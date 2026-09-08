@@ -108,7 +108,6 @@ effects are demonitors), and that pairing removes a whole class of lockstep bugs
 -export([clear_subscription/2]).
 -export([kill_all/1]).
 -export([reset/1]).
--export([delete/1]).
 -export([in_flight/1]).
 -export([inspect/1]).
 
@@ -452,12 +451,6 @@ bucket across reconnects (a fresh `bondy_connect_load:new/1` would orphan a
 
 reset(#dispatch{load = Load}) ->
     #dispatch{load = bondy_connect_load:reset(Load)}.
-
--doc "Free the load regulator's ETS row on connection terminate.".
--spec delete(t()) -> ok.
-
-delete(#dispatch{load = Load}) ->
-    bondy_connect_load:delete(Load).
 
 -doc "The number of in-flight callee invocations (test/introspection helper).".
 -spec in_flight(t()) -> non_neg_integer().

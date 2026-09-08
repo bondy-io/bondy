@@ -198,6 +198,28 @@ that high-water mark, so re-reading ground already committed does not count.
 ![Applier drain: consumer position as a ratchet, with the alarm window
 measured across a span that makes no forward progress](img/db-drain.svg)
 
+### Detecting a standing frontier gap
+
+A shard can be draining perfectly and still be missing history: a per-origin
+sequence run it never received, with later operations from the same origin
+already applied above it. The applied frontier records exactly that — it
+reports a prefix bound and keeps the operations above the gap in a pending set
+— so the condition is a fact the shard already holds rather than one that has
+to be inferred. `bondy_oplog_instance_frontier_holes` reports how many gaps a
+shard is carrying and `bondy_oplog_instance_frontier_pending_seqs` how much is
+stranded above them.
+
+`db.frontier.hole_alarm` is how long a shard may carry one before raising
+`{bondy_oplog_frontier_hole, InstanceId}`, whose details name the origins and
+the sequence each gap starts at. The threshold is on the **age** of the
+condition, not its occurrence: short-lived gaps are routine — a local commit
+landing out of sequence order, a burned sequence awaiting its backfill, an
+operation a peer round away. A gap that stays is not: the shard holds its
+reported frontier below it, so peers keep re-offering that origin and the log
+cannot truncate past it. `0` disables the detector. It is measured on the sync
+scheduler's own timer, independently of `db.aae` — a node with anti-entropy
+off is more likely to carry a standing gap, not less.
+
 ### Sizing the projection
 
 Durable shards open every leveled Bookie in **`head_only` mode**

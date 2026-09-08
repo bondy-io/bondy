@@ -233,6 +233,27 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
+%% @doc How long a shard instance may carry a per-origin contiguity HOLE in its
+%% applied frontier before the node raises the bondy_oplog_frontier_hole alarm.
+%% A hole is a sequence run this replica never received, with later sequences
+%% of the same origin already folded above it; the replica holds its reported
+%% frontier below the hole, so peers keep re-offering that origin and the MST
+%% cannot truncate past it. Short-lived holes are ROUTINE (a local WAL commit
+%% landing out of sequence order, a burned sequence awaiting its backfill, a
+%% peer round away), which is why this alarms on the AGE of the condition and
+%% not on its occurrence — keep it well above `db.aae.interval`. Observable
+%% without waiting for the alarm via the
+%% bondy_oplog_instance_frontier_holes gauge. `0` disables the detector and
+%% clears any alarm it raised. Measured independently of `db.aae`: a node with
+%% anti-entropy off is more likely to carry a standing hole, not less.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.frontier.hole_alarm", "bondy_oplog.frontier_hole_alarm_ms", [
+  {datatype, {duration, ms}},
+  {default, "5m"}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc The shard count for a bondy_db database. `main` is the durable
 %% database; `registry` is ephemeral. Applied whenever the catalogue
 %% provisions the named DB. `main` and `registry` are Bondy's only two
@@ -827,8 +848,7 @@ end}.
 %% @doc Whether leveled flushes to disk after every write. `none` (the
 %% default) lets the operating system schedule the flush. `sync` forces a
 %% flush per write, which is markedly slower unless the hardware absorbs it
-%% (battery-backed write cache). `riak_sync` calls sync() manually after each
-%% write and exists for OTP16 compatibility.
+%% (battery-backed write cache).
 %%
 %% This governs the durable *projection*, not the write-ahead log. A write is
 %% already durable in the WAL before the fold reaches leveled, and the
@@ -837,7 +857,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.sync_strategy", "bondy_db.leveled_sync_strategy", [
-  {datatype, {enum, [none, sync, riak_sync]}},
+  {datatype, {enum, [none, sync]}},
   {default, none}
 ]}.
 

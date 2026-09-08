@@ -43,6 +43,9 @@ seq_seed_restart_test_() ->
             end},
             {timeout, 60, fun() ->
                 mint_before_the_wal_tail_is_replayed(Dir)
+            end},
+            {timeout, 60, fun() ->
+                checkpoint_records_the_minted_seq(Dir)
             end}
         ]
     end}.
@@ -176,9 +179,106 @@ mint_before_the_wal_tail_is_replayed(Dir) ->
         close_shard(Cache, Proj)
     end.
 
+%% The compaction checkpoint carries the own-origin MINTED maximum in a slot
+%% of its own, separate from the applied frontier.
+%%
+%% The two are different quantities: the frontier's per-origin entry asserts an
+%% applied PREFIX and its readers treat an over-claim as licence to discard,
+%% while the allocator needs "highest seq ever handed out" and treats an
+%% under-claim as licence to re-mint a dot a peer already applied. They ride
+%% one map today, so capping the frontier for soundness would regress the
+%% allocator — the trap in `_design/applied_frontier.md` §5.
+%%
+%% The discriminating assertion is the one on the PERSISTED PAYLOAD: the
+%% own-origin frontier entry is reaped before the checkpoint is written, so a
+%% minted slot that read the frontier instead of the live allocator records 0.
+%% The post-restart seq assertion is a consequence, not a falsifier — the
+%% retained WAL's head segment holds the latest own append and seeds the
+%% counter on its own (see `compact_to_empty_then_clean_restart/1`); it becomes
+%% load-bearing once the frontier is capped.
+checkpoint_records_the_minted_seq(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    Origin = bondy_oplog_origin:new(),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    try
+        {ok, _} = open_pack_instance(InstId, NS, Dir, Origin),
+        N = 10,
+        _ = append_batch(InstId, 1, N),
+        _ = bondy_oplog_instance:await_apply(InstId),
+
+        %% Compact to empty so neither the live MST nor the WAL below the
+        %% watermark holds an own-origin event.
+        Root = bondy_oplog_instance:root_hash(InstId),
+        ?assertMatch(
+            {ok, {compacted, _, _}},
+            bondy_oplog_instance:compact(InstId, [Root])
+        ),
+        ?assertEqual(0, bondy_oplog:size(InstId)),
+
+        %% Remove the own-origin entry from the applied frontier. Everything
+        %% below now distinguishes the minted slot from the frontier.
+        ?assertEqual(
+            [Origin],
+            bondy_oplog_registry:reap_frontier(InstId, [
+                Origin
+            ])
+        ),
+        ?assertEqual(
+            #{}, maps:with([Origin], bondy_oplog_registry:frontier(InstId))
+        ),
+        ok = bondy_oplog_instance:persist_frontier(InstId),
+
+        %% The persisted payload: an empty own-origin frontier entry next to a
+        %% minted slot at the allocator's true position.
+        lists:foreach(
+            fun(F) ->
+                {ok, Bin} = file:read_file(F),
+                case erlang:binary_to_term(Bin) of
+                    {checkpoint_v1, _W,
+                        {projection_managed, frontier, VV, Minted, _Prov}} ->
+                        ?assertEqual(0, maps:get(Origin, VV, 0)),
+                        ?assertEqual(N, Minted);
+                    Other ->
+                        erlang:error({unexpected_checkpoint, F, Other})
+                end
+            end,
+            checkpoint_files(Dir, InstId)
+        ),
+
+        ok = bondy_oplog:stop_instance(InstId),
+        {ok, _} = open_pack_instance(InstId, NS, Dir, Origin),
+        %% The frontier stays reaped across the restart — nothing resurrects
+        %% the own entry — so the counter came back from the minted slot and
+        %% the retained WAL, not from the frontier.
+        ?assertEqual(
+            #{}, maps:with([Origin], bondy_oplog_registry:frontier(InstId))
+        ),
+        Key = bondy_oplog:append(
+            InstId, {cell_apply, ?B, <<"after">>, {set, 99_000, <<"after">>}}
+        ),
+        ?assertEqual(N + 1, bondy_oplog_event:key_seq(Key))
+    after
+        ok = bondy_oplog:stop_instance(InstId),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj)
+    end.
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+%% This instance's checkpoint files. The tree is shared by every instance the
+%% case set opens under `Dir`, so filter by instance id — asserting over a
+%% sibling's checkpoint would fail on its unrelated origin.
+checkpoint_files(Dir, InstId) ->
+    Files = [
+        F
+     || F <- filelib:wildcard(filename:join(Dir, "**/checkpoint.etf")),
+        string:find(F, binary_to_list(InstId)) =/= nomatch
+    ],
+    ?assert(length(Files) >= 1),
+    Files.
 
 mk_id() ->
     list_to_binary(

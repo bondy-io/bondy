@@ -52,6 +52,7 @@ groups() ->
             sub_session_death_cleans_registry,
             sub_same_uri_multiple_policies,
             sub_sessionless_refs,
+            remove_all_runs_task_once_per_entry,
             partition_pick_recovers_after_crash
         ]}
     ].
@@ -464,6 +465,104 @@ sub_same_uri_multiple_policies(Config) ->
 %% re-subscribing to a topic is idempotent (already_exists with its own
 %% entry), while a DIFFERENT process subscribing to the same topic gets its
 %% own entry — each internal subscriber needs its own delivery.
+%% `remove_all/4' must remove every matched entry and run the task exactly once
+%% per entry, over a set LARGER than the `{limit, _}' option it passes.
+%%
+%% That option does not bound a page: `bondy_registry_store:find/4' keys only
+%% the return SHAPE on its presence and answers the whole match set with an
+%% already-exhausted continuation. `do_remove_all/3' asserts that shape rather
+%% than looping, so if the store ever regains real paging this case fails loudly
+%% instead of the removal silently stopping after one page.
+remove_all_runs_task_once_per_entry(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    SessionId = bondy_session_id:new(),
+    Ref = bondy_ref:new(internal, self(), SessionId),
+    Opts = #{match => ?EXACT_MATCH},
+    N = 250,
+
+    Uris = [
+        <<"com.example.removeall.", (integer_to_binary(I))/binary>>
+     || I <- lists:seq(1, N)
+    ],
+    _ = [
+        {ok, {_, true}} =
+            bondy_registry:add(subscription, RealmUri, Uri, Opts, Ref)
+     || Uri <- Uris
+    ],
+    Owned = bondy_registry:entries(
+        subscription, RealmUri, SessionId, infinity
+    ),
+    ?assertEqual(
+        N, length(Owned), "precondition: the session must own every entry"
+    ),
+
+    %% A sibling session's entry and a session-less (internal callback) one,
+    %% both in the same realm and served by the same partition. `find_pairs/5'
+    %% is what narrows the match set to `SessionId', so these are the case that
+    %% would break if it ever stopped doing so.
+    OtherSessionId = bondy_session_id:new(),
+    OtherRef = bondy_ref:new(internal, self(), OtherSessionId),
+    OtherUri = <<"com.example.removeall.sibling">>,
+    {ok, {OtherEntry, true}} =
+        bondy_registry:add(subscription, RealmUri, OtherUri, Opts, OtherRef),
+
+    SessionlessPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    SessionlessRef = bondy_ref:new(internal, SessionlessPid),
+    SessionlessUri = <<"com.example.removeall.sessionless">>,
+    {ok, {SessionlessEntry, true}} = bondy_registry:add(
+        subscription, RealmUri, SessionlessUri, Opts, SessionlessRef
+    ),
+
+    Calls = ets:new(remove_all_task_calls, [set, public]),
+    Task = fun(Entry) ->
+        Id = bondy_registry_entry:id(Entry),
+        _ = ets:update_counter(Calls, Id, {2, 1}, {Id, 0}),
+        ok
+    end,
+
+    ok = bondy_registry:remove_all(subscription, RealmUri, SessionId, Task),
+
+    ?assertEqual(
+        [],
+        bondy_registry:entries(subscription, RealmUri, SessionId, infinity),
+        "every entry of the session must be removed"
+    ),
+
+    Counts = ets:select(Calls, [{{'_', '$1'}, [], ['$1']}]),
+    true = ets:delete(Calls),
+
+    ?assertEqual(
+        N, length(Counts), "the task must be run for every removed entry"
+    ),
+    ?assertEqual(
+        [1], lists:usort(Counts), "the task must be run exactly once per entry"
+    ),
+
+    ?assertMatch(
+        {ok, _},
+        bondy_registry:lookup(
+            subscription, bondy_registry_entry:key(OtherEntry)
+        ),
+        "a sibling session's entry must survive"
+    ),
+    ?assertMatch(
+        {ok, _},
+        bondy_registry:lookup(
+            subscription, bondy_registry_entry:key(SessionlessEntry)
+        ),
+        "a session-less entry must survive"
+    ),
+
+    ok = bondy_registry:remove(OtherEntry),
+    ok = bondy_registry:remove(SessionlessEntry),
+
+    SessionlessPid ! stop,
+    ok.
+
 sub_sessionless_refs(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
     Type = subscription,
@@ -723,10 +822,10 @@ registry_rib_dual_write(Config) ->
         {RealmUri, ?EXACT_MATCH, SubUri, bondy_config:nodestring()}
     ),
 
-    %% Subscription is a bare `bondy_oplog_crdt_pn_counter`, registered
-    %% directly — its raw projection is a plain integer, not a map
-    %% (`bondy_registry_rib:reshape_summary/2` wraps it as `#{count => N}`
-    %% for consumers, unit-tested on its own).
+    %% Subscription is reachability-only: one counter, carried by
+    %% `bondy_oplog_crdt_owned_counter`, so the RAW projection is a plain
+    %% integer. `bondy_registry_rib:reshape_summary/2` derives the
+    %% `#{count => N}` summary that consumers read.
     ?assert(
         await_cell(SubTable, RealmUri, SubKey, fun
             ({ok, {1, _}}) -> true;

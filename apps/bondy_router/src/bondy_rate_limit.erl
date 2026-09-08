@@ -77,7 +77,6 @@ problem degrades to "no limit", never to a wedged inbound path.
 -export([new_session_limiter/0]).
 -export([new_session_limiter/1]).
 -export([allow_session/1]).
--export([delete_session_limiter/1]).
 
 -ifdef(TEST).
 -export([do_throttle/3]).
@@ -142,10 +141,12 @@ new_session_limiter() ->
 -doc """
 Creates the CURRENT session's `message`-class limiter chain — one
 dedicated token bucket per scope that configures `message` — or
-`undefined` when none does. Held in the session's own state and deleted
-on teardown (like `bondy_connect_load`), so the per-message hot path is
-a field check + one atomics consume per configured scope — NO
-per-message config read. The config is read once here, at session open.
+`undefined` when none does. Held in the session's own state, with NO teardown
+to run: the private buckets are unregistered
+(`bondy_regulator_rate_limit:new/2`) and go when that state goes. The
+per-message hot path is a field check + one atomics consume per configured
+scope — NO per-message config read. The config is read once here, at session
+open.
 """.
 -spec new_session_limiter(Dims :: dims()) -> session_limiter().
 
@@ -196,26 +197,12 @@ allow_session([{Scope, T} | Rest]) ->
             throttled
     end.
 
--doc "Deletes a session limiter chain (frees its buckets). No-op for `undefined`.".
--spec delete_session_limiter(session_limiter()) -> ok.
-
-delete_session_limiter(undefined) ->
-    ok;
-delete_session_limiter(Buckets) when is_list(Buckets) ->
-    lists:foreach(
-        fun
-            ({realm_total, _, _}) ->
-                %% the realm's shared bucket outlives the session
-                ok;
-            ({_, T}) ->
-                try
-                    bondy_regulator_rate_limit:delete(T)
-                catch
-                    _:_ -> ok
-                end
-        end,
-        Buckets
-    ).
+%% REMOVED: delete_session_limiter/1. A chain holds only the realm's SHARED
+%% bucket (which outlives the session by design) and unregistered private
+%% buckets (`bondy_regulator_rate_limit:new/2`), which own no row and are freed
+%% by the VM with the session's state. Nothing was left for a teardown to do,
+%% and a no-op teardown is what let the previous, REGISTERED private buckets
+%% orphan a row whenever the connection died without running it.
 
 %% =============================================================================
 %% PRIVATE
@@ -346,8 +333,14 @@ make_session_chain([{realm_total, Opts} | Rest], Dims, Acc) ->
     Key = bucket_key(realm_total, message, undefined, Dims),
     make_session_chain(Rest, Dims, [{realm_total, Key, Opts} | Acc]);
 make_session_chain([{Scope, Opts} | Rest], Dims, Acc) ->
-    Key = {bondy_msg_limiter, self(), erlang:unique_integer([positive])},
-    try bondy_regulator_rate_limit:new(token_bucket, Key, Opts) of
+    %% UNREGISTERED (`new/2`): the bucket is private to this session, held in
+    %% its own state and passed to `allow_session/1` directly — never looked up
+    %% by key. It used to be registered under
+    %% `{bondy_msg_limiter, self(), unique_integer()}`, a key nothing could
+    %% reconstruct, so a connection killed without running its teardown left a
+    %% row no one could ever reach. Unregistered, the array goes when the
+    %% session's state does.
+    try bondy_regulator_rate_limit:new(token_bucket, Opts) of
         {ok, T} ->
             make_session_chain(Rest, Dims, [{Scope, T} | Acc]);
         {error, Reason} ->

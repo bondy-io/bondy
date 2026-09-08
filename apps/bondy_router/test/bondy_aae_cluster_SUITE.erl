@@ -52,6 +52,7 @@ all() ->
         rib_retry_reroutes_to_live_node,
         meta_event_demand_visible_cross_node,
         remote_user_delete_closes_peer_sessions,
+        remote_realm_delete_purges_peer_registry,
         token_version_rejected_cross_node,
         %% Last: they plant cells carrying a runtime-minted atom, and
         %% nothing may depend on suite state after them.
@@ -488,6 +489,32 @@ remote_user_delete_closes_peer_sessions(Config) ->
         ok = erpc:call(N2, ?MODULE, do_disarm_close_recorder, [])
     end.
 
+%% A realm deleted on node 1 must be torn down on node 2 as well. Closing the
+%% peer's sessions is not enough: a realm's registry entries are keyed by the
+%% realm, and the router's OWN entries have no session, so no session-close
+%% path can reach them. The per-node `wamp.session.<hash>..get' wildcard is one
+%% such entry — `bondy_session_manager' registers it, under a session-less
+%% callback ref, on the first session opened in the realm on that node.
+remote_realm_delete_purges_peer_registry(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_realmdel">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_open_realm, [Uri]),
+    ok = wait_realm(N2, Uri),
+
+    %% Give node 2 the realm-scoped registry state a router builds on its own.
+    Owner = erpc:call(N2, ?MODULE, do_open_anon_session, [Uri]),
+    ?assertMatch([_ | _], erpc:call(N2, ?MODULE, do_node_wildcards, [Uri])),
+
+    %% Delete on node 1: the `clear' rides AAE into node 2's projection, where
+    %% the merge reactor must run the same node-local teardown the deleting
+    %% node runs.
+    ok = erpc:call(N1, bondy_realm, delete, [Uri, #{force => true}]),
+
+    ok = wait_realm_registry_empty(N2, Uri),
+    _ = erpc:call(N2, erlang, exit, [Owner, kill]),
+    ok.
+
 %% The revocation zookie across nodes (STORAGE_ARCHITECTURE §9.2/§9.3): a JWT
 %% minted on node 1 authenticates on node 2 once the realm/user converge AND the
 %% AE fence is fresh; after a credential change on node 1 bumps the user cell's
@@ -841,7 +868,12 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
         %% writer goes down first, so there is no round to race.
         %%
         %% Each mechanism alone failed this case ~1 run in 3 (2026-09-04);
-        %% with both closed, 8/8.
+        %% with both closed, 8/8 THAT DAY. It has since regressed and this
+        %% case is FLAKY: measured 2026-09-09, 2 failures in 3 runs on an
+        %% unmodified tree, always `AtomAfterBoot = true` — the boot did
+        %% intern the probe atom, so a premise above is no longer holding.
+        %% Measure the baseline before attributing a failure here to a
+        %% change under test.
         ok = bondy_ct:stop_node(S1, halt),
         ok = bondy_ct:stop_node(S2, halt),
         S2b = bondy_ct:restart_node(
@@ -1148,6 +1180,18 @@ wait_realm(Node, Uri) ->
     ).
 
 %% @private
+%% Polls until `Node' holds no registry entries at all for the realm — the
+%% node-local teardown a deleted realm must trigger there.
+wait_realm_registry_empty(Node, Uri) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() -> erpc:call(Node, ?MODULE, do_realm_registry_counts, [Uri]) end,
+        {0, 0},
+        Node,
+        Deadline
+    ).
+
+%% @private
 %% Polls until `Node's RIB summary view agrees with its full-entry view for
 %% the realm (`bondy_registry_rib:check/1` returns []).
 wait_rib_check_empty(Node, Uri) ->
@@ -1278,6 +1322,57 @@ do_create_open_realm(Uri) ->
     Realm = bondy_realm:create(Uri),
     ok = bondy_realm:disable_security(Realm),
     ok.
+
+%% @private
+%% Opens an anonymous session on THIS node from a spawned owner process that
+%% stays alive, so the session outlives the erpc call. Returns the owner.
+do_open_anon_session(Uri) ->
+    Parent = self(),
+    Owner = spawn(fun() ->
+        Id = bondy_session_id:new(),
+        {ok, _} = bondy_session_manager:open(Id, Uri, do_session_opts()),
+        Parent ! {session_ready, self()},
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        {session_ready, Owner} -> Owner
+    after 15000 ->
+        error({timeout, waiting_for_session_owner})
+    end.
+
+%% @private
+do_session_opts() ->
+    #{
+        peer => {{127, 0, 0, 1}, 10997},
+        authid => <<"anonymous">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => false,
+        authroles => [<<"anonymous">>],
+        roles => #{caller => #{}, subscriber => #{}}
+    }.
+
+%% @private
+%% The router's own per-node `wamp.session.<hash>..get' registrations in the
+%% realm on THIS node. They carry no session, so no session-close path reaches
+%% them.
+do_node_wildcards(Uri) ->
+    Prefix = <<"wamp.session.">>,
+    Size = byte_size(Prefix),
+    [
+        E
+     || E <- bondy_registry:entries(registration, Uri, '_', infinity),
+        binary:part(bondy_registry_entry:uri(E), 0, Size) == Prefix
+    ].
+
+%% @private
+do_realm_registry_counts(Uri) ->
+    {
+        length(bondy_registry:entries(registration, Uri, '_', infinity)),
+        length(bondy_registry:entries(subscription, Uri, '_', infinity))
+    }.
 
 %% @private
 %% Register the echo callback on THIS node.

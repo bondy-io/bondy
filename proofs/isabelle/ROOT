@@ -16,5 +16,8 @@ session Bondy_Stabilization = HOL +
     Hlc
     Dot_Exactness
     Dot_Exactness_Gapped
+    Bucket_Skip_Soundness
     Seq_Seed
     Confirmed_Compaction
+    Frontier_Writers
+    Frontier_Pending

@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -63,6 +63,15 @@
       "title": "Router / WAMP",
       "type": "link",
       "url": "/d/bondy-router-wamp",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "MCP Gateway",
+      "type": "link",
+      "url": "/d/bondy-mcp",
       "icon": "dashboard",
       "targetBlank": false,
       "keepTime": true,
@@ -987,8 +996,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (service, outcome, phase) (rate(bondy_http_connector_secret_resolution_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{service}} {{phase}} {{outcome}}",
+          "expr": "sum by (service, outcome) (rate(bondy_http_connector_secret_resolution_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{outcome}}",
           "datasource": {
             "type": "prometheus",
             "uid": "bondy-prometheus"

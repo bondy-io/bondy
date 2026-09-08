@@ -590,7 +590,13 @@ declare_metrics() ->
             namespace
         ]},
         {bondy_oplog_core_freshness_lag_max_milliseconds,
-            "Max AE freshness lag across the namespace's shards.", [namespace]},
+            "Max AE freshness lag across the namespace's PRIMARY shards - the "
+            "same set the auth freshness fence evaluates, so this is the value "
+            "to compare against auth_max_lag. Secondary index shards are "
+            "excluded: nothing bumps their AE atomic, and they carry no "
+            "freshness independent of the primary they are written with. Use "
+            "bondy_oplog_core_ae_lag_milliseconds for the per-shard, "
+            "per-index view.", [namespace]},
         {bondy_oplog_write_readable_latency_microseconds,
             "Write-to-readable latency (rolling window quantiles).", [
                 instance_id, quantile
@@ -1134,6 +1140,25 @@ families() ->
             "Sum of per-origin max sequence numbers in the applied "
             "frontier. Monotone; cross-node differences show replication "
             "lag.", gauge, fun frontier_seq_rows/0},
+        {bondy_oplog_instance_frontier_holes,
+            "Per-origin contiguity holes the instance is currently "
+            "carrying: seq runs this replica has never received, with "
+            "later seqs of the same origin already folded above them. "
+            "0 on a healthy replica. A standing non-zero value holds this "
+            "instance's applied frontier below the hole, so peers keep "
+            "re-offering the origin and the MST cannot truncate past it - "
+            "see the bondy_oplog_frontier_hole alarm, which fires on the "
+            "AGE of the condition this gauge reports.", gauge,
+            fun frontier_hole_rows/0},
+        {bondy_oplog_instance_frontier_pending_seqs,
+            "Sequence numbers this instance has folded but cannot claim, "
+            "because they sit above a contiguity hole "
+            "(bondy_oplog_instance_frontier_holes). They are applied - "
+            "nothing is lost and nothing is re-fetched - but they are not "
+            "reported to peers until the hole below them closes. Grows "
+            "with traffic behind a stuck hole while the hole count does "
+            "not, so the ratio is how far behind the hole the instance "
+            "has run.", gauge, fun frontier_pending_seq_rows/0},
         {bondy_oplog_peer_last_sync_age_seconds,
             "Seconds since the last completed sync with a peer, per "
             "(instance, peer).", gauge, fun() -> peer_age_rows(last_sync) end},
@@ -1275,6 +1300,27 @@ frontier_seq_rows() ->
             [{instance_id, Id}],
             lists:sum([S || S <- maps:values(frontier(Id)), is_integer(S)])
         }
+     || Id <- instances()
+    ].
+
+%% @private
+%% One row per instance, always — 0 is the healthy reading and a gauge that
+%% vanishes cannot be alerted on with `== 0`. The per-ORIGIN breakdown is
+%% deliberately not a label: it would multiply instance cardinality by cluster
+%% size for a condition that is normally absent, and the origins are carried
+%% where they are acted on — the `bondy_oplog_frontier_hole` alarm's details
+%% and its log line.
+frontier_hole_rows() ->
+    pending_rows(fun bondy_interval_set:size/1).
+
+%% @private
+frontier_pending_seq_rows() ->
+    pending_rows(fun bondy_interval_set:flat_size/1).
+
+%% @private
+pending_rows(F) ->
+    [
+        {[{instance_id, Id}], lists:sum(lists:map(F, maps:values(pending(Id))))}
      || Id <- instances()
     ].
 
@@ -1643,6 +1689,15 @@ instances() ->
 frontier(Id) ->
     try bondy_oplog_registry:frontier(Id) of
         F when is_map(F) -> F;
+        _ -> #{}
+    catch
+        _:_ -> #{}
+    end.
+
+%% @private
+pending(Id) ->
+    try bondy_oplog_registry:pending(Id) of
+        P when is_map(P) -> P;
         _ -> #{}
     catch
         _:_ -> #{}

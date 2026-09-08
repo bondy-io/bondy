@@ -160,7 +160,7 @@ declared_detail_keys_are_delivered(#{sites := Sites}) ->
     %% Vacuity guard: the comprehension above passes trivially if the scanner
     %% stops resolving raise sites or the catalogue stops declaring any keys.
     ?assertEqual(
-        5,
+        8,
         length(Checked),
         "the entries with non-empty detail_keys are no longer being checked"
     ).

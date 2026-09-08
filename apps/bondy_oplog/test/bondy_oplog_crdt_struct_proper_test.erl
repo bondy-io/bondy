@@ -39,6 +39,9 @@
 -export([prop_encode_state_roundtrip/0]).
 -export([prop_counter_field_oracle/0]).
 -export([prop_stabilize_fold_transparent/0]).
+-export([prop_reap_iff_every_touched_field_force_reaps/0]).
+-export([prop_reap_origins_idempotent/0]).
+-export([prop_reap_preserves_undeclared_field_values/0]).
 
 %% =============================================================================
 %% Generators
@@ -263,10 +266,118 @@ properties_test_() ->
             prop_idempotent_redelivery(),
             prop_encode_state_roundtrip(),
             prop_counter_field_oracle(),
-            prop_stabilize_fold_transparent()
+            prop_stabilize_fold_transparent(),
+            prop_reap_iff_every_touched_field_force_reaps(),
+            prop_reap_origins_idempotent(),
+            prop_reap_preserves_undeclared_field_values()
         ],
         lists:foreach(
             fun(Prop) -> ?assert(proper:quickcheck(Prop, Opts)) end,
             Props
         )
     end}.
+
+%% =============================================================================
+%% Dead-origin reap (`reap_origins/2` + the `force_reap` field policy)
+%% =============================================================================
+
+-define(DEPARTED, <<"departed">>).
+
+%% The generic form of a trap no single-field example can see.
+%%
+%% `reap_origins/2` reaps an origin's CC entry only once it has no live dot in
+%% ANY field — `live_origins/1` folds over all of them — so ONE field without
+%% `force_reap` keeps the origin live and defeats the policy on every other
+%% field. `bondy_oplog_cell_utils:reap_one_cell/6` then SKIPS the write, so
+%% the force-reaped fields are discarded too and the reap is a total no-op.
+%%
+%% This is not hypothetical: the registry RIB registration schema declared
+%% `force_reap` on `count` alone, and `bondy_rib_reclamation_cluster_SUITE`
+%% measured a departed node's cell being scanned and not reaped.
+prop_reap_iff_every_touched_field_force_reaps() ->
+    ?FORALL(
+        {Declared, Writes},
+        {list(oneof([count, tag])), non_empty(list(write_gen()))},
+        begin
+            Decl = lists:usort(Declared),
+            State = build(schema_with_force_reap(Decl), ?DEPARTED, Writes),
+            Touched = lists:usort([F || {F, _Op} <- Writes]),
+            {_New, Reaped} = ?MOD:reap_origins(State, [?DEPARTED]),
+            (Reaped =/= []) =:= ordsets:is_subset(Touched, Decl)
+        end
+    ).
+
+%% `reap_origins/2`'s doc asserts idempotence; this is that assertion's
+%% evidence. A second pass over an already-reaped state must be a no-op, in
+%% state AND in what it reports, or the retirement pass would keep rewriting
+%% cell frames for origins it has already cleaned.
+prop_reap_origins_idempotent() ->
+    ?FORALL(
+        {Declared, Writes},
+        {list(oneof([count, tag])), list(write_gen())},
+        begin
+            Decl = lists:usort(Declared),
+            State = build(schema_with_force_reap(Decl), ?DEPARTED, Writes),
+            {Once, _} = ?MOD:reap_origins(State, [?DEPARTED]),
+            {Twice, ReapedAgain} = ?MOD:reap_origins(Once, [?DEPARTED]),
+            Twice =:= Once andalso ReapedAgain =:= []
+        end
+    ).
+
+%% The conservative default, stated as a law rather than an example: a field
+%% that does NOT declare `force_reap` keeps its value across a reap, whatever
+%% else the schema declares. This is what makes `reap_one_cell/6`'s
+%% value-preserving frame sound for every undeclared field.
+prop_reap_preserves_undeclared_field_values() ->
+    ?FORALL(
+        {Declared, Writes},
+        {list(oneof([count, tag])), list(write_gen())},
+        begin
+            Decl = lists:usort(Declared),
+            State = build(schema_with_force_reap(Decl), ?DEPARTED, Writes),
+            Before = ?MOD:to_value(State),
+            {After, _} = ?MOD:reap_origins(State, [?DEPARTED]),
+            AfterV = ?MOD:to_value(After),
+            lists:all(
+                fun(F) ->
+                    maps:get(F, AfterV, undefined) =:=
+                        maps:get(F, Before, undefined)
+                end,
+                [count, tag] -- Decl
+            )
+        end
+    ).
+
+%% @private
+write_gen() ->
+    oneof([
+        {count, {inc, oneof(?DELTAS)}},
+        {tag, {set, oneof(?TAGS)}}
+    ]).
+
+%% @private
+%% `?SCHEMA`, with `force_reap => true` on exactly the listed fields.
+schema_with_force_reap(Fields) ->
+    maps:map(
+        fun(FieldKey, Mod) ->
+            case lists:member(FieldKey, Fields) of
+                true -> {Mod, #{force_reap => true}};
+                false -> Mod
+            end
+        end,
+        ?SCHEMA
+    ).
+
+%% @private
+%% Apply `Writes` as one origin's ops, seq/HLC strictly increasing so none is
+%% dropped as a duplicate by the per-origin `MaxSeq` dedup.
+build(Schema, Origin, Writes) ->
+    {State, _} = lists:foldl(
+        fun({FieldKey, Op}, {Acc, Seq}) ->
+            Key = bondy_oplog_event:key(Seq, Origin, Seq),
+            {?MOD:apply_op(Acc, {apply, FieldKey, Op}, Key, []), Seq + 1}
+        end,
+        {?MOD:init(Schema), 1},
+        Writes
+    ),
+    State.

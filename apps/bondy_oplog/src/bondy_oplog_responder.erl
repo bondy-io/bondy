@@ -319,13 +319,26 @@ dispatch(InstanceId, get_catalogue_snapshot_init) when
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            %% No await_apply: serve the current MST snapshot (AAE eventual);
-            %% blocking here caused the 5s sync timeouts — see `get_root`.
-            case bondy_oplog_catalogue_snapshot:init(InstanceId) of
-                {ok, no_snapshot} ->
-                    {ok, no_snapshot};
-                {ok, {Watermark, Cursor}} ->
-                    {ok, {init, {Watermark, Cursor}}}
+            %% `bondy_oplog_catalogue_snapshot:build_targets/2` enumerates the
+            %% tables that have REGISTERED, so an instance still filling its
+            %% routing directory ships a catalogue missing those buckets while
+            %% `get_frontier` still reports the whole applied vector. The
+            %% initiator would install the one and adopt the other. Refuse
+            %% until the directory is complete: the session ends benignly and
+            %% the next round retries, as for `root_unservable`.
+            case bondy_oplog_registry:tables_registered(InstanceId) of
+                false ->
+                    {error, {tables_not_registered, InstanceId}};
+                true ->
+                    %% No await_apply: serve the current MST snapshot (AAE
+                    %% eventual); blocking here caused the 5s sync timeouts —
+                    %% see `get_root`.
+                    case bondy_oplog_catalogue_snapshot:init(InstanceId) of
+                        {ok, no_snapshot} ->
+                            {ok, no_snapshot};
+                        {ok, {Watermark, Cursor}} ->
+                            {ok, {init, {Watermark, Cursor}}}
+                    end
             end
     end;
 dispatch(InstanceId, {get_catalogue_snapshot_next, Cursor}) when
@@ -337,6 +350,7 @@ dispatch(InstanceId, {get_catalogue_snapshot_next, Cursor}) when
         _Pid ->
             case bondy_oplog_catalogue_snapshot:next(InstanceId, Cursor) of
                 {ok, {batch, _} = Batch} -> {ok, Batch};
+                {ok, {chunked_batch, _} = Chunked} -> {ok, Chunked};
                 {ok, {done, _} = Done} -> {ok, Done};
                 {error, _} = E -> E
             end
@@ -513,9 +527,11 @@ check_oversized_alarm(State) ->
 %% @private
 set_oversized_alarm() ->
     Desc = <<
-        "AAE sync is skipping items too large to replicate: a stored value "
-        "exceeds the inter-node frame cap (cluster.max_message_size). The "
-        "affected data cannot converge until the cap is raised above it. See "
+        "AAE sync is handling items too large for the inter-node frame cap "
+        "(cluster.max_message_size). Catalogue CELLS are shipped in parts and "
+        "still converge, at the cost of extra bootstrap rounds; MST PAGES are "
+        "left out, so those sync rounds complete nothing and the instance "
+        "makes no AAE progress until the cap is raised. See "
         "the bondy_oplog_sync_oversized_item_last_bytes metric and the WARNING "
         "logs for the size and identity."
     >>,

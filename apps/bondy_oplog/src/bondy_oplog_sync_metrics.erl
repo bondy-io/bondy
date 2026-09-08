@@ -16,22 +16,33 @@ An AAE sync response is packed up to `bondy_oplog_config:sync_max_response_bytes
 — derived from Partisan's `max_message_size` — so a batch never trips the
 transport frame cap (which would drop the peer with `emsgsize`). A single item
 whose serialized size *alone* exceeds that ceiling cannot be framed to a peer at
-all; it is skipped and reported here, so it never poisons the peer connection and
-never replicates until `cluster.max_message_size` is raised above it.
+all. The two payload kinds then diverge, and the distinction matters when
+reading these metrics:
 
-Two families surface the condition, shared by both sync payloads — MST pages
-(`get_pages`) and catalogue cells (bootstrap snapshot):
+- `kind = cell` (catalogue bootstrap snapshot) — SHIPPED IN PARTS
+  (`bondy_oplog_catalogue_snapshot:emit_parts/6`) and reassembled by the
+  initiator, so it still converges; the cost is extra bootstrap rounds. It is
+  reported here as a transfer-shape notice, NOT a data-loss event. Before
+  part-shipping this was a skip that advanced the cursor past the cell while
+  the bootstrap still adopted the peer's frontier — permanent, oracle-invisible
+  loss.
+- `kind = page` (`get_pages`) — LEFT OUT of the response. A sync round only
+  integrates when its missing-set empties, so a permanently oversized page
+  means that round completes nothing and the instance makes no AAE progress
+  until `cluster.max_message_size` is raised. A stall, not a silent loss.
 
-- `bondy_oplog_sync_oversized_item_total{kind}` — a counter of skipped items.
+Two families surface the condition, shared by both sync payloads:
+
+- `bondy_oplog_sync_oversized_item_total{kind}` — a counter of oversized items.
 - `bondy_oplog_sync_oversized_item_last_bytes{kind}` — a gauge holding the size
-  of the LAST skipped item, i.e. how high `max_message_size` must be raised (use
+  of the LAST oversized item, i.e. how high `max_message_size` must be raised (use
   `max`/`max_over_time` in the query for the worst case seen).
 
 Alongside the metrics, the sync responder raises a first-class SASL alarm
-(`{bondy_oplog_sync_oversized_items, node()}`) while skipping is ongoing — so
+(`{bondy_oplog_sync_oversized_items, node()}`) while oversizing is ongoing — so
 the condition shows in `alarm_handler:get_alarms/0`, the `bondy_alarms` gauge
 and the cluster overview, not only on a rate graph. The responder drives the
-alarm off the counter and clears it once skipping stops (see the responder's
+alarm off the counter and clears it once oversizing stops (see the responder's
 `check_oversized_alarm`).
 
 The metric families are node-wide with a low-cardinality `kind` label (`page` |
@@ -169,10 +180,12 @@ maybe_log(Kind, Id, Size, MaxBytes) ->
         true ->
             ?LOG_WARNING(#{
                 description =>
-                    "An AAE sync item exceeds the transport frame cap and "
-                    "cannot be replicated; it is skipped. Raise "
-                    "cluster.max_message_size above the item size for this "
-                    "data to converge.",
+                    "An AAE sync item exceeds the transport frame cap. A "
+                    "`cell` is shipped in parts and still converges, at the "
+                    "cost of extra rounds; a `page` is left out of the "
+                    "response, so that sync round completes nothing and the "
+                    "instance makes no AAE progress until the cap is raised. "
+                    "Raise cluster.max_message_size above the item size.",
                 kind => Kind,
                 item => Id,
                 item_bytes => Size,

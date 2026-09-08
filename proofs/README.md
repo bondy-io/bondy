@@ -35,6 +35,9 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `Dot_Exactness.thy` | Exactness of the compact `Ctx[O] >= S` test **under** per-origin FIFO |
 | `Dot_Exactness_Gapped.thy` | Exactness of a gapped context **without** any FIFO hypothesis, and its join |
 | `Seq_Seed.thy` | Discharges the per-origin half of H1 across restarts: the counter seed `max(checkpoint, tree, WAL)` under watermark-keyed WAL retention keeps dots unique and gap-free |
+| `Bucket_Skip_Soundness.thy` | The applied frontier when a bucket has no cell-apply context: the shipped per-origin `max` over the folded pairs is UNSOUND under a bucket skip; the contiguous prefix bound is sound for an arbitrary applied set, is the largest sound claim, never regresses as holes fill, and is stopped by an unroutable bucket and by nothing else |
+| `Frontier_Writers.thy` | Why the applied frontier needs ONE writer, not four: in a max-merge, unsoundness is upward-closed, so one over-claiming writer defeats every conservative one and a cap at another call site is void (`join_absorbs_unsound`, `cap_cannot_repair`); the sparse `#{Origin => Seq}` max is sound **iff** the underlying set is prefix-closed (`max_sound_iff_prefix`); folding behind a contiguity admission test evaluated AFTER bucket resolution preserves prefix-closure of the FOLDED set (the oplog keeps recording receipt) (`fold_preserves_prefix_closed`); and boot reconstruction equals the incremental value when boot RE-FOLDS rather than declares (`reconstruction_agrees`); a claim derived from the oplog is unsound w.r.t. the projection (`receipt_log_overclaims`). It also models the RESTART, which is where the defect lives: a four-set state (checkpoint, claimed, folded, received) with the invariant `claimed subset-of folded`. Declaring the oplog folded at restart breaks it (`shipped_restart_breaks_soundness`, `shipped_restart_overclaims`); re-folding from the checkpoint preserves it (`refold_restart_preserves_soundness`) and never regresses below the checkpoint (`refold_no_regression`). The same oplog-derived claim is SOUND for the replica's own origin (`own_origin_oplog_claim_is_sound`), which is why the writer must be split rather than removed. Design: `_design/applied_frontier.md` |
+| `Frontier_Pending.thy` | The applied frontier ACROSS A SCHEDULE, which the two theories above cannot express. The shipped `claim/2` is sound exactly under batch visibility (`shipped_sound_when_visible`) and unsound the moment a batch boundary falls between the hole and the claim (`shipped_split_batch_overclaims`). The sharpening: **no writer whose state is one integer per origin is both sound and eventually complete** (`no_scalar_writer_sound_and_complete`) — a diagonal over two schedules that carry NO failures, so better failure reporting cannot close it. The prefix-plus-pending pair, carried across a schedule, denotes the folded set exactly (`pending_exact`), reports the largest sound claim (`pending_sound`, `pending_maximal`), never regresses (`pending_no_regression`), is complete once delivery ends prefix-closed (`pending_complete`), costs nothing when it is (`pending_zero_cost_when_healthy`) and one interval per hole when it is not (`pending_intervals_bounded_by_holes`). Also: one writer is still required (`union_absorbs_unsound`), the two columns need no atomic write (`torn_read_is_sound`), and the pending half may be volatile (`dropping_pending_is_sound`, `refold_restores_exactness`). Design: `_design/applied_frontier_pending.md` |
 | `Confirmed_Compaction.thy` | Compaction by peer confirmation: certifying a peer by its recorded root OR its recorded applied VV, with truncation capped below the first un-applied key, never makes an un-applied event unshippable (`no_loss`) and never drops one (`no_drop`) |
 
 | TLA+ module | Question |
@@ -45,6 +48,8 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `OriginWatermarkReap.tla` | Can the meet be recorded as a scalar watermark, with origins born over time? |
 | `OriginRetirementSet.tla` | Does a replicated grow-only retirement set license the reap across rejoins? |
 | `SeqSeed.tla` | Does the per-origin sequence counter survive a restart? Which durable sources must seed it, in what compaction order? |
+| `MuxBucketSkip.tla` | Can the applied-frontier VV claim an event whose cell was never installed because its BUCKET had no context? Two independent channels — the fold and the bootstrap adoption — and which mechanisms are load-bearing for each. |
+| `FrontierPending.tla` | Can the applied frontier be maintained by ONE INTEGER per origin, given that batch boundaries are set by drain timing? Which of the three claim rules survives restarts, the compaction door and every interleaving? |
 | `ConfirmedCompaction.tla` | Is a peer's recorded ROOT the right witness for what it holds? Does confirmed compaction converge, and do the compaction sites honour the watermark door's hold? |
 
 ## Scope
@@ -72,7 +77,7 @@ every irreversible act (`discard`, `stabilize_fold`, page GC).
 | Model | Code |
 | --- | --- |
 | `origin_unique` (H1) | Two halves. Distinct origin ids: operator obligation, `bondy_oplog_crdt_aw_map.erl` precondition 1. Distinct seqs under one origin across the minter's restarts: **NOT supplied by the shipped code** — `bondy_oplog_instance:init/1` seeds the counter from the live tree only, which is empty once compaction has run (Jepsen, 2026-09-03). `Seq_Seed.thy` **proves** the seed rule `max(checkpoint frontier, tree, retained WAL)` under watermark-keyed WAL retention discharges it; `SeqSeed.tla` refutes the shipped rule and the checkpoint-only fix — see [Results — TLA+](#seqseedtla--the-sequence-counter-across-restarts). **BUILT** 2026-09-03: `init/1` seeds from the restored frontier; the WAL writer records `max_seq` in its manifest, recovers it on open and seeds the instance before publishing its pid; the fast paths resolve the WAL before reserving. Pinned by `bondy_oplog_seq_seed_restart_test` (both cases red against the shipped code) |
-| `causal_delivery` (H2) | **Per-origin** half enforced by `bondy_oplog_cell_apply:partition_contiguous/3`; **cross-origin** half NOT supplied by anything — see [Open obligations](#open-obligations) |
+| `causal_delivery` (H2) | **Per-origin** half enforced by `bondy_oplog_cell_apply:partition_contiguous/4`; **cross-origin** half NOT supplied by anything — see [Open obligations](#open-obligations) |
 | `hlc_respects_hb` (H3) | **Proved** in `Hlc.thy` from `bondy_oplog_hlc:update/2` |
 | `prepare_after_deliver` (I1) | `bondy_oplog_applier:ensure_remote_caught_up/1` |
 | `certified_frontier` (I2) | `bondy_oplog_instance:compute_frontier_for/2` + `bondy_oplog_sync_session:pull_if_compatible/7` |
@@ -241,9 +246,61 @@ What it does not establish: liveness (`ConfirmedCompaction_*_Live.cfg`),
 anything under the recency filter or `mst_retention`, and that the code
 implements the rule.
 
+**`no_scalar_writer_sound_and_complete`** (`Frontier_Pending.thy`) — the
+impossibility that motivates the pending set. For ANY writer `w` with one
+integer of state, if `w` is sound on every schedule then on
+`[({2}, {}), ({1}, {})]` it ends at 1 while the projection holds `{1, 2}`. The
+proof is a diagonal: soundness on the one-batch schedule `[({2}, {})]` forces
+the state to 0, and the second batch is then handed exactly the state that
+`[({1}, {})]` hands it, where soundness caps the answer at 1. Neither schedule
+contains a failure, so the `Failed` reporting built in
+`_design/applied_frontier.md` increment 3 cannot help. Determinism of the writer
+is the only hypothesis.
+
+**`pending_exact`** (same theory) — the prefix-plus-pending state denotes the
+folded set exactly, at every point of every schedule, with no hypothesis on
+batch boundaries, delivery order or failure visibility. Every other positive
+result about the representation is a corollary of this plus the arithmetic
+already proved in `Bucket_Skip_Soundness.thy`.
+
+The counterexample was mutation-checked: with the second batch's failure made
+visible (`[({}, {1}), ({2}, {1})]`) the session fails to build, so
+`shipped_split_batch_overclaims` is about the batch boundary and not an
+artefact of the encoding.
+
 ## Results — TLA+
 
 Verdicts only; `tla/README.md` carries the traces and the reasoning.
+
+### `FrontierPending.tla` — one integer, or a prefix and a pending set
+
+One replica, `Origins = {o1}`, `MaxSeq = 3`, two buckets, the compaction door
+prefix-capped as the code caps it, unless noted. `NoOverClaim` is the oracle
+contract; `NoLoss` says nothing un-folded was truncated; `Complete` says the
+entry is right the moment the projection is; `EventuallyComplete` allows a
+repair step.
+
+| Config | Rule | Result |
+| --- | --- | --- |
+| `_MaxCap` | shipped `claim/2` | **`NoOverClaim` violated** |
+| `_MaxCap_Loss` | shipped | **`NoLoss` violated** — the over-claim disarms the hold that would have kept the event |
+| `_MaxCap_WholeBatch` | shipped, drain the whole inbox | **`NoOverClaim` violated** — arrival timing splits batches anyway |
+| `_MaxCap_InOrder` | shipped, prefix-closed delivery | **`NoOverClaim` violated** — the bucket-skip channel alone suffices |
+| `_MaxCap_InOrder_AllRoutable` | shipped, in order, every bucket routable | clean — the regime in which the shipped rule is right |
+| `_Contig` | prefix bound alone | clean (`NoOverClaim`, `NoLoss`) |
+| `_Contig_Dead` | prefix bound alone | **`Complete` violated** — sound, not complete on the spot |
+| `_Contig_NoRefold_Stuck` | prefix bound, no replay | **`EventuallyComplete` violated** — and never recovers alone |
+| `_Contig_Refold` | prefix bound + replay | clean — today's repair works, at O(live MST) per boot |
+| `_Pending` | prefix + pending | clean — `NoOverClaim`, `PendingSound`, `NoLoss`, `Exact`, `Complete` |
+| `_Pending_TwoOrigins` | prefix + pending, 2 origins, `MaxSeq = 2` | clean — the pointwise reduction the theory assumes |
+| `_Pending_ExactDoor` | door reads the pending half too | clean — safe, and pointless: the truncation cap already holds everything above the hole |
+| `_Pending_Restart` | prefix + pending, restarts, replay | clean — arbitrarily many restarts |
+| `_Pending_Restart_NoRefold` | restarts, no replay | **`EventuallyComplete` violated** — the boot re-fold is still required |
+| `_Pending_ExactDoor_Restart_Uncapped` | sharpened door, cap removed | **`EventuallyComplete` violated** — what the truncation cap is buying |
+
+What it does not establish: more than one replica, the MST, HLCs, re-delivery of
+a truncated event (forbidden here, the worst case), and that the code implements
+any of it — nothing of this is built.
 
 ### `SeqSeed.tla` — the sequence counter across restarts
 
@@ -351,7 +408,7 @@ inversion: `r2` folds `r1`'s put and mints a put observing it; `r3` folds
 `r2`'s op first (dropping nothing, since it has not seen `r1`'s dot) and
 `r1`'s afterwards, whose `put/5` adds the dot back. Both dots survive at `r3`,
 one at `r2`, permanently. **The requirement is cross-origin causal delivery,
-and no per-origin mechanism supplies it** — `partition_contiguous/3` holds per
+and no per-origin mechanism supplies it** — `partition_contiguous/4` holds per
 origin, and in this trace each origin delivers exactly one event with no
 per-origin gap, so nothing is held.
 
@@ -501,12 +558,14 @@ Verified by reading `apps/bondy_oplog/src` at the time of writing.
 
 | Mechanism | Formal status | Code status |
 | --- | --- | --- |
-| Per-origin prefix hold | `_Hold` / `_Hold3` clean | **BUILT**, unconditional — `bondy_oplog_cell_apply:partition_contiguous/3`, `contiguous_run/2`; telemetry `[bondy_oplog, applier, events_held]` |
+| Per-origin prefix hold | `AaeCausalClosure_Hold` / `_Hold3` clean | **BUILT**, unconditional — `bondy_oplog_cell_apply:partition_contiguous/4`, `contiguous_run/2`; telemetry `[bondy_oplog, applier, events_held]` |
 | Contiguity detector | — | **BUILT** — `detect_prefix_holes/2`, `[bondy_oplog, applier, prefix_hole]` |
 | Universal-retirement reap guard | `_UniversalS1` / `_Universal` clean | **BUILT** — `bondy_oplog_origin_retirement:universal/1`, `reaped_unconverged` telemetry |
 | Persist-before-enforce for bans | `_ForgetfulS1` refutes the alternative | **BUILT** — `bondy_oplog_origin_bans`, `{error, not_persistent}` |
 | **Gapped causal context `(contig, exc)`** | **PROVED** (`Dot_Exactness_Gapped.thy`), wire-compatible by `join_degenerates_to_max` | **NOT BUILT** — no `first_gap` / `contig` / `exc` anywhere in `apps/*/src`; `bondy_oplog_crdt_aw_core:vv_merge/2` is still pointwise integer max and `dot_observed/2` is still `N >= S` |
-| `ContigClaim` frontier bound | modelled; **result unrecorded** | **NOT BUILT** |
+| `ContigClaim` frontier bound | modelled; sound but not complete on the spot (`FrontierPending_Contig_Dead`), recovers only with a replay (`_Contig_Refold`) | **BUILT** — `merge_applied/2` reports the contiguous prefix; the replay half is `bondy_oplog_instance:replay_anchor/1` |
+| **Applied frontier as prefix + pending set** | **PROVED** (`Frontier_Pending.thy`); the one-integer alternative **refuted in general** (`no_scalar_writer_sound_and_complete`) and the earlier rule refuted concretely (`FrontierPending_MaxCap*`) | **BUILT** — `bondy_oplog_registry` carries a `pending` column beside `frontier` (`pending/1`, `frontier_and_pending/1`) and `merge_applied/2` writes the contiguous prefix, holding out-of-order seqs in `pending`. `merge_frontier/2` remains a pointwise max and is now the BOOTSTRAP writer only |
+| **Bootstrap frontier adoption** | **PROVED** (`Bucket_Skip_Soundness.adopt_if_complete_sound`), with the responder gate as a HYPOTHESIS; both halves refuted individually (`unconditional_adoption_unsound`, `adoption_unsound_without_serve_gate`) and by TLC (`MuxBucketSkip_Minus_AdoptIfComplete`, `_Minus_ServeGate`) | **BUILT** — both halves: the responder gate, and `bondy_oplog_sync_session:adopt_frontier/3`, which hands `finalize_catalogue_bootstrap/5` the peer's vector only over an install that reported no unroutable bucket |
 | Vector stability | `vector_stable` defined; **not certified by the substrate** | **NOT BUILT** |
 | Cross-origin causal delivery | absence **refutes `Convergence`** (`CellContextReap`) | **NOT BUILT** — no mechanism exists |
 | **Compaction confirmation by root OR applied VV** | **PROVED** (`Confirmed_Compaction.thy`: `no_loss`, `no_drop`); shipped root-only rule **refuted** (`ConfirmedCompaction_Root2*.cfg`) | **BUILT** — `bondy_oplog_compaction:compact/1` passes the peer-state entries; `compute_frontier_for/2` confirms by root or recorded applied VV (`vv_covers/2`), a rootless row constrains; pinned by `bondy_oplog_compaction_fused_test:peer_compaction_does_not_stall_ours` (the `Root2` trace) and `rootless_live_peer_holds_compaction` (the `Root3` trace), rule table in `bondy_oplog_compaction_frontier_test:vv_witness_test_` |
@@ -538,7 +597,7 @@ substrate does not certify this today.
    is a proved convergence violation.** `CellContextReap` shows `Convergence`
    failing in 6 steps under out-of-order delivery, reap on or off, via a
    three-party inversion in which no origin has a per-origin gap. The shipped
-   `partition_contiguous/3` hold is per-origin and cannot see it. This is the
+   `partition_contiguous/4` hold is per-origin and cannot see it. This is the
    same distinction as the vector-vs-HLC stability gap recorded in
    `bondy_oplog_crdt_nested_core`'s moduledoc, and it is the sharpest open
    safety question in the development. Note the scope: origins and seqs are
@@ -551,33 +610,57 @@ substrate does not certify this today.
    still available, `Dot_Exactness_Gapped.thy` discharges the *exactness*
    obligation by representation rather than by protocol — which is what a
    deployment that cannot preserve prefix closure would need.
-3. **Vector stability.** Not certified. Blocks context-governed reduction;
+3. ~~**The bootstrap adopts a frontier it did not materialise.**~~ **Closed.**
+   The unconditional max-merge was proved unsound
+   (`unconditional_adoption_unsound`) and violated by TLC in 4 steps
+   (`MuxBucketSkip_Minus_AdoptIfComplete`); the sound rule — adopt only when
+   the install skipped nothing the joiner could observe — is proved
+   (`adopt_if_complete_sound`), model-checked (`MuxBucketSkip_Final_Skew`) and
+   now BUILT. No wire change was needed: the install already knew the
+   unroutable bucket at the skip site and now returns it as `unclaimable`,
+   which is what tells that skip apart from the benign HLC-older one sharing
+   the same `skipped` counter. Two things the models decided that taste would
+   not have: refusing the bootstrap instead violates `Live`, and so does
+   suppressing the frontier-gap verdict the withheld claim provokes
+   (`MuxBucketSkip_Minus_GapVerdict`) — the re-bootstrap cycle is the only
+   writer of applied state that does not pass through the fold, so it is the
+   delivery path for the events the per-origin hold parks, and what ends it is
+   an operator acting on the `bondy_oplog_bucket_unroutable` alarm.
+4. **Vector stability.** Not certified. Blocks context-governed reduction;
    keeps `stabilize_fold` refused for the add-wins family.
-4. **Membership completeness.** I2 quantifies over the confirmed set. A
+5. **Membership completeness.** I2 quantifies over the confirmed set. A
    replica outside it that can still mint below the frontier breaks the
    argument. `reclamation_members/0` and the stale-peer rejoin work bear on
    this; neither is modelled.
-5. **Datatype convergence.** Not attempted. The natural next step is
+6. **Datatype convergence.** Not attempted. The natural next step is
    instantiating the Gomes/Kleppmann/Mulligan/Beresford locale (AFP entry
    `CRDT`) for `aw_core`/`nested_core`, which assumes causal delivery as a
    hypothesis — i.e. it consumes obligation 1.
 
-### Unrecorded
+### The contiguous claim with no hold and ungated compaction
 
 `AaeCausalClosure_Contig.cfg` (3 replicas) and `_Contig2.cfg` (2 replicas)
 check `TypeOK` + `NoOverClaim` with `ContigClaim = TRUE`, `PrefixHold = FALSE`
-and `GatedCompaction = FALSE` — i.e. whether the contiguous-prefix claim alone
-makes the oracle sound with no hold and ungated compaction. The configs exist;
-no result is recorded in either README. Re-run them before relying on the
-answer.
+and `GatedCompaction = FALSE` — whether the contiguous-prefix claim alone makes
+the oracle sound with no hold and ungated compaction.
 
-**These two configs are on the critical path for the `bondy_ddb` delivery
-design** (`_design/ddb/`, section 3): that design retires the per-origin hold
-and replaces the max-based claim with the contiguous prefix bound, which is
-exactly `ContigClaim = TRUE, PrefixHold = FALSE, GatedCompaction = FALSE`. If
-`NoOverClaim` holds there, the design's central safety claim is model-checked
-before implementation; if not, the design changes. Fetch `tla2tools.jar` and run
-them before the spec is written.
+**These are on the critical path for the `bondy_ddb` delivery design**
+(`_design/ddb/`, section 3): that design retires the per-origin hold and
+replaces the max-based claim with the contiguous prefix bound, which is exactly
+this configuration.
+
+| Config | Result |
+| --- | --- |
+| `_Contig2` (2 replicas) | **clean**, exhaustive — 1,682 distinct states |
+| `_Contig` (3 replicas) | **did not close** — abandoned after ~20 minutes |
+
+So the design's central safety claim is model-checked **at pairwise scope
+only**. That is the scope the config's own header argues for (sync, claim and
+gap logic are all pairwise), but it is not the same as checking it at three,
+and the 3-replica run is the one that does not terminate — the same explosion
+the header predicts once a firing gap check makes `Rebootstrap` reachable from
+most states. Treat the pairwise result as necessary, not sufficient, and do not
+cite it as a 3-replica result.
 
 ## Maintenance
 

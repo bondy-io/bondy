@@ -52,7 +52,8 @@ scheduler_bootstrap_test_() ->
             fun pre_bootstrap_catalogue_auto_bootstraps_from_first_peer/0},
         {timeout, 10, fun pre_bootstrap_single_crdt_auto_bootstraps/0},
         {timeout, 10, fun live_instance_fans_out_per_peer_syncs/0},
-        fun empty_peers_is_a_noop/0
+        fun empty_peers_is_a_noop/0,
+        {timeout, 20, fun a_gated_instance_neither_bootstraps_nor_serves/0}
     ]}.
 
 pre_bootstrap_catalogue_auto_bootstraps_from_first_peer() ->
@@ -82,6 +83,63 @@ pre_bootstrap_catalogue_auto_bootstraps_from_first_peer() ->
     Adapter = bondy_oplog_core_registry:entry_projection_adapter(LocalEntry),
     Handle = bondy_oplog_core_registry:entry_projection_handle(LocalEntry),
     ?assertMatch({ok, _Frame}, Adapter:get(Handle, ?B, <<"k">>)),
+
+    teardown(Peer),
+    teardown(Local),
+    file:del_dir_r(BaseDir).
+
+%% Until the catalogue has registered every table the shard DECLARES, the
+%% routing directory is incomplete: a bootstrap install skips the buckets it
+%% cannot route while `finalize_catalogue_bootstrap/5` adopts the peer's whole
+%% frontier and claims them. Both ends must therefore refuse, and both read
+%% `bondy_oplog_registry:tables_registered/1`. This drives the initiator
+%% through the scheduler and calls the responder directly.
+%%
+%% Releasing the gate is the entire repair — no backoff, no retry budget, no
+%% re-bootstrap — which is what makes the gate safe to fail closed.
+a_gated_instance_neither_bootstraps_nor_serves() ->
+    BaseDir = test_dir(),
+    {Peer, _, _, _} = setup_persistent(BaseDir, #{seed => true}),
+    {Local, _, _, _} = setup_persistent(
+        BaseDir, #{applier => #{drain_gated => true}}
+    ),
+    _ = bondy_oplog:append(Peer, {cell_apply, ?B, <<"k">>, {set, 5, <<"v">>}}),
+    _ = barrier(Peer),
+
+    ?assertEqual(false, bondy_oplog_registry:tables_registered(Local)),
+    ?assertEqual(true, bondy_oplog_registry:tables_registered(Peer)),
+
+    %% Responder half: a peer asking Local for its catalogue is refused, so
+    %% it cannot install a snapshot missing Local's unregistered buckets and
+    %% then adopt Local's whole frontier.
+    ?assertEqual(
+        {error, {tables_not_registered, Local}},
+        bondy_oplog_responder:dispatch(Local, get_catalogue_snapshot_init)
+    ),
+
+    %% Initiator half. The ROUTING DECISION is asserted directly, as in
+    %% `pre_bootstrap_single_crdt_auto_bootstraps/0`: driving it through a
+    %% tick would leave the load gate and the concurrency caps free to make
+    %% this pass for reasons that have nothing to do with the gate.
+    ?assertEqual(
+        ok, bondy_oplog_sync_scheduler:default_dispatch(Local, [Peer])
+    ),
+    ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Local)),
+
+    %% Positive control: releasing the gate is the entire repair — no backoff,
+    %% no retry budget, no re-bootstrap — which is what makes failing closed
+    %% here safe. Asserted on the responder rather than by dispatching: a
+    %% dispatch raised from the test process leaves the session's monitor
+    %% owned by this process, so its node-global in-flight slot is never
+    %% released and every later cap assertion in the suite skews. That the
+    %% ungated initiator path still bootstraps is
+    %% `pre_bootstrap_catalogue_auto_bootstraps_from_first_peer/0`.
+    ok = bondy_oplog:open_drain_gate(Local),
+    ?assertEqual(true, bondy_oplog_registry:tables_registered(Local)),
+    ?assertMatch(
+        {ok, _},
+        bondy_oplog_responder:dispatch(Local, get_catalogue_snapshot_init)
+    ),
 
     teardown(Peer),
     teardown(Local),
@@ -193,15 +251,18 @@ setup_persistent(BaseDir, ExtraOpts) ->
     NS = ns_of(Id),
     {Cache, Proj} = register_shard(NS, primary, 0),
     Path = make_path(BaseDir, Id),
+    %% `maps:merge/2` is shallow, so an `applier` key in `ExtraOpts` would
+    %% drop `cell_apply_target`. Merge that one sub-map explicitly.
+    Applier = maps:merge(
+        #{cell_apply_target => {NS, primary, 0}},
+        maps:get(applier, ExtraOpts, #{})
+    ),
     Opts = maps:merge(
         #{
             fold_module => lww_register,
-            applier => #{
-                cell_apply_target => {NS, primary, 0}
-            },
             storage_path => list_to_binary(Path)
         },
-        ExtraOpts
+        ExtraOpts#{applier => Applier}
     ),
     {ok, _} = bondy_oplog:start_instance(Id, Opts),
     {Id, NS, Cache, Proj}.

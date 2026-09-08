@@ -153,13 +153,7 @@ flush(RealmUri, Ref) ->
         %% Cleanup all registrations for the ref's session
         SessionId = bondy_ref:session_id(Ref),
         bondy_registry:remove_all(
-            subscription,
-            RealmUri,
-            SessionId,
-            fun on_unsubscribe/1,
-            %% disable broadcast to avoid an avalanche on the other notes
-            %% they will get this delete in the next AAE exchange
-            #{broadcast => false}
+            subscription, RealmUri, SessionId, fun on_unsubscribe/1
         )
     catch
         Class:Reason:Stacktrace ->

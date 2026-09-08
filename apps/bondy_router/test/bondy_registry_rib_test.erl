@@ -32,7 +32,14 @@ write_path_test_() ->
                 {"registration summary lifecycle", fun() -> regs(Tab) end}},
             {timeout, 60,
                 {"subscription summary lifecycle", fun() -> subs(Tab) end}},
+            {timeout, 60,
+                {"a redundant removal does not decrement twice", fun() ->
+                    redundant_removal(Tab)
+                end}},
             {timeout, 60, {"remote stub lifecycle", fun stubs/0}},
+            {timeout, 60,
+                {"orphan stub pruning deletes only cell-less departed rows",
+                    fun orphan_stub_pruning/0}},
             {timeout, 60, {"subscriber node discovery", fun sub_nodes/0}},
             {timeout, 60, {"reshape_summary/2", fun reshape_summary/0}},
             {timeout, 60,
@@ -204,6 +211,98 @@ summary(Table, Key) ->
 %% The RIB hooks write async (`bondy_db:apply_async/4` — no
 %% read-your-writes barrier), so tests reading the cell right after a
 %% hook must flush the shard first.
+%% `reap_orphan_stubs/1`'s two decision axes, neither of which the
+%% end-to-end cluster suite can isolate.
+%%
+%% The dangerous branch is the SECOND one. Deleting a stub because its node
+%% left the membership would be wrong: a removal is reversible, and this
+%% node's frontier already claims the returning node's events, so AAE
+%% re-ships nothing and its routing stays blackholed until it happens to
+%% rewrite a cell. Only the backing cell being GONE licenses the delete —
+%% that is the membership signal already laundered through retirement.
+orphan_stub_pruning() ->
+    ok = ensure_stubs_tab(),
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Gone = <<"peer_departed@127.0.0.1">>,
+    Live = <<"peer_live@127.0.0.1">>,
+
+    CellLess = <<"com.example.rib.orphan.cellless">>,
+    Backed = <<"com.example.rib.orphan.backed">>,
+    LiveUri = <<"com.example.rib.orphan.live">>,
+
+    %% (a) departed node, NO backing cell -> the orphan; must be pruned.
+    ok = bondy_registry_rib:on_remote_set(
+        registration, cell_key(?EXACT_MATCH, CellLess, Gone), #{count => 1}
+    ),
+    %% (b) departed node, cell still present -> must SURVIVE. This is the
+    %% blackhole guard: the cell has not stabilized away yet.
+    BackedKey = cell_key(?EXACT_MATCH, Backed, Gone),
+    ok = bondy_db:apply(Table, ?REALM, BackedKey, {apply, count, {inc, 1}}),
+    ok = flush(Table, BackedKey),
+    ok = bondy_registry_rib:on_remote_set(
+        registration, BackedKey, #{count => 1}
+    ),
+    %% (c) LIVE member, no backing cell -> must survive; membership scopes
+    %% the sweep, so a live node's rows are never even candidates.
+    %% A node never stubs ITSELF (`on_remote_set/3` routes our own
+    %% nodestring to `self_heal/4`), so the live case needs a real peer in
+    %% the membership. Seed one and restore the set afterwards.
+    PrevMembers = partisan_membership:members(),
+    ok = partisan_membership:set(
+        PrevMembers ++ [#{name => binary_to_atom(Live, utf8)}]
+    ),
+    ok = bondy_registry_rib:on_remote_set(
+        registration, cell_key(?EXACT_MATCH, LiveUri, Live), #{count => 1}
+    ),
+
+    Present = fun(Uri, Node) ->
+        lists:keymember(
+            Node,
+            1,
+            bondy_registry_rib:stub_nodes(
+                registration, ?REALM, ?EXACT_MATCH, Uri
+            )
+        )
+    end,
+    ?assert(Present(CellLess, Gone), "precondition: orphan stub seeded"),
+    ?assert(Present(Backed, Gone), "precondition: backed stub seeded"),
+
+    Pruned =
+        try
+            bondy_registry_rib:reap_orphan_stubs(?REALM)
+        after
+            ok = partisan_membership:set(PrevMembers)
+        end,
+
+    ?assertNot(
+        Present(CellLess, Gone),
+        "a departed node's stub with no backing cell must be pruned"
+    ),
+    ?assert(
+        Present(Backed, Gone),
+        "a departed node's stub whose cell is STILL PRESENT must survive, "
+        "or a returning node's routing is blackholed"
+    ),
+    ?assert(
+        Present(LiveUri, Live),
+        "a live member's stub must never be a pruning candidate"
+    ),
+    ?assert(Pruned >= 1, "the pruned count must report the deletion"),
+
+    %% Idempotent for the row it already pruned: sweeping again must not
+    %% re-report it. (`Live` is no longer a member by now, so the sweep may
+    %% legitimately act on ITS row — hence asserting the specific stub is
+    %% still absent rather than a bare count of 0.)
+    _ = bondy_registry_rib:reap_orphan_stubs(?REALM),
+    ?assertNot(
+        Present(CellLess, Gone),
+        "a pruned stub must stay pruned"
+    ),
+    ?assert(
+        Present(Backed, Gone),
+        "the backed stub must survive repeated sweeps"
+    ).
+
 flush(Table, Key) ->
     ok = bondy_db:await(Table, ?REALM, Key).
 
@@ -279,9 +378,12 @@ subs(Tab) ->
     Table = ?CAT:table(?BONDY_DB_SUBSCRIPTION_RIB_TAB),
     Key = cell_key(?EXACT_MATCH, ?URI),
 
-    %% Subscription cells are reachability-only: a bare pn_counter, so the
-    %% raw read is a plain integer (`reshape_summary/2` wraps it as
-    %% `#{count => N}` for consumers — see the `reshape_summary/0` test).
+    %% Subscription cells are reachability-only: one counter, carried by
+    %% `bondy_oplog_crdt_owned_counter`, so the RAW read is a plain integer.
+    %% `bondy_registry_rib:reshape_summary/2` is what turns it into the
+    %% `#{count => N}` summary shape consumers see, and it is called at every
+    %% read call site — so asserting the raw integer here is deliberate: it
+    %% pins the carrier, which a summary-shaped assertion would hide.
     E1 = entry(subscription, ?EXACT_MATCH, undefined),
     E2 = entry(subscription, ?EXACT_MATCH, undefined),
 
@@ -289,11 +391,46 @@ subs(Tab) ->
     ok = bondy_registry_rib:on_entry_added(self(), Tab, E2),
     ok = flush(Table, Key),
     ?assertMatch({ok, {2, _}}, bondy_db:read(Table, ?REALM, Key)),
+    ?assertEqual(
+        #{count => 2},
+        bondy_registry_rib:reshape_summary(subscription, 2)
+    ),
 
     ok = bondy_registry_rib:on_entry_removed(self(), Tab, E1),
     ok = bondy_registry_rib:on_entry_removed(self(), Tab, E2),
     ok = flush(Table, Key),
     ?assertMatch({ok, {0, _}}, bondy_db:read(Table, ?REALM, Key)).
+
+%% A removal that finds no members row must not touch the replicated count.
+%%
+%% Removing one entry twice is reachable, not hypothetical:
+%% `bondy_realm:teardown/1' casts the realm's session closes -- each of which
+%% flushes its own session's entries -- and then traverses the same realm
+%% removing everything it finds, so one entry can be removed down both paths.
+%% The members row is this node's ground truth for whether the entry is still
+%% counted, and `on_entry_added/3' writes the row and the `{inc, 1}' together;
+%% the matching `{inc, -1}' must therefore be gated on the row exactly as the
+%% occupancy gauge is. Ungated, the summary this node advertises to its peers
+%% goes NEGATIVE, and no later removal can bring it back.
+redundant_removal(Tab) ->
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Uri = <<"com.example.rib.redundant">>,
+    Key = cell_key(?EXACT_MATCH, Uri),
+    E = entry(registration, ?EXACT_MATCH, ?INVOKE_SINGLE, Uri),
+
+    ok = bondy_registry_rib:on_entry_added(self(), Tab, E),
+    ok = flush(Table, Key),
+    ?assertMatch({ok, {#{count := 1}, _}}, bondy_db:read(Table, ?REALM, Key)),
+
+    ok = bondy_registry_rib:on_entry_removed(self(), Tab, E),
+    ok = bondy_registry_rib:on_entry_removed(self(), Tab, E),
+    ok = flush(Table, Key),
+    {ok, {#{count := Count}, _}} = bondy_db:read(Table, ?REALM, Key),
+    ?assertEqual(
+        0,
+        Count,
+        "the second removal found no members row, so it must not decrement"
+    ).
 
 %% Unit-tests the read-path reshape in isolation: registration passes
 %% the ratchet registers through (normalising never-written fields to
@@ -520,9 +657,12 @@ await_ready(Table, RealmUri, Key, N) ->
 %% A synthetic local entry for `?REALM`/`?URI`. `Invoke` is ignored for
 %% subscriptions (the type carries no invocation policy).
 entry(Type, Policy, Invoke) ->
+    entry(Type, Policy, Invoke, ?URI).
+
+entry(Type, Policy, Invoke, Uri) ->
     Ref = bondy_ref:new(internal),
     Opts = #{match => Policy, invoke => Invoke},
-    bondy_registry_entry:new(Type, ?REALM, Ref, ?URI, Opts).
+    bondy_registry_entry:new(Type, ?REALM, Ref, Uri, Opts).
 
 cell_key(Policy, Uri) ->
     cell_key(Policy, Uri, bondy_config:nodestring()).

@@ -132,6 +132,9 @@ retired fold era and resolved to its byte-identical native twin by
 `bondy_oplog_crdt_lww_register`; durable cells decode unchanged).
 A label with no twin raises `{unknown_cell_module, _}`.
 
+Throughout this chapter `kernel:` abbreviates `bondy_oplog_cell_kernel:`.
+It is not OTP's `kernel` application.
+
 All per-cell compute routes through `bondy_oplog_cell_kernel`:
 
 ```mermaid

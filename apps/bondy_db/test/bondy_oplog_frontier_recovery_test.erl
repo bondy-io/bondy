@@ -12,13 +12,25 @@
 %%     compaction checkpoint; `init/1` restores it with a max-merge before the
 %%     applier drains.
 %%   - CRASH restart (the checkpoint wiped) — `init/1` finds no persisted
-%%     frontier, and the applier's WAL-tail replay reconstructs it on the normal
-%%     apply path. No O(N) projection fold, no `warming` state: re-applying an
-%%     already-counted event is an idempotent max-merge.
+%%     frontier, so `bondy_oplog_instance:replay_anchor/1` sees a live MST full
+%%     of cell events the frontier does not claim and anchors the applier's
+%%     replay cursor at `undefined`. The boot re-fold then re-presents the live
+%%     oplog and the frontier follows what materialises. Re-folding an
+%%     already-applied event is idempotent (the cells are keyed and the
+%%     commutative kernels guard on a per-origin `MaxSeq`), so this costs a
+%%     fold of the LOG, which compaction bounds — never a projection rescan.
 %%
 %% The crash case is the load-bearing one: it proves the meltdown-free property
-%% — a hard kill recovers the frontier from the cheap WAL replay the instance
-%% already runs, not from a full projection rescan.
+%% — a hard kill recovers the frontier from a bounded oplog re-fold, not from a
+%% full projection rescan.
+%%
+%% The crash case must not be carried by a boot fold that DECLARES every cell
+%% event in the MST applied. That reconstructs the number and loses the data:
+%% the MST records receipt, so an event received and never materialised is
+%% claimed,
+%% and the claim is what `watermark_door/3` and `capped_truncation_point/2`
+%% check before truncating it. See `_design/applied_frontier.md` and
+%% `bondy_oplog_frontier_fold_gap_test`.
 %% =============================================================================
 -module(bondy_oplog_frontier_recovery_test).
 
@@ -294,6 +306,12 @@ write_aw_keys(T, N) ->
 
 %% Wait for every instance's applier to drain so the frontier reflects all
 %% writes (the hook fires on the applier's projection write, not on `apply/4`).
+%% Wait for BOTH applier stages: the WAL drain, then the projection replay.
+%% They are separate barriers. `await_apply/1` settles the drain; the boot
+%% re-fold is a `replay_cell_events` cast the applier init enqueues BEHIND the
+%% drain, so after a crash restart the frontier is still catching up when
+%% `await_apply/1` returns. `replay_cell_events_sync/1` is the replay barrier —
+%% the same one every other durable e2e test here uses.
 drain_all() ->
     lists:foreach(
         fun(I) ->
@@ -302,10 +320,21 @@ drain_all() ->
                     bondy_oplog_instance:await_apply(I)
                 catch
                     _:_ -> ok
+                end,
+            _ =
+                try
+                    replay_sync(bondy_oplog_registry:applier_pid(I))
+                catch
+                    _:_ -> ok
                 end
         end,
         bondy_oplog:list_instances()
     ).
+
+replay_sync(undefined) ->
+    ok;
+replay_sync(Pid) when is_pid(Pid) ->
+    bondy_oplog_applier:replay_cell_events_sync(Pid).
 
 %% Map of InstanceId => Frontier over every live instance (the table's shards).
 frontier_map() ->

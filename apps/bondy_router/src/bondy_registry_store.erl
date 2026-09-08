@@ -197,9 +197,6 @@ whole (possibly paged) set of them.
 -export([add_indices/2]).
 -export([delete_indices/2]).
 -export([remove/2]).
--export([remove/3]).
--export([dirty_delete/2]).
--export([dirty_delete/3]).
 -export([find/1]).
 -export([find/2]).
 -export([find/3]).
@@ -438,12 +435,6 @@ add_indices(#bondy_registry_store{} = Store, Entry) ->
             Error
     end.
 
--doc "".
--spec remove(Store :: t(), Entry :: entry()) -> ok.
-
-remove(Store, Entry) ->
-    remove(Store, Entry, #{broadcast => true}).
-
 -doc """
 Removes a registration or subscription entry (`bondy_registry_entry:t()`) from
 the registry and its indices.
@@ -464,14 +455,14 @@ through a trie server.
 > This is an interim design that will be replaced by a more concurrent one in
 > next releases.
 """.
--spec remove(Store :: t(), Entry :: t(), Opts :: map()) -> ok.
+-spec remove(Store :: t(), Entry :: t()) -> ok.
 
-remove(#bondy_registry_store{} = Store, Entry, Opts) ->
+remove(#bondy_registry_store{} = Store, Entry) ->
     ok = validate_entry(Entry),
 
     maybe
         ok ?= delete_indices(Store, Entry),
-        delete(Store, Entry, Opts)
+        delete(Store, Entry)
     end.
 
 -doc "Removes an entry (and its indices) from the store returning it.".
@@ -488,7 +479,7 @@ take(Store, Entry) ->
 -doc """
 Removes an entry (and its indices) from the store returning it.
 
-Indices are deleted before the entry table row (see `remove/3` for why this
+Indices are deleted before the entry table row (see `remove/2` for why this
 order matters: it keeps `project/2` from ever finding an index entry whose
 backing record is already gone).
 """.
@@ -512,56 +503,6 @@ take(#bondy_registry_store{} = Store, Type, EntryKey) when ?IS_TYPE(Type) ->
         {error, not_found} = Error ->
             Error
     end.
-
--doc """
-WARNING: Never use this unless you know exactly what you are doing!
-We use this only when we want to remove a remote entry from the registry as
-a result of the owner node being down.
-We want to achieve the following:
-1. The delete has to be idempotent, so that we avoid having to merge N
-versions either during broadcast or AAE exchange. We can use the owners
-ActorID and Timestamp for this, manipulating the plum_db_object, a little
-bit nasty but effective and almost harmless as entries are immutable anyway.
-2. If we can achieve (1) then we could disable broadcast, as all nodes
-will be doing (1).
-3. We still have the AAE exchange, so (1) has to ensure that the hash of
-the object is the same in all nodes. I think that comes naturally from
-doing (1) anyway, but we need to check, e.g. timestamp differences?
-""".
--spec dirty_delete(t(), entry()) -> {ok, entry()} | {error, not_found | any()}.
-
-dirty_delete(#bondy_registry_store{} = Store, Entry) ->
-    dirty_delete(
-        Store, bondy_registry_entry:type(Entry), bondy_registry_entry:key(Entry)
-    ).
-
--doc """
-WARNING: Never use this unless you know exactly what you are doing!
-We use this only when we want to remove a remote entry from the registry as
-a result of the owner node being down.
-We want to achieve the following:
-1. The delete has to be idempotent, so that we avoid having to merge N
-versions either during broadcast or AAE exchange. We can use the owners
-ActorID and Timestamp for this, manipulating the plum_db_object, a little
-bit nasty but effective and almost harmless as entries are immutable anyway.
-2. If we can achieve (1) then we could disable broadcast, as all nodes
-will be doing (1).
-3. We still have the AAE exchange, so (1) has to ensure that the hash of
-the object is the same in all nodes. I think that comes naturally from
-doing (1) anyway, but we need to check, e.g. timestamp differences?
-""".
--spec dirty_delete(
-    Store :: t(), Type :: entry_type(), EntryKey :: entry_key()
-) ->
-    {ok, entry()} | {error, not_found | any()}.
-
-dirty_delete(#bondy_registry_store{} = Store, Type, EntryKey) ->
-    %% bondy_db `clear` is HLC-ordered and idempotent by construction, so the
-    %% a dirty delete needs no deterministic tombstone to converge: it is
-    %% just a local delete. With AAE off there are no remote replicas to
-    %% dirty-delete, so this is reached only by the (inert) node-down `prune`
-    %% path.
-    take(Store, Type, EntryKey).
 
 -doc "".
 -spec lookup(Store :: t(), IndexEntry :: index_entry()) ->
@@ -1451,10 +1392,10 @@ session_idx_key(Entry, Type, RealmUri, SessionId, EntryId) ->
     }.
 
 %% @private
--spec delete(Store :: t(), Entry :: entry(), Opts :: map()) ->
+-spec delete(Store :: t(), Entry :: entry()) ->
     ok | {error, any()}.
 
-delete(#bondy_registry_store{} = Store, Entry, _Opts) ->
+delete(#bondy_registry_store{} = Store, Entry) ->
     Type = bondy_registry_entry:type(Entry),
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     EntryId = bondy_registry_entry:id(Entry),
@@ -1547,7 +1488,7 @@ store_indices(#bondy_registry_store{} = Store, Entry) ->
 -doc """
 Removes an entry's in-memory match indices (trie / ETS bags) ONLY — it does not
 touch the per-node remote index nor the bondy_db projection. Used by
-`remove/3` / `take/3` as the index half of a full delete.
+`remove/2` / `take/3` as the index half of a full delete.
 
 There is no masking path calling this. Masking answers a registry in which full
 `#entry{}` records replicate and a peer can clear another node's entries under

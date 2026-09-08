@@ -30,7 +30,6 @@ outbound WAMP messages.
     auth_timestamp :: integer() | undefined,
     state_name :: state_name(),
     context :: bondy_context:t() | undefined,
-    goodbye_reason :: uri() | undefined,
     %% per-session message-throttle bucket, created at session open when
     %% message throttling is enabled (else `undefined`). Held here so the
     %% per-message path never reads config.
@@ -167,9 +166,6 @@ terminate(#wamp_state{context = undefined}) ->
 terminate(#wamp_state{} = State) ->
     Ctxt = State#wamp_state.context,
 
-    %% free the per-session message-throttle bucket (no-op if none).
-    _ = bondy_rate_limit:delete_session_limiter(State#wamp_state.msg_limiter),
-
     case bondy_context:has_session(Ctxt) of
         true ->
             Session = bondy_context:session(Ctxt),
@@ -303,10 +299,7 @@ handle_outbound(#goodbye{} = M, St0) ->
     %% get the client's goodbye response
     Bin = bondy_wamp_encoding:encode(M, encoding(St0)),
     ok = notify(M, erlang:iolist_size(Bin), St0),
-    St1 = St0#wamp_state{
-        state_name = shutting_down,
-        goodbye_reason = M#goodbye.reason_uri
-    },
+    St1 = St0#wamp_state{state_name = shutting_down},
     %% We stop the connection after the timeout.
     %% This is to guarantee the client the chance to reply the
     %% goodbye message.
@@ -381,7 +374,7 @@ handle_inbound_messages(
 
     {stop, St1};
 handle_inbound_messages(
-    [#goodbye{} = M | _], #wamp_state{state_name = established} = St0, Acc
+    [#goodbye{} | _], #wamp_state{state_name = established} = St0, Acc
 ) ->
     %% Client initiated goodbye, we ignore any subsequent messages
     %% We reply with all previous messages plus a goodbye and stop
@@ -390,10 +383,13 @@ handle_inbound_messages(
         ?WAMP_GOODBYE_AND_OUT
     ),
     Bin = bondy_wamp_encoding:encode(Reply, encoding(St0)),
-    St1 = St0#wamp_state{
-        state_name = closed,
-        goodbye_reason = M#goodbye.reason_uri
-    },
+    %% NOTE: `M#goodbye.reason_uri` is DROPPED. It used to be recorded in the
+    %% state and read by nothing, which made `wamp.close.logout` look honoured
+    %% when it never was: `terminate/1` closes the session with `undefined`, so
+    %% the logout branch of the old `bondy_session:maybe_revoke_tickets/2` was
+    %% unreachable and a client could never revoke its own ticket by
+    %% disconnecting. Carrying the reason to the close is a separate change.
+    St1 = St0#wamp_state{state_name = closed},
 
     ok = notify(Reply, erlang:iolist_size(Bin), St1),
 

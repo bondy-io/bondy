@@ -10,7 +10,7 @@
   ],
   "timezone": "",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
   "time": {
     "from": "now-15m",
@@ -41,6 +41,15 @@
       "keepTime": true,
       "tags": [],
       "asDropdown": false
+    },
+    {
+      "title": "MCP Gateway",
+      "type": "link",
+      "url": "/d/bondy-mcp",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
     }
   ],
   "annotations": {

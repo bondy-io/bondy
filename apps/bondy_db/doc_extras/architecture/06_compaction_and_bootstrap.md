@@ -229,16 +229,18 @@ What a peer that missed truncated history does:
   received, so no page pull fails; instead, after every complete round
   a retention instance compares the peer's pre-round applied-frontier
   VV against its own post-replay VV. Strictly behind on any origin ⇒
-  the session fails with `{frontier_gap, Origins}` and the scheduler
-  flags the same re-bootstrap. Crucially this check also **gates
-  frontier adoption**: the "adopt the peer's frontier after a
-  successful round" oracle-repair is only sound when peer compaction
-  implies all-peer confirmation — retention breaks that implication,
-  and adopting across a gap would report CONVERGED over silently
-  missing data. This is ALSO the organic join-time trigger: a fresh
-  replica's first sync against a truncating cluster lands here and
-  bootstraps; a fresh cluster with nothing yet truncated syncs clean
-  with no wasted bootstrap.
+  the session fails with `{frontier_gap, Origins}` and, on a second
+  consecutive verdict, the scheduler flags a catalogue re-bootstrap.
+  A live round never adopts the peer's frontier — it only compares
+  against it — so this verdict is how a deficit page sync cannot close
+  becomes an action rather than a silent CONVERGED. Two causes reach it
+  and the remedy is the same for both: the peer truncated events this
+  node never received, or this node
+  [withheld the peer's frontier](#adoption-is-all-or-nothing) at its last
+  bootstrap. This is ALSO the organic join-time trigger: a fresh replica's
+  first sync against a truncating cluster lands here and bootstraps; a
+  fresh cluster with nothing yet truncated syncs clean with no wasted
+  bootstrap.
 - **Catalogue bootstrap works on fused instances** (it must — it is the
   only complete recovery source once history truncates): the snapshot
   producer resolves the projection target through the fused instance
@@ -601,16 +603,31 @@ frontier = #{ Origin => max Seq applied from Origin }
 ```
 
 over every `{HLC, Origin, Seq}` `cell_apply` event the instance has
-materialised. One property of the op-log makes a per-origin maximum a
-complete summary of the applied set: **delivery is causal — no per-origin
-gaps.** Because an origin's events apply in sequence order with nothing
-skipped (see [chapter 02](02_event_log_and_keys.md)), knowing the
-maximum sequence applied from an origin is equivalent to knowing
-*exactly which* of that origin's events have been applied. Two instances
-with equal frontiers have therefore applied the same op-set, and the
-op-based CRDT guarantees the same op-set yields the same state (see
-[chapter 05](05_crdt_model.md)). Two further properties make this the
-right oracle:
+materialised. A single number per origin summarises that set completely
+only if the applied seqs form a **contiguous prefix**, and that is a
+property the substrate has to enforce rather than one delivery supplies.
+Events do arrive out of order, and a cell can fail to materialise while
+later ones from the same origin succeed — a bucket whose table is not
+registered here, or a value too large to frame.
+
+So the entry means "every seq from this origin up to N materialised
+here", and it advances only across a contiguous run.
+`bondy_oplog_cell_apply:partition_contiguous/4` draws that run from the
+seqs that actually routed, and anything above a gap is **held** in
+`bondy_oplog_registry`'s `pending` set rather than claimed. Cost is one
+interval per hole, not per seq above it, so a permanently unroutable
+bucket costs one interval however much folds behind it.
+
+Held state is visible rather than silent. `pending/1` is non-empty for an
+origin exactly when that origin has a hole, and an instance that carries
+one past `db.frontier.hole_alarm` raises
+`bondy_oplog_frontier_hole` naming the origins, where the gap starts, and
+how much is stranded above it.
+
+Two instances with equal frontiers have therefore applied the same
+op-set, and the op-based CRDT guarantees the same op-set yields the same
+state (see [chapter 05](05_crdt_model.md)). Two further properties make
+this the right oracle:
 
 - **It is compaction-invariant.** The frontier is a cumulative *applied
   position*, not a snapshot of live state. Compaction truncates the MST
@@ -627,28 +644,47 @@ It is maintained on the apply path: at each commit barrier the applier
 is what makes recovery trivial — re-applying an event that is already
 counted leaves the frontier unchanged.
 
-### Recovery: three durable sources, no recompute
+### Recovery: restore the claim, re-fold the rest
 
-Because max-merge is idempotent, an instance reconstructs its frontier at
-`init/1` by merging three durable sources, in any order, with no
-projection rescan and no transient "not yet authoritative" state:
+An instance restores its frontier at `init/1` from two durable sources,
+and earns the remainder back by folding:
 
 1. **The compaction checkpoint** carries the frontier of the *compacted
    prefix* — the events truncated from both the WAL and the MST, whose
    maxima are recoverable nowhere else. `terminate/2` and every
    compaction commit persist it.
-2. **The live MST** carries the uncompacted, already-applied events
-   (compaction watermark → durable root). A clean restart resumes at the
-   tail, so these never replay; their maxima are folded directly out of
-   the MST's `cell_apply` keys — `O(live MST)`, bounded by compaction.
-3. **The WAL tail** carries events past the durable root, which the
+2. **The WAL tail** carries events past the durable root, which the
    applier replays on the normal apply path after `init/1`, topping up
    the frontier as it goes.
 
-This is deliberately *not* a fold over the materialised projection. An
-`O(#cells)` rescan on every restart was the cold-boot cost the frontier
-exists to avoid; reconstruction here is bounded by the live op-log, which
-compaction keeps small.
+The uncompacted range between them — compaction watermark to durable
+root — is **not declared applied at startup**. It is re-presented to the
+fold, and the frontier follows whatever materialises.
+
+Folding the live MST's `cell_apply` keys into the frontier instead is the
+obvious shortcut and it is wrong, because the MST records **receipt**,
+not application. The two genuinely differ: `install_event/5` is the
+shared insert path, and only a local event folds before it installs. A
+peer-received event installs first and is folded afterwards by a
+best-effort cast, which a crash or a shutdown can lose. Counting such an
+event as applied claims data the projection does not hold, and it also
+disarms the repair — `watermark_door/3` and `capped_truncation_point/2`
+judge "never applied" against this same frontier, so the over-claim lets
+the never-applied event be truncated. Releases up to `1.0.0-rc.lime`
+took the shortcut and lost user records across a rolling restart.
+
+`bondy_oplog_instance:replay_anchor/1` is what decides. It returns the
+current root when every `cell_apply` event in the live MST is already
+claimed by the restored frontier, and `undefined` — re-fold the live
+tree — when one is not. A replica that shut down with everything folded
+and checkpointed therefore boots exactly as before; the re-fold runs only
+where there is something to recover, and is idempotent when it does.
+
+None of this is a rescan of the materialised projection. The scan is one
+`O(live MST)` fold, bounded by compaction, over the log rather than the
+data. A checkpoint written by a release that took the shortcut carries no
+provenance stamp, and an instance restoring one raises
+`bondy_oplog_frontier_receipt_derived`.
 
 ### Comparing across peers
 
@@ -665,8 +701,13 @@ answer the frontier request.
 
 The frontier holder and its max-merge live in `bondy_oplog_registry`; it
 is maintained on the apply path in `bondy_oplog_cell_apply` and
-reconstructed at startup in `bondy_oplog_instance` (`restore_frontier`
-from the checkpoint, `frontier_from_mst` from the live tree).
+restored at startup in `bondy_oplog_instance` (`restore_frontier` from the
+checkpoint). The uncompacted range is not declared applied at startup: it is
+re-presented to the fold, and the frontier follows what materialises. Folding
+the live tree's event keys into the frontier instead would count RECEIPT,
+which is how releases up to `1.0.0-rc.lime` over-claimed. A checkpoint written
+by one of those carries no provenance stamp, and an instance restoring one
+raises `bondy_oplog_frontier_receipt_derived`.
 
 ## Bootstrap: how a new peer joins
 
@@ -729,13 +770,26 @@ sequenceDiagram
     participant Local as local instance
 
     New->>Peer: get_catalogue_snapshot_init
-    Peer-->>New: {Watermark, Cursor, first cell chunk}
-    loop until cursor exhausted
-        New->>Local: install_catalogue_batch(Cells, Mode)
-        New->>Peer: {get_catalogue_snapshot_next, Cursor}
-        Peer-->>New: next chunk
+    alt peer's routing directory is complete
+        Peer-->>New: {init, {Watermark, Cursor}}
+    else still registering tables
+        Peer-->>New: {error, tables_not_registered}
+        Note over New,Peer: benign — the next round retries
     end
-    New->>Local: finalize (watermark advance + truncate + mark_live)
+    New->>Peer: get_frontier
+    Peer-->>New: peer's applied frontier
+    loop until cursor exhausted
+        New->>Peer: {get_catalogue_snapshot_next, Cursor}
+        Peer-->>New: batch · chunked_batch · done
+        New->>Local: install_catalogue_batch({replace, Cells})
+        Local-->>New: installed · skipped · unclaimable
+    end
+    alt every shipped cell routed here
+        New->>Local: finalize with the peer's frontier
+    else some bucket had no table
+        New->>Local: finalize with no frontier
+        Note over New,Local: alarm: bondy_oplog_bucket_unroutable
+    end
     Note over New,Peer: plain AE picks up the live tail
 ```
 
@@ -746,21 +800,62 @@ surviving local state to merge against. The finalize step performs the
 same monotonic watermark advance and `mark_live/1` ordering as the
 single-CRDT path.
 
+**A cell too large to frame arrives in parts.** A value whose serialized
+size alone exceeds the sync byte ceiling cannot be shipped whole, so the
+producer emits it as numbered `cell_chunk()` parts across consecutive
+batches and the reply becomes a `chunked_batch`. The initiator
+reassembles parts 1..Total in `bondy_oplog_sync_session` and **fails the
+bootstrap** if the stream ends with a reassembly still open — a partial
+value must never reach the projection.
+
 **The frontier travels separately.** The streamed cells are
 `{Bucket, Key, Frame}` triples — HLC and folded value only. They do
 **not** carry the `{Origin, Seq}` pairs the [applied
 frontier](#the-applied-frontier-the-convergence-oracle) is built from
 (the frontier is advanced only on the WAL-drain apply path, never on a
 direct projection write). So installing every cell seeds the replica's
-*data* but leaves its frontier empty — and a replica that holds all the
+*data* but leaves its frontier empty, and a replica that holds all the
 data yet reports an empty frontier is judged **diverged forever**. The
-finalize entry point therefore takes the peer's frontier and adopts it:
-`finalize_catalogue_bootstrap/4` captures the peer's `get_frontier`
-response *before* the stream starts (a lower bound on what the live scan
-ships, so it never over-claims) and max-merges it into the local
-frontier alongside the watermark advance. `finalize_catalogue_bootstrap/3`
-is the degenerate no-merge form. Without this, the snapshot would
-converge by data but never by the oracle.
+session therefore fetches the peer's frontier with `get_frontier` before
+the stream starts and hands it to
+`bondy_oplog_instance:finalize_catalogue_bootstrap/5`, which max-merges
+it alongside the watermark advance.
+
+### Adoption is all-or-nothing
+
+Whether to hand over that vector is decided **after** the install, not
+before, and the reason is that the cells cannot answer for themselves.
+The peer's vector asserts "every event of this origin up to N
+materialised here". If one cell did not land, that sentence is false for
+whichever origin minted it — and the install cannot say which, because a
+cell carries no origin and no seq. The only question the install can
+answer is *did everything the peer shipped land*, so the claim is
+adopted whole or not at all.
+
+`install_catalogue_batch` reports `unclaimable`: the buckets whose cells
+did not land for a reason no local value covers — an unregistered bucket,
+or a frame that would not decode. It excludes the benign HLC-older skip,
+where a newer local write is already present, which is why the plain
+`skipped` counter cannot decide this.
+`bondy_oplog_sync_session:adopt_frontier/3` passes the peer's vector when
+that set is empty and nothing when it is not.
+
+Withholding is not the same as failing. The bootstrap still completes and
+every routable cell is installed; only the bookkeeping is declined. That
+matters because the usual cause — a peer running a build that declares a
+table this node does not — never resolves on its own, so refusing the
+bootstrap would strand the replica without the data it *can* route.
+Adopting regardless is the over-claim the oracle cannot see.
+
+The replica then reports **diverged** against that peer, raising a
+frontier-gap verdict and a re-bootstrap on the usual cadence. That cycle
+is not waste. A routable event sitting above an unroutable seq of the
+same origin is held by the contiguity rule and can never be folded, and
+the catalogue install is the only writer of applied state that does not
+go through the fold — so re-bootstrapping is how those events are
+eventually delivered. What ends the cycle is an operator, which is why
+the condition raises `bondy_oplog_bucket_unroutable` naming the buckets
+to declare.
 
 ## Bootstrap lifecycle: gating the applier
 
@@ -915,7 +1010,7 @@ dispatch:
 ```mermaid
 stateDiagram-v2
     [*] --> pre_bootstrap
-    pre_bootstrap --> dispatched : tick · under cap · not in backoff
+    pre_bootstrap --> dispatched : tick · directory complete · under cap · not in backoff
     dispatched --> live : bootstrap success (DOWN normal)
     dispatched --> pre_bootstrap : bootstrap failure (DOWN other)
     pre_bootstrap --> live : seed: true on first open
@@ -926,6 +1021,13 @@ the next tick re-evaluates the lifecycle and (assuming backoff has
 elapsed) re-dispatches. This is the structural self-healing
 property — there is no separate retry machinery, just the standard
 tick + lifecycle re-evaluation.
+
+"Directory complete" is `bondy_oplog_registry:tables_registered/1`, the
+same predicate the responder applies when serving. On this side it is not
+a safety condition: adoption is already
+[all-or-nothing](#adoption-is-all-or-nothing), so a bootstrap dispatched
+mid-registration would install a partial projection and claim nothing.
+The gate exists to avoid spending that work twice.
 
 ### Telemetry surface
 
@@ -940,6 +1042,11 @@ retry pressure without sampling logs:
 | `[bondy_oplog, sync_scheduler, bootstrap_capped]` | Dispatch skipped because in-flight cap was hit. | `instance_id` |
 | `[bondy_oplog, sync_scheduler, bootstrap_backoff_deferred]` | Dispatch skipped because `now < NextRetryMs`. | `instance_id` |
 | `[bondy_oplog, sync_scheduler, bootstrap_retry_scheduled]` | A failure bumped the fail count + wrote a new retry time. | `instance_id`, `wait_ms`, `fail_count` |
+| `[bondy_oplog, sync, catalogue_bootstrap, complete]` | A catalogue bootstrap installed and finalized. | `instance_id`, `peer`, `was_live`, `frontier_adopted`, `unclaimable_buckets`; measurements `installed`, `skipped`, `unclaimable`, `watermark` |
+
+`frontier_adopted` is the one to alert on. A run with it `false` installed
+data but declined the peer's frontier, and `unclaimable_buckets` names
+why.
 
 ### Operator playbook
 
@@ -950,6 +1057,8 @@ retry pressure without sampling logs:
 | A specific replica keeps failing to bootstrap. | Watch `bootstrap_retry_scheduled` telemetry for that `instance_id` — `fail_count` rising past 5+ means the peer-pool is genuinely unreachable for this replica, not a flake. |
 | Need to quiesce bootstrap traffic without disabling AE. | `bondy_oplog_config:set_max_inflight_bootstraps(0)` — sessions in flight drain naturally; no new ones are spawned. |
 | Tests need deterministic retry timing. | `bondy_oplog_config:set_bootstrap_retry_base_ms(0)` + `bondy_oplog_config:set_bootstrap_retry_jitter(false)`. |
+| `bondy_oplog_bucket_unroutable` is raised and the replica keeps re-bootstrapping. | A peer holds data for a table this node does not declare. The alarm's `buckets` names them. Declare the table here — usually by bringing this node to the build the peer is running — and the next bootstrap completes and clears the alarm. Nothing on the peer side helps. |
+| `bondy_oplog_frontier_hole` is raised. | This replica is missing seqs below events it has applied. It closes on its own while the missing history still exists at a peer; if it does not, the history has been truncated everywhere and the catalogue re-bootstrap is the only repair. `origins` in the alarm says where the gap starts and how much is stranded above it. |
 
 ## Keeping anti-entropy subordinate to routing
 

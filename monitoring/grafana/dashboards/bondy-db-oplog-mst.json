@@ -10,7 +10,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 11,
+  "version": 16,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -3269,6 +3269,828 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "id": 150,
+      "type": "row",
+      "title": "WAL \u2014 throughput, durability & maintenance",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 134
+      },
+      "panels": []
+    },
+    {
+      "id": 151,
+      "type": "timeseries",
+      "title": "WAL throughput (by instance)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Frames and operations appended, and the bytes they carried. Ops per append is the batching factor: a flat ops line with a rising appends line means batches are getting smaller.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 135
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_appends_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "appends {{instance_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_appended_ops_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "ops {{instance_id}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 152,
+      "type": "timeseries",
+      "title": "WAL durability \u2014 fsync bytes & blocked callers",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Bytes made durable, against callers parked waiting for that to happen. Waiters standing above zero means append latency is being paid by the caller, not absorbed by the batch.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 135
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_fsync_bytes_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "fsync B/s {{instance_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (bondy_oplog_wal_waiters{node=~\"$node\"})",
+          "legendFormat": "waiters {{instance_id}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 153,
+      "type": "timeseries",
+      "title": "WAL maintenance \u2014 rotations, retention & scrub",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Segment lifecycle. Retention deletions should track rotations; if they stop while rotations continue, the log is growing without bound. Scrub runs read frames back to verify them.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 143
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_rotations_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "rotations {{instance_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_retention_deleted_segments_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "segments deleted {{instance_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_scrub_runs_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "scrub runs {{instance_id}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_scrub_frames_checked_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "frames checked {{instance_id}}",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 154,
+      "type": "timeseries",
+      "title": "WAL codec \u2014 compression ratio",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Bytes in against bytes out through the WAL codec, plus the operation count. Output over input IS the compression ratio; the two lines converging means compression has stopped paying.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 143
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_codec_input_bytes_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "in B/s {{instance_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_codec_output_bytes_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "out B/s {{instance_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_wal_codec_ops_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "codec ops {{instance_id}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 155,
+      "type": "stat",
+      "title": "WAL bytes truncated by recovery",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Bytes discarded at open because the tail could not be verified - a torn write from an unclean stop. Non-zero after a crash is expected; non-zero on a clean boot is not.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 151
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(increase(bondy_oplog_wal_recovery_truncated_bytes_total{node=~\"$node\"}[1h])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 156,
+      "type": "row",
+      "title": "MST \u2014 GC, page store & seal",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 155
+      },
+      "panels": []
+    },
+    {
+      "id": 157,
+      "type": "timeseries",
+      "title": "MST GC & page-store reclamation",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "GC runs against what they actually reclaimed. Runs climbing while packs retired and pages dropped stay flat means GC is finding nothing to free.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 156
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (result) (rate(bondy_mst_gc_runs_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "mst gc runs {{result}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_mst_page_store_gc_runs_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "page-store gc runs {{instance_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_mst_page_store_gc_packs_retired_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "packs retired {{instance_id}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_mst_page_store_gc_pages_dropped_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "pages dropped {{instance_id}}",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 158,
+      "type": "timeseries",
+      "title": "MST seal & broadcast",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Records and bytes written by the sealing worker, and the broadcasts the tree emitted. Seal is off the hot path; a stall shows here before it shows as page-store growth.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 156
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_mst_seal_records_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "seal records {{instance_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_mst_seal_bytes_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "seal B/s {{instance_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (direction) (rate(bondy_mst_broadcasts_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "broadcasts {{direction}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 159,
+      "type": "row",
+      "title": "Applier, instances & core substrate",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 164
+      },
+      "panels": []
+    },
+    {
+      "id": 160,
+      "type": "timeseries",
+      "title": "Applier \u2014 events, replays & skips",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Events applied, cells re-presented by replay, publications skipped, and validator refreshes. Replayed cells rising without applied events rising is the applier doing work that lands nowhere.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 165
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_apply_events_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "applied {{instance_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_applier_replayed_cells_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "replayed cells {{instance_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_applier_publish_skipped_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "publish skipped {{instance_id}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (outcome) (rate(bondy_oplog_applier_validator_refreshes_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "validator refresh {{outcome}}",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 161,
+      "type": "timeseries",
+      "title": "Instance state \u2014 lifecycle, frontier origins & MST installs",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Lifecycle code per instance (pre_bootstrap vs live), how many origins each applied frontier carries, and items installed into the MST. Origins only ever grows; a jump means a new writer appeared.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 165
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (bondy_oplog_instance_lifecycle_code{node=~\"$node\"})",
+          "legendFormat": "lifecycle {{instance_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (bondy_oplog_instance_frontier_origins{node=~\"$node\"})",
+          "legendFormat": "origins {{instance_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_instance_mst_install_items_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "mst installs {{instance_id}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 162,
+      "type": "timeseries",
+      "title": "Core substrate \u2014 read & range throughput",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Reads and range scans per second across the substrate. Freshness lag moved to its own panel: it is measured in milliseconds and does not belong on a throughput axis.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 173
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_oplog_core_read_rps{node=~\"$node\"})",
+          "legendFormat": "read rps",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_oplog_core_range_rps{node=~\"$node\"})",
+          "legendFormat": "range rps",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 163,
+      "type": "timeseries",
+      "title": "Write-to-readable latency p95 (by instance)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "How long a committed write takes to become readable. This is the number an application notices; WAL fsync latency is only one term in it.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 173
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, instance_id) (rate(bondy_oplog_write_readable_latency_us_bucket{node=~\"$node\"}[5m])))",
+          "legendFormat": "p95 {{instance_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 164,
+      "type": "timeseries",
+      "title": "Bootstrap duration p95 & origin retirements",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Time a catalogue or snapshot bootstrap takes, and origins retired from the frontier. Retirement is what lets a departed writer stop pinning truncation.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 181
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(bondy_oplog_bootstrap_duration_microseconds_bucket{node=~\"$node\"}[5m])))",
+          "legendFormat": "bootstrap p95 {{outcome}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (outcome) (rate(bondy_oplog_retirements_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "retirements {{outcome}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 165,
+      "type": "timeseries",
+      "title": "AE freshness lag (max per namespace)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Time since each namespace's PRIMARY shards were last AE-bumped, which is the value the auth fence compares against auth_max_lag: bondy_auth -> bondy_db:ensure_fresh/2 -> bondy_oplog_core:ensure_fresh/2, which iterates primary_shards_for/1. The AE heartbeat bumps these on every successful sync round, so they stay flat on an idle cluster with no writes at all - a rising line means AE itself has stopped, not that traffic stopped.\n\nSecondary index shards are deliberately excluded: nothing bumps their atomic, and they are written from the same cell apply as their primary so they carry no freshness of their own. Use bondy_oplog_core_ae_lag_milliseconds for the per-shard, per-index view.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 189
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "A",
+          "expr": "max by (namespace) (bondy_oplog_core_freshness_lag_max_milliseconds{node=~\"$node\"})",
+          "legendFormat": "{{namespace}}"
+        }
+      ]
     }
   ],
   "links": [
@@ -3306,6 +4128,15 @@
       "title": "Runtime / BEAM",
       "type": "link",
       "url": "/d/bondy-runtime-beam",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "MCP Gateway",
+      "type": "link",
+      "url": "/d/bondy-mcp",
       "icon": "dashboard",
       "targetBlank": false,
       "keepTime": true,

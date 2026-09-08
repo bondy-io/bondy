@@ -370,3 +370,81 @@ exposition_formats() ->
     ?assertNotEqual(
         nomatch, binary:match(Output, <<"bondy_oplog_sync_sessions_total">>)
     ).
+
+%% =============================================================================
+%% SCRAPE-TIME GAUGES: THE APPLIED FRONTIER'S PENDING COMPONENT
+%% =============================================================================
+%%
+%% Its own fixture: unlike the event-driven metrics above, these gauges are
+%% read from `bondy_oplog_registry` at scrape time, so the oplog must be
+%% RUNNING and carrying a real instance for the collector to emit anything
+%% (`collect_mf/2` short-circuits when `bondy_oplog` is not a running
+%% application).
+
+frontier_hole_gauge_test_() ->
+    {setup, fun hole_setup/0, fun hole_cleanup/1, fun(Id) ->
+        {timeout, 60, fun() -> holes_appear_under_an_injected_hole(Id) end}
+    end}.
+
+hole_setup() ->
+    {ok, _} = application:ensure_all_started(bondy_db),
+    {ok, _} = application:ensure_all_started(prometheus),
+    ok = bondy_prometheus_db:setup(),
+    Id = list_to_binary(
+        "hole_gauge_" ++
+            integer_to_list(erlang:unique_integer([positive, monotonic]))
+    ),
+    {ok, _} = bondy_oplog:start_instance(Id),
+    Id.
+
+hole_cleanup(Id) ->
+    _ = bondy_oplog:stop_instance(Id),
+    ok.
+
+%% A healthy instance reads 0 — the gauge is emitted for EVERY instance, not
+%% only the sick ones, so an alert can be written against `== 0` and a
+%% dashboard shows a flat floor rather than a gap.
+%%
+%% Then inject a hole and read it back through the real exposition. Seqs 2, 5
+%% and 6 fold with 1, 3 and 4 absent: the prefix cannot leave 0, and pending
+%% holds TWO maximal runs (`[2, {5, 6}]`) covering THREE seqs. That difference
+%% is the point of having both gauges — the run count is bounded by the number
+%% of holes while the seq count grows with traffic behind them
+%% (`proofs/isabelle/Frontier_Pending.thy`, `pending_intervals_bounded_by_holes`).
+holes_appear_under_an_injected_hole(Id) ->
+    Origin = bondy_oplog_origin:new(),
+    ?assertEqual(0, gauge(bondy_oplog_instance_frontier_holes, Id)),
+    ?assertEqual(0, gauge(bondy_oplog_instance_frontier_pending_seqs, Id)),
+
+    ok = bondy_oplog_registry:merge_applied(Id, #{Origin => [2, 5, 6]}),
+    ?assertEqual(0, maps:get(Origin, bondy_oplog_registry:frontier(Id), 0)),
+    ?assertEqual(
+        [2, {5, 6}], maps:get(Origin, bondy_oplog_registry:pending(Id))
+    ),
+
+    ?assertEqual(2, gauge(bondy_oplog_instance_frontier_holes, Id)),
+    ?assertEqual(3, gauge(bondy_oplog_instance_frontier_pending_seqs, Id)),
+
+    %% and it clears when the holes fill.
+    ok = bondy_oplog_registry:merge_applied(Id, #{Origin => [1, 3, 4]}),
+    ?assertEqual(6, maps:get(Origin, bondy_oplog_registry:frontier(Id), 0)),
+    ?assertEqual(0, gauge(bondy_oplog_instance_frontier_holes, Id)),
+    ?assertEqual(0, gauge(bondy_oplog_instance_frontier_pending_seqs, Id)).
+
+%% The value of `Name{instance_id="Id"}` in the rendered exposition, so the
+%% assertion goes through the same path a scrape does. Fails loudly when the
+%% series is absent: a gauge that stops being emitted is exactly the
+%% regression this guards.
+gauge(Name, Id) ->
+    Output = prometheus_text_format:format(),
+    Pattern = iolist_to_binary([
+        atom_to_binary(Name, utf8), "{instance_id=\"", Id, "\"} "
+    ]),
+    case binary:match(Output, Pattern) of
+        nomatch ->
+            erlang:error({series_not_exposed, Name, Id});
+        {At, Len} ->
+            Rest = binary:part(Output, At + Len, byte_size(Output) - At - Len),
+            [Value | _] = binary:split(Rest, [<<"\n">>, <<" ">>]),
+            binary_to_integer(Value)
+    end.

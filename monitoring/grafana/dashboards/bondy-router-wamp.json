@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 6,
+  "version": 8,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -101,6 +101,15 @@
       "title": "Mail",
       "type": "link",
       "url": "/d/bondy-mail",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "MCP Gateway",
+      "type": "link",
+      "url": "/d/bondy-mcp",
       "icon": "dashboard",
       "targetBlank": false,
       "keepTime": true,
@@ -3775,6 +3784,266 @@
           },
           "expr": "histogram_quantile(0.95, sum by (le, node) (rate(bondy_router_flow_queue_depth_bucket{node=~\"$node\"}[$__rate_interval])))",
           "legendFormat": "{{node}}"
+        }
+      ]
+    },
+    {
+      "id": 157,
+      "type": "row",
+      "title": "Sessions, sockets & egress",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 174
+      },
+      "panels": []
+    },
+    {
+      "id": 158,
+      "type": "timeseries",
+      "title": "Session manager latency p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Where session establishment spends its time: queueing for the manager, being serviced by it, and cleanup on close. Queue rising while service is flat is a concurrency limit, not a slow operation.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 175
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_session_manager_open_queue_microseconds_bucket{node=~\"$node\"}[5m])))",
+          "legendFormat": "open queue p95",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_session_manager_open_service_microseconds_bucket{node=~\"$node\"}[5m])))",
+          "legendFormat": "open service p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(bondy_session_manager_cleanup_microseconds_bucket{node=~\"$node\"}[5m])))",
+          "legendFormat": "cleanup p95 {{kind}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 159,
+      "type": "timeseries",
+      "title": "Sockets \u2014 open rate, close rate & lifetime",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Opens against closes, with the p95 connection lifetime. Opens tracking closes at a short lifetime is a reconnect loop; the rates alone will not show that.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 175
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_sockets_opened_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "opened",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_sockets_closed_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "closed",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_socket_duration_seconds_bucket{node=~\"$node\"}[5m])))",
+          "legendFormat": "lifetime p95",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 160,
+      "type": "timeseries",
+      "title": "WAMP egress \u2014 queue depth & service time",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Depth of the egress queue against how long it takes to drain an item. Depth climbing while service time stays flat means the producer is outrunning the socket, not that the socket got slower.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 183
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_wamp_egress_queue_depth_bucket{node=~\"$node\"}[5m])))",
+          "legendFormat": "queue depth p95",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_wamp_egress_service_microseconds_bucket{node=~\"$node\"}[5m])))",
+          "legendFormat": "service p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 161,
+      "type": "timeseries",
+      "title": "WAMP message & job throughput",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Total WAMP messages handled, jobs enqueued, and registry projection misses. A projection miss is a lookup that had to fall back off the fast path.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 183
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_messages_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "wamp messages",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_jobs_enqueued_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "jobs enqueued",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_registry_projection_miss_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "registry projection miss",
+          "refId": "C"
         }
       ]
     }

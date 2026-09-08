@@ -9,7 +9,7 @@
   ],
   "timezone": "",
   "schemaVersion": 39,
-  "version": 9,
+  "version": 10,
   "refresh": "10s",
   "time": {
     "from": "now-1h",
@@ -104,6 +104,15 @@
       "title": "Mail",
       "type": "link",
       "url": "/d/bondy-mail",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "MCP Gateway",
+      "type": "link",
+      "url": "/d/bondy-mcp",
       "icon": "dashboard",
       "targetBlank": false,
       "keepTime": true,

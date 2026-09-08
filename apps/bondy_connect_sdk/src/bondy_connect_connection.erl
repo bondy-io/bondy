@@ -646,8 +646,10 @@ terminate(Reason, StateName, Data) ->
     %% exhausted retry budget and a router refusal were indistinguishable to
     %% the caller — and to anyone debugging one.
     _ = reply_waiters({error, connect_error(Reason)}, Data),
-    %% Free the rate-limiter's ETS row (no-op when no `rate` is configured).
-    _ = bondy_connect_dispatch:delete(Data#data.dispatch),
+    %% No rate-limiter teardown: the dispatch's token bucket is unregistered
+    %% (`bondy_regulator_rate_limit:new/2`) and is freed with the state. It used
+    %% to own an ETS row keyed by a `unique_integer` nobody could reconstruct,
+    %% so a connection that never reached this line orphaned it for good.
     ok.
 
 %% @private Unwrap a gen_statem termination reason into the error a caller

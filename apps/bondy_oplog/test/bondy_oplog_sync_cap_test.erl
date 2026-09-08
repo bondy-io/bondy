@@ -108,16 +108,30 @@ cells_test_() ->
             fun cells_small/0},
         {"a batch over the ceiling is truncated, advances to the last kept key",
             fun cells_over/0},
-        {"an oversized cell is skipped, metered, and advanced past",
-            fun cells_oversized/0},
-        {"an all-oversized range yields an empty batch advanced past all",
-            fun cells_all_oversized/0},
-        {"at least one fitting cell is always kept", fun cells_at_least_one/0}
+        {
+            "an oversized cell behind kept cells flushes them first, and is NOT "
+            "advanced past",
+            fun cells_oversized/0
+        },
+        {
+            "a leading oversized cell is surrendered for part-shipping, not "
+            "skipped",
+            fun cells_all_oversized/0
+        },
+        {"at least one fitting cell is always kept", fun cells_at_least_one/0},
+        {"an oversized frame splits into parts that reassemble EXACTLY",
+            fun parts_roundtrip/0},
+        {"parts of two cells interleaved across rounds reassemble correctly",
+            fun parts_interleaved/0},
+        {"a reassembly missing any part stays pending, never installs",
+            fun parts_incomplete_stays_pending/0},
+        {"every emitted part fits under the round ceiling",
+            fun parts_fit_ceiling/0}
     ]}.
 
 cells_small() ->
     Pairs = pairs([1000, 1000, 1000]),
-    {Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
+    {ok, Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
         <<"i">>, <<"b">>, Pairs, ?BUDGET
     ),
     ?assertEqual(3, length(Cells)),
@@ -125,7 +139,7 @@ cells_small() ->
 
 cells_over() ->
     Pairs = pairs(lists:duplicate(20, 1000)),
-    {Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
+    {ok, Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
         <<"i">>, <<"b">>, Pairs, ?BUDGET
     ),
     ?assert(length(Cells) > 0),
@@ -135,28 +149,135 @@ cells_over() ->
     Total = lists:sum([erlang:external_size(C) || C <- Cells]),
     ?assert(Total =< ?BUDGET).
 
+%% The oversized cell is met at key(2). Cells are already accumulated, so
+%% cap_cells flushes them and advances only to key(1) — key(2) leads the next
+%% round and is part-shipped there. The OLD behaviour advanced to key(3),
+%% stepping over key(2) permanently; that is the data loss this replaces.
 cells_oversized() ->
-    Before = counter_value(cell),
     Pairs = [{key(1), blob(1000)}, {key(2), blob(20000)}, {key(3), blob(1000)}],
-    {Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
+    {ok, Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
         <<"i">>, <<"b">>, Pairs, ?BUDGET
     ),
     Keys = [K || {_, K, _} <- Cells],
-    ?assertEqual([key(1), key(3)], Keys),
-    ?assertEqual(key(3), Advance),
+    ?assertEqual([key(1)], Keys),
+    ?assertEqual(key(1), Advance),
+    ?assertNotEqual(key(3), Advance).
+
+%% A leading oversized cell is handed back for part-shipping, carrying its
+%% frame. It is still metered, so the operator alarm keeps working.
+cells_all_oversized() ->
+    Before = counter_value(cell),
+    Frame = blob(20000),
+    Pairs = [{key(1), Frame}, {key(2), blob(20000)}],
+    ?assertEqual(
+        {oversized, key(1), Frame},
+        bondy_oplog_catalogue_snapshot:cap_cells(
+            <<"i">>, <<"b">>, Pairs, ?BUDGET
+        )
+    ),
     ?assert(counter_value(cell) >= Before + 1).
 
-cells_all_oversized() ->
-    Pairs = [{key(1), blob(20000)}, {key(2), blob(20000)}],
-    {Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
-        <<"i">>, <<"b">>, Pairs, ?BUDGET
+%% =============================================================================
+%% PART-SHIPPING ROUND TRIP
+%% =============================================================================
+
+%% Splits a frame the way `emit_parts/6` does, in as many rounds as it takes.
+split_all(Bucket, Key, Frame, MaxBytes) ->
+    PB = bondy_oplog_catalogue_snapshot:part_payload_bytes(
+        Bucket, Key, MaxBytes
     ),
+    Total = bondy_oplog_catalogue_snapshot:total_parts(Frame, PB),
+    split_all(Bucket, Key, Frame, PB, Total, 1, MaxBytes, []).
+
+split_all(_B, _K, _F, _PB, Total, Idx, _Max, Acc) when Idx > Total ->
+    lists:reverse(Acc);
+split_all(B, K, F, PB, Total, Idx, Max, Acc) ->
+    {Parts, LastIdx} = bondy_oplog_catalogue_snapshot:take_parts(
+        B, K, F, PB, Total, Idx, Max
+    ),
+    ?assert(Parts =/= []),
+    ?assert(LastIdx >= Idx),
+    split_all(B, K, F, PB, Total, LastIdx + 1, Max, [Parts | Acc]).
+
+%% The property that matters: whatever the split, concatenation restores the
+%% ORIGINAL bytes. An off-by-one in offset or length breaks this.
+parts_roundtrip() ->
+    Frame = crypto:strong_rand_bytes(20000),
+    Rounds = split_all(<<"b">>, key(1), Frame, ?BUDGET),
+    ?assert(length(Rounds) > 1),
+    {Cells, Pending} = lists:foldl(
+        fun(Round, {CellAcc, Pend}) ->
+            {Done, Pend1} = bondy_oplog_sync_session:absorb_chunks(Round, Pend),
+            {CellAcc ++ Done, Pend1}
+        end,
+        {[], #{}},
+        Rounds
+    ),
+    ?assertEqual(#{}, Pending),
+    ?assertEqual([{<<"b">>, key(1), Frame}], Cells).
+
+%% Two cells in flight at once must not cross-contaminate.
+parts_interleaved() ->
+    F1 = crypto:strong_rand_bytes(20000),
+    F2 = crypto:strong_rand_bytes(15000),
+    R1 = lists:flatten(split_all(<<"b">>, key(1), F1, ?BUDGET)),
+    R2 = lists:flatten(split_all(<<"b">>, key(2), F2, ?BUDGET)),
+    %% Feed them one part at a time, alternating.
+    Interleaved = interleave(R1, R2),
+    {Cells, Pending} = lists:foldl(
+        fun(Part, {CellAcc, Pend}) ->
+            {Done, Pend1} = bondy_oplog_sync_session:absorb_chunks(
+                [Part], Pend
+            ),
+            {CellAcc ++ Done, Pend1}
+        end,
+        {[], #{}},
+        Interleaved
+    ),
+    ?assertEqual(#{}, Pending),
+    ?assertEqual(
+        lists:sort([{<<"b">>, key(1), F1}, {<<"b">>, key(2), F2}]),
+        lists:sort(Cells)
+    ).
+
+interleave([], B) -> B;
+interleave(A, []) -> A;
+interleave([H1 | T1], [H2 | T2]) -> [H1, H2 | interleave(T1, T2)].
+
+%% Drop one part and the cell must NOT be produced — it stays pending, which
+%% is what makes `pull_install_loop` fail the bootstrap instead of finalizing
+%% over a hole.
+parts_incomplete_stays_pending() ->
+    Frame = crypto:strong_rand_bytes(20000),
+    All = lists:flatten(split_all(<<"b">>, key(1), Frame, ?BUDGET)),
+    ?assert(length(All) > 1),
+    Missing = tl(All),
+    {Cells, Pending} = bondy_oplog_sync_session:absorb_chunks(Missing, #{}),
     ?assertEqual([], Cells),
-    ?assertEqual(key(2), Advance).
+    ?assertEqual([{<<"b">>, key(1)}], maps:keys(Pending)).
+
+%% Every part must be framable on its own, or part-shipping just moves the
+%% frame-cap failure rather than removing it.
+parts_fit_ceiling() ->
+    Frame = crypto:strong_rand_bytes(50000),
+    Rounds = split_all(<<"b">>, key(1), Frame, ?BUDGET),
+    lists:foreach(
+        fun(Round) ->
+            lists:foreach(
+                fun(Part) ->
+                    ?assert(erlang:external_size(Part) =< ?BUDGET)
+                end,
+                Round
+            ),
+            Total = lists:sum([erlang:external_size(P) || P <- Round]),
+            ?assert(Total =< ?BUDGET)
+        end,
+        Rounds
+    ).
 
 cells_at_least_one() ->
     Pairs = pairs([9000, 9000]),
-    {Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
+    {ok, Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(
         <<"i">>, <<"b">>, Pairs, ?BUDGET
     ),
     ?assertEqual(1, length(Cells)),

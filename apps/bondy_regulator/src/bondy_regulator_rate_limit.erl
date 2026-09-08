@@ -30,10 +30,6 @@
     atomics :: atomics:atomics_ref()
 }).
 
--record(state, {
-    purge_interval = timer:minutes(1) :: pos_integer()
-}).
-
 -type t() :: #?MODULE{}.
 -type key() :: any().
 -type algorithm() :: token_bucket.
@@ -54,6 +50,7 @@
 -export_type([t/0]).
 
 %% API
+-export([new/2]).
 -export([new/3]).
 -export([delete/1]).
 -export([allow/2]).
@@ -79,17 +76,55 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 -doc """
-new(Name, [
-    {limit, 100},
-    {window, {1, minute}},
-    {algorithm, sliding},
-    {backend, ets}
-]).
+Creates a bucket that is NOT registered in the module's table: it has no key,
+and the caller's reference to the returned term is the only thing keeping its
+atomics array alive.
+
+Use this for a bucket a single owner holds in its own state and passes to
+`allow/2` directly — a per-session or per-connection limiter. Such a bucket is
+never looked up by key, so registering it buys nothing and costs a row that
+only the owner can ever free: if the owner dies without running its teardown,
+the row is unreachable for good, because its key is not derivable from
+anything. Unregistered, the array is freed by the VM when the owner's
+reference goes, and there is no teardown to forget.
+
+Use `new/3` only when some OTHER process must find the bucket by key — the
+shared node / listener / realm buckets `m:bondy_rate_limiter` owns and reaps
+with its own idle-TTL sweep.
+""".
+-spec new(Algo :: algorithm(), Options :: opts()) ->
+    {ok, t()} | {error, Reason :: any()}.
+
+new(Algo, Opts) ->
+    case make(Algo, undefined, Opts) of
+        #?MODULE{} = T ->
+            ok = reset(T),
+            {ok, T};
+        {error, _} = Error ->
+            Error
+    end.
+
+-doc """
+Creates a bucket registered in the module's table under `Key`, so that it can
+be found with `allow/2`, `peek/1` or `reset/1` given the key alone. The row is
+the caller's to remove with `delete/1`.
+
+For an owner-held bucket that nobody looks up by key, use `new/2` instead — see
+why there.
 """.
 -spec new(Algo :: algorithm(), Key :: key(), Options :: opts()) ->
     {ok, t()} | {error, Reason :: any()}.
 
-new(token_bucket = Algo, Key, Opts) when is_map(Opts) ->
+new(Algo, Key, Opts) ->
+    case make(Algo, Key, Opts) of
+        #?MODULE{} = T ->
+            store(T);
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @private
+make(token_bucket = Algo, Key, Opts) when is_map(Opts) ->
     Ref = atomics:new(2, [{signed, false}]),
     %% Default = 5 reqs / second
     Rate = maps:get(rate, Opts, 5 / 1_000),
@@ -118,7 +153,7 @@ new(token_bucket = Algo, Key, Opts) when is_map(Opts) ->
             ]
         ),
 
-    T = #?MODULE{
+    #?MODULE{
         key = Key,
         algorithm = token_bucket,
         rate = Rate,
@@ -126,10 +161,8 @@ new(token_bucket = Algo, Key, Opts) when is_map(Opts) ->
         atomics = Ref,
         buckets = 0,
         window_ms = 0
-    },
-
-    store(T);
-new(Algo, Key, Opts) ->
+    };
+make(Algo, Key, Opts) ->
     %% Only support token_bucket for the time being
     error(
         badarg,
@@ -215,6 +248,11 @@ peek(Key) ->
 """.
 -spec delete(key() | t()) -> ok.
 
+delete(#?MODULE{key = undefined}) ->
+    %% An unregistered bucket (`new/2`) owns no row. Its atomics array is
+    %% freed when the last reference to the term goes, so there is nothing
+    %% here to delete.
+    ok;
 delete(#?MODULE{} = T) ->
     delete(T#?MODULE.key);
 delete(Key) ->
@@ -237,6 +275,22 @@ reset(Key) ->
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
+%% The server exists to OWN `?TAB` — the registered buckets outlive any
+%% individual caller, so the table must not be owned by one.
+%%
+%% It runs no reaper. It used to sweep the table every minute deleting rows
+%% whose `atomics:get/2` raised `badarg`, on the belief that an unused atomics
+%% array is garbage collected out from under its row. It is not: the row holds
+%% a reference to the array, which is exactly what keeps it alive, so the read
+%% always succeeded and the sweep never deleted anything — a full `ets:foldl`
+%% per minute, forever, reclaiming nothing while reading as though orphans were
+%% handled. (Falsifier: store an atomics ref in ETS, drop every other
+%% reference, garbage-collect every process, read it back from the row —
+%% `atomics:get/2` returns the value.)
+%%
+%% Registered buckets are reaped by their owner: `m:bondy_rate_limiter` sweeps
+%% its own on an idle TTL and calls `delete/1`. Owner-held buckets are built
+%% with `new/2` and are not in the table at all.
 init(_) ->
     ?TAB = ets:new(?TAB, [
         named_table,
@@ -246,9 +300,7 @@ init(_) ->
         {read_concurrency, true},
         {write_concurrency, true}
     ]),
-    State = #state{purge_interval = timer:minutes(1)},
-    ok = schedule_purge(State),
-    {ok, State}.
+    {ok, #{}}.
 
 handle_call(_, _, State) ->
     {reply, ok, State}.
@@ -256,10 +308,6 @@ handle_call(_, _, State) ->
 handle_cast(_Event, State) ->
     {noreply, State}.
 
-handle_info(purge, State) ->
-    ok = purge(),
-    ok = schedule_purge(State),
-    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -297,41 +345,6 @@ calculate_tokens(T, Tokens, LastRefillTs, Now) ->
 
 calculate_resets_in(T, Tokens, Increment) ->
     trunc(math:ceil((Increment - Tokens) / T#?MODULE.rate)).
-
-%% =============================================================================
-%% GEN_SERVER PRIVATE HELPERS
-%% =============================================================================
-
-schedule_purge(#state{purge_interval = PurgeInterval}) ->
-    _TRef = erlang:send_after(PurgeInterval, self(), purge),
-    ok.
-
-purge() ->
-    Count = ets:foldl(
-        fun(#?MODULE{atomics = Ref} = T, Acc) ->
-            try
-                _ = atomics:get(Ref, 1),
-                Acc
-            catch
-                error:badarg ->
-                    %% Atomics was garbage collected so we purge from ets
-                    ets:delete(?MODULE, T#?MODULE.key),
-                    Acc + 1
-            end
-        end,
-        0,
-        ?TAB
-    ),
-
-    case Count > 0 of
-        true ->
-            ?LOG_INFO(#{
-                message => "Purged inactive rate limiters",
-                count => Count
-            });
-        false ->
-            ok
-    end.
 
 %% =============================================================================
 %% EUNIT

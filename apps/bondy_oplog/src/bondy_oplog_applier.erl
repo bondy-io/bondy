@@ -302,9 +302,11 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     %% diffs the live MST against this root via `bondy_mst:diff_to_list/2`
     %% and only re-applies the new entries — so the cost of a replay is
     %% O(events since last sync), not O(events in MST). `undefined`
-    %% triggers a one-time full fold (cold start / restart, since the
-    %% MST may hold peer-authored events whose `cell_apply` has never
-    %% been replayed on this node). Advanced exclusively from
+    %% triggers a one-time full fold. `init/1` sets it from
+    %% `bondy_oplog_instance:replay_anchor/1`, which returns `undefined`
+    %% exactly when the live MST holds a cell event the restored frontier does
+    %% not claim — a received-but-not-materialised event, which nothing else
+    %% would re-present. Advanced exclusively from
     %% `do_replay_cell_events/1` after the diff fold completes — *not*
     %% from `commit_now/1`, because a peer `integrate_peer_root` can
     %% interleave with the WAL drain and land remote pages under the
@@ -979,6 +981,7 @@ cell_context(ApplierPid, Bucket, Key) when is_pid(ApplierPid) ->
     {ok, #{
         installed := non_neg_integer(),
         skipped := non_neg_integer(),
+        unclaimable := [binary()],
         merged := non_neg_integer(),
         replaced_no_merge := non_neg_integer()
     }}
@@ -1001,9 +1004,18 @@ lossless.
 Invalidates the read cache and advances the per-shard high-water HLC
 atomic after each successful write.
 
-Returns `{ok, #{installed := N, skipped := M, merged := 0,
-replaced_no_merge := 0}}` (the `merged`/`replaced_no_merge` keys are
-retained for return-shape stability and are always `0`).
+Returns `{ok, #{installed := N, skipped := M, unclaimable := Buckets,
+merged := 0, replaced_no_merge := 0}}` (the `merged`/`replaced_no_merge`
+keys are retained for return-shape stability and are always `0`).
+
+`skipped` counts three unrelated causes and so cannot decide anything.
+`unclaimable` names the buckets of the cells that did NOT land and whose
+absence no local value covers — an unregistered bucket, or a frame that
+would not decode. It excludes the HLC-older skip, where a newer local
+write is already present. The caller adopts the peer's applied frontier
+only when it is empty (`bondy_oplog_sync_session:do_bootstrap_snapshot/6`):
+a cell carries no origin and no seq, so "did everything the peer shipped
+land" is the only question this install can answer about the frontier.
 
 Returns `{error, no_cell_apply_target}` if the applier was not started
 with a `cell_apply_target`.
@@ -1148,17 +1160,28 @@ do_init_2(
                     State = #state{
                         instance_id = InstanceId,
                         instance_pid = InstP,
-                        %% Anchor the replay cursor to the MST root we are
-                        %% starting from. On a durable instance the projection
-                        %% already reflects this root (the applier writes the
-                        %% projection BEFORE installing to the MST, so the
-                        %% projection is >= the MST for local events), so the
-                        %% boot cold-replay must NOT re-fold the whole tree —
-                        %% that is redundant work (and, on a large table, a slow,
-                        %% memory-heavy full fold). A later peer merge advances
-                        %% the root and replays only the diff. `root/1` reads the
-                        %% in-memory root, so it is safe off the instance process.
-                        last_replayed_root = bondy_mst:root(MST),
+                        %% Anchor the replay cursor. The instance decides: the
+                        %% current root when the restored frontier already
+                        %% claims every cell event in the live MST (the healthy
+                        %% case — boot skips the fold, as it always did), and
+                        %% `undefined` when it does not, which re-folds the live
+                        %% MST so the frontier follows what materialises.
+                        %%
+                        %% This used to be `bondy_mst:root(MST)` unconditionally,
+                        %% on the premise that "the projection already reflects
+                        %% this root". That holds only for a LOCAL event whose
+                        %% bucket resolved: a peer-received event installs into
+                        %% the MST FIRST and is folded afterwards by a
+                        %% best-effort cast (`deliver_remote/1`), which a crash
+                        %% can lose — and nothing would ever re-present it, since
+                        %% the WAL drain resumes past the durable root. See
+                        %% `bondy_oplog_instance:replay_anchor/1`.
+                        %%
+                        %% The call runs on the instance because the fold reads
+                        %% pack-store fds, which are process-bound — the same
+                        %% reason `do_replay_cell_events_r/1` delegates.
+                        last_replayed_root =
+                            bondy_oplog_instance:replay_anchor(InstP),
                         wal_pid = WalP,
                         wal_dir = WalDir,
                         iter = Iter,
@@ -1195,6 +1218,9 @@ do_init_2(
                     ok = bondy_oplog_registry:set_applier_pid(
                         InstanceId, self()
                     ),
+                    ok = bondy_oplog_registry:set_tables_registered(
+                        InstanceId, DrainGate =:= open
+                    ),
                     %% A predecessor that crashed while stalled leaves its
                     %% alarm behind; this incarnation owns the id now
                     %% (re-raised by the detector if the stall persists).
@@ -1218,8 +1244,8 @@ do_init_2(
                             %% The WAL drain only handles events past
                             %% `resume_position/2`, so without this the
                             %% projection stays stale until the next sync tick.
-                            case CellCtx of
-                                undefined -> ok;
+                            case State#state.cell_apply_source of
+                                {single, undefined} -> ok;
                                 _ -> gen_server:cast(self(), replay_cell_events)
                             end;
                         gated ->
@@ -1546,6 +1572,11 @@ handle_call({register_table, Bucket, Target, TableOpts}, _From, State) ->
             ok = bondy_oplog_registry:set_ae_targets(
                 State#state.instance_id, AeTargets
             ),
+            %% The directory just gained a bucket, so a replay that
+            %% previously had nowhere to route this bucket's cells now does.
+            %% Cheap when there is nothing to do: the cursor is already at the
+            %% current root and the replay returns `no_change`.
+            ok = gen_server:cast(self(), replay_cell_events),
             {reply, ok, State#state{
                 cell_apply_source = Source, ae_targets = AeTargets
             }};
@@ -1731,15 +1762,15 @@ handle_cast(open_drain_gate, #state{drain_gate = open} = State) ->
     {noreply, State};
 handle_cast(
     open_drain_gate,
-    #state{drain_gate = gated, cell_apply_ctx = CellCtx} = State
+    #state{drain_gate = gated} = State
 ) ->
     %% Provisioning is complete: every table sharing this per-shard instance
     %% has registered its cell-apply bucket, so the WAL can be replayed with a
     %% whole `cell_apply_source` and no cell is skipped. Kick the drain (and the
     %% cold-replay catch-up that init deferred — see `do_init_2/9`).
     self() ! drain,
-    case CellCtx of
-        undefined -> ok;
+    case State#state.cell_apply_source of
+        {single, undefined} -> ok;
         _ -> gen_server:cast(self(), replay_cell_events)
     end,
     {noreply, State#state{drain_gate = open}};
@@ -2327,10 +2358,15 @@ apply_batch(
                 ),
 
                 CellT0 = erlang:monotonic_time(microsecond),
+                %% The WHOLE verified batch, not just `CellEvents`: the mux
+                %% groups on `event_bucket/1` (which skips non-cell ops) but
+                %% claims the frontier over every seq-bearing event, and a
+                %% `seq_fill` backfill is seq-bearing. `CellEvents` still
+                %% measures the cell work below.
                 ok = bondy_oplog_cell_apply:apply_cell_batch_mux(
                     S1#state.cell_apply_source,
                     S1#state.instance_id,
-                    CellEvents
+                    Verified
                 ),
                 telemetry:execute(
                     [bondy_oplog, applier, batch_cell_apply],
@@ -2598,7 +2634,20 @@ resolve_remote_gen_ref(State) ->
 %% (`{error, _}` — instance unavailable). The prepare fence needs the
 %% distinction: it must only advance its recorded generation on `ok`,
 %% or a failed replay would silently unfence subsequent context reads.
-do_replay_cell_events_r(#state{cell_apply_ctx = undefined} = State) ->
+do_replay_cell_events_r(
+    #state{cell_apply_source = {single, undefined}} = State
+) ->
+    %% A genuinely cell-apply-less instance: nothing to fold into.
+    %%
+    %% This guards on the SOURCE, not on the founding `cell_apply_ctx`, and the
+    %% difference is load-bearing. `handle_call({register_table, ...})` heals
+    %% `cell_apply_source` but never `cell_apply_ctx`, so an applier that
+    %% started before its table registered kept `cell_apply_ctx = undefined`
+    %% for its whole life — and guarding on that made every replay a permanent
+    %% no-op even once the directory was complete, silently stranding every
+    %% peer-delivered event on that instance. `apply_cell_pairs_mux/5` applies
+    %% the same `{single, undefined}` test itself, so this clause is an early
+    %% exit, not a second policy.
     {ok, State};
 do_replay_cell_events_r(
     #state{
@@ -2717,7 +2766,11 @@ do_install_catalogue_batch(Id, Source, Cells) ->
                     %% No table registered for this bucket on the instance
                     %% (a snapshot cell for a table not open here): skip it
                     %% rather than misroute it to the founding projection.
-                    bump_n(skipped, length(BucketCells), Acc);
+                    bump_n(
+                        skipped,
+                        length(BucketCells),
+                        unclaimable(Bucket, Acc)
+                    );
                 Ctx ->
                     install_catalogue_group(
                         Id, Ctx, Bucket, BucketCells, Acc
@@ -2727,6 +2780,7 @@ do_install_catalogue_batch(Id, Source, Cells) ->
         #{
             installed => 0,
             skipped => 0,
+            unclaimable => [],
             merged => 0,
             replaced_no_merge => 0,
             max_hlc => 0
@@ -2884,7 +2938,7 @@ install_one_cell(
                 reason => R,
                 stacktrace => St
             }),
-            bump(skipped, Acc)
+            bump(skipped, unclaimable(Bucket, Acc))
     end.
 
 %% @private
@@ -2999,6 +3053,15 @@ handle_cell(
             ),
             bump(skipped, Acc)
     end.
+
+%% @private
+%% Record that a cell of this bucket did not land for a reason no local
+%% value covers. An ordset because a bucket group can contribute more than
+%% once (one entry per undecodable cell) and the caller reports the set.
+unclaimable(Bucket, Acc) ->
+    maps:update_with(
+        unclaimable, fun(S) -> ordsets:add_element(Bucket, S) end, Acc
+    ).
 
 %% @private
 bump(Key, Acc) ->

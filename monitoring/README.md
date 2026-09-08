@@ -35,12 +35,22 @@ and node selection carry across):
   matrix** (last-completed-sync age; a red row = that node cannot pull,
   a red column = nobody can pull from that peer) plus a gap-verdict
   matrix, trend panels, frontier convergence, the pair inspector
-  (`pairA`/`pairB`), and Partisan link health.
+  (`pairA`/`pairB`), Partisan link health, the sync scheduler's own
+  state, and **prefix closure** — both the event counters (holes formed,
+  events held, seqs burned and filled) and the standing gauges that say
+  whether a hole is still open.
 - **Bondy — bondy_db / oplog / MST** (`bondy-db-oplog-mst`) — per-node
   storage detail: write path, applier, core substrate, leveled, MST &
-  page store, secondary indexes.
+  page store, secondary indexes, WAL (throughput, durability,
+  maintenance, codec ratio), MST GC & seal, and instance lifecycle.
 - **Bondy — Router / WAMP**, **Bondy — Runtime / BEAM**, **Bondy —
   HTTP Connector** — per-node domain detail.
+- **Bondy — MCP Gateway** (`bondy-mcp`) — the MCP overlay: session
+  handshakes and churn, dispatched tools and resources with their
+  latency, upstream calls split by status against drift-blocked ones,
+  manifest rebuilds, and the refusals (RBAC, protocol version, name
+  collisions) that stop a request before it runs. Empty on a node with
+  no MCP listener.
 - **Bondy — Mail** (`bondy-mail`) — outbound email: relay health and the
   `mail_relay_down` alarm, send rate and duration, failures split by
   **nature** (permanent means someone has to change something; transient

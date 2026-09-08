@@ -84,6 +84,27 @@ snapshot is a moving target across peer restarts.
     %% `ns`/`bucket` when the current target's keyspace is exhausted. Empty
     %% for a single-target (`mint/6`) session — the legacy single-bucket walk.
     remaining = [] :: [{atom(), binary()}],
+    %% Mid-cell resume point for a cell too large to frame whole
+    %% (`bondy_oplog_catalogue_snapshot:cap_cells/5`). `{Key, Frame, PartBytes, NextIdx}`
+    %% means "this key's frame is being shipped in parts of PartBytes; the
+    %% next part to emit is NextIdx".
+    %%
+    %% PartBytes is PINNED here, not recomputed per round, because it derives
+    %% from `cluster.max_message_size` — which the oversized alarm explicitly
+    %% tells the operator to RAISE. Recomputing would change the part count
+    %% mid-cell and the receiver, holding the first `Total` it saw, could
+    %% never complete the reassembly. Pinning makes that undrifting by
+    %% construction.
+    %%
+    %% The FRAME IS HELD HERE rather than re-read per round
+    %% on purpose: the range scan is live (see the snapshot module's
+    %% moduledoc), so re-reading could slice two different frames into one
+    %% reassembly. Holding it makes that unrepresentable instead of guarding
+    %% it. Bounded: at most one part-shipped cell per session at a time.
+    pending =
+        undefined ::
+        undefined
+        | {binary(), binary(), pos_integer(), pos_integer()},
     expires_at :: integer()
 }).
 
@@ -99,7 +120,9 @@ snapshot is a moving target across peer restarts.
     shard := non_neg_integer(),
     bucket := binary(),
     last_key := undefined | binary(),
-    watermark := non_neg_integer()
+    watermark := non_neg_integer(),
+    pending :=
+        undefined | {binary(), binary(), pos_integer(), pos_integer()}
 }.
 
 -export_type([cursor/0]).
@@ -117,6 +140,7 @@ snapshot is a moving target across peer restarts.
 -export([next_target/1]).
 -export([lookup/1]).
 -export([advance/2]).
+-export([set_pending/2]).
 -export([discard/1]).
 -export([info/0]).
 
@@ -246,6 +270,11 @@ next_target(Cursor) when is_binary(Cursor) ->
                 ns = NS,
                 bucket = Bucket,
                 last_key = undefined,
+                %% A target is only exhausted once its final part-shipped
+                %% cell completed, so this is already `undefined` here;
+                %% cleared explicitly so a future caller cannot carry one
+                %% target's resume point into another target's keyspace.
+                pending = undefined,
                 remaining = Rest,
                 expires_at = Now + ttl_ms()
             },
@@ -288,7 +317,41 @@ advance(Cursor, NewLastKey) when
     NewExpiresAt = Now + ttl_ms(),
     Updates = [
         {#cursor.last_key, NewLastKey},
+        %% Advancing past a key ends any part-shipping for it: either every
+        %% part was emitted, or the key is being abandoned. Either way a
+        %% stale `pending` here would resume a cell the walk has left.
+        {#cursor.pending, undefined},
         {#cursor.expires_at, NewExpiresAt}
+    ],
+    try ets:update_element(?TABLE, Cursor, Updates) of
+        true -> ok;
+        false -> not_found
+    catch
+        error:badarg -> not_found
+    end.
+
+?DOC("""
+Records the mid-cell resume point for a cell being shipped in parts, and
+refreshes the expiry deadline. `last_key` is deliberately NOT advanced: the
+walk has not passed this key until its final part has been emitted.
+""").
+-spec set_pending(
+    cursor(), {binary(), binary(), pos_integer(), pos_integer()}
+) -> ok | not_found.
+
+set_pending(Cursor, {Key, Frame, PartBytes, NextIdx} = Pending) when
+    is_binary(Cursor),
+    is_binary(Key),
+    is_binary(Frame),
+    is_integer(PartBytes),
+    PartBytes > 0,
+    is_integer(NextIdx),
+    NextIdx > 0
+->
+    Now = erlang:monotonic_time(millisecond),
+    Updates = [
+        {#cursor.pending, Pending},
+        {#cursor.expires_at, Now + ttl_ms()}
     ],
     try ets:update_element(?TABLE, Cursor, Updates) of
         true -> ok;
@@ -366,7 +429,8 @@ row_to_map(#cursor{
     shard = Shard,
     bucket = Bucket,
     last_key = LastKey,
-    watermark = Watermark
+    watermark = Watermark,
+    pending = Pending
 }) ->
     #{
         instance_id => Id,
@@ -375,7 +439,8 @@ row_to_map(#cursor{
         shard => Shard,
         bucket => Bucket,
         last_key => LastKey,
-        watermark => Watermark
+        watermark => Watermark,
+        pending => Pending
     }.
 
 %% @private

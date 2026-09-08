@@ -7,7 +7,9 @@
 
 -moduledoc """
 Unit tests for `bondy_connect_load`: the in-flight cap, plus the rate-limiter
-token-bucket lifecycle (reuse on reconnect, free on teardown).
+token-bucket lifecycle (reuse on reconnect, and — the property that replaced
+"free on teardown" — that the bucket owns no shared row for a teardown to
+have to free).
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -26,8 +28,8 @@ all() ->
         release_frees_a_slot,
         release_floors_at_zero,
         reset_zeroes_in_flight,
-        delete_without_rate_is_noop,
-        rate_bucket_reused_on_reset_and_freed_on_delete
+        rate_bucket_is_unregistered,
+        rate_bucket_reused_on_reset
     ].
 
 init_per_suite(Config) ->
@@ -81,27 +83,42 @@ reset_zeroes_in_flight(_) ->
     L3 = bondy_connect_load:reset(L2),
     ?assertEqual(0, bondy_connect_load:in_flight(L3)).
 
-delete_without_rate_is_noop(_) ->
-    ?assertEqual(ok, bondy_connect_load:delete(bondy_connect_load:new(#{}))).
-
-%% A rate-limited load reuses its token bucket across reconnects (`reset/1`)
-%% instead of orphaning a bondy_regulator ETS row each time, and frees it on
-%% `delete/1`. Measured as row-count deltas on the regulator's table.
-rate_bucket_reused_on_reset_and_freed_on_delete(_) ->
+%% The bucket must own NO row in the regulator's shared table. That table is
+%% the only place a per-connection bucket could outlive its connection: its old
+%% key was `{bondy_connect_load, Pid, unique_integer()}`, which nothing could
+%% reconstruct, so a connection that died before its teardown ran orphaned the
+%% row permanently. Owning no row is what makes that unreachable — the atomics
+%% array is freed with the value.
+%%
+%% This is the falsifier for that leak: it fails if anyone re-registers the
+%% bucket, whether or not a teardown is also added.
+rate_bucket_is_unregistered(_) ->
     Before = ets:info(?REG_TAB, size),
 
-    %% new/1 with a `rate` spec creates exactly one bucket row.
     L0 = bondy_connect_load:new(#{rate => #{capacity => 5}}),
-    ?assertEqual(Before + 1, ets:info(?REG_TAB, size)),
+    ?assertEqual(Before, ets:info(?REG_TAB, size)),
 
-    %% reset/1 (the reconnect path) must NOT create another row...
-    L1 = bondy_connect_load:reset(L0),
-    ?assertEqual(Before + 1, ets:info(?REG_TAB, size)),
-
-    %% ...even repeatedly (proving no per-reconnect leak).
-    L2 = bondy_connect_load:reset(L1),
-    ?assertEqual(Before + 1, ets:info(?REG_TAB, size)),
-
-    %% delete/1 frees the row.
-    ok = bondy_connect_load:delete(L2),
+    %% And it is a working bucket, not an absent one: capacity 5 admits 5.
+    L1 = lists:foldl(
+        fun(_, Acc) ->
+            {ok, A} = bondy_connect_load:admit(Acc),
+            bondy_connect_load:release(A)
+        end,
+        L0,
+        lists:seq(1, 5)
+    ),
+    ?assertEqual({error, overloaded}, bondy_connect_load:admit(L1)),
     ?assertEqual(Before, ets:info(?REG_TAB, size)).
+
+%% A reconnect (`reset/1`) keeps the SAME bucket rather than minting a fresh
+%% one, so the reconnecting peer does not get handed a full burst.
+rate_bucket_reused_on_reset(_) ->
+    L0 = bondy_connect_load:new(#{rate => #{capacity => 2}}),
+    {ok, L1} = bondy_connect_load:admit(L0),
+    {ok, L2} = bondy_connect_load:admit(L1),
+    ?assertEqual({error, overloaded}, bondy_connect_load:admit(L2)),
+
+    %% reset/1 zeroes in-flight but must NOT refill the token bucket.
+    L3 = bondy_connect_load:reset(L2),
+    ?assertEqual(0, bondy_connect_load:in_flight(L3)),
+    ?assertEqual({error, overloaded}, bondy_connect_load:admit(L3)).

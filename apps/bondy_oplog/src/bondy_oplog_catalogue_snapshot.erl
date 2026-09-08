@@ -53,12 +53,19 @@ skip-if-older check on `pre_bootstrap`.
 
 -ifdef(TEST).
 -export([cap_cells/4]).
+-export([take_parts/7]).
+-export([part_payload_bytes/3]).
+-export([total_parts/2]).
 -endif.
 
 %% Default bucket for catalogue projections. Matches the convention in
 %% `bondy_oplog_applier_cell_apply_test` and the e2e test suites: cell
 %% events are appended with `Bucket = <<>>`.
 -define(DEFAULT_BUCKET, <<>>).
+
+%% Headroom for the enclosing `{ok, {chunked_batch, {Cursor, [], Parts}}}`
+%% wrapper, which `part_payload_bytes/3` does not measure.
+-define(PART_MARGIN_BYTES, 256).
 
 %% Max binary sentinel for unbounded-high range scans. 256 bytes of
 %% 0xFF — beyond any production catalogue key.
@@ -310,6 +317,12 @@ init_with_target(InstanceId, NS, Index, Shard, Bucket) ->
 %% =============================================================================
 
 %% @private
+do_next(Cursor, #{pending := {_, _, _, _}} = CState) ->
+    %% Mid-cell: keep emitting parts of the held frame. No range scan, and
+    %% `last_key` stays put until the final part goes out, so the walk cannot
+    %% pass a cell it has not fully shipped.
+    #{bucket := Bucket, pending := {Key, Frame, PartBytes, NextIdx}} = CState,
+    emit_parts(Cursor, Bucket, Key, Frame, PartBytes, NextIdx);
 do_next(Cursor, CState) ->
     #{
         instance_id := InstanceId,
@@ -348,26 +361,21 @@ do_next(Cursor, CState) ->
                     end;
                 {ok, Pairs} ->
                     MaxBytes = bondy_oplog_config:sync_max_response_bytes(),
-                    {Cells, AdvanceKey} = cap_cells(
-                        InstanceId, Bucket, Pairs, MaxBytes
-                    ),
-                    %% AdvanceKey is the last key decided this round (kept, or
-                    %% skipped because it was oversized). The cursor advances to
-                    %% it so the next round resumes strictly after it: a
-                    %% byte-capped round leaves the untouched tail for the next
-                    %% call, and an all-oversized round yields an empty-but-
-                    %% advanced batch the initiator loops past. `Pairs` is
-                    %% non-empty here, so AdvanceKey is always defined.
-                    case
-                        bondy_oplog_catalogue_cursor:advance(Cursor, AdvanceKey)
-                    of
-                        ok ->
-                            {ok, {batch, {Cursor, Cells}}};
-                        not_found ->
-                            %% Cursor was reaped concurrently — rare but
-                            %% possible if the session sat idle past the
-                            %% TTL right at the moment the GC ran.
-                            {error, cursor_expired}
+                    case cap_cells(InstanceId, Bucket, Pairs, MaxBytes) of
+                        {oversized, OKey, OFrame} ->
+                            %% A single cell larger than the frame ceiling.
+                            %% It used to be skipped and advanced past, which
+                            %% lost it permanently while the bootstrap still
+                            %% adopted the peer frontier. Ship it in parts
+                            %% instead; the receiver reassembles.
+                            OPartBytes = part_payload_bytes(
+                                Bucket, OKey, MaxBytes
+                            ),
+                            emit_parts(
+                                Cursor, Bucket, OKey, OFrame, OPartBytes, 1
+                            );
+                        {ok, Cells, AdvanceKey} ->
+                            capped_batch(Cursor, Cells, AdvanceKey)
                     end;
                 {error, Reason} ->
                     {error, Reason}
@@ -375,31 +383,127 @@ do_next(Cursor, CState) ->
     end.
 
 %% @private
+%% `AdvanceKey` is the last key KEPT this round. The cursor advances to it so
+%% the next round resumes strictly after it, leaving any byte-capped tail for
+%% the next call. Nothing is ever advanced past without being shipped: an
+%% oversized cell is part-shipped (`emit_parts/6`), never skipped.
+capped_batch(Cursor, Cells, AdvanceKey) ->
+    case bondy_oplog_catalogue_cursor:advance(Cursor, AdvanceKey) of
+        ok ->
+            {ok, {batch, {Cursor, Cells}}};
+        not_found ->
+            %% Cursor was reaped concurrently — rare but possible if the
+            %% session sat idle past the TTL right at the moment the GC ran.
+            {error, cursor_expired}
+    end.
+
+%% @private
+%% Ship one oversized cell's frame as numbered parts, as many as fit in this
+%% round. The receiver (`bondy_oplog_sync_session`) reassembles by
+%% `{Bucket, Key}` and MUST fail the bootstrap if the stream ends with an
+%% incomplete reassembly — otherwise this becomes another silent drop.
+%%
+%% `last_key` is advanced ONLY after the final part, so a cursor reaped
+%% mid-cell resumes the whole cell rather than losing its tail.
+emit_parts(Cursor, Bucket, Key, Frame, PartBytes, NextIdx) ->
+    MaxBytes = bondy_oplog_config:sync_max_response_bytes(),
+    Total = total_parts(Frame, PartBytes),
+    {Parts, LastIdx} = take_parts(
+        Bucket, Key, Frame, PartBytes, Total, NextIdx, MaxBytes
+    ),
+    Result =
+        case LastIdx >= Total of
+            true ->
+                %% Final part emitted: the walk may now pass this key.
+                %% `advance/2` also clears `pending`.
+                bondy_oplog_catalogue_cursor:advance(Cursor, Key);
+            false ->
+                bondy_oplog_catalogue_cursor:set_pending(
+                    Cursor, {Key, Frame, PartBytes, LastIdx + 1}
+                )
+        end,
+    case Result of
+        ok -> {ok, {chunked_batch, {Cursor, [], Parts}}};
+        not_found -> {error, cursor_expired}
+    end.
+
+%% @private
+%% Payload budget for one part: the round ceiling less the exact encoded
+%% overhead of the part tuple itself, less a margin for the enclosing
+%% response term. At least one byte, so a pathologically small ceiling
+%% still terminates (it just ships very slowly).
+part_payload_bytes(Bucket, Key, MaxBytes) ->
+    Overhead = erlang:external_size({Bucket, Key, 1, 1, <<>>}),
+    max(1, MaxBytes - Overhead - ?PART_MARGIN_BYTES).
+
+%% @private
+total_parts(Frame, PartBytes) ->
+    max(1, (byte_size(Frame) + PartBytes - 1) div PartBytes).
+
+%% @private
+%% Accumulate parts from `Idx` while they fit under the round ceiling.
+%% Always emits at least one part, so progress is guaranteed.
+take_parts(Bucket, Key, Frame, PartBytes, Total, Idx, MaxBytes) ->
+    take_parts(Bucket, Key, Frame, PartBytes, Total, Idx, MaxBytes, 0, []).
+
+take_parts(_B, _K, _F, _PB, Total, Idx, _Max, _Used, Acc) when Idx > Total ->
+    {lists:reverse(Acc), Total};
+take_parts(B, K, F, PB, Total, Idx, Max, Used, Acc) ->
+    Offset = (Idx - 1) * PB,
+    Len = min(PB, byte_size(F) - Offset),
+    Part = binary:part(F, Offset, Len),
+    Item = {B, K, Idx, Total, Part},
+    Size = erlang:external_size(Item),
+    case Acc =/= [] andalso Used + Size > Max of
+        true ->
+            {lists:reverse(Acc), Idx - 1};
+        false ->
+            take_parts(
+                B, K, F, PB, Total, Idx + 1, Max, Used + Size, [Item | Acc]
+            )
+    end.
+
+%% @private
 %% Pack cells into a batch no larger than the sync byte ceiling (derived from
 %% Partisan's frame cap), mirroring the responder's page capping so bootstrap
-%% snapshots never exceed the transport frame. Returns the kept cells (in key
-%% order) and the key to advance the cursor to — the last key decided, so the
-%% untouched tail is re-scanned next round and never lost. A single cell whose
-%% serialized size alone exceeds the ceiling cannot be framed to a peer; it is
-%% reported and skipped (advanced past), so it never trips the frame cap — it
-%% simply cannot replicate until `cluster.max_message_size` is raised above it.
+%% snapshots never exceed the transport frame.
+%%
+%% Returns either `{ok, Kept, AdvanceKey}` — the kept cells in key order and
+%% the last key kept — or `{oversized, Key, Frame}` for a single cell whose
+%% serialized size alone exceeds the ceiling, which the caller ships in parts.
+%%
+%% An oversized cell is surrendered ONLY when nothing has been kept yet; if
+%% cells are already accumulated they are returned first and the oversized one
+%% is met again at the head of the next round. So the cursor never advances
+%% past a key that has not been shipped.
+%%
+%% This replaces the previous behaviour, which reported an oversized cell to
+%% metrics and ADVANCED PAST IT — losing it permanently while the bootstrap
+%% still adopted the peer's frontier, so the convergence oracle read CONVERGED
+%% over a record that could never replicate.
 cap_cells(InstanceId, Bucket, Pairs, MaxBytes) ->
     cap_cells(InstanceId, Bucket, Pairs, MaxBytes, 0, [], undefined).
 
 %% @private
 cap_cells(_InstanceId, _Bucket, [], _MaxBytes, _Used, KeptRev, Advance) ->
-    {lists:reverse(KeptRev), Advance};
+    {ok, lists:reverse(KeptRev), Advance};
 cap_cells(
     InstanceId, Bucket, [{K, F} | Rest], MaxBytes, Used, KeptRev, Advance
 ) ->
     Cell = {Bucket, K, F},
     Size = erlang:external_size(Cell),
     if
-        Size > MaxBytes ->
+        Size > MaxBytes andalso KeptRev =:= [] ->
+            %% Still reported, so the operator alarm and the
+            %% `max_message_size` guidance keep working — but it is now a
+            %% notice about transfer shape, not a data-loss event.
             ok = bondy_oplog_sync_metrics:report_oversized(
                 cell, {InstanceId, Bucket, K}, Size, MaxBytes
             ),
-            cap_cells(InstanceId, Bucket, Rest, MaxBytes, Used, KeptRev, K);
+            {oversized, K, F};
+        Size > MaxBytes ->
+            %% Flush what we have; this cell leads the next round.
+            {ok, lists:reverse(KeptRev), Advance};
         KeptRev =:= [] orelse Used + Size =< MaxBytes ->
             cap_cells(
                 InstanceId,
@@ -412,7 +516,7 @@ cap_cells(
             );
         true ->
             %% Ceiling reached; leave {K, F} and the rest for the next round.
-            {lists:reverse(KeptRev), Advance}
+            {ok, lists:reverse(KeptRev), Advance}
     end.
 
 %% @private

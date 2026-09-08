@@ -45,8 +45,16 @@ transport delivers them to the peer's responder which calls back into
 | `get_retired`                          | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                     | `{ok, #{hash() => page()}}`                                            |
 | `get_snapshot`                         | `{ok, event_key(), term()}` \| `{ok, no_snapshot}`                     |
-| `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor()}}}` \| `{ok, no_snapshot}`         |
-| `{get_catalogue_snapshot_next, Cursor}`| `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {done, []}}` \| `{error, cursor_expired}` |
+| `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor()}}}` \| `{ok, no_snapshot}` \| `{error, {tables_not_registered, instance_id()}}` |
+| `{get_catalogue_snapshot_next, Cursor}`| `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {chunked_batch, {cursor(), [cell()], [cell_chunk()]}}}` \| `{ok, {done, [cell()]}}` \| `{error, cursor_expired}` |
+
+`get_catalogue_snapshot_init` is the one request a running instance
+refuses on its own state. `bondy_oplog_catalogue_snapshot:build_targets/2`
+enumerates the tables that have REGISTERED here, so an instance still
+filling its routing directory would ship a catalogue missing those
+buckets while `get_frontier` answered with the whole applied vector —
+and the initiator would install the one and adopt the other. The refusal
+is benign: the initiator's session ends and the next round retries.
 
 `watermark()` is the peer-observed max HLC across the catalogue
 projection at session start (per-shard high-water atomic from
@@ -69,6 +77,22 @@ the `Opts` argument.
 
 -type cell() ::
     {Bucket :: binary(), Key :: binary(), Frame :: binary()}.
+
+%% One numbered part of a cell whose serialized size alone exceeds the sync
+%% byte ceiling, so it cannot be framed whole
+%% (`bondy_oplog_catalogue_snapshot:emit_parts/6`). Parts of a given
+%% `{Bucket, Key}` arrive in ascending `Idx` order across consecutive
+%% batches; the initiator reassembles `Frame` by concatenating parts 1..Total
+%% and MUST fail the bootstrap if the stream ends with an incomplete
+%% reassembly.
+-type cell_chunk() ::
+    {
+        Bucket :: binary(),
+        Key :: binary(),
+        Idx :: pos_integer(),
+        Total :: pos_integer(),
+        Part :: binary()
+    }.
 
 -type request() ::
     get_root
@@ -113,10 +137,21 @@ the `Opts` argument.
     | {ok, bondy_oplog_event:event_key(), term()}
     | {ok, {init, {non_neg_integer(), bondy_oplog_catalogue_cursor:cursor()}}}
     | {ok, {batch, {bondy_oplog_catalogue_cursor:cursor(), [cell()]}}}
+    %% Emitted ONLY when a cell is too large to frame whole. A peer built
+    %% before part-shipping existed has no clause for this and fails the
+    %% bootstrap loudly — which is the intended trade: that same situation
+    %% previously advanced past the cell and lost it silently while still
+    %% adopting the peer frontier.
+    | {ok,
+        {chunked_batch,
+            {
+                bondy_oplog_catalogue_cursor:cursor(), [cell()], [cell_chunk()]
+            }}}
     | {ok, {done, []}}
     | {error, cursor_expired}.
 
 -export_type([cell/0]).
+-export_type([cell_chunk/0]).
 
 -export_type([request/0]).
 -export_type([response/0]).

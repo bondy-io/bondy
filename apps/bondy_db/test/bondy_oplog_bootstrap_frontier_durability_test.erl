@@ -98,7 +98,13 @@ adopted_frontier_is_durable_at_bootstrap() ->
             fun(F) ->
                 {ok, Bin} = file:read_file(F),
                 case erlang:binary_to_term(Bin) of
-                    {checkpoint_v1, _W, {projection_managed, frontier, VV}} ->
+                    %% The payload also carries the own-origin MINTED seq
+                    %% (`bondy_oplog_instance:minted_from_checkpoint/1`) and
+                    %% the frontier's provenance stamp
+                    %% (`checkpoint_provenance/1`), neither of which this case
+                    %% says anything about.
+                    {checkpoint_v1, _W,
+                        {projection_managed, frontier, VV, _Minted, _Prov}} ->
                         ?assertEqual(
                             ?PHANTOM_SEQ,
                             maps:get(?PHANTOM_ORIGIN, VV, undefined)

@@ -38,8 +38,8 @@ Two ways in:
 explicit valid option, then the `bondy_alarm_catalogue` entry for the id, then
 `major` / `node` / `false`. Every producer in the tree raises through the OTP
 2-tuple, so in practice the catalogue is what classifies them — which is the
-point: the judgement lives in one reviewable table rather than at nine raise
-sites. An id the catalogue does not declare still lands, with the constants.
+point: the judgement lives in one reviewable table rather than at every raise
+site. An id the catalogue does not declare still lands, with the constants.
 
 `get_alarms/0` keeps returning OTP-shaped `{Id, Desc}` pairs. It is a
 projection of the record, not a second store; `list/0` returns the alarms
@@ -135,8 +135,8 @@ it names.
 
 Most alarms will not have one, and that is a property of the tree rather than
 an omission here: Bondy has no ambient trace context — a trace rides in a
-message's `'_traceparent'` option — and seven of the nine catalogued producers
-are background probes, appliers and sweepers with no request to inherit from.
+message's `'_traceparent'` option — and most of the catalogued producers are
+background probes, appliers and sweepers with no request to inherit from.
 The field is absent there rather than filled with a freshly minted id, which
 would correlate with nothing.
 
@@ -484,8 +484,8 @@ new_alarm(Id, Desc, Opts, Now) ->
 %% The catalogue entry for this id, or an empty map for an id it does not
 %% declare. Resolved at RAISE time rather than at read time so the record has
 %% one severity and one class, and no consumer has to know whether a field was
-%% defaulted. A pure list walk over nine entries — safe on the boot path, where
-%% alarms are raised before most of the node exists.
+%% defaulted. A pure list walk, short enough for the boot path, where alarms
+%% are raised before most of the node exists.
 declared(Id) ->
     case bondy_alarm_catalogue:lookup(Id) of
         {ok, Entry} -> Entry;

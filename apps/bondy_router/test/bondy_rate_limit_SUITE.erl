@@ -27,6 +27,7 @@ all() ->
         parked_realm_class_is_inert,
         update_clears_realm_budgets,
         session_chain_shares_the_realm_total,
+        session_private_buckets_are_unregistered,
         invalid_budget_is_refused,
         pre_rate_limit_realm_migrates,
         property_is_projected_externally,
@@ -161,10 +162,37 @@ session_chain_shares_the_realm_total(_) ->
     ?assertEqual(ok, bondy_rate_limit:allow_session(L1)),
     ?assertEqual(ok, bondy_rate_limit:allow_session(L2)),
     ?assertEqual(throttled, bondy_rate_limit:allow_session(L2)),
-    %% deleting a session's chain must leave the SHARED bucket alone
-    ok = bondy_rate_limit:delete_session_limiter(L1),
-    ?assertEqual(throttled, bondy_rate_limit:allow_session(L2)),
-    ok = bondy_rate_limit:delete_session_limiter(L2).
+    %% Dropping a session's chain must leave the SHARED bucket alone. There is
+    %% no teardown call to make: the private buckets are unregistered and go
+    %% with the session's state, while the realm's total bucket is registered
+    %% and outlives every session in the realm.
+    ?assertEqual(throttled, bondy_rate_limit:allow_session(L2)).
+
+%% A session's PRIVATE buckets must own no row in the regulator's shared table.
+%% That table was the only place a per-session bucket could outlive its session:
+%% the old key was `{bondy_msg_limiter, Pid, unique_integer()}`, unreconstructible
+%% by anything but the owner, so a connection killed before
+%% `bondy_wamp_protocol:terminate/1` ran orphaned the row for the life of the
+%% node. Owning no row is what makes that impossible.
+%%
+%% The realm's `total` bucket is deliberately excluded — it IS registered and
+%% IS shared, which is why the chain carries it as a key rather than a bucket.
+session_private_buckets_are_unregistered(_) ->
+    with_listener_message_budget(fun(_RealmUri) ->
+        Before = ets:info(bondy_regulator_rate_limit, size),
+
+        Limiter = bondy_rate_limit:new_session_limiter(
+            #{listener => api_gateway_http}
+        ),
+        ?assertNotEqual(undefined, Limiter),
+        ?assertEqual(Before, ets:info(bondy_regulator_rate_limit, size)),
+
+        %% ...and it is a working bucket, not an absent one: capacity 2.
+        ?assertEqual(ok, bondy_rate_limit:allow_session(Limiter)),
+        ?assertEqual(ok, bondy_rate_limit:allow_session(Limiter)),
+        ?assertEqual(throttled, bondy_rate_limit:allow_session(Limiter)),
+        ?assertEqual(Before, ets:info(bondy_regulator_rate_limit, size))
+    end).
 
 %% The validator refuses malformed budgets at the API boundary.
 invalid_budget_is_refused(_) ->

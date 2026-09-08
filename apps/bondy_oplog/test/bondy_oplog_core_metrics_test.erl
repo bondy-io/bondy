@@ -43,6 +43,7 @@ metrics_test_() ->
         fun rates_scale_with_window/0,
         fun multiple_namespaces_are_independent/0,
         fun freshness_lag_is_reported/0,
+        fun freshness_lag_ignores_secondary_index_shards/0,
         fun info_reports_running_state/0
     ]}.
 
@@ -160,6 +161,38 @@ freshness_lag_is_reported() ->
     ?assert(maps:get(current_freshness_lag_max_ms, Meas) > 1_000_000_000),
     Cleanup().
 
+%% The reported max must come from PRIMARY shards only, because that is the
+%% set the auth freshness fence evaluates
+%% (`bondy_oplog_core:ensure_fresh/2` -> `primary_shards_for/1`). Nothing ever
+%% bumps a secondary index shard's AE atomic — only `{NS, primary, Shard}` is
+%% an `ae_target` — so including one made the gauge grow with wall clock on a
+%% healthy cluster and disagree with the fence it was read against.
+%%
+%% Measured on a live 2-node cluster before the fix: primary 0.06s while the
+%% namespace's `by_resource` index reported 343s and climbing.
+%%
+%% The primary here is FRESH (bumped now) and the secondary is left at the
+%% sentinel, so the two answers differ by nine orders of magnitude and the
+%% assertion cannot pass by accident.
+freshness_lag_ignores_secondary_index_shards() ->
+    NS = mk_ns(),
+    {CleanupPrimary, _} = register_shard(NS),
+    CleanupSecondary = register_secondary_shard(NS, by_resource),
+    ok = bondy_oplog_core_registry:bump_ae(NS, primary, 0),
+
+    Events = capture_refresh_events(fun() ->
+        ok = bondy_oplog_core_metrics:snapshot_now()
+    end),
+    [{Meas, _}] = [E || E = {_M, #{namespace := N}} <- Events, N =:= NS],
+    Lag = maps:get(current_freshness_lag_max_ms, Meas),
+
+    %% Fresh primary: a small lag, not the sentinel the secondary still holds.
+    ?assert(Lag >= 0),
+    ?assert(Lag < 60_000),
+
+    CleanupSecondary(),
+    CleanupPrimary().
+
 info_reports_running_state() ->
     Info = bondy_oplog_core_metrics:info(),
     ?assert(maps:is_key(enabled, Info)),
@@ -169,6 +202,26 @@ info_reports_running_state() ->
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+register_secondary_shard(NS, Index) ->
+    {ok, CH} = bondy_oplog_cache_ets:init(NS, Index, 0, #{}),
+    {ok, PH} = bondy_oplog_projection_ets:open(NS, Index, 0, #{}),
+    OV = bondy_oplog_db_overlay:new(),
+    ok = bondy_oplog_core_registry:register(NS, Index, 0, #{
+        shard_count => 1,
+        cache_adapter => bondy_oplog_cache_ets,
+        cache_handle => CH,
+        projection_adapter => bondy_oplog_projection_ets,
+        projection_handle => PH,
+        overlay => OV,
+        fold_module => lww_register
+    }),
+    fun() ->
+        ok = bondy_oplog_core_registry:unregister(NS, Index, 0),
+        ok = bondy_oplog_cache_ets:close(CH),
+        ok = bondy_oplog_projection_ets:close(PH),
+        ok = bondy_oplog_db_overlay:delete(OV)
+    end.
 
 mk_ns() ->
     list_to_atom(

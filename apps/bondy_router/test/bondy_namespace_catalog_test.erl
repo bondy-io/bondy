@@ -216,9 +216,11 @@ provisions_all() ->
             #{fold_module := lww_register},
             bondy_db:info(?CAT:table(security_sources))
         ),
-        %% RIB tables register the generic CRDT toolkit modules directly (no
-        %% per-use-case wrapper) — registration_rib carries its schema as
-        %% crdt_opts (bondy_oplog_crdt_struct has none of its own).
+        %% The two RIB tables use DIFFERENT carriers, and each is ratcheted
+        %% here because getting either wrong is silent at runtime.
+        %%
+        %% registration_rib: the generic struct toolkit, carrying its schema
+        %% as crdt_opts (bondy_oplog_crdt_struct has none of its own).
         ?assertMatch(
             #{
                 crdt_module := bondy_oplog_crdt_struct,
@@ -228,9 +230,82 @@ provisions_all() ->
             },
             bondy_db:info(?CAT:table(bondy_registration_rib))
         ),
-        ?assertMatch(
-            #{crdt_module := bondy_oplog_crdt_pn_counter},
-            bondy_db:info(?CAT:table(bondy_subscription_rib))
+        %% subscription_rib: a bare counter, NO schema. It must not be a
+        %% struct and must not be tier_2 — a one-field struct here is
+        %% semantically identical and cost a measured 45-180x subscribe
+        %% regression, because tier_2 state accrues one dot per unstabilized
+        %% write. `bondy_oplog_crdt_owned_counter_proper_test`'s
+        %% `prop_state_size_is_independent_of_writes/0` is the law; this is
+        %% the ratchet on the DECLARATION.
+        SubInfo = bondy_db:info(?CAT:table(bondy_subscription_rib)),
+        ?assertMatch(#{crdt_module := bondy_oplog_crdt_owned_counter}, SubInfo),
+        ?assertEqual(
+            #{},
+            maps:get(crdt_opts, SubInfo, #{}),
+            "the subscription RIB cell is one counter and must carry no schema"
+        ),
+        ?assertEqual(
+            tier_0,
+            (maps:get(crdt_module, SubInfo)):causal_tier(),
+            "the subscription RIB carrier must stay tier_0"
+        ),
+        %% Both carriers must be visible to the membership-driven reap, which
+        %% selects buckets by `function_exported(Mod, reap_origins, 2)` — the
+        %% single gate that decides whether a departed node's cells are
+        %% reclaimed at all. They earn it by different routes (the struct
+        %% through `force_reap`, the counter through being named here), so
+        %% assert the gate itself rather than either route.
+        lists:foreach(
+            fun(Table) ->
+                #{crdt_module := Mod} = bondy_db:info(?CAT:table(Table)),
+                _ = code:ensure_loaded(Mod),
+                ?assert(
+                    erlang:function_exported(Mod, reap_origins, 2),
+                    lists:flatten(
+                        io_lib:format(
+                            "~p's carrier ~p must export reap_origins/2 or a "
+                            "departed node's cells are never reclaimed",
+                            [Table, Mod]
+                        )
+                    )
+                )
+            end,
+            [bondy_registration_rib, bondy_subscription_rib]
+        ),
+        %% EVERY field of the registration schema must declare `force_reap`,
+        %% or a departed node's cell is never reclaimed: `reap_origins/2`
+        %% reaps an origin only once it has no live dot in ANY field, so one
+        %% undeclared field defeats the policy on all the others and
+        %% `bondy_oplog_cell_utils:reap_one_cell/6` then skips the write
+        %% entirely. The field set is DECLARED here, not scanned off the
+        %% schema: a ratchet that iterates whatever it finds cannot notice a
+        %% field going missing. `bondy_rib_reclamation_cluster_SUITE` is the
+        %% end-to-end proof and `bondy_oplog_crdt_struct_proper_test`'s
+        %% `prop_reap_iff_every_touched_field_force_reaps/0` is the law.
+        #{crdt_opts := RegSchema} =
+            bondy_db:info(?CAT:table(bondy_registration_rib)),
+        ExpectedFields = [count, invoke, earliest, latest],
+        ?assertEqual(
+            lists:sort(ExpectedFields),
+            lists:sort(maps:keys(RegSchema)),
+            "the registration RIB schema's field set changed; update the "
+            "force_reap ratchet deliberately rather than letting it scan"
+        ),
+        lists:foreach(
+            fun(FieldKey) ->
+                ?assertMatch(
+                    {_Mod, #{force_reap := true}},
+                    maps:get(FieldKey, RegSchema),
+                    lists:flatten(
+                        io_lib:format(
+                            "bondy_registration_rib.~p must declare "
+                            "force_reap",
+                            [FieldKey]
+                        )
+                    )
+                )
+            end,
+            ExpectedFields
         ),
         %% info/0 summary.
         Info = ?CAT:info(),

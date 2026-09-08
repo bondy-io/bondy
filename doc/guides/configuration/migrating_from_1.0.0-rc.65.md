@@ -185,6 +185,7 @@ defaults are safe to run with unchanged.
 | `db.origin_retirement`, `db.origin_retirement.interval` | Reaping bookkeeping for permanently departed cluster members. See the [reclamation configuration reference](reclamation_options.md). |
 | `db.gc_max_concurrency`, `db.compaction.peer_timeout` | Shared compaction/reclamation scheduler tuning. See the [reclamation configuration reference](reclamation_options.md). |
 | `db.drain.stall_alarm` | Alarm threshold for a wedged WAL consumer. |
+| `db.frontier.hole_alarm` | Alarm threshold for a shard carrying a per-origin gap in its applied frontier. |
 | `cluster.max_message_size` | Partisan inter-node frame size cap. |
 | `load_regulation.aae_reactor.pool.size` | Worker-pool size for anti-entropy merge reactions. |
 | `load_regulation.router.flow_pool.capacity` | Capacity of the per-flow relay ordering pool. |

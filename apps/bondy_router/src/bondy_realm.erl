@@ -913,6 +913,7 @@ connected to any realm.
 
 -export([suspend/1]).
 -export([close/2]).
+-export([teardown/1]).
 -export([resume/1]).
 
 -export([grants/1]).
@@ -1160,6 +1161,52 @@ realm `Realm`.
 
 close(RealmUri, Reason) ->
     bondy_session_manager:close_all(RealmUri, Reason).
+
+-doc """
+Removes realm `RealmUri` from THIS node: closes its sessions and deletes its
+registry entries, including the router's own session-less ones.
+
+This is the half of realm deletion that does not replicate. `delete/2` clears
+the realm's `m:bondy_db` cells and every node converges on those, but sessions
+are node-local and full registry entries are never replicated — only the RIB
+summaries derived from them are — so each node runs this for itself: the
+deleting node from `delete/2`, every other node from `m:bondy_aae_reactor` when
+the cleared cell merges into its projection.
+
+Idempotent, so a node may run it more than once.
+
+Distinct from `close/2`, which only kicks the sessions out. That is what a node
+does when a REMOTE router deletes a realm it was bridged to
+(`m:bondy_bridge_relay_client`): there the local realm of the same URI still
+exists and must keep its entries.
+
+Pinned by `bondy_session_cleanup_SUITE:realm_delete_purges_registry` (the
+deleting node) and
+`bondy_aae_cluster_SUITE:remote_realm_delete_purges_peer_registry` (a peer).
+
+Both suites cover the delete arriving as an event. A catalogue-snapshot
+bootstrap replaces a table's projection wholesale and emits no per-cell merge
+event (`bondy_aae_reactor` handles `bondy_oplog_core_bootstrap_event`
+separately), so a live node recovering that way does not learn of a realm
+deleted while it was behind, and keeps this state until it restarts.
+""".
+-spec teardown(RealmUri :: uri()) -> ok.
+
+teardown(RealmUri) ->
+    ok = close(RealmUri, ?WAMP_CLOSE_REALM),
+
+    %% `'_'` as the session removes the entries no session owns as well —
+    %% chiefly the per-node `wamp.session.<hash>..get` wildcard
+    %% `bondy_session_manager` registers on the first session opened in the
+    %% realm, under a session-less callback ref. Nothing on a session close
+    %% path can reach those.
+    ok = bondy_registry:remove_all(registration, RealmUri, '_', undefined),
+    ok = bondy_registry:remove_all(subscription, RealmUri, '_', undefined),
+
+    %% Must move with the entries: the table only caches which realms already
+    %% have their wildcard registered, so a realm reclaiming this URI while the
+    %% cache still named it would never get one.
+    bondy_session_manager:forget_realm(RealmUri).
 
 -doc """
 Returns the list of supported authentication methods for Realm.
@@ -1664,14 +1711,16 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             %% Prevent new connections
             _ = suspend(Realm),
 
-            %% We kick out all the local sessions
-            %% Tell the local manager so that if can kick out the session and
-            %% perform any other cleanup task. This is performed async.
+            %% Kick this node's sessions out now, ahead of the deferred
+            %% work below. `bondy_router_worker:cast/1` answers
+            %% `{error, overload}` when the pool is at capacity and then the
+            %% teardown never runs, so this is the only close a shed delete
+            %% still performs — a session must not outlive its realm.
             ok = close(Uri, ?WAMP_CLOSE_REALM),
 
-            %% We synchronously delete the realm.
-            %% This will be replicated and each node will handle the update
-            %% (via an AAE exchange, once db.aae lands) and close the realm.
+            %% We synchronously delete the realm. The cleared cell replicates,
+            %% and each peer node runs its own `teardown/1` when the clear
+            %% merges into its projection (`bondy_aae_reactor`).
             ok = bondy_db:apply(table(), ?REALM_BAND, Uri, clear),
 
             %% We notify
@@ -1708,6 +1757,13 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
 
                 %% Delete all users
                 bondy_rbac_user:remove_all(Uri, Opts1),
+
+                %% Everything above is a bondy_db write, so every node
+                %% converges on it. This last step is the node-local half —
+                %% see `teardown/1`, which each peer runs for itself. Its
+                %% `close/2` is a no-op here: the sessions were kicked before
+                %% the clear above.
+                ok = teardown(Uri),
 
                 ok
             end,

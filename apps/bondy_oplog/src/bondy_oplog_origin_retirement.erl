@@ -66,9 +66,19 @@ the union of keys, so a peer that still carries the entry re-adds it. Left
 alone, a departed node's entries are immortal, one PER DURABLE SHARD, since
 `bondy_oplog_instance_sup:resolve_origin_opt/2` persists a separate origin
 under each instance's directory — the cost of a departure scales with
-`db.main.shard_count`, not with the number of nodes. (Ephemeral instances
-contribute nothing: they share one per-VM origin and their frontiers stay
-empty.)
+`db.main.shard_count`, not with the number of nodes.
+
+Ephemeral instances are cheaper but NOT free, and the difference matters to
+anything reading `frontier_origins/0`. They share one per-VM origin, so a
+departure adds one entry rather than one per shard, and nothing is persisted
+(`persist_frontier` is a no-op on ephemeral), so a restart clears whatever
+accumulated. Their frontiers are NOT empty at runtime: `merge_applied/2` is
+called on both the local and the replay path with no durability gate, and a
+probe against a provisioned catalogue — one RIB cell written to the ephemeral
+`registry` DB — showed the owning shard's frontier carrying the local origin
+(`registry-6 -> #{<<3,158,...>> => 1}`) while the 15 shards no key hashed to
+stayed empty. So ephemeral instances DO appear in `bondy_oplog:list_instances()`
+and DO contribute origins to the reap's candidate population.
 
 Dropping an entry is licensed by exactly one thing: **every member has the
 origin in its retirement set**, read fresh over the transport, fail-closed —

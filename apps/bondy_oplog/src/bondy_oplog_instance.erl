@@ -447,10 +447,23 @@ without protocol changes.
     %% baseline, capping the transient peak without touching the hot
     %% append/drain path. Driven from `handle_info(gc_tick, _)`.
     heap_monitor = bondy_oplog_heap_monitor:new() ::
-        bondy_oplog_heap_monitor:t()
+        bondy_oplog_heap_monitor:t(),
+    %% Provenance of the applied frontier this instance booted with, and the
+    %% stamp it writes into every checkpoint it persists. `receipt_derived` is
+    %% ABSORBING: a value that inherited a receipt-derived entry keeps the
+    %% stamp however many sound writes follow it, because no later write
+    %% lowers an entry. See `checkpoint_provenance/1`.
+    frontier_provenance = folded :: frontier_provenance()
 }).
 
 -type backend() :: map | ets | module().
+
+%% Provenance of an applied-frontier value. `folded` — every entry was written
+%% by a writer that claims a seq only after its cell folded. `receipt_derived` —
+%% at least one entry came from a build whose boot fold counted RECEIPT as
+%% materialisation, so the value may assert an applied prefix over a cell that
+%% never folded.
+-type frontier_provenance() :: folded | receipt_derived.
 
 -type opts() :: #{
     backend => backend(),
@@ -520,6 +533,7 @@ without protocol changes.
 
 -export_type([opts/0]).
 -export_type([backend/0]).
+-export_type([frontier_provenance/0]).
 
 %% Lifecycle
 -export([start_link/2]).
@@ -593,6 +607,7 @@ without protocol changes.
 -export([finalize_catalogue_bootstrap/5]).
 -export([persist_frontier/1]).
 -export([seed_seq/2]).
+-export([replay_anchor/1]).
 -export([reclamation_members/0]).
 -export([reclaim_stable_cells/1]).
 -export([stability_point/1]).
@@ -622,6 +637,10 @@ without protocol changes.
 -export([frontier_stability_point/1]).
 %% Exposed for the pack-store seal-threshold default test.
 -export([backend_opts/3]).
+%% Exposed so the checkpoint-provenance classification can be driven over
+%% every payload shape without a durable instance per shape
+%% (`bondy_oplog_frontier_provenance_test`).
+-export([checkpoint_provenance/1]).
 -endif.
 
 %% =============================================================================
@@ -2068,8 +2087,10 @@ bootstrap). See `bondy_oplog_applier:install_catalogue_batch/2` for
 the per-mode semantics. The arity-2 form is equivalent to
 `install_catalogue_batch(Inst, {replace, Cells})`.
 
-Returns `{ok, #{installed := _, skipped := _, merged := _,
-replaced_no_merge := _}}`.
+Returns `{ok, #{installed := _, skipped := _, unclaimable := _,
+merged := _, replaced_no_merge := _}}`. See
+`bondy_oplog_applier:install_catalogue_batch/2` for what `unclaimable`
+means and why `skipped` cannot substitute for it.
 
 Called by `bondy_oplog_sync_session:bootstrap_catalogue/3` between
 `get_catalogue_snapshot_init` and `finalize_catalogue_bootstrap/3`.
@@ -2082,6 +2103,7 @@ Called by `bondy_oplog_sync_session:bootstrap_catalogue/3` between
     {ok, #{
         installed := non_neg_integer(),
         skipped := non_neg_integer(),
+        unclaimable := [binary()],
         merged := non_neg_integer(),
         replaced_no_merge := non_neg_integer()
     }}
@@ -2249,6 +2271,16 @@ open_drain_gate(InstanceId) when is_binary(InstanceId) ->
                 undefined ->
                     {error, instance_not_running};
                 ApplierPid ->
+                    %% The routing directory is complete the moment the
+                    %% orchestrator calls this, not when the applier gets to
+                    %% the cast below — so publish readiness here, where the
+                    %% fact becomes true, and let the drain follow
+                    %% asynchronously. Anti-entropy reads this, and gating it
+                    %% on a mailbox would leave a window in which the
+                    %% catalogue is complete but the shard still refuses.
+                    ok = bondy_oplog_registry:set_tables_registered(
+                        InstanceId, true
+                    ),
                     bondy_oplog_applier:open_drain_gate(ApplierPid)
             end
     end.
@@ -2287,6 +2319,11 @@ HLC + value). Without adopting the peer's frontier, a fully bootstrapped replica
 holds all the data yet reports DIVERGED forever against the convergence oracle.
 The merge is a max-merge — idempotent, and safe to combine with anything the
 normal apply path has already recorded. An empty map is a no-op.
+
+WHETHER to adopt is not decided here.
+`bondy_oplog_sync_session:adopt_frontier/3` passes the peer's vector only over
+an install that landed everything the peer shipped, and `#{}` otherwise — a cell carries no origin and no seq, so the
+install cannot say WHICH origin lost history and the rule is all-or-nothing.
 """.
 -spec finalize_catalogue_bootstrap(
     instance_id() | pid(),
@@ -2397,6 +2434,48 @@ the live MST (`init/1`). Never lowers the counter.
 
 seed_seq(Target, MaxSeq) when is_integer(MaxSeq), MaxSeq >= 0 ->
     gen_server:call(target(Target), {seed_seq, MaxSeq}, infinity).
+
+?DOC("""
+Where the applier must anchor its projection-replay cursor at boot:
+`undefined` to re-fold the live MST, or the current root to skip it.
+
+Called once, from `bondy_oplog_applier:do_init_2/9`. Runs HERE, not in the
+applier, because the fold reads pack-store file descriptors, which are raw and
+bound to this process.
+
+`undefined` is returned exactly when the live MST holds a `cell_apply` event
+the restored applied frontier does not claim. Such an event is one this replica
+RECEIVED but has no evidence of having MATERIALISED, and the two are genuinely
+different: `install_event/5` is the shared insert path for local and
+peer-received events, and only the local one folds before it installs
+(`bondy_oplog_applier:apply_batch/2` writes the projection, then casts
+`install_local_batch`). A peer-received event installs FIRST and is folded
+afterwards by a best-effort `replay_cell_events` cast from `deliver_remote/1`,
+which a crash or a shutdown can lose.
+
+Anchoring on the current root unconditionally — as this did — silently made
+that event unrecoverable: the WAL drain resumes past the durable root, so
+nothing else would ever re-present it. Declaring it applied instead (the
+deleted `frontier_from_mst/1`) was worse: it also disarmed `watermark_door/3`
+and `capped_truncation_point/2`, which hold never-applied events from
+truncation and judge "never applied" against this same frontier. Measured as
+user loss across a rolling restart; pinned by
+`bondy_oplog_frontier_fold_gap_test:across_a_restart/0`.
+
+COST. The scan is one O(live MST) fold — the size of the LOG, which compaction
+bounds, not of the projection. It replaces the fold `frontier_from_mst/1` did
+at every boot, so the traversal is not new. What is new is the re-fold in the
+`undefined` case, and it runs only when the scan found an unclaimed event: a
+replica that shut down with everything folded and checkpointed scans, finds
+nothing, and boots exactly as before. The re-fold itself is idempotent — cells
+are keyed and the commutative kernels guard on a per-origin `MaxSeq`
+(`bondy_oplog_crdt_g_counter:apply_op/3`).
+""").
+-spec replay_anchor(instance_id() | pid()) ->
+    undefined | bondy_mst:hash().
+
+replay_anchor(Target) ->
+    gen_server:call(target(Target), replay_anchor, infinity).
 
 %% @private
 %% As `persist_frontier/1`, absorbing `AbsorbHlc` into the local clock first —
@@ -2669,38 +2748,63 @@ init({InstanceId, Opts}) ->
     AeTargets = validate_ae_targets(maps:get(ae_targets, Opts, [])),
     ok = bondy_oplog_registry:set_ae_targets(InstanceId, AeTargets),
     %% Restore the applied-frontier convergence oracle (`#{Origin => max Seq}`)
-    %% from THREE durable sources, each max-merged (idempotent, monotone) into
-    %% the registry holder published above:
-    %%   1. the compaction checkpoint — the COMPACTED prefix's maxima (events
-    %%      truncated from the WAL and the MST, recoverable nowhere else);
-    %%   2. the live MST's `cell_apply` keys — the uncompacted, already-applied
-    %%      events (compaction watermark → durable root). A clean restart resumes
-    %%      at the tail, so these never replay and must be folded out directly;
-    %%   3. the applier's WAL-tail replay (events past the durable root), which
-    %%      tops up on the normal apply path after init.
-    %% No recompute fold over the projection and no `warming` state — that was
-    %% the cold-boot meltdown. The MST fold is O(live MST), bounded by compaction.
+    %% from the compaction checkpoint — the COMPACTED prefix's maxima (events
+    %% truncated from both the WAL and the MST, recoverable nowhere else).
     %% The registry row exists (published above), which `merge_frontier/2`
     %% requires.
+    %%
+    %% The UNCOMPACTED range (compaction watermark → durable root) is NOT
+    %% declared applied here. It used to be, by folding the live MST's
+    %% `cell_apply` keys straight into the frontier, and that was the defect:
+    %% the MST records RECEIPT, not materialisation — `install_event/5` is the
+    %% shared insert path for local and peer-received events alike, and
+    %% `bondy_oplog_applier:apply_batch/2` installs the whole verified batch
+    %% whatever the cell apply returned. So a cell whose bucket did not resolve
+    %% was counted as applied on every boot, which both over-claimed AND
+    %% disarmed the repair: `watermark_door/3` and `capped_truncation_point/2`
+    %% hold never-applied events from truncation, and they judge "never
+    %% applied" against this same frontier. Measured as user loss across a
+    %% rolling restart; pinned by
+    %% `bondy_oplog_frontier_fold_gap_test:across_a_restart/0` and proved in
+    %% `proofs/isabelle/Frontier_Writers.thy`
+    %% (`shipped_restart_overclaims`, `refold_restart_preserves_soundness`).
+    %%
+    %% That range is instead RE-PRESENTED to the fold, which is idempotent, and
+    %% the frontier follows from what actually materialises. `replay_anchor/1`
+    %% decides whether it has to be: it scans the live MST for a cell event
+    %% this restored frontier does not claim, and only then does the boot
+    %% replay re-fold. A replica that shut down with everything folded and
+    %% checkpointed finds nothing and boots as it always did. Recovery is
+    %% therefore only ever BEHIND the old claim, never ahead — the direction
+    %% that costs a re-fetch rather than a user
+    %% (`Frontier_Writers.refold_no_regression`).
     ok = restore_frontier(InstanceId, CachedCheckpoint),
-    ok = bondy_oplog_registry:merge_frontier(
-        InstanceId, frontier_from_mst(MST)
-    ),
-    %% Seed the per-origin seq counter from the restored frontier's own
-    %% entry. The live-MST seed above (`max_local_seq/2`) covers only what
-    %% compaction has not yet truncated; the checkpoint's frontier is the
-    %% durable record of the compacted prefix's maximum, and in steady state
-    %% the live MST holds NO own-origin event (compaction empties it), so
-    %% without a durable seed every restart came back at 0 and re-minted
-    %% dots every peer had already applied — invisible to the frontier-gap
-    %% oracle (`proofs/tla/SeqSeed_Shipped.cfg`; pinned by
+    FrontierProvenance = checkpoint_provenance(CachedCheckpoint),
+    ok = report_frontier_provenance(InstanceId, Origin, FrontierProvenance),
+    %% Seed the per-origin seq counter — the MINTED quantity, not the applied
+    %% frontier. The live-MST seed above (`max_local_seq/2`) covers only what
+    %% compaction has not yet truncated, and in steady state the live MST
+    %% holds NO own-origin event (compaction empties it), so without a durable
+    %% seed every restart came back at 0 and re-minted dots every peer had
+    %% already applied — invisible to the frontier-gap oracle
+    %% (`proofs/tla/SeqSeed_Shipped.cfg`; pinned by
     %% `bondy_oplog_seq_seed_restart_test`). The third source, the retained
     %% WAL's maximum, arrives from the WAL writer (`seed_seq/2`) before the
     %% writer publishes its pid. Runs BEFORE the fast path is published, so
     %% no caller can reserve against the stale value.
+    %%
+    %% The checkpoint's dedicated `minted` slot is the durable source
+    %% (`minted_from_checkpoint/1`); the frontier's own-origin entry is kept
+    %% under `max` because a checkpoint written before that slot existed has
+    %% no minted value, and because an under-seed here is a dot collision.
+    %% The two are separate quantities answering separate questions — see
+    %% `minted_from_checkpoint/1`.
     ok = maybe_bump_seq_atomic(
         SeqRef,
-        maps:get(Origin, bondy_oplog_registry:frontier(InstanceId), 0)
+        max(
+            minted_from_checkpoint(CachedCheckpoint),
+            maps:get(Origin, bondy_oplog_registry:frontier(InstanceId), 0)
+        )
     ),
     %% Publish the lock-free `append_fast` bundle iff the validator
     %% advertises `is_stateless/0 -> true`. The bundle lets callers
@@ -2733,7 +2837,9 @@ init({InstanceId, Opts}) ->
     ok = bondy_oplog_registry:set_lifecycle(
         InstanceId, State#state.lifecycle
     ),
-    State1 = maybe_init_fused(State, Opts),
+    State1 = maybe_init_fused(
+        State#state{frontier_provenance = FrontierProvenance}, Opts
+    ),
     HeapMonitor = bondy_oplog_heap_monitor:arm(State1#state.heap_monitor),
     {ok, State1#state{heap_monitor = HeapMonitor}}.
 
@@ -2767,6 +2873,11 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
             apply_batch_max_events, ApplierOpts, ?FUSED_APPLY_BATCH_MAX
         ),
         idle_waiter = undefined,
+        %% Same anchor rule as the applier (`replay_anchor/1`): the current
+        %% root when the restored frontier already claims every cell event in
+        %% the live MST, `undefined` when it does not. Paired with the
+        %% `fused_replay` kick below, which is then a cheap `no_change`.
+        last_replayed_root = compute_replay_anchor(State),
         %% Already validated at `init/1` (`validate_ae_targets/1`, which
         %% runs before this); the fused commit + remote replay bump them.
         ae_targets = maps:get(ae_targets, Opts, []),
@@ -2779,6 +2890,17 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
             end
     },
     self() ! fused_init,
+    %% Boot re-fold. A fused instance has no applier, so nothing else would
+    %% re-present the live MST (compaction watermark → durable root) to the
+    %% projection: its WAL drain resumes PAST the durable root. The applier's
+    %% equivalent is the `replay_cell_events` cast in
+    %% `bondy_oplog_applier:do_init_2/9`; `last_replayed_root = undefined`
+    %% above makes this first replay a full fold. Without it the frontier
+    %% would stay behind that range for as long as no peer delivered
+    %% anything, and `capped_truncation_point/2` would refuse to compact.
+    %% `fused_replay_cell_events/1` reads `State#state.mst` directly, so it
+    %% does not wait on the deferred WAL reader.
+    self() ! fused_replay,
     State#state{fused_drain = FD}.
 
 %% @private
@@ -3450,13 +3572,17 @@ do_handle_call(persist_frontier, _From, State) ->
         State#state.instance_id,
         State#state.backend,
         State#state.watermark,
+        minted_seq(State#state.seq),
         State#state.compaction_checkpoint,
-        State#state.compaction_checkpoint_state
+        State#state.compaction_checkpoint_state,
+        State#state.frontier_provenance
     ),
     {reply, ok, State};
 do_handle_call({seed_seq, MaxSeq}, _From, State) ->
     ok = maybe_bump_seq_atomic(State#state.seq, MaxSeq),
     {reply, ok, State};
+do_handle_call(replay_anchor, _From, State) ->
+    {reply, compute_replay_anchor(State), State};
 do_handle_call(reclamation_stability_point, _From, State) ->
     {reply, reclamation_stability_point(State), State};
 do_handle_call({persist_frontier, AbsorbHlc}, From, State) when
@@ -3766,6 +3892,11 @@ handle_info(fused_init, State) ->
     %% Deferred fused-drain WAL-reader open (Step 3). Retries until the
     %% WAL sibling has published its pid.
     {noreply, fused_open_reader(State)};
+handle_info(fused_replay, State) ->
+    %% Boot re-fold of the live MST — see `maybe_init_fused/2`. Sent once;
+    %% the guard clauses of `fused_replay_cell_events/1` make it a no-op for
+    %% an instance with no fused drain or no cell-apply context.
+    {noreply, fused_replay_cell_events(State)};
 handle_info(fused_drain, State) ->
     %% A fused-drain wakeup (init kick, more-loop continuation, or an
     %% idle-waiter DOWN). Drain the WAL into the projection + MST inline.
@@ -4084,9 +4215,10 @@ fused_apply_batch(#state{fused_drain = FD, instance_id = Id} = State0, Batch) ->
             [] ->
                 State1;
             _ ->
-                {CellEvents, _Other} = fused_partition_cells(Verified),
+                %% The WHOLE verified batch — see the same call in
+                %% `bondy_oplog_applier:apply_batch/2`.
                 ok = bondy_oplog_cell_apply:apply_cell_batch_mux(
-                    FD#fused_drain.cell_apply_source, Id, CellEvents
+                    FD#fused_drain.cell_apply_source, Id, Verified
                 ),
                 StateA = install_local_batch(State1, Verified),
                 PublishT0 = erlang:monotonic_time(microsecond),
@@ -4138,18 +4270,6 @@ fused_verify_batch(
             }),
             fused_verify_batch(State, Rest, VAcc, [Event | RAcc])
     end.
-
-%% @private
-fused_partition_cells(Events) ->
-    lists:partition(
-        fun(E) ->
-            case bondy_oplog_event:op(E) of
-                {cell_apply, _, _, _} -> true;
-                _ -> false
-            end
-        end,
-        Events
-    ).
 
 %% @private
 fused_batch_summary(Batch) ->
@@ -4612,7 +4732,7 @@ applied_witness(Id) ->
 %% The door's predicate: an event the projection will still fold — its
 %% `{Origin, Seq}` exceeds the applied VV and its origin is not retired.
 %% The VV half is exact because the projection folds each origin as a
-%% contiguous prefix (`bondy_oplog_cell_apply:partition_contiguous/3`'s
+%% contiguous prefix (`bondy_oplog_cell_apply:partition_contiguous/4`'s
 %% hold), so the per-origin maximum bounds every applied seq from above.
 %% A retired origin's events are dropped by the applier before any fold
 %% (`bondy_oplog_cell_apply:drop_retired/2`) and never raise the VV, so
@@ -4940,10 +5060,12 @@ terminate(_Reason, #state{
     mst = MST,
     backend = Backend,
     watermark = Watermark,
+    seq = SeqRef,
     compaction_checkpoint = CkptMod,
     compaction_checkpoint_state = CkptState,
     overlay = Overlay,
-    seal = Seal
+    seal = Seal,
+    frontier_provenance = Provenance
 }) ->
     %% Kill any in-flight seal worker BEFORE closing the MST. The frozen
     %% incoming-sealing file stays on disk and the reopen recovery re-seals
@@ -4957,8 +5079,23 @@ terminate(_Reason, #state{
     %% Best-effort and BEFORE `close/1`: a failure just falls back to a
     %% WAL-replay-only frontier next boot.
     _ = maybe_persist_frontier(
-        InstanceId, Backend, Watermark, CkptMod, CkptState
+        InstanceId,
+        Backend,
+        Watermark,
+        minted_seq(SeqRef),
+        CkptMod,
+        CkptState,
+        Provenance
     ),
+    %% Best-effort: at node shutdown `alarm_handler` may already be gone, and
+    %% a stale alarm on an instance that is no longer running would outlive
+    %% every reader of it.
+    _ =
+        try
+            clear_instance_alarms(InstanceId)
+        catch
+            _:_ -> ok
+        end,
     %% Leave the registry row in place so that on a one_for_all subtree
     %% restart the dyn_sup mapping (`sup_pid`) survives. The row's
     %% `instance_pid` field will be stale until the new instance
@@ -5045,6 +5182,18 @@ report_clock_skew(Key, PeerOrigin) ->
 restore_frontier(_InstanceId, undefined) ->
     ok;
 restore_frontier(
+    InstanceId, {_W, {projection_managed, frontier, FrontierVV, _Minted, _Meta}}
+) when
+    is_map(FrontierVV)
+->
+    bondy_oplog_registry:merge_frontier(InstanceId, FrontierVV);
+restore_frontier(
+    InstanceId, {_W, {projection_managed, frontier, FrontierVV, _Minted}}
+) when
+    is_map(FrontierVV)
+->
+    bondy_oplog_registry:merge_frontier(InstanceId, FrontierVV);
+restore_frontier(
     InstanceId, {_W, {projection_managed, frontier, FrontierVV}}
 ) when
     is_map(FrontierVV)
@@ -5054,13 +5203,155 @@ restore_frontier(_InstanceId, _Other) ->
     ok.
 
 %% @private
+%% Classifies the frontier a checkpoint carries by the writer that produced it.
+%% A payload with no stamp slot came from a release that folded the oplog at
+%% boot and so counted RECEIPT as applied; the absence IS the signal, and no
+%% later write can lower the entry (`Frontier_Writers.join_absorbs_unsound`).
+%%
+%% The stamp describes the VALUE, not the build that last wrote it, which is
+%% what makes it absorbing — see `frontier_checkpoint/3`.
+-spec checkpoint_provenance(term()) -> frontier_provenance().
+
+checkpoint_provenance({_W, {projection_managed, frontier, _VV, _M, Meta}}) when
+    is_map(Meta)
+->
+    maps:get(provenance, Meta, receipt_derived);
+checkpoint_provenance({_W, {projection_managed, frontier, _VV, _M}}) ->
+    receipt_derived;
+checkpoint_provenance({_W, {projection_managed, frontier, _VV}}) ->
+    receipt_derived;
+checkpoint_provenance(_Other) ->
+    %% No frontier payload, or no checkpoint at all: nothing was inherited.
+    folded.
+
+%% @private
+%% The checkpoint's frontier payload. ONE constructor for both writers so the
+%% stamp cannot be present on one path and absent on the other; an unstamped
+%% write would read back as `receipt_derived` and alarm a healthy node.
+%%
+%% `Provenance` is the value's, carried from `init/1`, so an instance that
+%% booted on an unstamped checkpoint keeps stamping `receipt_derived` however
+%% many sound writes follow. A reader predating the stamp treats the 5-tuple
+%% as unknown and restores no frontier, so downgrade is not supported.
+frontier_checkpoint(FrontierVV, MintedSeq, Provenance) ->
+    {projection_managed, frontier, FrontierVV, MintedSeq, #{
+        provenance => Provenance
+    }}.
+
+%% @private
+%% Alarms a frontier inherited from a build that claimed a seq on RECEIPT
+%% (`checkpoint_provenance/1`). Only the REMOTE entries are suspect: for the
+%% own origin the same claim is sound, because a local write folds before its
+%% event is minted (`Frontier_Writers.own_origin_oplog_claim_is_sound`).
+%%
+%% There is no in-place repair and the alarm offers none; why neither keeping
+%% nor dropping the suspect entries works is in
+%% `doc/guides/database/convergence.md`.
+report_frontier_provenance(_InstanceId, _Origin, folded) ->
+    ok;
+report_frontier_provenance(InstanceId, Origin, receipt_derived) ->
+    Remote = maps:without(
+        [Origin], bondy_oplog_registry:frontier(InstanceId)
+    ),
+    case map_size(Remote) of
+        0 ->
+            ok;
+        N ->
+            Info = #{
+                instance_id => InstanceId,
+                origins => N,
+                claimed => Remote
+            },
+            Desc =
+                <<
+                    "A shard instance restored an applied frontier written by "
+                    "a release that folded the oplog at boot, counting an "
+                    "event as applied on RECEIPT rather than on materialising "
+                    "it. Its remote-origin entries may assert an applied "
+                    "prefix over a cell that never folded, which both hides a "
+                    "real gap from the convergence oracle and lets the "
+                    "never-applied event be truncated. No merge can lower an "
+                    "entry, so this cannot be repaired in place: replace the "
+                    "value by wiping this instance's data directory and "
+                    "letting it re-bootstrap from a peer."
+                >>,
+            ?LOG_WARNING(Info#{description => Desc}),
+            alarm_handler:set_alarm(
+                {{bondy_oplog_frontier_receipt_derived, InstanceId}, Desc, #{
+                    details => Info
+                }}
+            )
+    end.
+
+%% @private
+%% Every instance-scoped alarm this instance may be holding, cleared together
+%% at terminate. Neither is re-raised by a restart on its own: the provenance
+%% one is re-judged by `init/1`, and the unroutable-bucket one by the next
+%% catalogue bootstrap, which the withheld frontier keeps provoking while the
+%% condition stands. `bondy_oplog_drain_stalled` is NOT here - the applier
+%% owns its lifecycle and clears it itself.
+clear_instance_alarms(InstanceId) ->
+    ok = alarm_handler:clear_alarm(
+        {bondy_oplog_frontier_receipt_derived, InstanceId}
+    ),
+    alarm_handler:clear_alarm({bondy_oplog_bucket_unroutable, InstanceId}).
+
+%% @private
+%% The own-origin highest MINTED seq recorded in the compaction checkpoint.
+%%
+%% MINTED is a different quantity from the applied frontier, and this is the
+%% slot that keeps them apart. The frontier's per-origin entry asserts an
+%% APPLIED PREFIX and its readers treat an over-claim as licence to discard
+%% (`watermark_door/3`, `capped_truncation_point/2`); the dot allocator needs
+%% "highest seq this replica ever handed out" and treats an UNDER-claim as
+%% licence to re-mint a dot a peer already applied. The two answers coincide
+%% today only because one map holds both, which is why capping the frontier
+%% for soundness would silently regress the allocator
+%% (`proofs/tla/SeqSeed_Shipped.cfg`, `proofs/isabelle/Seq_Seed.thy`,
+%% `bondy_oplog_seq_seed_restart_test`).
+%%
+%% Why the checkpoint has to carry it: compaction truncates BOTH the WAL
+%% (`advance_wal_snapshot_watermark/2`) and the MST
+%% (`truncate_below_or_equal/4`), so in steady state neither holds an
+%% own-origin event and `max_local_seq/2` returns `undefined`. The checkpoint
+%% is then the only durable record.
+%%
+%% `0` for a checkpoint written before this slot existed (the 3-tuple clause),
+%% for a bare-CRDT checkpoint, and for no checkpoint at all. `init/1` composes
+%% it with the frontier's own-origin entry under `max`, so an upgrading node
+%% keeps seeding from the frontier until it writes its first 4-tuple
+%% checkpoint.
+minted_from_checkpoint(
+    {_W, {projection_managed, frontier, _VV, Minted, _Meta}}
+) when
+    is_integer(Minted), Minted >= 0
+->
+    Minted;
+minted_from_checkpoint({_W, {projection_managed, frontier, _VV, Minted}}) when
+    is_integer(Minted), Minted >= 0
+->
+    Minted;
+minted_from_checkpoint(_Other) ->
+    0.
+
+%% @private
+%% This instance's own-origin highest minted seq, read from the live
+%% allocator. Slot 1 of the seq atomic — the same slot `init/1` seeds and
+%% every append raises. See `minted_from_checkpoint/1` for why it is
+%% persisted separately from the frontier.
+minted_seq(SeqRef) ->
+    atomics:get(SeqRef, 1).
+
+%% @private
 %% Persist the live applied-frontier version vector into the compaction
 %% checkpoint as `{projection_managed, frontier, FrontierVV}` so the next start
 %% restores the compacted-prefix maxima (see `restore_frontier/2`). Durable
 %% backends only — an ephemeral instance has no checkpoint. The registry read is
 %% wrapped in `try`: at node shutdown the core registry may already be gone,
 %% and a miss just falls back to a WAL-replay-only frontier next boot.
-maybe_persist_frontier(InstanceId, Backend, Watermark, CkptMod, CkptState) ->
+maybe_persist_frontier(
+    InstanceId, Backend, Watermark, MintedSeq, CkptMod, CkptState, Provenance
+) ->
     _ =
         is_durable_backend(Backend) andalso
             try
@@ -5068,7 +5359,7 @@ maybe_persist_frontier(InstanceId, Backend, Watermark, CkptMod, CkptState) ->
                 CkptMod:put_checkpoint(
                     CkptState,
                     Watermark,
-                    {projection_managed, frontier, FrontierVV}
+                    frontier_checkpoint(FrontierVV, MintedSeq, Provenance)
                 )
             catch
                 _:_ -> ok
@@ -5947,33 +6238,63 @@ max_local_seq(MST, LocalOrigin) ->
     ).
 
 %% @private
-%% Reconstruct the applied-frontier version vector `#{Origin => max Seq}` from
-%% the live MST's `cell_apply` event keys at init. The MST holds the uncompacted,
-%% already-applied events (between the compaction watermark and the durable
-%% root); a clean restart resumes PAST them, so the apply path never refires for
-%% them and the frontier must be folded out of the MST directly. Counts the SAME
-%% events the apply path counts (`{cell_apply, ...}` ops only — see
-%% `bondy_oplog_cell_apply:batch_frontier/1`), so a restart-reconstructed
-%% frontier equals the incrementally-maintained one. O(live MST) — bounded by
-%% compaction, the same cost class as `compute_live_size/1` / `max_local_seq/2`,
-%% NOT the projection. Composed at init with the checkpoint frontier (the
-%% compacted prefix) and the WAL-tail replay (events past the durable root).
-frontier_from_mst(MST) ->
-    bondy_mst:fold(
-        MST,
-        fun
-            ({K, {{cell_apply, _B, _CK, _FE}, _Meta, _Prev, _Sig}}, Acc) ->
-                Origin = bondy_oplog_event:key_origin(K),
-                Seq = bondy_oplog_event:key_seq(K),
-                case Acc of
-                    #{Origin := Cur} when Cur >= Seq -> Acc;
-                    _ -> Acc#{Origin => Seq}
-                end;
-            ({_K, _V}, Acc) ->
-                Acc
-        end,
-        #{}
-    ).
+%% See `replay_anchor/1`. Folds the live MST once, looking for a `cell_apply`
+%% event the restored frontier does not claim; the first one found decides the
+%% answer, so the common (healthy) case still pays the full traversal but the
+%% uncommon one stops early.
+compute_replay_anchor(#state{mst = MST, instance_id = Id} = State) ->
+    VV = bondy_oplog_registry:frontier(Id),
+    case first_unclaimed_cell(MST, VV) of
+        undefined ->
+            bondy_mst:root(MST);
+        Key ->
+            ?LOG_NOTICE(#{
+                description =>
+                    "Boot re-fold: the oplog holds a cell event the applied "
+                    "frontier does not claim, so this replica received it but "
+                    "has no evidence of applying it. Re-presenting the live "
+                    "oplog to the projection; the re-fold is idempotent and "
+                    "the frontier will follow what materialises.",
+                instance_id => Id,
+                origin => bondy_oplog_event:key_origin(Key),
+                seq => bondy_oplog_event:key_seq(Key),
+                claimed_seq => maps:get(
+                    bondy_oplog_event:key_origin(Key), VV, 0
+                ),
+                live_size => State#state.live_size
+            }),
+            telemetry:execute(
+                [bondy_oplog, instance, boot_refold],
+                #{count => 1, live_size => State#state.live_size},
+                #{instance_id => Id}
+            ),
+            undefined
+    end.
+
+%% @private
+%% The first `cell_apply` key in `MST` whose seq is above `VV`'s entry for its
+%% origin, or `undefined`. `bondy_mst:fold/3` has no early exit, so the hit is
+%% thrown; a `cell_apply` event carries no other control flow through here.
+first_unclaimed_cell(MST, VV) ->
+    try
+        bondy_mst:fold(
+            MST,
+            fun
+                ({K, {{cell_apply, _B, _CK, _FE}, _Meta, _Prev, _Sig}}, Acc) ->
+                    Origin = bondy_oplog_event:key_origin(K),
+                    Seq = bondy_oplog_event:key_seq(K),
+                    case Seq > maps:get(Origin, VV, 0) of
+                        true -> throw({unclaimed, K});
+                        false -> Acc
+                    end;
+                ({_K, _V}, Acc) ->
+                    Acc
+            end,
+            undefined
+        )
+    catch
+        throw:{unclaimed, Key} -> Key
+    end.
 
 %% @private
 %% Combined admission test: overlay pressure first, then the MST
@@ -7186,7 +7507,16 @@ finalize_catalogue_compaction_commit(
     %% checkpoint. `Frontier` is the event-key watermark; `FrontierVV` is the
     %% per-origin version vector, read lock-free from the registry holder.
     FrontierVV = bondy_oplog_registry:frontier(StateF#state.instance_id),
-    Checkpoint = {projection_managed, frontier, FrontierVV},
+    %% The own-origin minted maximum rides along: this call site is the one
+    %% that truncates the WAL below `Frontier`, so after it neither the WAL
+    %% nor the MST holds an own-origin event and the checkpoint is the only
+    %% durable record of the allocator's position. See
+    %% `minted_from_checkpoint/1`.
+    Checkpoint = frontier_checkpoint(
+        FrontierVV,
+        minted_seq(StateF#state.seq),
+        StateF#state.frontier_provenance
+    ),
     {ok, CkptUs} = tc(fun() ->
         (StateF#state.compaction_checkpoint):put_checkpoint(
             StateF#state.compaction_checkpoint_state,

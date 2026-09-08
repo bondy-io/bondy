@@ -110,6 +110,10 @@ by `sec_idx/1`.
 -ifdef(TEST).
 %% Exported for the bounded-eviction / hit-miss unit test.
 -export([oldstate_cache_get/3]).
+%% Exported for `bondy_oplog_prefix_hole_telemetry_test`: the detector needs a
+%% registry entry to read, `seq_gaps/2` is pure and is tested exhaustively.
+-export([detect_prefix_holes/2]).
+-export([seq_gaps/2]).
 -endif.
 
 %% =============================================================================
@@ -123,10 +127,21 @@ by `sec_idx/1`.
 %% via `apply_event/3`, encode back, and write the new frame via
 %% `put_batch/2`. Bucket is a first-class call-time parameter on the
 %% projection adapter; the applier passes it through verbatim.
+%%
+%% RETURNS the per-origin seqs this call MATERIALISED, `#{Origin => [Seq]}`,
+%% for `apply_cell_batch_mux/3` to turn into a frontier claim. It does not
+%% merge the frontier itself: `bondy_oplog_registry:merge_applied/2` is the
+%% single writer of that quantity, and one over-claiming writer poisons the
+%% entry permanently.
+%%
+%% An event the fold SKIPS counts as materialised: `compute_one_cell/13`
+%% returns `skip` when the event is older than the cell's current state, so
+%% that state already reflects it. A failed `put_batch/2` counts as nothing:
+%% the cells re-apply on the next replay.
 apply_cell_batch(undefined, _Id, _Events) ->
-    ok;
+    #{};
 apply_cell_batch(_Ctx, _Id, []) ->
-    ok;
+    #{};
 apply_cell_batch(Ctx, Id, Events) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
     CrdtOpts = maps:get(crdt_opts, Ctx, #{}),
@@ -194,7 +209,9 @@ apply_cell_batch(Ctx, Id, Events) ->
 
     case map_size(LocalWrites) of
         0 ->
-            ok;
+            %% Every event in the batch was older than its cell's current
+            %% state. Nothing to write, but the state reflects them all.
+            origin_seqs(Events, fun event_cell_key/1);
         _ ->
             PutT0 = erlang:monotonic_time(microsecond),
             Entries = [{B, K, F} || {{B, K}, F} <- maps:to_list(LocalWrites)],
@@ -225,18 +242,14 @@ apply_cell_batch(Ctx, Id, Events) ->
                         undefined -> ok;
                         _ -> advance_high_water(HighWaterRef, MaxHlc)
                     end,
-                    %% Advance the applied-frontier version vector over this
-                    %% batch's `{HLC, Origin, Seq}` keys (local/append path; the
-                    %% replay/merge path does the same in `apply_cell_pairs/4`).
-                    %% After the durable write, so the frontier never leads the
-                    %% projection — the convergence oracle.
-                    ok = bondy_oplog_registry:merge_frontier(
-                        Id, batch_frontier_events(Events)
-                    ),
                     %% Only after the primary write is durable do we let
                     %% the index see these terms. The live drain path
                     %% enforces the back-pressure cap (Bypass = false).
-                    dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, false);
+                    ok = dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, false),
+                    %% Report what is now durable. The caller makes the
+                    %% frontier claim, after every group of the batch has
+                    %% reported — so the frontier never leads the projection.
+                    origin_seqs(Events, fun event_cell_key/1);
                 {error, Reason} ->
                     %% Primary write failed: do NOT dispatch index ops —
                     %% the cells (and their index entries) are re-applied
@@ -250,10 +263,9 @@ apply_cell_batch(Ctx, Id, Events) ->
                         count => map_size(LocalWrites),
                         reason => Reason
                     }),
-                    ok
+                    #{}
             end
-    end,
-    ok.
+    end.
 
 %% @private
 %% Per-event compute (read + apply + encode). Returns the new frame +
@@ -697,6 +709,14 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
 %% a marked rebuild. The full-rebuild path no longer routes through here —
 %% it re-indexes from the converged projection
 %% (`bondy_oplog_cell_utils:reindex/3`).
+%%
+%% RETURNS `{CellsApplied, Materialised}` where `Materialised` is the
+%% per-origin seqs this call reflected into the projection — the replay-path
+%% counterpart of `apply_cell_batch/3`'s return, and for the same reason: the
+%% frontier claim is made once per batch by `apply_cell_pairs_mux/5`, after
+%% every group has reported. A pair the fold SKIPS counts as materialised (the
+%% cell's state already dominates it); a failed `put_batch/2` counts as
+%% nothing.
 apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
     CrdtOpts = maps:get(crdt_opts, Ctx, #{}),
@@ -778,60 +798,58 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
             {#{}, undefined, 0, #{}, #{}},
             Pairs
         ),
-        case map_size(LocalWrites) of
-            0 ->
-                ok;
-            _ ->
-                Entries = [
-                    {B, K, F}
-                 || {{B, K}, F} <- maps:to_list(LocalWrites)
-                ],
-                case Adapter:put_batch(Handle, Entries) of
-                    ok ->
-                        maps:foreach(
-                            fun({B, K}, _F) ->
-                                invalidate_cache(
-                                    CacheAdapter, CacheHandle, B, K
-                                )
+        Materialised =
+            case map_size(LocalWrites) of
+                0 ->
+                    batch_seqs(Pairs);
+                _ ->
+                    Entries = [
+                        {B, K, F}
+                     || {{B, K}, F} <- maps:to_list(LocalWrites)
+                    ],
+                    case Adapter:put_batch(Handle, Entries) of
+                        ok ->
+                            maps:foreach(
+                                fun({B, K}, _F) ->
+                                    invalidate_cache(
+                                        CacheAdapter, CacheHandle, B, K
+                                    )
+                                end,
+                                LocalWrites
+                            ),
+                            %% Write-through the peer/replay frames too,
+                            %% so a subsequent local read sees the durable
+                            %% value (no-op when disabled).
+                            oldstate_cache_put_entries(OldStateCache, Entries),
+                            case MaxHlc of
+                                undefined -> ok;
+                                _ -> advance_high_water(HighWaterRef, MaxHlc)
                             end,
-                            LocalWrites
-                        ),
-                        %% Write-through the peer/replay frames too,
-                        %% so a subsequent local read sees the durable
-                        %% value (no-op when disabled).
-                        oldstate_cache_put_entries(OldStateCache, Entries),
-                        case MaxHlc of
-                            undefined -> ok;
-                            _ -> advance_high_water(HighWaterRef, MaxHlc)
-                        end,
-                        %% Advance the applied-frontier version vector over every
-                        %% `{HLC, Origin, Seq}` in this committed batch. The
-                        %% universal materialisation path, so it captures all
-                        %% sources (local fast/replay, remote append, page-sync
-                        %% merge). The convergence oracle compares these frontiers
-                        %% across nodes. After the durable write, so the frontier
-                        %% never leads the projection.
-                        ok = bondy_oplog_registry:merge_frontier(
-                            Id, batch_frontier(Pairs)
-                        ),
-                        dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, false),
-                        %% Notify reactors AFTER the durable write + index
-                        %% dispatch, so a reactor that reads back sees the
-                        %% merged value. Best-effort, never blocks the replay.
-                        publish_merges(PublishNs, PubAcc);
-                    {error, Reason} ->
-                        ?LOG_WARNING(#{
-                            description =>
-                                "bondy_oplog_applier replay batch write "
-                                "failed; the cells will be re-applied on "
-                                "the next sync tick",
-                            instance_id => Id,
-                            count => map_size(LocalWrites),
-                            reason => Reason
-                        })
-                end
-        end,
-        N
+                            ok = dispatch_index_ops(
+                                SecIdx, IdxAcc, MaxHlc, false
+                            ),
+                            %% Notify reactors AFTER the durable write + index
+                            %% dispatch, so a reactor that reads back sees the
+                            %% merged value. Best-effort, never blocks the replay.
+                            ok = publish_merges(PublishNs, PubAcc),
+                            %% Report what is now durable; the caller makes the
+                            %% frontier claim, so the frontier never leads the
+                            %% projection.
+                            batch_seqs(Pairs);
+                        {error, Reason} ->
+                            ?LOG_WARNING(#{
+                                description =>
+                                    "bondy_oplog_applier replay batch write "
+                                    "failed; the cells will be re-applied on "
+                                    "the next sync tick",
+                                instance_id => Id,
+                                count => map_size(LocalWrites),
+                                reason => Reason
+                            }),
+                            #{}
+                    end
+            end,
+        {N, Materialised}
     catch
         C:R:S ->
             ?LOG_WARNING(#{
@@ -844,28 +862,18 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                 reason => R,
                 stacktrace => S
             }),
-            0
+            {0, #{}}
     end.
 
 %% @private
-%% As `batch_frontier/1`, for the local/append path (`apply_cell_batch/3`), whose
-%% input is a list of `bondy_oplog_event:t()` rather than `{MstKey, _}` pairs.
-batch_frontier_events(Events) ->
-    frontier_of(origin_seqs(Events, fun event_cell_key/1)).
-
-%% @private
-%% Per-origin max-Seq over the cell_apply events in a replay batch — the
-%% applied-frontier delta committed via `bondy_oplog_registry:merge_frontier/2`.
-%% Iterates ALL cell_apply pairs (materialised or skipped): a skipped event is
-%% older than the cell's current state, so that origin's frontier is already at a
-%% higher seq, making the unconditional `max` correct.
-batch_frontier(Pairs) ->
-    frontier_of(origin_seqs(Pairs, fun pair_cell_key/1)).
+%% Per-origin seqs over the seq-bearing pairs of a replay batch.
+batch_seqs(Pairs) ->
+    origin_seqs(Pairs, fun pair_cell_key/1).
 
 %% @private
 %% Per-origin seq lists (unsorted) over a batch's seq-bearing events —
-%% the shared core of `batch_frontier/1`/`batch_frontier_events/1`,
-%% `detect_prefix_holes/2` and `partition_contiguous/3`. `KeyF` extracts
+%% the shared core of `batch_seqs/1`, `apply_cell_batch_mux/3`,
+%% `detect_prefix_holes/2` and `partition_contiguous/4`. `KeyF` extracts
 %% the event key from one batch element, or `undefined` for elements
 %% that carry no per-origin seq claim. `cell_apply` events count, and so
 %% do `seq_fill` backfills (the no-op occupants of a burned seq range,
@@ -907,43 +915,26 @@ event_cell_key(Event) ->
     end.
 
 %% @private
-frontier_of(OriginSeqs) ->
-    maps:map(fun(_Origin, Seqs) -> lists:max(Seqs) end, OriginSeqs).
-
-%% @private
-%% CONTIGUITY DETECTOR — telemetry only, never changes behaviour.
+%% Telemetry only; never changes behaviour. Reports the seqs a fold found
+%% ABSENT below its own batch. Presence is the prefix PLUS
+%% `bondy_oplog_registry:pending/1`, read together so the pair cannot tear.
 %%
-%% The applied-frontier VV is a per-origin max, not a prefix witness
-%% (see the watermark-door note in `bondy_oplog_instance`), and the
-%% compact observed-remove test `Ctx[O] >= S`
-%% (`bondy_oplog_crdt_aw_core:dot_observed/2`) is exact only when each
-%% origin's events reach a projection in per-origin contiguous order.
-%% Nothing enforces that today: a page-sync merge can fold an origin's
-%% later seq while an earlier one is absent (truncated at every live
-%% peer before this replica ever pulled it), silently max-merging the
-%% frontier past the hole. This detector makes that moment observable:
-%% called at the mux front-ends — the whole batch, BEFORE any per-group
-%% frontier merge, so a bucket split cannot fake a gap — it compares
-%% the batch's per-origin seqs against the pre-batch frontier and
-%% reports every gap.
-%%
-%% A firing is a fact about fold-time contiguity, not always data loss:
-%% a concurrent local fast-path append that commits to the WAL out of
-%% seq order also presents as a (transient, own-origin) gap. A seq
-%% burned by a failed WAL append (see `release_seq_range` in
-%% `bondy_oplog_instance`) presents the same way until its `seq_fill`
-%% backfill lands — the fill counts as a present seq here, closing the
-%% gap. The point of the telemetry is to measure exactly that mix in
-%% the field.
+%% A firing is not always data loss: a local append committing to the WAL out
+%% of seq order, or a seq burned and awaiting its `seq_fill`, presents the same
+%% way.
 detect_prefix_holes(_Id, OriginSeqs) when map_size(OriginSeqs) =:= 0 ->
     ok;
 detect_prefix_holes(Id, OriginSeqs) ->
-    VV = bondy_oplog_registry:frontier(Id),
+    {VV, Pending} = bondy_oplog_registry:frontier_and_pending(Id),
     maps:foreach(
         fun(Origin, Seqs) ->
             Cur = maps:get(Origin, VV, 0),
-            News = lists:usort([S || S <- Seqs, S > Cur]),
-            case seq_gaps(Cur, News) of
+            Held = maps:get(Origin, Pending, bondy_interval_set:new()),
+            Present = bondy_interval_set:union(
+                Held,
+                bondy_interval_set:from_list([S || S <- Seqs, S > Cur])
+            ),
+            case seq_gaps(Cur, Present) of
                 [] ->
                     ok;
                 Gaps ->
@@ -955,6 +946,7 @@ detect_prefix_holes(Id, OriginSeqs) ->
                             instance_id => Id,
                             origin => Origin,
                             applied_seq => Cur,
+                            held => bondy_interval_set:flat_size(Held),
                             gaps => Gaps
                         }
                     ),
@@ -963,13 +955,18 @@ detect_prefix_holes(Id, OriginSeqs) ->
                             "Per-origin contiguity gap at the cell-apply "
                             "fold: this batch materialises an origin's "
                             "later seq while earlier seq(s) are neither "
-                            "applied here nor in the batch. If the gap is "
-                            "history truncated at every live peer this is "
-                            "a prefix hole the applied frontier will "
-                            "silently max-merge past.",
+                            "applied here nor in the batch. The applied "
+                            "frontier holds its prefix below the gap and "
+                            "keeps the later seqs pending, so nothing is "
+                            "over-claimed - but the gap holds this "
+                            "origin's prefix, and every event above it in "
+                            "the tree, until it closes. If the missing "
+                            "history is truncated at every live peer, only "
+                            "a catalogue re-bootstrap can close it.",
                         instance_id => Id,
                         origin => Origin,
                         applied_seq => Cur,
+                        held => bondy_interval_set:flat_size(Held),
                         gaps => Gaps,
                         missing => Missing
                     })
@@ -979,14 +976,23 @@ detect_prefix_holes(Id, OriginSeqs) ->
     ).
 
 %% @private
-%% Gaps in a sorted seq list relative to `Prev` (exclusive): each
-%% `{From, To}` is a maximal run of absent seqs.
+%% The absent runs below each maximal run of `Set`, relative to `Prev`
+%% (exclusive): each `{From, To}` is a maximal run of absent seqs. `Set` is a
+%% `bondy_interval_set`, whose runs are ascending, disjoint and non-adjacent
+%% (it coalesces), so one left-to-right pass suffices; a run already covered
+%% by `Prev` contributes nothing.
 seq_gaps(_Prev, []) ->
     [];
-seq_gaps(Prev, [S | Rest]) when S =:= Prev + 1 ->
-    seq_gaps(S, Rest);
-seq_gaps(Prev, [S | Rest]) ->
-    [{Prev + 1, S - 1} | seq_gaps(S, Rest)].
+seq_gaps(Prev, [Run | Rest]) ->
+    {Lo, Hi} = run_bounds(Run),
+    case Lo > Prev + 1 of
+        true -> [{Prev + 1, Lo - 1} | seq_gaps(Hi, Rest)];
+        false -> seq_gaps(erlang:max(Hi, Prev), Rest)
+    end.
+
+%% @private
+run_bounds({Lo, Hi}) -> {Lo, Hi};
+run_bounds(N) when is_integer(N) -> {N, N}.
 
 %% @private
 %% Per-bucket multiplexing front-ends for `apply_cell_batch/3` and
@@ -1004,22 +1010,56 @@ seq_gaps(Prev, [S | Rest]) ->
 %% A bucket with no ctx under a `{dir, _}` source is logged and skipped (its
 %% cells re-apply on the next replay); `{single, undefined}` is the
 %% no-cell-apply instance and is a silent no-op.
+%%
+%% The batch's applied-frontier claim is made here, once, from what
+%% materialised. A group that fails to resolve contributes nothing, so the
+%% prefix stops below its skipped seq. Merging once per batch rather than once
+%% per group is a cost choice; what must not change is the number of SITES,
+%% because the merge is a join and one over-claiming site defeats every
+%% conservative one permanently.
+%%
+%% `Events` is the whole verified batch, not just its `cell_apply` members:
+%% `event_bucket/1` skips everything else at the grouping step, while
+%% `event_cell_key/1` also picks up `seq_fill` backfills, which are seq-bearing
+%% and PRESENT by construction (there is nothing to fold) and so complete a
+%% burned origin's run. Passing only the cells would stall an origin's claim at
+%% the first burned seq for good.
 apply_cell_batch_mux({single, undefined}, _Id, _Events) ->
     ok;
 apply_cell_batch_mux(Source, Id, Events) ->
     ok = detect_prefix_holes(Id, origin_seqs(Events, fun event_cell_key/1)),
-    lists:foreach(
-        fun({Bucket, Group}) ->
+    Materialised = lists:foldl(
+        fun({Bucket, Group}, MAcc) ->
             case bondy_oplog_mux:resolve(Source, Bucket) of
                 undefined ->
-                    log_missing_ctx(Id, Bucket, length(Group));
+                    log_missing_ctx(Id, Bucket, length(Group)),
+                    MAcc;
                 Ctx ->
-                    ok = apply_cell_batch(Ctx, Id, Group)
+                    union_seqs(MAcc, apply_cell_batch(Ctx, Id, Group))
             end
         end,
+        origin_seqs(fills(Events), fun event_cell_key/1),
         bondy_oplog_mux:group_by(Events, fun event_bucket/1)
     ),
-    ok.
+    bondy_oplog_registry:merge_applied(Id, Materialised).
+
+%% @private
+%% The `seq_fill` members of a batch — the signed no-op occupants of a seq
+%% range burned by a failed WAL append (`release_seq_range` in
+%% `bondy_oplog_instance`). They seed the materialised set because their whole
+%% purpose is to be present: there is nothing to fold and nothing to lose.
+fills(Events) ->
+    lists:filter(
+        fun(E) -> bondy_oplog_event:op(E) =:= seq_fill end,
+        Events
+    ).
+
+%% @private
+%% Per-origin seq accumulator union. Lists, not sets: they are batch-scoped and
+%% short, and `bondy_oplog_registry:merge_applied/2` folds them into an
+%% interval set anyway.
+union_seqs(A, B) ->
+    maps:merge_with(fun(_Origin, Xs, Ys) -> Xs ++ Ys end, A, B).
 
 %% @private
 %% As `apply_cell_batch_mux/3`, for the replay/merge path; returns the total
@@ -1034,7 +1074,7 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin) ->
 %% enforcement: when `hold => true`, a remote origin's events beyond its
 %% first contiguity gap
 %% are HELD — excluded from the fold and therefore from the
-%% applied-frontier merge (`batch_frontier/1` sees only folded pairs).
+%% applied-frontier claim, which only ever names folded pairs.
 %% Returns `{CellsApplied, HeldCount}`; a caller passing `hold => true`
 %% MUST NOT advance its replay cursor past this diff when `HeldCount > 0`
 %% — the unadvanced cursor is what re-presents the held events on the
@@ -1053,7 +1093,9 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
     {Foldable, Held} =
         case maps:get(hold, Opts, false) of
             true ->
-                partition_contiguous(Id, drop_retired(Id, Pairs), LocalOrigin);
+                partition_contiguous(
+                    Id, drop_retired(Id, Pairs), LocalOrigin, Source
+                );
             false ->
                 {drop_retired(Id, Pairs), 0}
         end,
@@ -1061,21 +1103,40 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
     %% means a contiguity gap MATERIALISED into the projection, while a
     %% gap that was presented but held is `events_held`. With holding
     %% off `Foldable =:= Pairs`, so this is the unenforced measurement.
-    ok = detect_prefix_holes(Id, origin_seqs(Foldable, fun pair_cell_key/1)),
-    Count = lists:foldl(
-        fun({Bucket, Group}, Acc) ->
+    ok = detect_prefix_holes(Id, batch_seqs(Foldable)),
+    %% One frontier update for the batch, from what MATERIALISED — the same
+    %% rule as the local path; see `bondy_oplog_registry:merge_applied/2`.
+    %% Events HELD by `partition_contiguous/4` are not in `Foldable` and so
+    %% simply do not appear: they were deliberately withheld and the caller's
+    %% un-advanced cursor re-presents them, at which point they materialise
+    %% and are recorded like any other.
+    {Count, Materialised} = lists:foldl(
+        fun({Bucket, Group}, {CAcc, MAcc}) ->
             case bondy_oplog_mux:resolve(Source, Bucket) of
                 undefined ->
                     log_missing_ctx(Id, Bucket, length(Group)),
-                    Acc;
+                    {CAcc, MAcc};
                 Ctx ->
-                    Acc + apply_cell_pairs(Ctx, Id, Group, LocalOrigin)
+                    {N, Done} = apply_cell_pairs(Ctx, Id, Group, LocalOrigin),
+                    {CAcc + N, union_seqs(MAcc, Done)}
             end
         end,
-        0,
+        {0, batch_seqs(fill_pairs(Foldable))},
         bondy_oplog_mux:group_by(Foldable, fun pair_bucket/1)
     ),
+    ok = bondy_oplog_registry:merge_applied(Id, Materialised),
     {Count, Held}.
+
+%% @private
+%% The `seq_fill` members of a replay batch — see `fills/1`.
+fill_pairs(Pairs) ->
+    lists:filter(
+        fun
+            ({_MstKey, {seq_fill, _Meta, _Prev, _Sig}}) -> true;
+            (_) -> false
+        end,
+        Pairs
+    ).
 
 %% @private
 %% Drops pairs authored by a RETIRED origin before anything folds them.
@@ -1094,9 +1155,9 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
 %% ban can be lifted, and dropping its events here would silently lose them
 %% once the replay cursor advanced past the diff that carried them.
 %%
-%% Filtering here rather than at the fold's tail also keeps them out of
-%% `batch_frontier/1`, so the applied frontier never rises for an origin
-%% whose events this replica declined.
+%% Filtering here rather than at the fold's tail also keeps them out of the
+%% claim, so the applied frontier never rises for an origin whose events this
+%% replica declined.
 drop_retired(Id, Pairs) ->
     case bondy_oplog_origin_bans:has_retired() of
         false ->
@@ -1133,20 +1194,34 @@ drop_retired(Id, Pairs) ->
 %% count it must hold. Per remote origin, foldable seqs are everything at
 %% or below the applied frontier (idempotent re-folds) plus the
 %% contiguous run rising from it; the rest of that origin's seqs — and
-%% every pair carrying them — are held. Pairs with no per-origin seq
-%% claim (see `origin_seqs/2`) and local-origin pairs always fold; a
-%% `seq_fill` pair is seq-bearing like any other, so it both completes
-%% runs and can itself be held behind an unfilled earlier gap.
-partition_contiguous(Id, Pairs, LocalOrigin) ->
+%% every pair carrying them — are held. The run is drawn from the ROUTABLE
+%% seqs only, so a bucket this shard has no table for stops it exactly as a
+%% missing seq does — both mean the cell cannot fold. Pairs with no
+%% per-origin seq claim (see `origin_seqs/2`) and local-origin pairs always
+%% fold; a `seq_fill` pair is seq-bearing like any other, so it both
+%% completes runs and can itself be held behind an unfilled earlier gap.
+%%
+%% READS THE PREFIX ONLY, deliberately. Nothing pending ever continues the
+%% prefix, so the first missing seq is always `Prefix + 1` and every seq a
+%% pending-aware test would additionally fold sits above it. A hold is not a
+%% drop, so the two tests agree on the outcome and differ only in how many
+%% replays it takes.
+partition_contiguous(Id, Pairs, LocalOrigin, Source) ->
     VV = bondy_oplog_registry:frontier(Id),
     OriginSeqs = maps:remove(
         LocalOrigin, origin_seqs(Pairs, fun pair_cell_key/1)
+    ),
+    Unroutable = maps:remove(
+        LocalOrigin, origin_seqs(unroutable(Pairs, Source), fun pair_cell_key/1)
     ),
     HeldSeqs = maps:filtermap(
         fun(Origin, Seqs) ->
             Cur = maps:get(Origin, VV, 0),
             News = lists:usort([S || S <- Seqs, S > Cur]),
-            Run = contiguous_run(Cur, News),
+            Blocked = maps:get(Origin, Unroutable, []),
+            Run = contiguous_run(
+                Cur, [S || S <- News, not lists:member(S, Blocked)]
+            ),
             case News -- Run of
                 [] -> false;
                 Rest -> {true, Rest}
@@ -1191,6 +1266,23 @@ partition_contiguous(Id, Pairs, LocalOrigin) ->
             }),
             {Foldable, length(Held)}
     end.
+
+%% @private
+%% The pairs whose bucket does not resolve to a cell-apply context, so the
+%% fold would discard them. A pair carrying no bucket — a `seq_fill` — is
+%% never blocked: occupying its seq is its whole job.
+unroutable(Pairs, Source) ->
+    lists:filter(
+        fun(Pair) ->
+            case pair_bucket(Pair) of
+                skip ->
+                    false;
+                {ok, Bucket} ->
+                    bondy_oplog_mux:resolve(Source, Bucket) =:= undefined
+            end
+        end,
+        Pairs
+    ).
 
 %% @private
 %% The longest prefix of sorted `Seqs` contiguous with `Prev`.
@@ -1242,7 +1334,9 @@ log_missing_ctx(Id, Bucket, Count) ->
     ?LOG_WARNING(#{
         description =>
             "bondy_oplog_cell_apply: no cell-apply context for bucket; "
-            "cells skipped (they re-apply on the next replay).",
+            "cells skipped and not counted as applied. They come back only "
+            "on a path that re-presents them: the held replay keeps its "
+            "cursor and does, a one-shot full fold does not.",
         instance_id => Id,
         bucket => Bucket,
         count => Count

@@ -10,9 +10,20 @@ A gen_server worker in the OIDC refresh pool.
 Periodically scans the `bondy_oidc_refresh_queue` ETS table for sessions
 needing token refresh and performs the refresh via `oidcc_token:refresh/3`.
 
-The ETS table is an `ordered_set` keyed by `{NextRefreshAt, EntryId}` for
+The ETS table is an `ordered_set` keyed by `{NextRefreshAt, SessionId}` for
 efficient batch selection of due entries using `ets:select/2` with match
 specs.
+
+An entry lives exactly as long as the session that scheduled it. Nothing on the
+session close path removes it — a removal there would have to scan the whole
+queue, since the queue is ordered by time and a closing session knows only its
+id. Instead the entry is dropped here, when it comes due, if its session is
+gone; that is also why the key's second element is the SESSION id and not an
+id minted per schedule. With a per-schedule id, the id a session recorded at
+open stopped naming the entry the first time the entry was refreshed and
+re-queued, so nothing could ever remove it again and the refresh went on
+calling the IdP for a session that had long since disconnected
+(`bondy_session_cleanup_SUITE:oidc_refresh_entry_is_keyed_by_its_session`).
 """.
 
 -behaviour(gen_server).
@@ -29,7 +40,7 @@ specs.
 -define(BATCH_SIZE, 50).
 
 -record(refresh_entry, {
-    key :: {pos_integer(), binary()},
+    key :: {non_neg_integer(), bondy_session_id:t()},
     realm_uri :: uri(),
     authid :: binary(),
     oidc_provider :: binary(),
@@ -39,7 +50,6 @@ specs.
 %% API
 -export([start_link/1]).
 -export([schedule_refresh/5]).
--export([remove_entry/1]).
 -export([init_table/0]).
 
 %% GEN_SERVER CALLBACKS
@@ -80,18 +90,22 @@ init_table() ->
     end.
 
 -doc """
-Schedules a token refresh for the given entry.
+Schedules a token refresh for session `SessionId`.
+
+The session id, not a per-schedule identifier, is the entry's identity: it is
+what lets the worker ask whether the entry still has a session (see the
+moduledoc).
 """.
 -spec schedule_refresh(
-    EntryId :: binary(),
+    SessionId :: bondy_session_id:t(),
     RealmUri :: uri(),
     Authid :: binary(),
     OidcProvider :: binary(),
     RefreshInfo :: map()
 ) -> ok.
 
-schedule_refresh(EntryId, RealmUri, Authid, OidcProvider, RefreshInfo) when
-    is_binary(EntryId) andalso is_binary(RealmUri) andalso
+schedule_refresh(SessionId, RealmUri, Authid, OidcProvider, RefreshInfo) when
+    is_binary(SessionId) andalso is_binary(RealmUri) andalso
         is_binary(Authid) andalso is_binary(OidcProvider) andalso
         is_map(RefreshInfo)
 ->
@@ -100,29 +114,13 @@ schedule_refresh(EntryId, RealmUri, Authid, OidcProvider, RefreshInfo) when
     NextRefreshAt = max(0, AccessExpiresAt - ?REFRESH_BUFFER_SECS),
 
     Entry = #refresh_entry{
-        key = {NextRefreshAt, EntryId},
+        key = {NextRefreshAt, SessionId},
         realm_uri = RealmUri,
         authid = Authid,
         oidc_provider = OidcProvider,
         refresh_token = RefreshToken
     },
     true = ets:insert(?TABLE, Entry),
-    ok.
-
--doc """
-Removes all refresh entries for the given entry ID.
-""".
--spec remove_entry(EntryId :: binary()) -> ok.
-
-remove_entry(EntryId) when is_binary(EntryId) ->
-    MS = [
-        {
-            #refresh_entry{key = {'_', EntryId}, _ = '_'},
-            [],
-            [true]
-        }
-    ],
-    _ = ets:select_delete(?TABLE, MS),
     ok.
 
 %% =============================================================================
@@ -184,7 +182,7 @@ do_refresh_entries({Entries, _Continuation}) ->
 
 %% @private
 do_refresh_entry(#refresh_entry{
-    key = Key,
+    key = {_, SessionId} = Key,
     realm_uri = RealmUri,
     authid = Authid,
     oidc_provider = Provider,
@@ -193,6 +191,22 @@ do_refresh_entry(#refresh_entry{
     %% Remove the old entry first
     true = ets:delete(?TABLE, Key),
 
+    case bondy_session:lookup(RealmUri, SessionId) of
+        {error, not_found} ->
+            %% The session went away. Dropping the entry here — rather than on
+            %% the close path — is the whole reason the key carries the session
+            %% id, and it is what stops a disconnected session's refresh from
+            %% running against the IdP for ever. Returning without
+            %% re-scheduling is the removal.
+            ok;
+        {ok, _} ->
+            do_refresh_live_entry(
+                SessionId, RealmUri, Authid, Provider, RefreshToken
+            )
+    end.
+
+%% @private
+do_refresh_live_entry(SessionId, RealmUri, Authid, Provider, RefreshToken) ->
     case bondy_oidc_provider:get_client_context(RealmUri, Provider) of
         {ok, ClientCtx} ->
             ReqOpts =
@@ -214,6 +228,7 @@ do_refresh_entry(#refresh_entry{
                     refresh = NewRefreshToken
                 }} ->
                     handle_refresh_success(
+                        SessionId,
                         RealmUri,
                         Authid,
                         Provider,
@@ -241,7 +256,7 @@ do_refresh_entry(#refresh_entry{
 
 %% @private
 handle_refresh_success(
-    RealmUri, Authid, Provider, AccessToken, NewRefreshToken
+    SessionId, RealmUri, Authid, Provider, AccessToken, NewRefreshToken
 ) ->
     NewRT =
         case NewRefreshToken of
@@ -275,9 +290,10 @@ handle_refresh_success(
                 undefined ->
                     ok;
                 _ ->
-                    EntryId = bondy_utils:uuid(),
+                    %% Under the SAME session id, so the entry the session
+                    %% scheduled at open is still the entry the queue holds.
                     schedule_refresh(
-                        EntryId,
+                        SessionId,
                         RealmUri,
                         Authid,
                         Provider,

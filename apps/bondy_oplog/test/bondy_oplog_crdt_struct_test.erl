@@ -147,5 +147,52 @@ stabilize_below_every_op_keeps_test() ->
     ),
     ?assertEqual(keep, ?MOD:stabilize(1, State)).
 
+%% `force_reap => true` is what makes a single-writer cell reclaimable once
+%% its writer is permanently gone: the retired origin's contributions are
+%% dropped, `count` reaches its `stabilize_zero`, and the cell discards
+%% outright. That matters because `bondy_oplog_cell_utils:reap_one_cell/6`
+%% re-encodes a VALUE-PRESERVING frame (old value column, shrunk state), so
+%% reclamation rests entirely on `stabilize/2` reading the SHRUNK state —
+%% this is the test that pins that chain. The whole cell is minted by ONE
+%% origin here, which is the single-writer shape of a registry RIB cell.
+force_reap_zeroes_the_field_and_discards_the_cell_test() ->
+    Schema = #{
+        count =>
+            {bondy_oplog_crdt_pn_counter, #{
+                stabilize_zero => 0, force_reap => true
+            }}
+    },
+    State = counted(Schema, <<"dead">>, 3),
+    ?assertEqual(#{count => 3}, ?MOD:to_value(State)),
+
+    {Reaped, Ids} = ?MOD:reap_origins(State, [<<"dead">>]),
+    ?assertEqual([<<"dead">>], Ids),
+    ?assertEqual(#{count => 0}, ?MOD:to_value(Reaped)),
+    ?assertEqual(discard, ?MOD:stabilize(100, Reaped)).
+
+%% The control that makes the above attributable to the policy rather than to
+%% reaping in general: the documented conservative default leaves the value of
+%% every field WITHOUT `force_reap` untouched, so the cell stays live.
+reap_without_force_reap_preserves_the_value_test() ->
+    Schema = #{count => {bondy_oplog_crdt_pn_counter, #{stabilize_zero => 0}}},
+    State = counted(Schema, <<"dead">>, 3),
+
+    {Reaped, _Ids} = ?MOD:reap_origins(State, [<<"dead">>]),
+    ?assertEqual(#{count => 3}, ?MOD:to_value(Reaped)),
+    ?assertNotEqual(discard, ?MOD:stabilize(100, Reaped)).
+
+%% @private
+%% `N` single-increment ops on `count`, all minted by `Origin`.
+counted(Schema, Origin, N) ->
+    lists:foldl(
+        fun(S, Acc) ->
+            ?MOD:apply_op(
+                Acc, {apply, count, {inc, 1}}, ev_key(S, Origin, S), []
+            )
+        end,
+        ?MOD:init(Schema),
+        lists:seq(1, N)
+    ).
+
 ev_key(Hlc, Origin, Seq) ->
     bondy_oplog_event:key(Hlc, Origin, Seq).

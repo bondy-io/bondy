@@ -115,6 +115,8 @@ do_request(PeerInstance, {get_catalogue_snapshot_next, Cursor}) ->
     case bondy_oplog_catalogue_snapshot:next(PeerInstance, Cursor) of
         {ok, {batch, _} = Batch} ->
             {ok, Batch};
+        {ok, {chunked_batch, _} = Chunked} ->
+            {ok, Chunked};
         {ok, {done, _} = Done} ->
             {ok, Done};
         {error, _} = E ->

@@ -70,7 +70,7 @@ workers; each partition owns its own slice of the indices.
 -export([remove/4]).
 -export([remove_all/2]).
 -export([remove_all/3]).
--export([remove_all/5]).
+-export([remove_all/4]).
 
 %% INDEX BASED MATCHING API
 -export([has_matches/3]).
@@ -97,9 +97,14 @@ workers; each partition owns its own slice of the indices.
 -doc """
 Starts the registry server.
 
-The server monitors cluster node up / down events (to schedule pruning of a
-departed node's entries) and rebuilds the partitions' in-memory indices from
-the bondy_db store on startup.
+The server owns two things, and only these two: `init_indices/0` (rebuilding
+the partitions' in-memory indices from the bondy_db store) and the periodic
+RIB consistency sweep scheduled by `init/1`.
+
+It does NOT observe cluster membership. Nothing here reacts to a peer joining
+or departing, and nothing prunes a departed node's routing state — see
+`m:bondy_registry_rib`'s "Departure" section for what that costs and why the
+signal a reclaimer would need is retirement rather than membership.
 """.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -298,39 +303,41 @@ remove_all(Type, Ctxt, Task) when
                 RealmUri, SessionId, '_'
             ),
             MaybeFun = maybe_fun(Task, Ctxt),
+            %% `limit` selects the RETURN SHAPE, it does not bound the page —
+            %% see `do_remove_all/3`.
             MatchOpts = [{limit, 100}],
             Matches = bondy_registry_partition:find(
                 Partition, Type, Pattern, MatchOpts
             ),
-            do_remove_all(Matches, SessionId, MaybeFun, #{})
+            do_remove_all(Partition, Matches, MaybeFun)
     end.
 
 -doc """
-Removes all registry entries of type Type, for a {RealmUri
-SessionId} relation.
-
-### Opts
-- broadcast => boolean()
+Removes all registry entries of type `Type` for a `{RealmUri, SessionId}`
+relation. `SessionId` may be `'_'`, which removes every entry in the realm
+including those owned by session-less refs (internal callbacks); that is how
+`bondy_realm:teardown/1` purges a realm.
 """.
 -spec remove_all(
     Type :: entry_type(),
     RealmUri :: uri(),
-    SessionId :: id(),
-    Task :: task() | undefined,
-    Opts :: map()
-) -> [entry()].
+    SessionId :: id() | '_',
+    Task :: task() | undefined
+) -> ok.
 
-remove_all(Type, RealmUri, SessionId, Task, Opts) when
+remove_all(Type, RealmUri, SessionId, Task) when
     Task == undefined orelse is_function(Task, 1)
 ->
     Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
 
+    %% `limit` selects the RETURN SHAPE, it does not bound the page — see
+    %% `do_remove_all/3`.
     MatchOpts = [{limit, 100}],
     Partition = pick_partition(RealmUri),
     Matches = bondy_registry_partition:find(
         Partition, Type, Pattern, MatchOpts
     ),
-    do_remove_all(Matches, SessionId, Task, Opts).
+    do_remove_all(Partition, Matches, Task).
 
 -doc """
 Looks up a registration / subscription entry by its key.
@@ -1232,39 +1239,41 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
     end.
 
 %% @private
-do_remove_all(Matches, SessionId, Fun, Opts) ->
-    do_remove_all(Matches, SessionId, Fun, Opts, []).
-
-%% @private
-do_remove_all(?EOT, _, Fun, _Opts, Acc) ->
-    _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
+%% Removes every matched entry from `Partition`, then runs `Fun` over them.
+%%
+%% Two phases on purpose: the removals write the art tries, so the task runs
+%% once they are all done rather than interleaved with them, to minimise trie
+%% concurrency access.
+%%
+%% `Matches` is what `bondy_registry_store:find/4` answers a `{limit, _}`
+%% request with: the WHOLE match set in one page, plus an already-exhausted
+%% continuation — bondy_db reads materialise the bounded set in one shot and
+%% `find/1` returns `?EOT` unconditionally. Asserting that shape rather than
+%% looping over the continuation is the point: should the store regain real
+%% paging, this raises a `function_clause` instead of quietly removing only the
+%% first page. Pinned by
+%% `bondy_registry_SUITE:remove_all_runs_task_once_per_entry`, which removes
+%% more entries than the limit it asks for.
+%%
+%% `find_pairs/5` also applies the pattern's `session_id` exactly — by point
+%% read, by session index, or by an explicit session-less filter — so the
+%% entries arrive already narrowed to the session and there is nothing to
+%% re-filter here.
+do_remove_all(_Partition, ?EOT, _Fun) ->
     ok;
-do_remove_all({[], ?EOT}, _, Fun, _Opts, Acc) ->
-    _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-    ok;
-do_remove_all({[], Cont}, SessionId, Fun, Opts, Acc) ->
-    %% We apply the Fun here as opposed to in every iteration to minimise art
-    %% trie concurrency access,
-    _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-    Res = bondy_registry_partition:find(Cont),
-    do_remove_all(Res, SessionId, Fun, Opts, Acc);
-do_remove_all({[{_EntryKey, Entry} | T], Cont}, SessionId, Fun, Opts, Acc) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    Session = bondy_registry_entry:session_id(Entry),
+do_remove_all(Partition, {Pairs, ?EOT}, Fun) ->
+    Entries = [Entry || {_EntryKey, Entry} <- Pairs],
 
-    case SessionId =:= Session orelse SessionId == '_' of
-        true ->
-            %% Delete the entry from the bondy_db store and its in-memory
-            %% indices (cross-node convergence rides AAE).
-            ok = bondy_registry_partition:remove(
-                pick_partition(RealmUri), Entry, Opts
-            ),
-            %% We continue traversing
-            do_remove_all({T, Cont}, SessionId, Fun, Opts, [Entry | Acc]);
-        false ->
-            %% No longer our session
-            ok
-    end.
+    %% Deletes the entry from the bondy_db store and its in-memory indices
+    %% (cross-node convergence rides AAE).
+    ok = lists:foreach(
+        fun(Entry) ->
+            ok = bondy_registry_partition:remove(Partition, Entry)
+        end,
+        Entries
+    ),
+
+    lists:foreach(fun(Entry) -> maybe_execute(Fun, Entry) end, Entries).
 
 %% @private
 %% Runs the RIB consistency check for every realm, logs each divergent one
@@ -1273,6 +1282,14 @@ do_remove_all({[{_EntryKey, Entry} | T], Cont}, SessionId, Fun, Opts, Acc) ->
 rib_check() ->
     Total = lists:foldl(
         fun(RealmUri, Acc) ->
+            %% Reclamation BEFORE measurement, in that order deliberately: a
+            %% departed node's cell is removed by the membership-driven origin
+            %% reap, but that is a local `stabilize` discard rather than an
+            %% apply, so no merge event fires and the stub it summarises is
+            %% left behind. Dropping those first means `check/1` compares two
+            %% views that have both been told the node is gone, instead of
+            %% reporting the orphan as a divergence for one interval.
+            _ = rib_reap_orphan_stubs(RealmUri),
             case bondy_registry_rib:check(RealmUri) of
                 [] ->
                     Acc;
@@ -1294,6 +1311,36 @@ rib_check() ->
     registry_metric(gauge, #{
         name => bondy_registry_rib_divergences, value => Total
     }).
+
+%% @private
+%% Total by contract, like every other step of the sweep: an unreadable
+%% projection or a missing stub table must not take the registry server down,
+%% and `reap_orphan_stubs/1` is itself fail-closed on a read it cannot make.
+rib_reap_orphan_stubs(RealmUri) ->
+    try bondy_registry_rib:reap_orphan_stubs(RealmUri) of
+        0 ->
+            0;
+        N when is_integer(N) ->
+            ?LOG_INFO(#{
+                description =>
+                    "Dropped registry RIB stubs with no backing cell "
+                    "(their owner's cell was reclaimed after it left the "
+                    "cluster)",
+                realm_uri => RealmUri,
+                count => N
+            }),
+            N
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description => "Registry RIB orphan-stub reap failed",
+                realm_uri => RealmUri,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            0
+    end.
 
 %% @private
 %% Record a metric without ever raising — nothing here may take the

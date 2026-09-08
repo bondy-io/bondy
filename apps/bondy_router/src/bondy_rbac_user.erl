@@ -1985,8 +1985,9 @@ durable_apply(Table, RealmUri, Key, Event) ->
             ?LOG_WARNING(#{
                 description =>
                     "User write durably appended but the projection wait timed "
-                    "out; continuing. The value projects once the applier "
-                    "drains (check the shard's projection backend if persistent).",
+                    "out; continuing. The value projects once the "
+                    "applier drains (check the shard's projection "
+                    "backend if persistent).",
                 realm_uri => RealmUri,
                 username => Key
             }),

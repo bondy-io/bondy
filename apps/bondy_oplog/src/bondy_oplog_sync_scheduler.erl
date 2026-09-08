@@ -281,7 +281,14 @@ retries.
     %% The derived per-tick yield decision is published to `?LOAD_TAB`
     %% for the per-instance dispatch to read. See `run_tick/1`,
     %% `update_load/1`, `load_decide/4`.
-    load_ewma = 0.0 :: float()
+    load_ewma = 0.0 :: float(),
+    %% APPLIED-FRONTIER HOLE EPISODES, one per live instance:
+    %% `healthy` or `{ObservedSince, Alarmed}`. Driven by `hole_tick`, NOT
+    %% by the sync tick — see `check_holes/1`. Absent means this scheduler
+    %% incarnation has never seen the instance, which is what makes the
+    %% first sighting adopt (and clear) whatever a previous incarnation
+    %% left raised for that id.
+    holes = #{} :: #{instance_id() => healthy | {integer(), boolean()}}
 }).
 
 %% Lifecycle
@@ -347,6 +354,13 @@ retries.
 %% within a second at the default tick interval.
 -define(LOAD_ALPHA, 0.3).
 
+%% Cadence of the applied-frontier hole check. Fixed and independent of the
+%% sync tick: the condition it watches is not an AAE condition, it is measured
+%% in minutes (`bondy_oplog_config:frontier_hole_alarm_ms/0`), and it must keep
+%% running when AAE is off — a node with anti-entropy disabled is MORE likely
+%% to carry a standing hole. The alarm's time resolution is one of these.
+-define(HOLE_TICK_MS, 10_000).
+
 %% gen_server callbacks
 -export([init/1]).
 -export([handle_call/3]).
@@ -364,6 +378,11 @@ retries.
 %% Exposed for deterministic unit testing of the load-reactive yield
 %% decision (EWMA + threshold), decoupled from the VM load probe.
 -export([load_decide/4]).
+%% The applied-frontier hole detector: `hole_step/4` is its pure core and is
+%% tested exhaustively; `check_holes/4` takes the clock and the instance list
+%% so the alarm plumbing can be driven without waiting for a tick.
+-export([hole_step/4]).
+-export([check_holes/4]).
 -endif.
 
 %% =============================================================================
@@ -524,7 +543,7 @@ init(Opts) ->
         tick_seq = 0,
         load_ewma = 0.0
     },
-    {ok, schedule_tick(State)}.
+    {ok, schedule_hole_tick(schedule_tick(State))}.
 
 handle_call(info, _From, State) ->
     Reply = #{
@@ -569,6 +588,8 @@ handle_cast(_Msg, State) ->
 
 handle_info(tick, State) ->
     {noreply, schedule_tick(run_tick(State))};
+handle_info(hole_tick, State) ->
+    {noreply, schedule_hole_tick(check_holes(State))};
 handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
     case ets:lookup(?INFLIGHT_TAB, Pid) of
         [{Pid, InstanceId, Kind, Peer, _StartedAt}] ->
@@ -795,6 +816,11 @@ cancel_pending_tick(#state{tick_ref = Ref} = State) ->
     State#state{tick_ref = undefined}.
 
 %% @private
+schedule_hole_tick(State) ->
+    _ = erlang:send_after(?HOLE_TICK_MS, self(), hole_tick),
+    State.
+
+%% @private
 schedule_tick(#state{enabled = false} = State) ->
     State#state{tick_ref = undefined};
 schedule_tick(#state{interval_ms = 0} = State) ->
@@ -802,6 +828,154 @@ schedule_tick(#state{interval_ms = 0} = State) ->
 schedule_tick(#state{interval_ms = Ms} = State) ->
     Ref = erlang:send_after(Ms, self(), tick),
     State#state{tick_ref = Ref}.
+
+%% =============================================================================
+%% PRIVATE: APPLIED-FRONTIER HOLE DETECTOR
+%% =============================================================================
+%%
+%% A HOLE is a per-origin seq run this replica never received, with later seqs
+%% of the same origin folded above it. `bondy_oplog_registry:pending/1` is
+%% non-empty for an origin iff that origin has one, so this reads a fact the
+%% writer already holds. The alarm is on the AGE of that condition, which is
+%% OBSERVED age: the clock starts when this incarnation first sees the hole,
+%% and `pending` is itself volatile, so a restart genuinely re-observes it.
+%%
+%% It rides `?HOLE_TICK_MS` rather than the AE tick, so the age this alarm
+%% reports does not move when an operator retunes `db.aae.interval`.
+
+%% @private
+check_holes(#state{holes = Holes} = State) ->
+    case bondy_oplog_config:frontier_hole_alarm_ms() of
+        0 ->
+            %% Disabled at runtime: drop every episode and clear what this
+            %% incarnation raised, so turning the detector off silences it
+            %% rather than freezing its last verdict on the dashboard.
+            maps:foreach(
+                fun
+                    (Id, {_Since, true}) -> clear_hole_alarm(Id);
+                    (_Id, _Ep) -> ok
+                end,
+                Holes
+            ),
+            State#state{holes = #{}};
+        Threshold ->
+            State#state{
+                holes = check_holes(
+                    safe_list_instances(),
+                    erlang:monotonic_time(millisecond),
+                    Threshold,
+                    Holes
+                )
+            }
+    end.
+
+%% @private
+%% One sweep: steps every live instance's episode and applies the resulting
+%% action. Returns the episode map for the NEXT sweep, keyed by the instances
+%% that exist now — an instance that has gone away leaves the map, and takes
+%% its alarm with it, because nothing else would ever clear it.
+check_holes(Instances, Now, Threshold, Holes0) ->
+    Holes = lists:foldl(
+        fun(Id, Acc) ->
+            {VV, Pending} = bondy_oplog_registry:frontier_and_pending(Id),
+            {Ep, Action} = hole_step(
+                Pending, maps:get(Id, Holes0, undefined), Now, Threshold
+            ),
+            ok = hole_action(Action, Id, VV, Pending, Ep, Now),
+            Acc#{Id => Ep}
+        end,
+        #{},
+        Instances
+    ),
+    maps:foreach(
+        fun
+            (Id, {_Since, true}) -> clear_hole_alarm(Id);
+            (_Id, _Ep) -> ok
+        end,
+        maps:without(Instances, Holes0)
+    ),
+    Holes.
+
+%% @private
+%% The detector's pure core. `undefined` means this incarnation has never seen
+%% the instance; `healthy` means it has, and saw no hole; `{Since, Alarmed}` is
+%% an open episode.
+%%
+%% A first sighting always CLEARS, adopting whatever a previous incarnation
+%% left raised: this process cannot read the alarm back to tell a stale one
+%% from none at all. The two costs are a flap on a hole that is still open,
+%% against an alarm from a dead incarnation standing forever; the flap is
+%% chosen because the next sweep re-raises within one tick.
+hole_step(Pending, undefined, Now, _Threshold) ->
+    {new_episode(Pending, Now), clear};
+hole_step(Pending, Ep, _Now, _Threshold) when map_size(Pending) =:= 0 ->
+    case Ep of
+        {_Since, true} -> {healthy, clear};
+        _ -> {healthy, none}
+    end;
+hole_step(_Pending, healthy, Now, _Threshold) ->
+    {{Now, false}, none};
+hole_step(_Pending, {Since, false}, Now, Threshold) when
+    Threshold > 0, Now - Since > Threshold
+->
+    {{Since, true}, raise};
+hole_step(_Pending, Ep, _Now, _Threshold) ->
+    {Ep, none}.
+
+%% @private
+new_episode(Pending, _Now) when map_size(Pending) =:= 0 -> healthy;
+new_episode(_Pending, Now) -> {Now, false}.
+
+%% @private
+hole_action(none, _Id, _VV, _Pending, _Ep, _Now) ->
+    ok;
+hole_action(clear, Id, _VV, _Pending, _Ep, _Now) ->
+    clear_hole_alarm(Id);
+hole_action(raise, Id, VV, Pending, {Since, true}, Now) ->
+    raise_hole_alarm(Id, VV, Pending, Now - Since).
+
+%% @private
+raise_hole_alarm(Id, VV, Pending, HeldForMs) ->
+    Origins = maps:map(
+        fun(Origin, Set) ->
+            Prefix = maps:get(Origin, VV, 0),
+            #{
+                prefix => Prefix,
+                missing_from => Prefix + 1,
+                holes => bondy_interval_set:size(Set),
+                stranded => bondy_interval_set:flat_size(Set)
+            }
+        end,
+        Pending
+    ),
+    Holes = lists:sum([bondy_interval_set:size(S) || S <- maps:values(Pending)]),
+    Info = #{
+        instance_id => Id,
+        held_for_ms => HeldForMs,
+        holes => Holes,
+        origins => Origins
+    },
+    Desc =
+        <<
+            "A shard instance has carried a per-origin gap in its applied "
+            "frontier for longer than db.frontier.hole_alarm. Sequence "
+            "numbers below the gap were never received; later ones from the "
+            "same origin are applied but cannot be reported, so peers keep "
+            "re-offering that origin and the log cannot be truncated past "
+            "it. Nothing is lost and nothing is over-claimed - the gap is "
+            "held, not skipped - but it will not close on its own if the "
+            "missing history has been truncated at every live peer."
+        >>,
+    ?LOG_WARNING(Info#{description => Desc}),
+    %% `Info` goes in `details`, NOT the description: its keys are this
+    %% alarm's declared `detail_keys`. See `bondy_alarm_handler:set_alarm/2`.
+    alarm_handler:set_alarm(
+        {{bondy_oplog_frontier_hole, Id}, Desc, #{details => Info}}
+    ).
+
+%% @private
+clear_hole_alarm(Id) ->
+    alarm_handler:clear_alarm({bondy_oplog_frontier_hole, Id}).
 
 %% @private
 %% Lifecycle-aware dispatch. Pre_bootstrap instances dispatch a single
@@ -818,16 +992,32 @@ default_dispatch(InstanceId, []) ->
     %% certify so the node keeps authenticating.
     bondy_oplog_sync_session:maybe_bump_ae_isolated(InstanceId);
 default_dispatch(InstanceId, Peers) ->
-    case bondy_oplog_instance:lifecycle_state(InstanceId) of
-        pre_bootstrap ->
-            maybe_dispatch_bootstrap(InstanceId, Peers);
-        live ->
-            maybe_dispatch_live(InstanceId, Peers);
-        undefined ->
-            %% Instance is starting up or unknown — no-op for this
-            %% tick; the next tick will see the lifecycle once
-            %% `init/1` publishes the handle.
-            ok
+    %% A shard instance whose catalogue is still registering its declared
+    %% tables cannot install a peer snapshot completely: cells for a bucket it
+    %% cannot route yet are skipped. Soundness no longer rests on this —
+    %% `bondy_oplog_sync_session:adopt_frontier/3` withholds the claim over
+    %% any such install, and removing this gate keeps every invariant
+    %% (`proofs/tla/MuxBucketSkip_Minus_GateOnRegistration.cfg`). What it buys
+    %% is behaviour: a bootstrap dispatched mid-registration installs a
+    %% partial projection and can then claim nothing, so it is work that has
+    %% to be redone. Skip the tick; `bondy_db:start_draining/1` releases the
+    %% gate once every declared table is open, which is bounded and always
+    %% reached.
+    case bondy_oplog_registry:tables_registered(InstanceId) of
+        false ->
+            ok;
+        true ->
+            case bondy_oplog_instance:lifecycle_state(InstanceId) of
+                pre_bootstrap ->
+                    maybe_dispatch_bootstrap(InstanceId, Peers);
+                live ->
+                    maybe_dispatch_live(InstanceId, Peers);
+                undefined ->
+                    %% Instance is starting up or unknown — no-op for this
+                    %% tick; the next tick will see the lifecycle once
+                    %% `init/1` publishes the handle.
+                    ok
+            end
     end.
 
 %% @private
@@ -1197,16 +1387,30 @@ maybe_flag_rebootstrap(
     InstanceId, Peer, {sync_failed, {frontier_gap, Origins}}
 ) ->
     %% The instance completed a full round yet is still behind the peer's
-    %% applied frontier: the missing events were compacted away at the
-    %% peer — by `mst_retention` policy, or by the durable
-    %% recency-filtered frontier advancing past this replica while it was
-    %% silent past `peer_timeout_ms` — and can never arrive by page-sync.
+    %% applied frontier. TWO causes reach here and the verdict does not
+    %% distinguish them, because the remedy is the same:
+    %%
+    %%   - the missing events were compacted away at the peer — by
+    %%     `mst_retention` policy, or by the durable recency-filtered
+    %%     frontier advancing past this replica while it was silent past
+    %%     `peer_timeout_ms` — and can never arrive by page-sync;
+    %%   - this replica WITHHELD the peer's frontier at its last catalogue
+    %%     bootstrap because the install was partial
+    %%     (`bondy_oplog_sync_session:adopt_frontier/3`), so it is behind
+    %%     by construction for the origins that minted into a bucket it
+    %%     cannot route. The fold path parks those too, so page-sync
+    %%     cannot close it either.
+    %%
     %% Same remedy as `peer_pages_unavailable` — a catalogue re-bootstrap
     %% supplies both the data (projection stream) and the frontier
-    %% (finalize adoption). This is ALSO the organic join-time trigger (a
-    %% fresh replica's first sync against a truncating cluster lands
-    %% here) and the stale-peer rejoin path (the recovery half of the
-    %% recency filter's liveness trade).
+    %% (finalize adoption). Under the second cause the re-bootstrap is the
+    %% only writer of applied state that does not pass through the fold,
+    %% so the cycle it starts is the DELIVERY path for the data the hold
+    %% parks; the `bondy_oplog_bucket_unroutable` alarm is what ends it.
+    %% This is ALSO the organic join-time trigger (a fresh replica's first
+    %% sync against a truncating cluster lands here) and the stale-peer
+    %% rejoin path (the recovery half of the recency filter's liveness
+    %% trade).
     %%
     %% TWO-STRIKE debounce — see `?GAP_STRIKE_WINDOW_MS` for the full
     %% rationale (deterministic core + residual rare transient on fused
@@ -1264,10 +1468,14 @@ maybe_flag_rebootstrap(
             ),
             ?LOG_INFO(#{
                 description =>
-                    "Peer's applied frontier is ahead of ours "
-                    "after a complete sync round, twice in a row "
-                    "(it compacted history we never received); "
-                    "scheduling a catalogue re-bootstrap.",
+                    "Peer's applied frontier is ahead of ours after a "
+                    "complete sync round, twice in a row; scheduling a "
+                    "catalogue re-bootstrap. Either the peer compacted "
+                    "history we never received, or we withheld its "
+                    "frontier at the last bootstrap because we could not "
+                    "route every bucket it shipped - the "
+                    "`bondy_oplog_bucket_unroutable` alarm is raised iff "
+                    "it was the second.",
                 instance => InstanceId,
                 peer => Peer,
                 origins_behind => Origins

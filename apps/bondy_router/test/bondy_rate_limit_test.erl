@@ -163,7 +163,6 @@ session_limiter_chains_node_and_listener() ->
     ?assertEqual(ok, bondy_rate_limit:allow_session(T1)),
     %% The node bucket (capacity 1) is the binding constraint.
     ?assertEqual(throttled, bondy_rate_limit:allow_session(T1)),
-    ok = bondy_rate_limit:delete_session_limiter(T1),
 
     %% Node message limiting off, listener on: the listener bucket alone
     %% binds — scopes are independent here too.
@@ -175,7 +174,6 @@ session_limiter_chains_node_and_listener() ->
     ?assertNotEqual(undefined, T2),
     ?assertEqual(ok, bondy_rate_limit:allow_session(T2)),
     ?assertEqual(throttled, bondy_rate_limit:allow_session(T2)),
-    ok = bondy_rate_limit:delete_session_limiter(T2),
 
     %% Nothing configured anywhere ⇒ no limiter at all.
     ok = bondy_config:set([L, rate_limit], undefined),

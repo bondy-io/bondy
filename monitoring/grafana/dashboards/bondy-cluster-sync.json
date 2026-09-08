@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 7,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -196,6 +196,15 @@
       "keepTime": true,
       "tags": [],
       "asDropdown": false
+    },
+    {
+      "title": "MCP Gateway",
+      "type": "link",
+      "url": "/d/bondy-mcp",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
     }
   ],
   "panels": [
@@ -3900,6 +3909,507 @@
           "expr": "topk(8, sum by (instance_id) (rate(bondy_oplog_seqs_filled_total[5m])))",
           "legendFormat": "filled {{instance_id}}",
           "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 218,
+      "type": "stat",
+      "title": "Instance replicas carrying holes",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Standing state, not an event window: how many (node, instance) replicas have an applied frontier held below a gap RIGHT NOW. The counters to the left say a hole formed; this says one is still open. Counts REPLICAS, so one shard instance holed on two nodes reads 2 - which is the blast radius you want. 0 on a healthy cluster. A rejoining node carries holes by construction until it catches up.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 130
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "count(bondy_oplog_instance_frontier_holes{node=~\"$node\"} > 0) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 219,
+      "type": "stat",
+      "title": "Seqs stranded above holes",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Sequence numbers folded but not claimable, because they sit above an open hole. They ARE applied - nothing is lost and nothing is re-fetched - so this is amber, not red. Summed across replicas, so the same seq stranded on two nodes counts twice; use the by-instance panel for a per-replica read. Growing while the hole count is flat means traffic is piling up behind a stuck hole.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 130
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_oplog_instance_frontier_pending_seqs{node=~\"$node\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 220,
+      "type": "stat",
+      "title": "Frontier hole alarms",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Instances that have carried a hole past db.frontier.hole_alarm. The alarm fires on the AGE of the condition the gauge above reports, so this lights only for gaps that are not closing on their own.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 134
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "count(bondy_alarm_active{node=~\"$node\", alarm_id=~\".*bondy_oplog_frontier_hole.*\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 221,
+      "type": "stat",
+      "title": "Unroutable bucket alarms",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "A peer shipped catalogue cells for a table this node does not declare, so the bootstrap withheld the peer's frontier and will keep re-running. The alarm's `buckets` detail names the tables to declare here; nothing on the peer side clears it.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 134
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "count(bondy_alarm_active{node=~\"$node\", alarm_id=~\".*bondy_oplog_bucket_unroutable.*\"}) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 222,
+      "type": "timeseries",
+      "title": "Standing frontier holes & stranded seqs (by instance)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Gauges, not rates: what each instance is carrying now. Holes flat while stranded seqs climb is the signature of a hole that has stopped closing.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 134
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "A",
+          "expr": "topk(8, sum by (instance_id) (bondy_oplog_instance_frontier_holes{node=~\"$node\"}))",
+          "legendFormat": "holes {{instance_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "B",
+          "expr": "topk(8, sum by (instance_id) (bondy_oplog_instance_frontier_pending_seqs{node=~\"$node\"}))",
+          "legendFormat": "stranded {{instance_id}}"
+        }
+      ]
+    },
+    {
+      "id": 223,
+      "type": "row",
+      "title": "Sync scheduler & peer bookkeeping",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 142
+      },
+      "panels": []
+    },
+    {
+      "id": 224,
+      "type": "timeseries",
+      "title": "Sync scheduler state",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "The scheduler's own view of itself: whether it is enabled, its tick interval, the run-queue load it sampled, and whether that load made it yield. Yielding at 1 with gap verdicts climbing means AE is being starved by routing load.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 143
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_oplog_sync_scheduler_enabled{node=~\"$node\"})",
+          "legendFormat": "enabled",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_oplog_sync_scheduler_yielding{node=~\"$node\"})",
+          "legendFormat": "yielding",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_oplog_sync_scheduler_load{node=~\"$node\"})",
+          "legendFormat": "run-queue load",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_oplog_sync_scheduler_interval_milliseconds{node=~\"$node\"})",
+          "legendFormat": "interval ms",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 225,
+      "type": "timeseries",
+      "title": "Peer bookkeeping \u2014 last-seen age, exclusions & table size",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "How stale each peer's last sighting is, peers excluded from selection, and the size of the peer-state table. Last-seen age growing while last-SYNC age stays flat means the peer is reachable but has nothing to offer.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 143
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "max by (peer) (bondy_oplog_peer_last_seen_age_seconds{node=~\"$node\"})",
+          "legendFormat": "last seen {{peer}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (instance_id) (rate(bondy_oplog_peer_exclusions_total{node=~\"$node\"}[5m]))",
+          "legendFormat": "exclusions {{instance_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_oplog_peer_state_entries{node=~\"$node\"})",
+          "legendFormat": "peer-state rows",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 226,
+      "type": "stat",
+      "title": "Peers connected",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Peers this node currently holds a cluster connection to. Compare against the member count: a persistent shortfall is a partition, not churn.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 151
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(bondy_cluster_connected_peers{node=~\"$node\"}) or vector(0)",
+          "refId": "A"
         }
       ]
     }

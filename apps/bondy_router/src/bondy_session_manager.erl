@@ -41,6 +41,7 @@ individually or in bulk.
 %% API
 -export([start_link/2]).
 -export([ensure_reg_realms_table/0]).
+-export([forget_realm/1]).
 -export([pool/0]).
 -export([open/1]).
 -export([open/3]).
@@ -89,6 +90,24 @@ ensure_reg_realms_table() ->
         catch
             _:_ -> ok
         end,
+    ok.
+
+-doc """
+Drops `RealmUri` from the node-local table of realms whose per-node
+`wamp.session.<hash>..get` wildcard is registered, so the next session opened on
+a realm with this URI registers it again.
+
+Called by `bondy_realm:teardown/1` together with the removal of the realm's
+registry entries. The two must move together: the table is only a cache of what
+the registry holds, and a realm that reclaimed this URI while the cache still
+named it would never get its wildcard back — `wamp.session.get` would answer
+`no_such_procedure` for every session on it until the node restarted
+(`bondy_session_cleanup_SUITE:realm_delete_purges_registry`).
+""".
+-spec forget_realm(RealmUri :: uri()) -> ok.
+
+forget_realm(RealmUri) when is_binary(RealmUri) ->
+    true = ets:delete(?REG_REALMS_TAB, RealmUri),
     ok.
 
 -spec pool() -> pool().
@@ -275,9 +294,6 @@ handle_call({open, Session0, EnqueuedAt}, _From, State0) ->
     Id = bondy_session:id(Session),
     Pid = bondy_session:pid(Session),
 
-    %% We register the session owner (pid) under the session key
-    true = bondy_gproc:register({bondy_session, Id}, Pid),
-
     %% We monitor the session owner (pid) so that we can cleanup when the
     %% process terminates
     Ref = erlang:monitor(process, Pid),
@@ -307,7 +323,7 @@ handle_call({open, Session0, EnqueuedAt}, _From, State0) ->
                 stacktrace => Stacktrace
             }),
             erlang:demonitor(Ref),
-            ok = timed_cleanup(error, Session),
+            ok = timed_cleanup(error, Session, undefined),
             ErrServiceUs = erlang:monotonic_time(microsecond) - ServiceStart,
             ok = bondy_telemetry:session_manager_open(QueueUs, ErrServiceUs),
             {reply, {error, Reason}, State0}
@@ -350,7 +366,7 @@ handle_info({'DOWN', Ref, _, _, _}, State0) ->
                             protocol_session_id => ProtocolId,
                             session_id => Id
                         }),
-                        timed_cleanup(down, Session);
+                        timed_cleanup(down, Session, undefined);
                     {error, not_found} ->
                         ok
                 end,
@@ -435,14 +451,31 @@ register_node_session_get(RealmUri) ->
     end.
 
 %% @private
-timed_cleanup(Kind, Session) ->
+timed_cleanup(Kind, Session, Reason) ->
     T0 = erlang:monotonic_time(microsecond),
-    ok = cleanup(Session),
+    ok = cleanup(Session, Reason),
     DurationUs = erlang:monotonic_time(microsecond) - T0,
     ok = bondy_telemetry:session_manager_cleanup(Kind, DurationUs).
 
 %% @private
-cleanup(Session) ->
+%% The single teardown for a session, whatever ended it. Both the owner-DOWN
+%% path and the `close` cast run it, so a session the ROUTER closes (a protocol
+%% violation, `close_all/1`, a realm delete) releases exactly what a crashed
+%% connection releases.
+%%
+%% That symmetry is load-bearing, not tidiness: the flush used to live only on
+%% the DOWN path, and that path gives up as soon as `bondy_session:lookup/1`
+%% misses. A router-initiated close deletes the session record FIRST, so the
+%% owner's later death found nothing and flushed nothing — the session's
+%% registrations and subscriptions stayed in the registry for the life of the
+%% node whenever the owner did not itself run `bondy_wamp_protocol:terminate/1`
+%% (`bondy_session_cleanup_SUITE:graceful_close_removes_session_records`).
+%%
+%% Running it on both paths means the ordinary WAMP disconnect flushes twice —
+%% once here, once in the connection's own `bondy_context:close/1`. `remove_all`
+%% is a bounded prefix select keyed by (type, realm, session), so the second
+%% flush is an empty range scan.
+cleanup(Session, Reason) ->
     %% TODO We need a new API to be the underlying cleanup function behind
     %% bondy_context:close/1. In the meantime we create a fakce context,
     %% knowing what it should contain for the close/2 call to work.
@@ -453,7 +486,7 @@ cleanup(Session) ->
         ref => bondy_session:ref(Session)
     },
     %% Flushes the session's registry entries (subscriptions and
-    %% registrations) via bondy_router:flush/2.
+    %% registrations) and its RPC promises via bondy_router:flush/2.
     bondy_context:close(FakeCtxt, crash),
     %% And deletes the stored session itself — `bondy_context:close/2`
     %% only flushes, so without this a connection that died WITHOUT the
@@ -463,7 +496,7 @@ cleanup(Session) ->
     %% manager, which acts as a session supervisor.
     _ =
         try
-            bondy_session:close(Session, undefined)
+            bondy_session:close(Session, Reason)
         catch
             _:_ -> ok
         end,
@@ -502,13 +535,10 @@ do_close(State0, Session, ReasonUri) ->
 
     ok = maybe_send_goodbye(Session, ReasonUri),
 
-    %% Close session to cleanup in-memory state
-    _ =
-        try
-            bondy_session:close(Session, ReasonUri)
-        catch
-            _:_ -> ok
-        end,
+    %% Flush the session's routing state and delete its records. The caller
+    %% (`handle_cast/2`) already times this, so it calls `cleanup/2` rather
+    %% than `timed_cleanup/3`.
+    ok = cleanup(Session, ReasonUri),
 
     State.
 
@@ -634,12 +664,15 @@ do_schedule_oidc_refresh(Session) ->
         ->
             RealmUri = bondy_session:realm_uri(Session),
             Authid = bondy_session:authid(Session),
-            EntryId = bondy_utils:uuid(),
             AccessExp = maps:get(
                 oidc_access_token_expires_in, Details, 0
             ),
-            ok = bondy_oidc_refresh_worker:schedule_refresh(
-                EntryId,
+            %% Keyed by the session, so the queue entry is addressable by the
+            %% only identifier that outlives a re-schedule. The close path
+            %% stores nothing and removes nothing — the worker drops the entry
+            %% when it comes due and the session is gone.
+            bondy_oidc_refresh_worker:schedule_refresh(
+                bondy_session:id(Session),
                 RealmUri,
                 Authid,
                 Provider,
@@ -647,14 +680,7 @@ do_schedule_oidc_refresh(Session) ->
                     refresh_token => RT,
                     access_token_expires_in => AccessExp
                 }
-            ),
-            %% Store EntryId back for removal at session close
-            Updated = Details#{oidc_refresh_entry_id => EntryId},
-            SessionId = bondy_session:id(Session),
-            ok = bondy_session:update_authmethod_details(
-                SessionId, Updated
-            ),
-            ok;
+            );
         _ ->
             ok
     end.

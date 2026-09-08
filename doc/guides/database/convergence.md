@@ -12,7 +12,7 @@ It assumes the operation key and the applied frontier as
 ## What converges: the applied frontier
 
 Every replicated operation carries a key `{HLC, Origin, Seq}`. A replica's
-**applied frontier** is the per-origin maximum `Seq` it has applied — a version
+**applied frontier** is the per-origin `Seq` it reports as applied — a version
 vector over origins.
 
 The frontier is the unit of comparison because it states what a replica *has*
@@ -22,9 +22,18 @@ the same operations. `bondy_prometheus_db` exports a stable hash of it as
 convergence is derivable in PromQL with no scrape-time network traffic: an
 instance is converged when every node reports the same hash.
 
-The frontier is a maximum, not a prefix. It records that `Seq` 7 arrived from an
-origin; it does not, by itself, record that 5 and 6 did. Closing that gap is the
-fold's job — see `doc/guides/database/prefix_closure.md`.
+Each entry is a **prefix bound**, not a maximum: the largest `Seq` below which
+nothing from that origin is missing. Reporting 7 therefore does assert that 5
+and 6 arrived — which is what makes equal frontiers mean equal operation sets.
+An operation folded above a hole is not lost and not reported: it is kept in a
+per-origin pending set and absorbed into the bound when the hole closes. See
+`doc/guides/database/prefix_closure.md`.
+
+A replica carrying a hole therefore reports a *lower* frontier than one that
+does not, so the hash oracle goes red while it is behind and clears when the
+hole fills. That is the intended reading, and it is a change from the maximum
+this frontier used to be: expect divergence to be visible where it previously
+was not.
 
 ## The sync round
 
@@ -56,8 +65,9 @@ capped round has not seen enough to license either.
 Each of steps 1–4 can succeed while an operation goes missing, and the round
 still records success. A replica that concludes "we agree" from such a round
 then acts on it — it lets the origin reclaim the space, and the loss becomes
-permanent and invisible to the frontier oracle, because a maximum merges past a
-hole. Three mechanisms close that.
+permanent. Under the maximum this frontier used to be it was also invisible,
+because a maximum merges past a hole. Three mechanisms close the loss itself,
+and the prefix bound above is what makes what remains visible.
 
 ### The watermark door
 
@@ -164,6 +174,42 @@ pulling. It drops the tree and resumes anti-entropy on a fresh one, but only
 after a domination gate proves no peer is stranded on the tree being discarded.
 Counter: `bondy_oplog_mst_rebuilt_total`. It should be zero; any occurrence
 means pages went missing and that is the question to chase, not the heal.
+
+## An inherited over-claim
+
+Releases up to and including `1.0.0-rc.lime` rebuilt part of the applied
+frontier at every start by folding the live tree's event keys into it. The tree
+records **receipt**, not materialisation, so an event whose cell did not resolve
+was counted as applied. A frontier such a release persisted may therefore assert
+an applied prefix over an operation that never reached the projection.
+
+An instance that restores one of those checkpoints raises
+`bondy_oplog_frontier_receipt_derived` (major, does not affect readiness), naming
+the instance and the remote origins whose entries are suspect. The own-origin
+entry is not suspect: a local write folds before its event is minted, so the same
+derivation is sound for it.
+
+The alarm reports a **loss of detection**, not a loss of data. The node serves
+exactly what it served before the upgrade; what it can no longer do reliably is
+notice that it is behind, because the suspect entries are the ones the deficit
+check in *Detecting a replica that is genuinely behind* reads. A replica that
+over-claims an origin reports no deficit for it and so never escalates to a
+re-bootstrap.
+
+**There is no in-place repair, and the alarm does not offer one.** The two
+available moves both fail:
+
+- *Keep the value.* No merge lowers an entry, so nothing later corrects it.
+- *Drop the suspect entries.* The compacted prefix cannot be re-derived
+  locally, so the entry does not return to its true value — it returns to zero,
+  and the seqs still held in the live tree become a permanent gap above it.
+  That trades a silent over-claim for a standing hole that only a re-bootstrap
+  closes.
+
+The sound exit is to replace the value: stop the node, remove the affected
+instance's data directory, and let it bootstrap from a peer. Provenance is
+sticky, so a node that inherits a suspect frontier keeps stamping every
+checkpoint it writes as suspect — one clean shutdown does not clear it.
 
 ## Recovery timing
 

@@ -82,9 +82,7 @@ data will be lost.
     oidc_refresh_token =>
         optional(binary()),
     oidc_access_token_expires_in =>
-        optional(pos_integer()),
-    oidc_refresh_entry_id =>
-        optional(binary())
+        optional(pos_integer())
 }.
 -type external() :: #{
     session => id(),
@@ -380,8 +378,15 @@ close(#session{} = S, Reason) when
     %% Cleanup counters
     ok = bondy_message_id:purge_session(RealmUri, Id),
 
-    %% Revoke Tickets and Tokens
-    ok = maybe_revoke_tickets(S, Reason),
+    %% NOTE: no credential is revoked here. This used to dispatch on
+    %% `Reason == ?WAMP_CLOSE_LOGOUT`, which no caller has ever passed: a
+    %% client's GOODBYE reason is recorded by `bondy_wamp_protocol` and then
+    %% dropped, and `terminate/1` closes with `undefined`. The clause was
+    %% therefore dead, and a reader took it for a working logout. A WAMP
+    %% client still has no way to revoke its own ticket — `bondy.ticket.revoke`
+    %% is a TODO in `bondy_ticket_api` and only the OIDC *HTTP* logout
+    %% (`bondy_oidc_handler`) revokes. Removed rather than left in place; the
+    %% fix is a separate change.
 
     %% Notify internally. Metrics ride telemetry; the gen_event
     %% notification remains for the WAMP meta-event publisher.
@@ -1127,44 +1132,6 @@ get_rbac_metadata(#session{
     bondy_rbac:get_metadata(Uri, Authid, Roles);
 get_rbac_metadata(#session{authid = Authid, realm_uri = Uri}) ->
     bondy_rbac:get_metadata(Uri, Authid).
-
-%% @private
-maybe_revoke_tickets(Session, ?WAMP_CLOSE_LOGOUT) ->
-    case authmethod(Session) of
-        ?WAMP_TICKET_AUTH ->
-            Authid = authid(Session),
-            #{
-                authrealm := Authrealm,
-                scope := Scope
-            } = authmethod_details(Session),
-            bondy_ticket:revoke(Authrealm, Authid, Scope);
-        ?OIDCRP_AUTH ->
-            case authmethod_details(Session) of
-                #{id := TicketId, authrealm := Authrealm, scope := Scope} =
-                        Details when
-                    TicketId =/= undefined
-                ->
-                    %% Remove from refresh queue
-                    case maps:find(oidc_refresh_entry_id, Details) of
-                        {ok, EntryId} when is_binary(EntryId) ->
-                            bondy_oidc_refresh_worker:remove_entry(EntryId);
-                        _ ->
-                            ok
-                    end,
-                    Authid = authid(Session),
-                    bondy_ticket:revoke(Authrealm, Authid, Scope);
-                _ ->
-                    ok
-            end;
-        ?WAMP_OAUTH2_AUTH ->
-            %% TODO remove token for sessionID
-            ok
-    end;
-maybe_revoke_tickets(_, _) ->
-    %% No need to revoke tokens.
-    %% In case of ?BONDY_USER_DELETED, the delete action would have already
-    %% revoked all tokens for this user.
-    ok.
 
 %% =============================================================================
 %% TEST

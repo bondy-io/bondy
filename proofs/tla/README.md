@@ -944,3 +944,236 @@ check and catalogue rebootstrap (the repair for what this module shows must
 not be needed), origin retirement reaping a VV entry (a reaped entry
 certifies nothing — conservative), and page transfer (a round is atomic; the
 re-shipment cost is stated, not counted).
+
+## `MuxBucketSkip.tla` — can the frontier claim a cell whose BUCKET had no context?
+
+`AaeCausalClosure.tla` models delivery as though every delivered event lands in
+`applied`; its only loss channel is a per-origin contiguity hole. That
+abstraction hides a second one. A shard instance multiplexes several tables
+onto one oplog, each tagged with a **bucket**; the instance is founded by the
+first table opened on it and siblings register later, so the routable bucket
+set GROWS while the instance is already serving anti-entropy — and a restart
+drops it back to the founding bucket while the durable frontier survives
+intact. A cell whose bucket does not resolve is skipped, and both the fold and
+the bootstrap can then report a frontier entry the projection does not hold.
+
+**Yes — by two independent routes.** This module isolates them and checks the
+five mechanisms that close them.
+
+### The two channels
+
+1. **The fold.** `apply_cell_pairs_mux/5` groups a replay batch by bucket,
+   drops the groups that do not resolve, and merges the frontier per
+   *surviving* group. A skipped sibling does not hold the merge back, and with
+   `Held = 0` the replay cursor advances past the dropped cells, so nothing
+   re-presents them.
+2. **The bootstrap.** `finalize_catalogue_bootstrap/5` max-merges the peer's
+   whole version vector after an install that skipped whatever it could not
+   route. The peer's own `build_targets/2` enumerates the buckets to scan from
+   the peer's registry, so a peer still opening its tables **under-ships while
+   answering `get_frontier` in full** — the asymmetry is the defect, and a
+   model whose `reg` only ever grows is structurally incapable of expressing
+   it.
+
+The second route is why closing the first is not enough: a claim rule that
+bounds the fold says nothing about a vector adopted wholesale from a peer.
+
+### The mechanisms, and which are load-bearing
+
+TLC 2.19, `Spec`/`FairSpec`, 2 replicas, 2 buckets, `MaxSeq = 2`, one restart
+per replica. Invariants `TypeOK`, `NoOverClaim`, `NoStrandedCell`; `Live`
+where noted.
+
+| Config | Mechanism removed | Result |
+| --- | --- | --- |
+| `Final_Skew` | — (all five, `VersionSkew = TRUE`) | clean + `Live`, 20,736 distinct |
+| `Final_NoSkew` | — (all five, transient window only) | clean + `Live`, 126,529 distinct |
+| `Final_3r` | — (all five, 3 replicas, `MaxSeq = 1`) | clean, 7,227,093 distinct |
+| `Minus_AdoptIfComplete` | bootstrap adopts unconditionally — **the shipped rule** | **`NoOverClaim` violated** |
+| `Minus_ServeGate` | responder serves before its directory is complete | **`NoOverClaim` violated** |
+| `Minus_SkipHole_Contig` | fold hole **and** contiguous claim | **`NoOverClaim` violated** |
+| `Minus_SkipIsHole` | fold hole only | clean |
+| `Minus_ContigClaim` | contiguous claim only | clean |
+| `Minus_GateOnRegistration` | initiator gate | clean |
+| `Minus_GapVerdict` | the frontier-gap verdict, for a deficit this replica cannot close | **`Live` violated** |
+
+The `Minus_GapVerdict` row answers the question that comes up the moment the
+claim is withheld. Withholding leaves the replica permanently behind that
+peer, so every round raises a gap and schedules a re-bootstrap that installs
+the same partial projection again — an obvious candidate for suppression, since
+no re-bootstrap can ever close that deficit. **Suppressing it costs `Live`,**
+and the counterexample says why in one step: r2 holds both events in its tree,
+`Replay(r2)` is enabled and fires as a permanent no-op, and `applied[r2]` never
+grows. The per-origin hold parks the routable seq behind the unroutable one,
+and `CatalogueBootstrap` is the ONLY action in the module that writes `applied`
+without passing through the fold. The cycle is not waste; it is the sole
+delivery path for exactly the data the hold parks. What ends it is an operator
+resolving the skew — which is why the condition must raise an alarm rather than
+be optimised away.
+
+Read the next four rows together. **`SkipIsHole` and `ContigClaim` are
+alternatives, not a pair** — either alone closes the fold channel and removing
+both opens it. And `GateOnRegistration`, the initiator half of the readiness
+gate, is **not load-bearing for these invariants at these bounds**: once the
+bootstrap withholds an unsound claim, gating the initiator buys no safety. Its
+justification is that it avoids a bootstrap that installs a partial projection
+and can then claim nothing — behaviour, not soundness. Say that, not more.
+
+`Minus_AdoptIfComplete` is the shipped state and it violates in 4 steps: r1
+registers `b2`, mints `(r1,1)` into it, r2 bootstraps. r2's declared set is
+`{b1}` so the initiator gate is open; r1's directory is complete so the
+responder gate is open. r2 installs nothing and claims `r1 |-> 1`.
+
+### `Declared(r)`, not the global bucket set
+
+An earlier version gated on `reg[r] = Buckets` and concluded the registration
+gate was safe but DEAD under version skew. That was an artefact of the wrong
+predicate: it modelled a gate no orchestrator would build.
+`bondy_db:start_draining/1` releases the real gate once the catalogue has
+opened every table **it declares**, which is bounded and always reached. The
+model uses `Declared(r)` throughout.
+
+### Why withhold the claim rather than refuse the bootstrap
+
+Refusing to finalize a bootstrap that skipped anything is also sound, and it
+**violates `Live`** under version skew: a bucket this build has no table for
+never becomes routable, so the replica never bootstraps and never receives the
+data it *can* route. Withholding only the claim keeps `Live` (`Final_Skew`).
+The two rules differ in what they do with a permanent condition, and only one
+of them terminates.
+
+A rule that derives the claim from what *installed* is unavailable, not merely
+worse: a shipped cell is `{Bucket, Key, Frame}` carrying no origin and no seq.
+An earlier version of this module computed one anyway, under `ContigClaim`, and
+it **masked the bootstrap channel** — every configuration pairing the shipped
+fold fix with the shipped bootstrap came out clean for that reason alone. The
+bootstrap claim now has only the two implementable options.
+
+`Bucket_Skip_Soundness.thy` discharges both channels unbounded:
+`contig_claim_sound` for the fold, `adopt_if_complete_sound` for the bootstrap
+— the latter carrying the responder gate as a hypothesis, with
+`unconditional_adoption_unsound` and `adoption_unsound_without_serve_gate`
+refuting each half by a concrete witness.
+
+### Code status
+
+| Mechanism | Code |
+| --- | --- |
+| `SkipIsHole` | **BUILT** — `bondy_oplog_cell_apply:partition_contiguous/4` draws its contiguous run from the routable seqs |
+| `ContigClaim` | **BUILT** — `bondy_oplog_registry:merge_applied/2` reports a prefix, out-of-order seqs held in `pending` |
+| `ServeGate` | **BUILT** — `bondy_oplog_responder` refuses `get_catalogue_snapshot_init` while `bondy_oplog_registry:tables_registered/1` is false |
+| `GateOnRegistration` | **BUILT** — `bondy_oplog_sync_scheduler:default_dispatch/2` |
+| `AdoptIfComplete` | **BUILT** — the install returns `unclaimable`, the buckets whose cells did not land for a reason no local value covers, and `bondy_oplog_sync_session:adopt_frontier/3` passes the peer's vector to `finalize_catalogue_bootstrap/5` only when it is empty. `skipped` could not decide it: three causes (unroutable bucket, decode error, HLC-older) share that one integer and only the first two are unsound |
+
+### Bounds
+
+2 replicas, 2 buckets, `MaxSeq = 2`, one restart each; plus one 3-replica run
+at `MaxSeq = 1`. Three replicas at `MaxSeq = 2` does **not** close — it passed
+64M distinct states still at depth 18 and was abandoned, so the 3-replica
+evidence covers one event per origin only. Compaction, the MST, HLCs and
+network failure are not modelled — the loss needs none of them. No refinement
+proof links this module to the Erlang.
+---
+
+## `FrontierPending.tla` — one integer per origin, or a prefix and a pending set?
+
+The section above ends by recording what shipped: a cap on the claim itself.
+That function (`merge_batch_frontier/4`) was reverted; its successor is
+`bondy_oplog_cell_apply:claim/2`, built in `_design/applied_frontier.md`
+increment 3 — per origin, the highest seq that materialised, strictly below the
+lowest seq **this batch** observed failing. Its own docstring records the limit:
+a failure in another batch is out of its reach. This module measures that limit
+and the two candidate representations against the same interleavings.
+
+What `MuxBucketSkip.tla` could not see is that the claim is computed **once per
+batch** and joined into a stored integer, and that batch boundaries are set by
+drain timing. So the question is not which arithmetic to use. It is whether a
+single integer can carry what one batch learns to the batch that needs it.
+
+### It cannot, and that is a theorem, not a config
+
+`proofs/isabelle/Frontier_Pending.thy` discharges the universal statement TLC
+cannot reach: for **any** writer whose state is one integer per origin, if it is
+sound on every schedule then on `[({2}, {}), ({1}, {})]` it ends reporting 1
+while the projection holds `{1, 2}` (`no_scalar_writer_sound_and_complete`).
+Neither schedule contains a failure. This module supplies what the theory does
+not model — concurrency, restarts, the compaction door, and the two channels
+`MuxBucketSkip.tla` separated.
+
+### Modelling corrections made during the run
+
+Two results came back wrong the first time, and both were the model, not the
+design:
+
+1. **`ApplyBatch` took an arbitrary subset of the inbox**, so it could present
+   seq 2 while seq 1 sat queued. The applier drains in arrival order. With
+   `InOrderDelivery` (arrival order = seq order) a batch is now a per-origin
+   prefix of the inbox, which is exact; without it the two orders differ and the
+   arbitrary subset stands in for an arrival-order prefix, an over-approximation
+   the module states. Before the fix, the shipped rule appeared unsound even
+   with in-order delivery and every bucket routable — an artefact.
+2. **`Truncate` dropped a single entry.** Both truncation sites truncate a
+   PREFIX capped below the smallest key the frontier does not claim
+   (`watermark_door/3` truncates below `MinHeld`; `capped_truncation_point/2`
+   below the first never-applied key). `TruncatePrefixOnly = TRUE` is the code;
+   the one run that sets it FALSE exists to show what the cap is buying.
+
+Weak fairness on `\E B : ApplyBatch(B)` was also not enough for the liveness
+runs: it is satisfied by an adversary that presents the same proper subset
+forever. The fold's fairness is strong and on the full drain,
+`SF_vars(ApplyBatch(inbox))`.
+
+### Results
+
+Exhaustive. `Origins = {o1}`, `MaxSeq = 3`, `Buckets = {b1, b2}`, door on and
+prefix-capped, unless the row says otherwise.
+
+| Configuration | Result |
+| --- | --- |
+| `FrontierPending_MaxCap.cfg` | `NoOverClaim` violated, 28 distinct states |
+| `FrontierPending_MaxCap_Loss.cfg` | `NoLoss` violated, 157 distinct states |
+| `FrontierPending_MaxCap_WholeBatch.cfg` | `NoOverClaim` violated, 29 distinct states |
+| `FrontierPending_MaxCap_InOrder.cfg` | `NoOverClaim` violated, 120 distinct states |
+| `FrontierPending_MaxCap_InOrder_AllRoutable.cfg` | clean, 313 distinct states |
+| `FrontierPending_Contig.cfg` | clean, 626 distinct states |
+| `FrontierPending_Contig_Dead.cfg` | `Complete` violated, 354 distinct states |
+| `FrontierPending_Contig_NoRefold_Stuck.cfg` | `EventuallyComplete` violated, 626 distinct states |
+| `FrontierPending_Contig_Refold.cfg` | clean, 1,355 distinct states |
+| `FrontierPending_Pending.cfg` | clean, 532 distinct states |
+| `FrontierPending_Pending_TwoOrigins.cfg` | clean, 4,160 distinct states |
+| `FrontierPending_Pending_ExactDoor.cfg` | clean, 706 distinct states |
+| `FrontierPending_Pending_Restart.cfg` | clean, 1,476 distinct states |
+| `FrontierPending_Pending_Restart_NoRefold.cfg` | `EventuallyComplete` violated, 1,194 distinct states |
+| `FrontierPending_Pending_ExactDoor_Restart_Uncapped.cfg` | `EventuallyComplete` violated, 2,377 distinct states |
+
+```
+java -cp tla2tools.jar tlc2.TLC -workers 4 -config FrontierPending_<c>.cfg FrontierPending.tla
+```
+
+### The three traces worth reading
+
+**The shipped rule loses a user, against the door as implemented**
+(`_MaxCap_Loss`, 5 steps). Seq 2 arrives and folds; the claim goes to 2; seq 1
+arrives; the door asks `never_applied/2`, which judges against that same
+frontier, is told seq 1 is applied, and truncates it. `applied = {2}`,
+`gone = {seq 1}`. The over-claim and the loss of the repair are the same act —
+`_design/applied_frontier.md` §3.2, now checked against the real prefix cap
+rather than an idealised door.
+
+**The prefix bound is sound and dead** (`_Contig_Dead`). Everything arrives,
+every bucket routes, the projection holds all three seqs — and the entry reports
+1, because the seq folded while the hole was open was recorded nowhere. A
+re-fold repairs it (`_Contig_Refold` is clean under `EventuallyComplete`), which
+is exactly today's arrangement and exactly its cost: an O(live MST) fold as the
+routine repair rather than the restart repair.
+
+**Sharpening the door is safe only because of the cap**
+(`_Pending_ExactDoor_Restart_Uncapped`, 11 steps). Seqs 2 and 3 fold while seq 1
+is outstanding; the sharpened door reads the pending half, calls them applied
+and truncates them; a restart drops the volatile half; seq 1 then folds and the
+prefix reaches 1 — and 2 and 3 can never be re-derived, because the tree no
+longer holds them. Nothing was lost from the projection; the frontier is stalled
+for good. With the cap in place (`_Pending_ExactDoor`) this is unreachable,
+because the hole holds everything above it. The ruling is to keep
+`never_applied/2` on the prefix: it needs no such argument, and the sharpened
+test buys nothing the cap has not already given.

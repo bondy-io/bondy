@@ -69,6 +69,13 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 -define(AW_CRDT, bondy_oplog_crdt_aw_map).
 -define(EW_CRDT, bondy_oplog_crdt_ew_flag).
 
+%% The subscription RIB cell's carrier: a `bondy_oplog_crdt_pn_counter` whose
+%% per-origin entries are reclaimable because the cell key names its sole
+%% writer. Naming it here IS the declaration that this table's cells are
+%% node-owned — see its moduledoc for why that licence belongs to the table
+%% rather than to the counter.
+-define(OWNED_COUNTER_CRDT, bondy_oplog_crdt_owned_counter).
+
 %% The registration RIB cell's `bondy_oplog_crdt_struct` schema, passed as
 %% `crdt_opts` (the struct has no schema of its own — see
 %% `bondy_oplog_crdt_struct`'s moduledoc). `count`'s `stabilize_zero => 0`
@@ -79,11 +86,53 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 %% element per add and one tombstone per remove, forever), at the
 %% documented cost that removals never shrink them: they are lifetime
 %% watermarks of the group, which WAMP dealer semantics permit.
+%%
+%% `count`'s `force_reap => true` is what makes a DEPARTED node's cell
+%% reclaimable. A RIB cell is single-writer — its key carries the owner's
+%% nodestring, so every contribution is minted by one origin — and the count
+%% is live local entries on that node, which cannot outlive it. That is
+%% exactly `bondy_oplog_crdt_struct:force_reap_field/3`'s licensing condition
+%% ("a field whose own domain semantics make a retired origin's contributions
+%% unconditionally, permanently invalid"). Without it a departed node's cell
+%% is immortal: only the owner's own `{inc, -1}`s can reach `stabilize_zero`,
+%% and the owner is gone. With it, the membership-driven cell reap zeroes the
+%% count and the `stabilize_zero` discard reclaims the cell outright — which
+%% matters because `bondy_oplog_cell_utils:reap_one_cell/6` re-encodes a
+%% VALUE-PRESERVING frame, so reclamation rests on `stabilize/2` reading the
+%% shrunk state, not on the value column. That chain is pinned by
+%% `bondy_oplog_crdt_struct_test`'s
+%% `force_reap_zeroes_the_field_and_discards_the_cell_test/0`, with
+%% `reap_without_force_reap_preserves_the_value_test/0` as the control.
+%%
+%% EVERY field declares it, not just `count`, and that is load-bearing rather
+%% than tidy. `bondy_oplog_crdt_struct:reap_origins/2` only reaps an origin's
+%% CC entry once it has no live dot in ANY field's dot-store
+%% (`live_origins/1` folds over all of them), and
+%% `bondy_oplog_cell_utils:reap_one_cell/6` SKIPS the write when nothing was
+%% reaped — discarding the force-reaped fields with it. So one un-declared
+%% field (`invoke`, say) keeps the departed writer live and silently defeats
+%% the whole mechanism. Measured: with `count` alone declared,
+%% `bondy_rib_reclamation_cluster_SUITE` scanned the cell and reaped nothing.
+%% That suite is what pins this; a single-field unit test cannot see it.
+%% See `m:bondy_registry_rib`'s "Departure" section.
+%%
+%% This applies to the REGISTRATION cell only. The subscription cell has a
+%% single field and therefore no schema at all: it is a bare
+%% `?OWNED_COUNTER_CRDT`, whose reap licence is the table declaration rather
+%% than a per-field policy. Wrapping it in a one-field struct to gain
+%% `force_reap` bought nothing and cost a causal tier — tier_2 state grows one
+%% dot per unstabilized write, making `apply_op` quadratic. Measured on the
+%% Fly fleet: subscribe latency 198ms -> 6-23s, `all_subscribed_ok` 100% ->
+%% 66.7%. Registrations keep the struct because they genuinely have four
+%% fields and are orders of magnitude lower in write rate.
 -define(RIB_REGISTRATION_SCHEMA, #{
-    count => {bondy_oplog_crdt_pn_counter, #{stabilize_zero => 0}},
-    invoke => bondy_oplog_crdt_lww_register,
-    earliest => bondy_oplog_crdt_min_register,
-    latest => bondy_oplog_crdt_max_register
+    count =>
+        {bondy_oplog_crdt_pn_counter, #{
+            stabilize_zero => 0, force_reap => true
+        }},
+    invoke => {bondy_oplog_crdt_lww_register, #{force_reap => true}},
+    earliest => {bondy_oplog_crdt_min_register, #{force_reap => true}},
+    latest => {bondy_oplog_crdt_max_register, #{force_reap => true}}
 }).
 
 -record(state, {
@@ -429,10 +478,10 @@ tables() ->
         %% (subscriptions). Only the node named in the key ever writes the
         %% cell — single-writer by construction. `count`/`invoke`/`earliest`/
         %% `latest` are backed by per-field CRDTs (`fold =>
-        %% rib_registration`/`rib_subscription` resolve to
-        %% `bondy_oplog_crdt_struct`, schema `?RIB_REGISTRATION_SCHEMA`, and a
-        %% bare `bondy_oplog_crdt_pn_counter` respectively — registered
-        %% directly, no per-use-case wrapper module) rather than one opaque
+        %% rib_registration` resolves to `bondy_oplog_crdt_struct` with schema
+        %% `?RIB_REGISTRATION_SCHEMA`; `fold => rib_subscription` resolves to
+        %% `?OWNED_COUNTER_CRDT`, which needs no schema because the cell is a
+        %% single counter) rather than one opaque
         %% LWW blob, so `bondy_registry_rib`'s entry-add/remove hooks write
         %% small, lock-free, targeted deltas directly — no per-realm
         %% recompute/serialisation point. `publish => true` wires the
@@ -557,14 +606,18 @@ native CRDT — the per-table "WAMP fold module" selection. These map what
 - `rib_registration` / `rib_subscription` → `lww_register` carrier +
   `bondy_oplog_crdt_struct` (schema `?RIB_REGISTRATION_SCHEMA`, passed as
   `crdt_opts` — the struct has no schema of its own) /
-  `bondy_oplog_crdt_pn_counter`, registered directly (no per-use-case
-  wrapper module): the registry RIB tables (see `tables/0`). The raw
-  projected value is NOT the external `#{invoke, count, earliest,
-  latest}` / `#{count}` summary shape read-side consumers expect —
-  `bondy_registry_rib:reshape_summary/2` derives it at every read call
-  site, immediately after the raw read/list. `bondy_registry_rib`'s write
-  path is lock-free per-field deltas, not a serialised recompute-from-
-  scratch whole-blob write.
+  `bondy_oplog_crdt_owned_counter` (no schema — one field needs none): the
+  registry RIB tables (see `tables/0`). Both carriers are reapable, which
+  is what lets a departed node's cells be reclaimed, but they earn it
+  differently — the struct through a per-field `force_reap` policy, the
+  owned counter through this declaration itself. The registration cell's
+  raw projected value is NOT the external `#{invoke, count, earliest,
+  latest}` summary shape read-side consumers expect, and the subscription
+  cell's is a bare integer, not `#{count => N}` —
+  `bondy_registry_rib:reshape_summary/2` derives the summary at every read
+  call site, immediately after the raw read/list. `bondy_registry_rib`'s
+  write path is lock-free per-field deltas, not a serialised recompute-
+  from-scratch whole-blob write.
 
 `mv_register` / `aw_map` / `ew_flag` / the two RIB CRDTs have no short
 fold alias in `bondy_oplog_cell_kernel`, so they are passed as an
@@ -590,7 +643,10 @@ fold_opts(rib_registration) ->
         crdt_opts => ?RIB_REGISTRATION_SCHEMA
     };
 fold_opts(rib_subscription) ->
-    #{fold_module => lww_register, crdt_module => bondy_oplog_crdt_pn_counter};
+    #{
+        fold_module => lww_register,
+        crdt_module => ?OWNED_COUNTER_CRDT
+    };
 fold_opts(presence) ->
     %% Reserved presence-FSM fold — no current table uses it (the registry
     %% tables converge as `lww`); no mapping yet.

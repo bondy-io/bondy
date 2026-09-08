@@ -45,6 +45,7 @@ here.
 %% SCHEDULERS
 -export([sync_scheduler_enabled/0]).
 -export([sync_interval_ms/0]).
+-export([frontier_hole_alarm_ms/0]).
 -export([gc_scheduler_enabled/0]).
 -export([origin_retirement_enabled/0]).
 -export([origin_retirement_interval_ms/0]).
@@ -125,6 +126,29 @@ sync_scheduler_enabled() ->
 
 sync_interval_ms() ->
     application:get_env(?APP, sync_interval_ms, 500).
+
+-doc """
+How long an instance may carry a per-origin contiguity hole in its applied
+frontier before the node raises `{bondy_oplog_frontier_hole, InstanceId}`
+(default 5 minutes; `0` disables the detector and clears whatever it raised).
+
+A hole is a seq run this replica never received, with later seqs of the same
+origin already folded above it (`bondy_oplog_registry:pending/1`). Short-lived
+holes are ROUTINE — a local WAL commit landing out of seq order, a burned seq
+waiting for its `seq_fill` backfill, a peer round away — so the alarm is on the
+AGE of the condition, not its occurrence. The threshold is minutes rather than
+seconds because the mechanisms that close a hole are themselves paced in
+rounds: the default AAE tick is `sync_interval_ms` and a catalogue
+re-bootstrap streams a whole projection.
+
+Measured by `bondy_oplog_sync_scheduler`'s own periodic hole tick, which runs
+independently of `sync_scheduler_enabled/0` — a node with AAE off is MORE
+likely to carry a standing hole, not less.
+""".
+-spec frontier_hole_alarm_ms() -> non_neg_integer().
+
+frontier_hole_alarm_ms() ->
+    application:get_env(?APP, frontier_hole_alarm_ms, 300_000).
 
 -doc "Whether the periodic compaction (GC) scheduler ticks (default `true`).".
 -spec gc_scheduler_enabled() -> boolean().

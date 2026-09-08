@@ -165,7 +165,7 @@ dangling_root_not_advertised(Dir) ->
 %% may therefore be truncated. A maximum cannot represent a hole, so a
 %% frontier that ran ahead of an unseen seq would license the door to drop
 %% the repair for that seq the moment a peer supplied it --- silently, and on
-%% every subsequent round. `bondy_oplog_cell_apply:partition_contiguous/3`
+%% every subsequent round. `bondy_oplog_cell_apply:partition_contiguous/4`
 %% is what stops the frontier getting there.
 hold_keeps_frontier_off_an_unseen_prefix(Dir) ->
     Origin = <<"door-origin-aaaa">>,

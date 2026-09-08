@@ -23,9 +23,13 @@ handler. The handler supervisor governs *execution*; this module governs
 
 A pure value (`t()`) — the rate limiter's mutable counters live in the
 `bondy_regulator` runtime (atomics), so copying the value is safe. The bucket
-itself is a row in the `bondy_regulator` ETS table, so it must be **reused
-across reconnects** (`reset/1`, not a fresh `new/1` each time) and **deleted on
-teardown** (`delete/1`); otherwise a row leaks per reconnect.
+is UNREGISTERED (`bondy_regulator_rate_limit:new/2`): it owns no row in the
+`bondy_regulator` table, and its atomics array is freed by the VM when the last
+reference to the value goes. There is therefore no teardown to run and nothing
+a dropped connection can orphan. Reconnects still reuse the bucket (`reset/1`,
+not a fresh `new/1`) — not to avoid a leak now, but because the token counters
+are time-based and a fresh bucket would hand the reconnecting peer a full
+burst.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -45,7 +49,6 @@ teardown** (`delete/1`); otherwise a row leaks per reconnect.
 -export([release/1]).
 -export([in_flight/1]).
 -export([reset/1]).
--export([delete/1]).
 
 %% =============================================================================
 %% API
@@ -93,24 +96,13 @@ in_flight(#load{in_flight = N}) ->
 
 -doc """
 Reset for a reconnect: zero the in-flight count (the previous session's handler
-workers have been torn down) while **keeping the same token bucket**. The bucket
-must be reused — creating a fresh one on every reconnect would orphan a
-`bondy_regulator` ETS row each time. The bucket's own token counters
-are time-based and intentionally survive the reconnect.
+workers have been torn down) while **keeping the same token bucket**. The
+bucket's token counters are time-based and intentionally survive the reconnect;
+a fresh bucket would hand the reconnecting peer a full burst.
 """.
 -spec reset(t()) -> t().
 reset(#load{} = L) ->
     L#load{in_flight = 0}.
-
--doc """
-Delete the token bucket (if any) on connection teardown, freeing its
-`bondy_regulator` ETS row. A no-op when no rate limit is configured.
-""".
--spec delete(t()) -> ok.
-delete(#load{limiter = undefined}) ->
-    ok;
-delete(#load{limiter = T}) ->
-    bondy_regulator_rate_limit:delete(T).
 
 %% =============================================================================
 %% PRIVATE
@@ -120,8 +112,10 @@ delete(#load{limiter = T}) ->
 make_limiter(undefined) ->
     undefined;
 make_limiter(Opts) when is_map(Opts) ->
-    Key = {?MODULE, self(), erlang:unique_integer([positive])},
-    case bondy_regulator_rate_limit:new(token_bucket, Key, Opts) of
+    %% UNREGISTERED (`new/2`): this bucket is private to one connection's
+    %% handler state and is never looked up by key, so it owns no row that a
+    %% teardown could fail to remove.
+    case bondy_regulator_rate_limit:new(token_bucket, Opts) of
         {ok, T} ->
             T;
         {error, Reason} ->

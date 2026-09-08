@@ -369,13 +369,7 @@ flush(RealmUri, Ref) ->
         %% cannot pick this ref as a callee after we start the flush.
         SessionId = bondy_ref:session_id(Ref),
         bondy_registry:remove_all(
-            registration,
-            RealmUri,
-            SessionId,
-            fun on_unregister/1,
-            %% disable broadcast to avoid an avalanche on the other notes
-            %% they will get this delete in the next AAE exchange
-            #{broadcast => false}
+            registration, RealmUri, SessionId, fun on_unregister/1
         ),
 
         %% Cleanup all RPC queued invocations for Ref. For invocation

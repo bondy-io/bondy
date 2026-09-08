@@ -20,7 +20,7 @@ is ignored here.
 |-------------------------|---------------|-------------|
 | `security_users`        | delete        | close this node's sessions for the user (`bondy.user.deleted`) |
 | `security_users`        | credential change | close this node's sessions for the user (`bondy.user.credentials_changed`) |
-| `bondy_realm`           | delete        | close this node's sessions for the realm (`wamp.close.close_realm`) |
+| `bondy_realm`           | delete        | close this node's sessions for the realm and drop its registry entries (`bondy_realm:teardown/1`) |
 | `security_user_grants`  | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) + conflict alarm |
 | `security_group_grants` | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) + conflict alarm |
 | `security_group_members`| add/remove    | invalidate this node's cached RBAC contexts for the realm (§9.5) |
@@ -338,14 +338,27 @@ route(NS, Key, Op, Old, #state{subs = Subs}) ->
 %% in an ETS table that only these reactions ever write, and it also owns the
 %% correction of this node's OWN resurrected cells.
 %%
-%% Every other kind is an INVALIDATION (close sessions whose credentials
-%% changed, drop a cached RBAC context). A bootstrap that reaches them has by
-%% definition just replaced the projection those caches would be rebuilt
-%% from, and the node doing it either has no sessions and no caches yet (a
-%% fresh replica) or has already had its caches driven by the op-replay that
-%% `bondy_oplog_sync_session:finish_bootstrap/4` runs for a LIVE
-%% re-bootstrap. There is nothing for them to invalidate here, so they are a
-%% deliberate no-op rather than an oversight.
+%% `user`, `grant`, `member`, `group` and `source` are INVALIDATIONS (close
+%% sessions whose credentials changed, drop a cached RBAC context). A bootstrap
+%% that reaches them has by definition just replaced the projection those
+%% caches would be rebuilt from, and the node doing it either has no sessions
+%% and no caches yet (a fresh replica) or has already had its caches driven by
+%% the op-replay that `bondy_oplog_sync_session:finish_bootstrap/4` runs for a
+%% LIVE re-bootstrap. There is nothing for them to invalidate here, so they are
+%% a deliberate no-op rather than an oversight.
+%%
+%% `realm` is NEITHER, and is the one gap here. `bondy_realm:teardown/1` drops
+%% node-local state (sessions, registry entries) that no bootstrap rebuilds and
+%% no other node can reach, so a live node bootstrapped past a realm delete
+%% keeps that realm's entries until it restarts.
+%%
+%% Reconciling it against the projection here would be WRONG, not merely
+%% missing: `bondy_oplog_applier:maybe_publish_bootstrap/4` fires once per
+%% install BATCH, and a streamed snapshot arrives in many, so this runs while
+%% the projection is still partial. Reading "realm absent" as "realm deleted"
+%% at that point tears down realms that are simply not installed yet. Closing
+%% the gap needs an end-of-bootstrap signal, which the dispatcher does not
+%% publish.
 bootstrap_rebuild(NS, #state{subs = Subs}) ->
     case lists:keyfind(NS, #sub.ns, Subs) of
         #sub{kind = Kind, table = Table} ->
@@ -359,8 +372,8 @@ bootstrap_rebuild(NS, #state{subs = Subs}) ->
 Rebuild whatever the reaction for `Kind` DERIVES from `Table`, after a
 catalogue-snapshot install replaced that table's projection wholesale.
 
-Only `rib` derives state. Every other kind is an invalidation and has
-nothing to invalidate at this point — see `bootstrap_rebuild/2`'s note.
+Only `rib` derives state. The invalidation kinds have nothing to invalidate at
+this point, and `realm` has a known gap — see `bootstrap_rebuild/2`'s note.
 MUST be total.
 """.
 -spec bootstrap_reaction(Kind :: atom(), Table :: atom()) -> ok.
@@ -464,20 +477,26 @@ authorized_keys_changed(New, Old) ->
         NewKeys =/= maps:get(authorized_keys, Old, undefined).
 
 %% @private
-%% React to a remote bondy_realm change. A `clear` (delete) closes this node's
-%% sessions for the realm; a `set` (create / update) is a no-op here. The delete
-%% arrives as bondy_db's short-form `clear` atom (the explicit `{clear, Hlc}`
-%% form is accepted too).
+%% React to a remote bondy_realm change. A `clear` (delete) runs this node's
+%% half of the realm teardown; a `set` (create / update) is a no-op here. The
+%% delete arrives as bondy_db's short-form `clear` atom (the explicit
+%% `{clear, Hlc}` form is accepted too).
+%%
+%% Unlike every other reaction here this is not an invalidation: sessions are
+%% node-local and full registry entries are never replicated, so the state
+%% `bondy_realm:teardown/1` drops is state no other node can reach. That is
+%% also why it is the one reaction a catalogue-snapshot bootstrap would need to
+%% cover — see `bootstrap_reaction/2`.
 react_realm(Key, clear) ->
     react_realm(Key, {clear, undefined});
 react_realm(Key, {clear, _Hlc}) ->
     RealmUri = unfold_realm_key(Key),
     ?LOG_INFO(#{
         description =>
-            "Closing local sessions for a realm deleted on a peer node",
+            "Tearing down local state for a realm deleted on a peer node",
         realm_uri => RealmUri
     }),
-    bondy_realm:close(RealmUri, ?WAMP_CLOSE_REALM);
+    bondy_realm:teardown(RealmUri);
 react_realm(_Key, _Op) ->
     ok.
 

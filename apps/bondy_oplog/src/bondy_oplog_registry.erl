@@ -132,6 +132,35 @@ table's lifecycle tied to a supervisor child.
     %% (`merge_frontier/2`, a max-merge), read lock-free by the observer / AAE
     %% responder (`frontier/1`). O(#origins); persisted with the checkpoint.
     frontier = #{} :: #{binary() => non_neg_integer()},
+    %% The applied frontier's SECOND component: per origin, the seqs this
+    %% instance has folded that sit ABOVE its prefix bound because an earlier
+    %% seq is still missing. Empty for an origin whose delivery has no hole,
+    %% which is the healthy case and the common one.
+    %%
+    %% It exists because a single integer per origin cannot be both sound and
+    %% eventually complete. The frontier is maintained incrementally across
+    %% batches whose boundaries are set by drain timing, and a batch that folds
+    %% seq 2 while seq 1 is missing has learnt something no integer can carry:
+    %% capping at 0 is sound but forgets seq 2 for good, and claiming 2 asserts
+    %% a prefix that was never applied. PROVED impossible in
+    %% `proofs/isabelle/Frontier_Pending.thy`
+    %% (`no_scalar_writer_sound_and_complete`); the pair is exact on every
+    %% schedule (`pending_exact`).
+    %%
+    %% VOLATILE and LOCAL. It is not checkpointed — dropping it denotes LESS,
+    %% which is the safe direction (`dropping_pending_is_sound`), and the boot
+    %% re-fold rebuilds it in one pass (`refold_restores_exactness`). It is
+    %% never shipped: peers receive the prefix alone, which is a lowering of an
+    %% exact claim and so disturbs no peer-side result
+    %% (`shipping_the_prefix_is_sound`). Written only through
+    %% `merge_applied/2` and cleared only by `reap_frontier/2`, both under the
+    %% same CAS as `frontier`.
+    %%
+    %% Cost: one interval per HOLE, not per seq above it
+    %% (`pending_intervals_bounded_by_holes`), so a permanently unroutable
+    %% bucket costs one interval for that origin however many later seqs fold
+    %% behind it.
+    pending = #{} :: #{binary() => bondy_interval_set:t()},
     %% Demand-based applier→instance flow control. Single-slot atomic
     %% counter shared between the applier (increments before
     %% dispatching an `install_local_batch` cast) and the instance
@@ -180,6 +209,20 @@ table's lifecycle tied to a supervisor child.
     %% scheduler (join-time catalogue bootstrap seeding) and the sync
     %% session (frontier-gap detection gates peer-frontier adoption).
     mst_retention = false :: boolean(),
+    %% Per-boot routing-directory readiness. `false` while the catalogue is
+    %% still registering the tables this shard instance DECLARES; a peer
+    %% snapshot SERVED before then silently omits the unregistered buckets
+    %% while `get_frontier` still answers in full, so the initiator installs
+    %% the one and adopts the other. This is the serving half only — the
+    %% installing half is `bondy_oplog_sync_session:adopt_frontier/3`, and
+    %% neither subsumes the other (`MuxBucketSkip_Minus_ServeGate`,
+    %% `_Minus_AdoptIfComplete`). Written by the applier at its `init/1` (from
+    %% `drain_gated`) and again when `open_drain_gate/1` releases the gate.
+    %% Defaults to `true`, so an instance that is never gated — single-table,
+    %% memory topology, tests — behaves exactly as before. A gated instance
+    %% reads `true` for the window between the instance publishing its row
+    %% and the applier reaching `init/1`; that window is not closed here.
+    tables_registered = true :: boolean(),
     %% The `bondy_db` DB this instance belongs to. Carried in the instance
     %% opts by the provisioning path (`bondy_db:open_table_provision/7`) and
     %% published once at instance `init/1`; immutable thereafter.
@@ -244,7 +287,6 @@ table's lifecycle tied to a supervisor child.
 -export([origin/1]).
 -export([mst/1]).
 -export([watermark/1]).
--export([snapshot/1]).
 -export([crdt_module/1]).
 -export([fold_module/1]).
 -export([fold_opts/1]).
@@ -257,8 +299,11 @@ table's lifecycle tied to a supervisor child.
 -export([fast_path/1]).
 -export([ae_targets/1]).
 -export([frontier/1]).
+-export([pending/1]).
+-export([frontier_and_pending/1]).
 -export([fused/1]).
 -export([mst_retention/1]).
+-export([tables_registered/1]).
 -export([db/1]).
 -export([install_in_flight/1]).
 -export([remote_gen/1]).
@@ -269,7 +314,6 @@ table's lifecycle tied to a supervisor child.
 %% hot lock-free reader paths in `bondy_oplog_instance` that would
 %% otherwise issue two `ets:lookup_element/3` calls back-to-back.
 -export([read_overlay_and_mst/1]).
--export([read_overlay_and_live_size/1]).
 
 %% Sibling pid management
 -export([set_wal_pid/2]).
@@ -280,6 +324,7 @@ table's lifecycle tied to a supervisor child.
 -export([set_fast_path/2]).
 -export([set_ae_targets/2]).
 -export([merge_frontier/2]).
+-export([merge_applied/2]).
 -export([reap_frontier/2]).
 -export([down/0]).
 -export([origins/0]).
@@ -295,6 +340,7 @@ table's lifecycle tied to a supervisor child.
 -endif.
 -export([set_install_in_flight/3]).
 -export([set_lifecycle/2]).
+-export([set_tables_registered/2]).
 -export([set_remote_gen/2]).
 
 %% gen_server callbacks
@@ -510,12 +556,6 @@ mst(InstanceId) ->
 watermark(InstanceId) ->
     field(InstanceId, #entry.watermark).
 
--spec snapshot(instance_id()) ->
-    undefined | {bondy_oplog_event:event_key(), term()}.
-
-snapshot(InstanceId) ->
-    field(InstanceId, #entry.snapshot).
-
 -spec crdt_module(instance_id()) -> module() | undefined.
 
 crdt_module(InstanceId) ->
@@ -646,6 +686,54 @@ frontier(InstanceId) ->
     end.
 
 ?DOC("""
+Returns the instance's PENDING applied seqs: `#{Origin => interval set}` of
+seqs this instance has folded that sit ABOVE the origin's prefix bound, because
+an earlier seq is still missing.
+
+Empty for every origin whose delivery had no hole, which is the healthy case —
+so this is `#{}` on a well behaved replica, and its size is a direct measure of
+how many holes the instance is carrying. Local and volatile: never shipped to a
+peer, never checkpointed. See the `pending` field note.
+""").
+-spec pending(instance_id()) -> #{binary() => bondy_interval_set:t()}.
+
+pending(InstanceId) ->
+    case field(InstanceId, #entry.pending) of
+        M when is_map(M) -> M;
+        _ -> #{}
+    end.
+
+?DOC("""
+Returns BOTH components of the applied frontier in one read: the prefix bound
+`#{Origin => Seq}` and the pending seqs above it.
+
+For readers that must not see the two halves from different generations. A torn
+pair is SOUND — either half is an individually sound claim about a set that
+only grows, so any pairing still denotes a subset of what was folded
+(`proofs/isabelle/Frontier_Pending.thy`, `torn_read_is_sound`) — but it is not
+EXACT, and a reader computing which seqs are absent needs exactness or it
+reports a folded seq as missing. One `ets:lookup/2` cannot tear.
+
+Returns `{#{}, #{}}` for an unknown instance, as `frontier/1` and `pending/1`
+do individually.
+""").
+-spec frontier_and_pending(instance_id()) ->
+    {
+        #{binary() => non_neg_integer()},
+        #{binary() => bondy_interval_set:t()}
+    }.
+
+frontier_and_pending(InstanceId) when is_binary(InstanceId) ->
+    try ets:lookup(?TABLE, InstanceId) of
+        [#entry{frontier = F, pending = P}] when is_map(F), is_map(P) ->
+            {F, P};
+        _ ->
+            {#{}, #{}}
+    catch
+        error:badarg -> {#{}, #{}}
+    end.
+
+?DOC("""
 Returns the instance's ephemeral fused-writer flag. `true` only for
 ephemeral (ets projection) instances that opted into the fused
 single-process write path; `false` for every durable instance and
@@ -670,6 +758,16 @@ retention window).
 
 mst_retention(InstanceId) ->
     field(InstanceId, #entry.mst_retention).
+
+?DOC("""
+Whether every table this shard instance declares has registered its
+cell-apply bucket. `false` means the instance cannot route every cell it may
+receive, so it must neither install a peer catalogue snapshot nor serve one.
+""").
+-spec tables_registered(instance_id()) -> boolean().
+
+tables_registered(InstanceId) ->
+    field(InstanceId, #entry.tables_registered) =/= false.
 
 ?DOC("""
 Returns the `bondy_db` DB the instance belongs to, or `undefined` when the
@@ -697,21 +795,6 @@ on the per-key slot lock.
 read_overlay_and_mst(InstanceId) when is_binary(InstanceId) ->
     try ets:lookup(?TABLE, InstanceId) of
         [#entry{overlay_tab = T, mst = M}] -> {T, M};
-        [] -> undefined
-    catch
-        error:badarg -> undefined
-    end.
-
-?DOC("""
-Returns `{OverlayTab, LiveSize}` for an instance in one ETS lookup,
-or `undefined`. Used by `size/1`.
-""").
--spec read_overlay_and_live_size(instance_id()) ->
-    undefined | {ets:tid() | undefined, non_neg_integer()}.
-
-read_overlay_and_live_size(InstanceId) when is_binary(InstanceId) ->
-    try ets:lookup(?TABLE, InstanceId) of
-        [#entry{overlay_tab = T, live_size = L}] -> {T, L};
         [] -> undefined
     catch
         error:badarg -> undefined
@@ -825,10 +908,7 @@ stored frontier (`#{Origin => max Seq}`). Called by the applier at the commit
 barrier with the batch's per-origin maxima. An empty partial is a no-op.
 
 **This is the only operation that may RAISE a frontier entry**, and every
-path that rebuilds a frontier goes through it — including all three durable
-restore sources at instance init (`restore_frontier/2` from the compaction
-checkpoint, `frontier_from_mst/1`, and the applier's WAL-tail replay). Two
-consequences follow:
+path that rebuilds a frontier goes through it. Two consequences follow:
 
 - the retired-origin ceiling below is applied once and inherited by every
   caller, which is what makes a frontier reap survive a restart: the reap is
@@ -843,16 +923,42 @@ module: it holds while `merge_frontier/2` and `reap_frontier/2` are the only
 writers of `#entry.frontier`, which a grep confirms today and nothing
 enforces.
 
-The maxima must come from events this replica actually FOLDED. The frontier
-is the convergence oracle, and a per-origin maximum identifies an applied
-PREFIX only under that condition. The applier guarantees it:
-`bondy_oplog_cell_apply:partition_contiguous/3` holds a remote origin's
-events beyond its first contiguity gap, so the maxima it merges cannot
-straddle a hole. A merge sourced from anywhere else — a peer's reported
-frontier, say — carries no such guarantee, and raising the oracle past a
-hole makes two replicas read IN SYNC over different data. The other two
-callers are legitimate because each supplies the DATA alongside the maxima:
-`finalize_catalogue_bootstrap/4` and `restore_frontier/2`.
+The maxima must come from events this replica actually MATERIALISED: a
+per-origin maximum asserts an applied PREFIX, so a caller that passes a seq
+whose cell never reached the projection makes two replicas compare EQUAL over
+different data — loss the oracle cannot see. **This function cannot check its
+argument**, so soundness lives entirely in the callers, and because the merge
+is a max, unsoundness is upward-closed: one over-claiming caller defeats every
+conservative one, permanently, and no arithmetic at another call site can
+repair it (`Frontier_Writers.join_absorbs_unsound` and `cap_cannot_repair`,
+`proofs/isabelle/`). Do not attempt to cap an entry here.
+
+The apply path does NOT come through here. It reports the seqs that actually
+materialised to `merge_applied/2`, which keeps the contiguous prefix and holds
+anything above a gap in `pending` — a set this function cannot express, since
+its argument is one integer per origin.
+
+The remaining callers, and the predicate each carries:
+
+- `bondy_oplog_instance:restore_frontier/2` — this replica's own compaction
+  checkpoint, i.e. the same predicate, persisted.
+- `bondy_oplog_instance:finalize_catalogue_bootstrap/5` — a PEER's reported
+  frontier, and the one caller that cannot derive its own predicate:
+  catalogue-snapshot cells carry only `{HLC, Value}` and no `{Origin, Seq}`.
+  So the decision is made one level up, in
+  `bondy_oplog_sync_session:adopt_frontier/3`, on the only question the
+  install can answer — did every cell the peer shipped land here. It passes
+  the peer's vector when the answer is yes and `#{}` when it is not.
+  Adopting regardless is a proved over-claim
+  (`Bucket_Skip_Soundness.unconditional_adoption_unsound`,
+  `proofs/tla/MuxBucketSkip_Minus_AdoptIfComplete.cfg`).
+
+A fourth caller used to merge `bondy_oplog_instance:frontier_from_mst/1` — the
+max `cell_apply` seq PRESENT IN THE LOG. The MST records receipt, not
+materialisation, so that over-claimed every cell received and skipped, and
+because `watermark_door/3` and `capped_truncation_point/2` judge "never
+applied" against this same frontier, the over-claim also disarmed the repair.
+It is deleted; boot now re-folds instead (`replay_anchor/1`).
 """).
 -spec merge_frontier(instance_id(), #{binary() => non_neg_integer()}) -> ok.
 
@@ -877,13 +983,143 @@ merge_frontier(InstanceId, Partial0) when
 merge_filtered(_InstanceId, Partial) when Partial =:= #{} ->
     ok;
 merge_filtered(InstanceId, Partial) ->
-    Merge = fun(Cur) ->
-        maps:merge_with(fun(_Origin, A, B) -> max(A, B) end, Cur, Partial)
+    Merge = fun({Cur, CurP}) ->
+        Raised = maps:merge_with(fun(_O, A, B) -> max(A, B) end, Cur, Partial),
+        %% Raising a prefix can cover seqs already held as pending — a
+        %% checkpoint restore that lands above a hole, say — so re-absorb
+        %% rather than leave the two components describing the same seq
+        %% twice. `absorb/2` is idempotent when nothing is covered.
+        absorb_all(maps:keys(Partial), Raised, CurP)
     end,
     case cas_frontier(InstanceId, Merge) of
         {ok, _} -> ok;
         not_found -> ok
     end.
+
+?DOC("""
+Records what a batch MATERIALISED into the projection: `#{Origin => [Seq]}`.
+
+This is the applied frontier's only incremental writer, and it takes what was
+FOLDED — never what failed. Per origin the seqs join the pending set, the
+prefix bound then absorbs whatever contiguous run now starts just above it, and
+the absorbed seqs leave pending. The result is EXACT: the pair denotes the
+folded set at every point of every schedule, with no hypothesis on batch
+boundaries, delivery order, or failure visibility
+(`proofs/isabelle/Frontier_Pending.thy`, `pending_exact`), and the prefix it
+reports is the largest sound claim (`pending_sound`, `pending_maximal`).
+
+**Why the caller no longer reports failures.** The predecessor
+(`bondy_oplog_cell_apply:claim/2`) capped its claim below the lowest seq the
+same batch had failed to materialise. That is sound exactly when every absent
+seq below the claim is visible to that call (`shipped_sound_when_visible`) and
+unsound the moment a batch boundary falls between the hole and the claim
+(`shipped_split_batch_overclaims`) — and boundaries are set by drain timing,
+which nothing chooses. Better failure reporting cannot fix it: no writer whose
+state is one integer per origin is both sound and eventually complete, and the
+counterexample schedules contain no failures at all
+(`no_scalar_writer_sound_and_complete`). Pinned by
+`bondy_oplog_frontier_fold_gap_test:split_batch/1`, which is red without the
+pending component.
+
+Both components move under ONE compare-and-swap. A torn pair would still be
+sound (`torn_read_is_sound`), but two swaps could LOSE an update when the
+applier and the instance process write the same origin concurrently, and they
+do: the mux front-ends are called from both.
+
+Retired origins are dropped, as in `merge_frontier/2` and for the same reason.
+""").
+-spec merge_applied(instance_id(), #{binary() => [non_neg_integer()]}) -> ok.
+
+merge_applied(_InstanceId, Applied) when Applied =:= #{} ->
+    ok;
+merge_applied(InstanceId, Applied0) when
+    is_binary(InstanceId), is_map(Applied0)
+->
+    case drop_retired(Applied0) of
+        Applied when Applied =:= #{} ->
+            ok;
+        Applied ->
+            Fold = fun({Cur, CurP}) ->
+                maps:fold(
+                    fun(Origin, Seqs, {F, P}) ->
+                        add_applied(Origin, Seqs, F, P)
+                    end,
+                    {Cur, CurP},
+                    Applied
+                )
+            end,
+            case cas_frontier(InstanceId, Fold) of
+                {ok, _} -> ok;
+                not_found -> ok
+            end
+    end.
+
+%% @private
+%% One origin: add the materialised seqs to its pending set, then absorb.
+add_applied(Origin, Seqs, F, P) ->
+    Prefix = maps:get(Origin, F, 0),
+    Set0 = maps:get(Origin, P, bondy_interval_set:new()),
+    %% Seqs at or below the prefix are ALREADY claimed and must not re-enter
+    %% pending: once there they no longer continue the prefix, so nothing would
+    %% ever absorb them and the set would grow without bound.
+    %%
+    %% This is not an edge case. Re-presenting already-folded events is the
+    %% normal path — the fold is idempotent by design and
+    %% `bondy_oplog_instance:replay_anchor/1` re-presents the WHOLE live oplog
+    %% at a boot that finds a gap — and a lost CAS re-applies this function to
+    %% the winner's value, which already absorbed them. Pinned by
+    %% `bondy_oplog_frontier_pending_test:absorbing_is_idempotent/0`.
+    Set = lists:foldl(
+        fun
+            (Seq, Acc) when Seq > Prefix ->
+                bondy_interval_set:add_element(Seq, Acc);
+            (_Seq, Acc) ->
+                Acc
+        end,
+        Set0,
+        Seqs
+    ),
+    absorb(Origin, Prefix, Set, F, P).
+
+%% @private
+%% Absorb every origin of `Origins` whose pending set now continues its prefix.
+absorb_all([], F, P) ->
+    {F, P};
+absorb_all([Origin | Rest], F, P) ->
+    {F1, P1} = absorb(
+        Origin, maps:get(Origin, F, 0), maps:get(Origin, P, []), F, P
+    ),
+    absorb_all(Rest, F1, P1).
+
+%% @private
+%% Raise `Origin`'s prefix through the contiguous run starting at `Prefix + 1`,
+%% and drop from pending everything the new prefix covers.
+%%
+%% The set is canonically ordered AND adjacency-coalesced
+%% (`bondy_interval_set`), so only its HEAD can continue the prefix: one match,
+%% no walk. Seqs are >= 1, which is what makes `{0, P}` mean "everything at or
+%% below the prefix" — `subtract/2` splits a run straddling the bound rather
+%% than dropping it.
+absorb(Origin, Prefix, Set, F, P) ->
+    case new_prefix(Prefix, Set) of
+        Prefix when Set =:= [] ->
+            {F, maps:remove(Origin, P)};
+        Prefix ->
+            {F, P#{Origin => Set}};
+        New ->
+            case bondy_interval_set:subtract(Set, [{0, New}]) of
+                [] -> {F#{Origin => New}, maps:remove(Origin, P)};
+                Rest -> {F#{Origin => New}, P#{Origin => Rest}}
+            end
+    end.
+
+%% @private
+new_prefix(Prefix, [N | _]) when is_integer(N), N =:= Prefix + 1 ->
+    N;
+new_prefix(Prefix, [{Min, Max} | _]) when Min =:= Prefix + 1 ->
+    Max;
+new_prefix(Prefix, _) ->
+    Prefix.
 
 ?DOC("""
 Removes `Origins` from `InstanceId`'s applied-frontier VV.
@@ -913,10 +1149,21 @@ frontier, or when the instance has no registry row.
 reap_frontier(_InstanceId, []) ->
     [];
 reap_frontier(InstanceId, Origins) when is_binary(InstanceId) ->
-    Reap = fun(Cur) ->
-        case [O || O <- Origins, is_map_key(O, Cur)] of
-            [] -> no_change;
-            Present -> {maps:without(Present, Cur), Present}
+    Reap = fun({Cur, CurP}) ->
+        %% BOTH components, in one swap. An origin left in `pending` after its
+        %% prefix entry was reaped would re-enter the frontier the moment a
+        %% later batch absorbed it, silently undoing the reap — and `pending`
+        %% is the half no checkpoint would ever correct.
+        case
+            [O || O <- Origins, is_map_key(O, Cur) orelse is_map_key(O, CurP)]
+        of
+            [] ->
+                no_change;
+            Present ->
+                {{maps:without(Present, Cur), maps:without(Present, CurP)}, [
+                    O
+                 || O <- Present, is_map_key(O, Cur)
+                ]}
         end
     end,
     case cas_frontier(InstanceId, Reap) of
@@ -963,14 +1210,14 @@ drop_retired(Partial) ->
 %% writer committed.
 cas_frontier(InstanceId, Fun) ->
     case ets:lookup(?TABLE, InstanceId) of
-        [#entry{frontier = Cur} = E] ->
-            case Fun(Cur) of
+        [#entry{frontier = Cur, pending = CurP} = E] ->
+            case Fun({Cur, CurP}) of
                 no_change ->
                     no_change;
-                {New, Result} ->
+                {{_, _} = New, Result} ->
                     swap(InstanceId, E, New, Result, Fun);
-                New when is_map(New) ->
-                    swap(InstanceId, E, New, New, Fun)
+                {_, _} = New ->
+                    swap(InstanceId, E, New, element(1, New), Fun)
             end;
         [] ->
             not_found
@@ -978,13 +1225,18 @@ cas_frontier(InstanceId, Fun) ->
 
 -ifdef(TEST).
 cas_with_interleaving(InstanceId, Fun, Interleave) when is_function(Fun, 1) ->
+    %% `Fun` is written against the FRONTIER alone — the column this case is
+    %% about. Lift it to the pair the CAS now carries, leaving `pending`
+    %% untouched; the compare covers both columns, so the stale-compare window
+    %% this exercises is if anything wider than before.
+    Lifted = fun({F, P}) -> {Fun(F), P} end,
     case ets:lookup(?TABLE, InstanceId) of
-        [#entry{frontier = Cur} = E] ->
+        [#entry{frontier = Cur, pending = CurP} = E] ->
             ok = Interleave(),
             %% A losing compare retries through `cas_frontier/2`, which
             %% reports the merged frontier rather than this call's own
             %% result, so normalise: the caller is asserting on the table.
-            {ok, _} = swap(InstanceId, E, Fun(Cur), ok, Fun),
+            {ok, _} = swap(InstanceId, E, Lifted({Cur, CurP}), ok, Lifted),
             ok;
         [] ->
             not_found
@@ -1001,12 +1253,13 @@ cas_with_interleaving(InstanceId, Fun, Interleave) when is_function(Fun, 1) ->
 %% Evidence:
 %% `bondy_oplog_frontier_reap_test:a_stale_frontier_compare_loses_no_origin/0`
 %% loses an origin against the literal-head form and none against this one.
-swap(InstanceId, #entry{frontier = Cur} = E, New, Result, Fun) ->
+swap(InstanceId, #entry{frontier = Cur, pending = CurP} = E, New, Result, Fun) ->
+    {NewF, NewP} = New,
     MS = [
         {
-            E#entry{frontier = '$1'},
-            [{'=:=', '$1', {const, Cur}}],
-            [{const, E#entry{frontier = New}}]
+            E#entry{frontier = '$1', pending = '$2'},
+            [{'=:=', '$1', {const, Cur}}, {'=:=', '$2', {const, CurP}}],
+            [{const, E#entry{frontier = NewF, pending = NewP}}]
         }
     ],
     case ets:select_replace(?TABLE, MS) of
@@ -1049,6 +1302,19 @@ gate the WAL drain.
 
 set_lifecycle(InstanceId, Handle) when is_binary(InstanceId) ->
     _ = update_field(InstanceId, #entry.lifecycle, Handle),
+    ok.
+
+?DOC("""
+Publishes the routing-directory readiness (see the `tables_registered` field
+note). Written by the applier: at `init/1` from its `drain_gated` opt, and
+again when `open_drain_gate/1` releases the gate.
+""").
+-spec set_tables_registered(instance_id(), boolean()) -> ok.
+
+set_tables_registered(InstanceId, Bool) when
+    is_binary(InstanceId), is_boolean(Bool)
+->
+    _ = update_field(InstanceId, #entry.tables_registered, Bool),
     ok.
 
 ?DOC("""
@@ -1142,6 +1408,7 @@ to_record(#{instance_id := Id} = M) ->
         ae_targets = maps:get(ae_targets, M, []),
         fused = maps:get(fused, M, false),
         mst_retention = maps:get(mst_retention, M, false),
+        tables_registered = maps:get(tables_registered, M, true),
         db = maps:get(db, M, undefined)
     }.
 

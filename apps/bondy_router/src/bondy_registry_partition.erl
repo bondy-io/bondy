@@ -70,8 +70,6 @@
 -export([add/2]).
 -export([add_indices/2]).
 -export([continuation_info/1]).
--export([dirty_delete/2]).
--export([dirty_delete/3]).
 -export([find/1]).
 -export([find/3]).
 -export([find/4]).
@@ -85,7 +83,6 @@
 -export([lookup/4]).
 -export([lookup/5]).
 -export([remove/2]).
--export([remove/3]).
 -export([take/2]).
 
 %% INDEX-BASED APIS
@@ -253,18 +250,12 @@ add_indices(Partition, Entry) when is_pid(Partition) ->
         ok
     end).
 
--doc "".
--spec remove(Partition :: pid(), Entry :: entry()) -> ok.
-
-remove(Partition, Entry) when is_pid(Partition) ->
-    remove(Partition, Entry, #{broadcast => true}).
-
 -doc """
 Removes a registration or subscription entry (`bondy_registry_entry:t()`) from
 the registry and its indices.
 
 The function first deletes the indices, then deletes the entry from the
-node-local entry table — see `bondy_registry_store:remove/3` for why this
+node-local entry table — see `bondy_registry_store:remove/2` for why this
 order matters.
 
 Indices are deleted concurrently for ALL matching policies, in the
@@ -275,12 +266,11 @@ ptrie's path-copy + root CAS (concurrent writers retry on CAS loss).
 > This is an interim design that will be replaced by a more concurrent one in
 > next releases.
 """.
--spec remove(Partition :: pid(), Entry :: entry(), Opts :: key_value:t()) -> ok.
+-spec remove(Partition :: pid(), Entry :: entry()) -> ok.
 
-remove(Partition, Entry, Opts0) when is_pid(Partition) ->
+remove(Partition, Entry) when is_pid(Partition) ->
     Store = store(Partition),
-    Opts = key_value:put(broadcast, true, Opts0),
-    Result = bondy_registry_store:remove(Store, Entry, Opts),
+    Result = bondy_registry_store:remove(Store, Entry),
     resulto:then(Result, fun(undefined) ->
         ok = bondy_registry_rib:on_entry_removed(
             Partition, bondy_registry_store:rib_members_tab(Store), Entry
@@ -299,56 +289,6 @@ take(Partition, Entry) when is_pid(Partition) ->
             Partition, bondy_registry_store:rib_members_tab(Store), Value
         ),
         {ok, Value}
-    end).
-
--doc """
-WARNING: Never use this unless you know exactly what you are doing!
-We use this only when we want to remove a remote entry from the registry as
-a result of the owner node being down.
-We want to achieve the following:
-1. The delete has to be idempotent, so that we avoid having to merge N
-versions either during broadcast or AAE exchange. We can use the owners
-ActorID and Timestamp for this, manipulating the plum_db_object, a little
-bit nasty but effective and almost harmless as entries are immutable anyway.
-2. If we can achieve (1) then we could disable broadcast, as all nodes
-will be doing (1).
-3. We still have the AAE exchange, so (1) has to ensure that the hash of
-the object is the same in all nodes. I think that comes naturally from
-doing (1) anyway, but we need to check, e.g. timestamp differences?
-""".
--spec dirty_delete(Partition :: pid(), entry()) -> entry() | undefined.
-
-dirty_delete(Partition, Entry) when is_pid(Partition) ->
-    Result = bondy_registry_store:dirty_delete(store(Partition), Entry),
-    resulto:then(Result, fun(Value) ->
-        {ok, Value}
-    end).
-
--doc """
-WARNING: Never use this unless you know exactly what you are doing!
-We use this only when we want to remove a remote entry from the registry as
-a result of the owner node being down.
-We want to achieve the following:
-1. The delete has to be idempotent, so that we avoid having to merge N
-versions either during broadcast or AAE exchange. We can use the owners
-ActorID and Timestamp for this, manipulating the plum_db_object, a little
-bit nasty but effective and almost harmless as entries are immutable anyway.
-2. If we can achieve (1) then we could disable broadcast, as all nodes
-will be doing (1).
-3. We still have the AAE exchange, so (1) has to ensure that the hash of
-the object is the same in all nodes. I think that comes naturally from
-doing (1) anyway, but we need to check, e.g. timestamp differences?
-""".
--spec dirty_delete(
-    Partition :: pid(), Type :: entry_type(), EntryKey :: entry_key()
-) ->
-    {ok, entry()} | {error, not_found | any()}.
-
-dirty_delete(Partition, Type, EntryKey) when is_pid(Partition) ->
-    Store = store(Partition),
-    Result = bondy_registry_store:dirty_delete(Store, Type, EntryKey),
-    resulto:then(Result, fun(Entry) ->
-        {ok, Entry}
     end).
 
 -doc "".

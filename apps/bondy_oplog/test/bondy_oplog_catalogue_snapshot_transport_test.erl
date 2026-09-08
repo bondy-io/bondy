@@ -36,7 +36,9 @@ transport_test_() ->
         fun init_wire_envelope/0,
         fun next_batch_then_done_wire_envelope/0,
         fun init_for_unknown_instance_errors/0,
-        fun single_crdt_instance_returns_no_snapshot/0
+        fun single_crdt_instance_returns_no_snapshot/0,
+        fun oversized_cell_ships_in_parts_and_reassembles/0,
+        fun oversized_cell_is_never_advanced_past/0
     ]}.
 
 init_wire_envelope() ->
@@ -87,6 +89,95 @@ single_crdt_instance_returns_no_snapshot() ->
         )
     after
         bondy_oplog:stop_instance(Id)
+    end.
+
+%% A cell whose frame alone exceeds the response ceiling used to be reported to
+%% metrics and ADVANCED PAST -- lost permanently, while the bootstrap still
+%% adopted the peer's frontier so the oracle read CONVERGED. It must now be
+%% shipped as parts that reassemble to the identical frame.
+%%
+%% Exercises the whole path the unit tests cannot: the cursor's `pending`
+%% threading across rounds, the wire envelope, and the receiver's reassembly.
+oversized_cell_ships_in_parts_and_reassembles() ->
+    {Id, _NS, _, _} = setup_instance(),
+    Big = crypto:strong_rand_bytes(40000),
+    _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"big">>, {set, 1, Big}}),
+    _ = barrier(Id),
+    with_ceiling(4000, fun() ->
+        {ok, {init, {_W, Cursor}}} =
+            ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
+        {Cells, Pending, Rounds} = drain(Id, Cursor, [], #{}, 0),
+        %% More than one round, or nothing was actually chunked.
+        ?assert(Rounds > 1),
+        %% Nothing left half-assembled: the stream ended cleanly.
+        ?assertEqual(#{}, Pending),
+        %% The oversized cell arrived, byte-identical after reassembly.
+        Frames = [F || {_B, <<"big">>, F} <- Cells],
+        ?assertMatch([_], Frames),
+        [Frame] = Frames,
+        {_Hlc, _State, ValueBytes} = bondy_oplog_cell_frame:decode_full(Frame),
+        ?assertEqual(Big, binary_to_term(ValueBytes))
+    end),
+    teardown(Id).
+
+%% The cursor must not pass a key whose parts are still in flight. If it did,
+%% the tail of the cell would be lost while the stream still reported `done`.
+oversized_cell_is_never_advanced_past() ->
+    {Id, _NS, _, _} = setup_instance(),
+    Big = crypto:strong_rand_bytes(30000),
+    _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"big">>, {set, 1, Big}}),
+    _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"zzz">>, {set, 2, <<"v">>}}),
+    _ = barrier(Id),
+    with_ceiling(4000, fun() ->
+        {ok, {init, {_W, Cursor}}} =
+            ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
+        %% First chunked round must NOT be `done`, and must carry parts of
+        %% part 1 of the big cell only.
+        {ok, {chunked_batch, {_, [], Parts}}} =
+            ?T:request(Id, Id, {get_catalogue_snapshot_next, Cursor}, #{}),
+        ?assert(Parts =/= []),
+        [{_, K, Idx, Total, _} | _] = Parts,
+        ?assertEqual(<<"big">>, K),
+        ?assertEqual(1, Idx),
+        ?assert(Total > 1),
+        %% Carry the parts already consumed above into the drain, or the
+        %% reassembly can never complete — the test would then be measuring
+        %% its own dropped parts rather than the protocol's.
+        {Done0, Pending0} = bondy_oplog_sync_session:absorb_chunks(Parts, #{}),
+        %% Drain the rest: both cells must arrive.
+        {Cells, Pending, _} = drain(Id, Cursor, Done0, Pending0, 0),
+        ?assertEqual(#{}, Pending),
+        Keys = lists:sort([Key || {_, Key, _} <- Cells]),
+        ?assertEqual([<<"big">>, <<"zzz">>], Keys)
+    end),
+    teardown(Id).
+
+%% Pulls to `done`, reassembling parts exactly as `pull_install_loop` does.
+drain(Id, Cursor, CellAcc, Pending, N) ->
+    case ?T:request(Id, Id, {get_catalogue_snapshot_next, Cursor}, #{}) of
+        {ok, {done, []}} ->
+            {CellAcc, Pending, N};
+        {ok, {batch, {_, Cells}}} ->
+            drain(Id, Cursor, CellAcc ++ Cells, Pending, N + 1);
+        {ok, {chunked_batch, {_, Cells, Chunks}}} ->
+            {Done, Pending1} = bondy_oplog_sync_session:absorb_chunks(
+                Chunks, Pending
+            ),
+            drain(Id, Cursor, CellAcc ++ Cells ++ Done, Pending1, N + 1)
+    end.
+
+with_ceiling(Bytes, Fun) ->
+    Prev = application:get_env(bondy_oplog, sync_max_response_bytes),
+    ok = application:set_env(bondy_oplog, sync_max_response_bytes, Bytes),
+    try
+        Fun()
+    after
+        case Prev of
+            {ok, V} ->
+                application:set_env(bondy_oplog, sync_max_response_bytes, V);
+            undefined ->
+                application:unset_env(bondy_oplog, sync_max_response_bytes)
+        end
     end.
 
 %% =============================================================================

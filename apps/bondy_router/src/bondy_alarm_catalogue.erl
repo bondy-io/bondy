@@ -49,8 +49,8 @@ producer's raise site from its compiled abstract code and fails if a declared
 key is not among the literal keys of the `details` map passed there. It checks
 that direction only: a producer may carry more than it declares.
 
-**The check is real but THIN: three of the nine entries declare keys and six
-declare `[]`**, so it runs over a third of the table. Some of the six are
+**Eight of the twelve entries declare keys and four declare `[]`**, so the
+check runs over most of the table but not all of it. Some of the four are
 correct as they stand — `bondy_mcp_name_collision` carries its realm and name
 in the ID, and says so at its entry — but the rest are producers that pass no
 `details` at all, and an empty declaration cannot fail. Read "checked" as
@@ -84,12 +84,13 @@ Bondy Lang one points the opposite way: these references are pulled, not
 pushed. `bondy_task_catalogue` already used `observe_with` for the same kind of
 thing, so the rename removes a synonym rather than adding a word.
 
-**Six of the nine entries have no task at all, and that is the finding rather
-than an omission.** Only the mail relay and the MCP collision have a sanctioned
-remediation in the WAMP API; nothing in `bondy.*` fixes a stalled drain, an
-unopenable main DB, an unwritable retirement set, an oversized sync item or a
-retention ceiling. An empty list is the answer an agent needs — it stops
-looking rather than improvising.
+**Ten of the twelve entries have no task at all, and that is the finding
+rather than an omission.** Only the mail relay and the MCP collision have a
+sanctioned remediation in the WAMP API; nothing in `bondy.*` fixes a stalled
+drain, an unopenable main DB, an unwritable retirement set, an oversized sync
+item, a retention ceiling, a frontier hole, a receipt-derived frontier or an
+undeclared table a peer replicates into. An empty list is the answer an agent
+needs — it stops looking rather than improvising.
 
 The join KEY is `bondy_alarm_api`'s `catalogue_id`, stamped on every rendered
 alarm: an alarm's id is concrete and an entry's is a pattern, so without it a
@@ -144,7 +145,7 @@ not, pass them.
 Every declared alarm, in id order.
 
 `affects_ready` is `false` on every entry, and that is a finding rather than an
-oversight: of the nine conditions below, only `bondy_db_main_unavailable` stops
+oversight: of the eleven conditions below, only `bondy_db_main_unavailable` stops
 the node serving, and its readiness signal deliberately does not run through the
 alarm — see that entry's `readiness_via`.
 
@@ -251,6 +252,41 @@ list() ->
             ],
             config_keys => []
         },
+        %% `bondy_oplog_sync_session:adopt_frontier/3`. A peer shipped
+        %% catalogue cells for a bucket this instance has no table for, so the
+        %% install was partial and the peer's applied frontier was withheld
+        %% rather than adopted. `class = node` because the deficient party is
+        %% this node's table set, not the data: every peer that declares the
+        %% table holds it and converges normally.
+        %%
+        %% Not readiness-affecting, and the reason is stronger here than for
+        %% the frontier hole above: the missing data belongs to a table this
+        %% node does not declare, so no local reader can ask for it and there
+        %% is no stale-read surface to protect. Draining the node would not
+        %% make the table appear.
+        %%
+        %% `tasks` is empty because declaring a table is a deployment change,
+        %% not a WAMP procedure. The remedy is in the alarm's own description.
+        #{
+            id_pattern => {bondy_oplog_bucket_unroutable, '_'},
+            severity => major,
+            class => node,
+            affects_ready => false,
+            summary =>
+                <<
+                    "A shard instance received replicated data for a table "
+                    "it does not declare, and withheld the peer's frontier"
+                >>,
+            detail_keys => [instance_id, buckets],
+            %% Nothing to name: the condition has no metric of its own, and
+            %% `buckets` in `details` IS the handle - it names exactly what to
+            %% declare. The per-cycle peer and counts go out on the
+            %% `[bondy_oplog, sync, catalogue_bootstrap, complete]` telemetry
+            %% event, which no collector exports.
+            observe_with => [],
+            tasks => [],
+            config_keys => []
+        },
         %% `bondy_oplog_applier:2094`. Applied state is falling behind this
         %% node's own WAL. Not readiness-affecting: the node still serves, it
         %% serves stale durable reads — and a stall whose cause is shared
@@ -271,6 +307,61 @@ list() ->
             observe_with => [],
             tasks => [],
             config_keys => [<<"db.drain.stall_alarm">>]
+        },
+        %% `bondy_oplog_sync_scheduler:raise_hole_alarm/4`. A gap in an
+        %% origin's sequence that this replica has carried for longer than the
+        %% threshold. `class = node` because the gap is one replica's missing
+        %% history; the events themselves exist wherever they were not
+        %% truncated. Not readiness-affecting, and must not become so: a
+        %% rejoining node carries holes by construction until it catches up,
+        %% and taking it out of rotation for that would stop the very traffic
+        %% that closes them.
+        #{
+            id_pattern => {bondy_oplog_frontier_hole, '_'},
+            severity => major,
+            class => node,
+            affects_ready => false,
+            summary =>
+                <<
+                    "A shard instance has carried a gap in its applied "
+                    "frontier past the alarm threshold"
+                >>,
+            detail_keys => [instance_id, held_for_ms, holes, origins],
+            %% Empty for a reason worth writing down. The standing condition
+            %% IS exposed — `bondy_oplog_instance_frontier_holes` and
+            %% `bondy_oplog_instance_frontier_pending_seqs` in the Prometheus
+            %% exposition — but those are scrape-time collector families in
+            %% `bondy_prometheus_db:families/0`, and the coverage test
+            %% resolves a `metric` reference by scanning for
+            %% `bondy_metrics:declare/1` registrations, which these are not.
+            %% Naming them here would fail that join, so the handle stays in
+            %% `details`: `origins` carries the per-origin prefix, the seq the
+            %% gap starts at, and how much is stranded above it.
+            observe_with => [],
+            tasks => [],
+            config_keys => [<<"db.frontier.hole_alarm">>]
+        },
+        %% `bondy_oplog_instance:report_frontier_provenance/3`. Raised once at
+        %% instance start. Not readiness-affecting: the node serves correctly
+        %% and its data is no worse than it was before the upgrade — what it
+        %% cannot do is notice that it is behind, because the suspect entries
+        %% are the ones the deficit oracle reads. `tasks` is empty because the
+        %% only sound remedy replaces the value (wipe the data directory and
+        %% re-bootstrap) and no WAMP procedure does that.
+        #{
+            id_pattern => {bondy_oplog_frontier_receipt_derived, '_'},
+            severity => major,
+            class => node,
+            affects_ready => false,
+            summary =>
+                <<
+                    "A shard instance restored an applied frontier that a "
+                    "prior release derived from receipt, not from applying"
+                >>,
+            detail_keys => [instance_id, origins, claimed],
+            observe_with => [],
+            tasks => [],
+            config_keys => []
         },
         %% `bondy_namespace_catalog:777`. The one condition here that stops
         %% the node serving — every durable table raises `*_not_provisioned`.

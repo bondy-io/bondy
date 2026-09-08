@@ -36,11 +36,12 @@ URI, bad config) are permanent: a retry would not help them.
 The callee opens a WAMP session via `bondy_session_manager:open/3` in
 `init/1`, which sets up a process monitor on the callee. When the callee
 exits (for any reason — crash, supervisor shutdown, rest_for_one cascade)
-the session manager's `'DOWN'` handler fires
-`bondy_router:flush(RealmUri, SessionRef)`, which in turn calls
-`bondy_dealer:flush/2` and `bondy_registry:remove_all/5` keyed by
-`SessionId`. All registrations carrying this callee's `SessionId` —
-including the WAMP-level user procedures we register here — are removed.
+the session manager's `'DOWN'` handler cleans the session up, which reaches
+`bondy_router:flush(RealmUri, SessionRef)` — that calls `bondy_dealer:flush/2`
+and `bondy_broker:flush/2`, and each of those removes the ref's entries with
+`bondy_registry:remove_all/4`, keyed by `SessionId`. All registrations
+carrying this callee's `SessionId` — including the WAMP-level user procedures
+we register here — are removed.
 
 This is what allows the callee to be safely restarted by the supervisor:
 the new incarnation mints a fresh `SessionId` and re-registers the same

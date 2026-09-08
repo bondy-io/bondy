@@ -46,11 +46,13 @@ each cell this node owns back to reality.
 
 The registry write path runs in the **caller's** process (the partition
 pid only locates the store slice) — the same is true of RIB maintenance.
-`count`, `invoke`, `earliest` and `latest` are per-field CRDTs
-(registration: `bondy_oplog_crdt_struct`, registered directly with its
-schema as `crdt_opts` — see `bondy_namespace_catalog`'s
-`?RIB_REGISTRATION_SCHEMA`; subscription: a bare
-`bondy_oplog_crdt_pn_counter`), not one opaque summary blob, so an
+The two types use different carriers, and the difference is
+deliberate. A registration cell is four fields, so it is a
+`bondy_oplog_crdt_struct` registered with its schema as `crdt_opts` (see
+`bondy_namespace_catalog`'s `?RIB_REGISTRATION_SCHEMA`). A subscription
+cell is one field, so it is a bare `bondy_oplog_crdt_owned_counter` and
+carries no schema at all. Either way the cell is per-field CRDTs rather
+than one opaque summary blob, so an
 entry add/remove writes a small, targeted, **lock-free** delta directly
 from the caller — `{inc, 1}` /`{inc, -1}` on `count`, `{set, Created}`
 on the `earliest`/`latest` min/max ratchets (adds only: removals never
@@ -69,13 +71,85 @@ settling to `0` is the only signal (read-side consumers treat
 `count =:= 0` as not routable), and a `count = 0` cell is later
 physically reclaimed by `stabilize/2` (registration:
 `bondy_oplog_crdt_struct`'s generic `stabilize_zero`-policy discard on
-`count`; subscription: `bondy_oplog_crdt_pn_counter`'s own unconditional
-discard-at-zero) once causally stable — mirroring how
+`count`; subscription: `bondy_oplog_crdt_owned_counter`'s inherited
+unconditional discard-at-zero) once causally stable — mirroring how
 `bondy_oplog_crdt_dw_flag` already reclaims a permanently-disabled flag
 cell.
 
 Remote entries never touch this module: their owner maintains their cells and
 they reach this node via AAE merge.
+
+### Departure: reclaiming a node's cells and stubs
+
+Single-writer keying is what makes `lww` resolution exact, and it is also
+what would leave a departed node's routing state immortal if nothing acted:
+`cell_key/3` stamps `bondy_config:nodestring()` into every key, and the only
+writes this module performs are `apply_added/1`'s `{inc, 1}` and
+`apply_removed/1`'s `{inc, -1}`. There is no cell `clear` at all, so the only
+physical reclamation is `stabilize/2`'s discard once `count` reaches `0` —
+and only the owner's own decrements can produce that. The owner is gone.
+
+So reclamation hangs off **retirement**, not plain membership loss.
+Membership removal alone is reversible and
+`m:bondy_oplog_origin_retirement` is explicit that a returning node is handed
+back the same origin; deleting a merged cell on that signal would leave no
+tombstone, this node's frontier already claims those events, AAE would never
+re-ship them, and the returning node's routing would be silently blackholed
+until it rewrote its own cells. Retirement bans the origin, which is the only
+signal under which dropping the local copy is permanent by construction
+rather than by hope.
+
+**The cell.** `m:bondy_oplog_origin_retirement` computes the dead-origin
+complement and `bondy_oplog_cell_utils:reap/4` reaps them from every bucket
+whose carrier exports `reap_origins/2`. Both RIB carriers do, by different
+routes: the registration struct through a per-field `force_reap` policy
+declared on EVERY field of `?RIB_REGISTRATION_SCHEMA`, and the subscription
+counter through `m:bondy_oplog_crdt_owned_counter`, whose licence is the
+table declaration itself. Reaping does not delete anything directly —
+`reap_one_cell/6` re-encodes a VALUE-PRESERVING frame — it drives the
+state's `count` to zero so the discard described above finally fires. Pinned
+end to end by `bondy_rib_reclamation_cluster_SUITE`.
+
+Why the subscription cell is a bare counter and not a one-field struct: it
+was briefly the latter, purely so it could carry `force_reap`. That moved
+the highest-write-rate cell in the system from tier_0 to tier_2, where
+add-wins state accrues one dot per unstabilized write and `apply_op` becomes
+quadratic. Measured on the Fly fleet: subscribe latency 198ms -> 6-23s,
+`all_subscribed_ok` 100% -> 66.7%. The size law that now forbids it lives in
+`bondy_oplog_crdt_owned_counter_proper_test`.
+
+**The stub.** A `stabilize/2` discard is not an apply, so it fires no merge
+event, and `stub_delete/1` is otherwise reachable only from
+`on_remote_set/3` (a merged `count = 0`) and `on_remote_clear/2` — both of
+which need a merge event for a key nobody but the departed node may write.
+So the stub needs its own trigger, and `reap_orphan_stubs/1` on
+`bondy_registry`'s periodic sweep is it. A stub is deleted when its backing
+cell is GONE, never merely because its node left the membership: removal is
+reversible, and dropping a returning node's stub would blackhole its routing
+until it happened to rewrite a cell. The cell's absence is the membership
+signal already laundered through retirement, so it is the safe one.
+
+That also means the trigger cannot be the membership event itself. The cell
+disappears strictly later — after the reap zeroes it and stabilization
+discards it — so a one-shot on membership change would run exactly when the
+answer is still "the cell is there". It has to retry, which is what a sweep
+does. What the membership set IS good for is scoping: only nodestrings
+absent from it are candidates, so the common case costs one match-spec scan
+of the stub table and no cell reads.
+
+Until the cell has stabilized away, a departed node stays in
+`subscription_nodes/3`
+(one wasted relay per matching PUBLISH), in `realm_nodestrings/2` (the meta
+API walk keeps it as a target) and in `bondy_registry:has_matches/3` (a
+topic only it subscribed to still reads as having demand).
+`m:bondy_dealer` is the exception and was never exposed: its node stage
+drops unreachable candidates at selection time (`prefer_reachable/2`, a
+preference so it can never empty a routable set) with the `rib_exclude`
+retry covering the residual race. That is a guard, not reclamation.
+
+`check/1` is blind to the whole problem by construction — a departed node
+sits in `stub_truth_nodes/1` (expected) and `cell_nodes/2` (actual) alike,
+so the two views agree and report no divergence.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -116,6 +190,7 @@ they reach this node via AAE merge.
 -export([on_remote_set/3]).
 -export([rebuild/1]).
 -export([realms/0]).
+-export([reap_orphan_stubs/1]).
 -export([stub_nodes/4]).
 -export([subscription_nodes/3]).
 
@@ -159,9 +234,9 @@ on_entry_added(_Partition, Tab, Entry) ->
 -doc """
 Hook called by `bondy_registry_partition` after an entry has been successfully
 removed from the store. A no-op unless the RIB is enabled and `Entry` is
-local. Deletes the entry's members row (atomic, kept only as `check/1`'s
-ground truth) and applies a small, targeted, lock-free CRDT delta
-directly — no partition dispatch, no serialisation point.
+local. Takes the entry's members row (atomic, and `check/1`'s ground truth)
+and, only if that row was still there, applies a small, targeted, lock-free
+CRDT delta directly — no partition dispatch, no serialisation point.
 """.
 -spec on_entry_removed(
     Partition :: pid(), Tab :: ets:tab(), Entry :: entry()
@@ -171,17 +246,27 @@ on_entry_removed(_Partition, Tab, Entry) ->
     case is_active(Entry) of
         true ->
             {Key, _} = member(Entry),
-            %% `take` so the occupancy gauge only moves when a row
-            %% actually existed (a redundant removal must not drift it).
+            %% The members row is this node's ground truth for whether the
+            %% entry is still counted, and `on_entry_added/3` writes the row
+            %% and the `{inc, 1}` together — so `take` returning a row is
+            %% exactly the condition under which the matching `{inc, -1}` is
+            %% owed. Gating both on it makes a redundant removal a no-op
+            %% instead of a decrement the count can never recover from:
+            %% removing one entry twice is reachable (`bondy_realm:teardown/1`
+            %% casts the realm's session closes, each flushing its own
+            %% entries, and then removes everything in the realm itself), and
+            %% a pn_counter has no floor. Pinned by
+            %% `bondy_registry_rib_test`'s "a redundant removal does not
+            %% decrement twice".
             case ets:take(Tab, Key) of
                 [] ->
                     ok;
                 [_] ->
                     ok = safe_metric(gauge, #{
                         name => bondy_registry_rib_members, delta => -1
-                    })
-            end,
-            apply_removed(Entry);
+                    }),
+                    apply_removed(Entry)
+            end;
         false ->
             ok
     end.
@@ -189,10 +274,10 @@ on_entry_removed(_Partition, Tab, Entry) ->
 -doc """
 Applies the CRDT delta for a newly-added local entry directly from the
 caller's process: `count` `{inc, 1}`, `invoke` `{set, Invoke}` and the
-`earliest`/`latest` ratchets `{set, Created}` for a registration; a bare
-counter `{inc, 1}` for a subscription (its table has no
-`invoke`/`earliest`/`latest` fields — it is a bare
-`bondy_oplog_crdt_pn_counter`, not a struct). MUST be total: any
+`earliest`/`latest` ratchets `{set, Created}` for a registration;
+a bare `{inc, 1}` for a subscription (whose carrier has no
+`invoke`/`earliest`/`latest` — reachability needs none of them). MUST
+be total: any
 failure is logged, never raised — a RIB write failing must not fail the
 entry add/remove it accompanies.
 """.
@@ -248,7 +333,7 @@ next add if it ever changes; `earliest`/`latest` are untouched by
 design — they are monotone ratchets recording the group's lifetime
 creation-time watermarks, so removals never shrink them, which is what
 bounds the cell to a scalar per field instead of one element plus one
-tombstone per entry ever added); a bare counter `{inc, -1}` for a
+tombstone per entry ever added); a bare `{inc, -1}` for a
 subscription. MUST be total, same contract as `apply_added/1`.
 """.
 -spec apply_removed(Entry :: entry()) -> ok.
@@ -521,15 +606,14 @@ table_type(?BONDY_DB_SUBSCRIPTION_RIB_TAB) -> subscription.
 -doc """
 Reaction to ANY peer merge event for a RIB cell (`bondy_aae_reactor`'s only
 entry point for `kind = rib`). The per-field CRDT write path emits many
-small ops (`{apply, count, {inc, _}}`, a bare `{inc, _}`, ...), none of
+small ops (`{apply, count, {inc, _}}`, `{set, _}` on a ratchet, ...), none of
 which alone represents "the current summary" — unlike the pre-migration
 whole-blob `lww_register` cell, where the merge op directly carried the
 new value. Reads the cell's CURRENT converged value instead, reshapes it
 (`reshape_summary/2` — the generic CRDT modules' raw `to_value/1` is not
 quite the summary shape read-side consumers expect: registration's raw
-struct value may omit never-written `earliest`/`latest` fields;
-subscription's raw `pn_counter` value is a bare
-integer, not a map), and dispatches exactly as `on_remote_set/3` already
+struct value may omit never-written `earliest`/`latest` fields), and
+dispatches exactly as `on_remote_set/3` already
 does (`count = 0` there is already equivalent to a clear, so this needs
 no separate clear case — the write path never emits an explicit
 clear op either, see the moduledoc's "Concurrency model"). A cell that
@@ -718,6 +802,132 @@ subscription_nodes(RealmUri, TopicUri, MatchOpts) ->
                 ]
         end,
     lists:usort([binary_to_atom(N, utf8) || N <- Exact ++ Pattern]).
+
+-doc """
+Drops this realm's stub rows that have no backing cell in the local
+projection — the reclamation half that the cell reap cannot do itself.
+
+A departed node's cell is removed by the membership-driven origin reap
+(`m:bondy_oplog_origin_retirement`), and that is a local `stabilize` discard,
+not an apply — so no merge event fires and `on_remote_clear/2` never runs.
+The stub would otherwise outlive the cell it summarises, which is the half
+that actually matters: every routing read path consults the stubs, not the
+cells.
+
+Absence of the cell is a sound signal here, which is the whole reason this
+can be a sweep rather than a second membership subscriber:
+
+- an ordinary teardown (the owner unregistering its last entry) reaches the
+  peers as a merged `count = 0`, and `on_remote_set/3` drops the stub THEN —
+  before the emptied cell is ever discarded, so it never presents as an
+  orphan;
+- a stub is never inserted before its cell exists, because
+  `bondy_oplog_cell_apply` publishes merge events only after the cells of the
+  batch are applied (`publish_merges/2`), so the add direction has no window
+  where a live stub looks orphaned.
+
+Fail-closed: if either projection cannot be listed, NOTHING is reaped. A
+transient read failure must never be allowed to empty the routing view — the
+cost of skipping a pass is one stale stub for another interval, the cost of
+getting it wrong is a black-holed realm.
+
+Returns the number of stubs dropped. Pinned by
+`bondy_rib_reclamation_cluster_SUITE`.
+""".
+-spec reap_orphan_stubs(RealmUri :: uri()) -> non_neg_integer().
+
+reap_orphan_stubs(RealmUri) ->
+    case ets:whereis(?STUBS_TAB) of
+        undefined ->
+            0;
+        _ ->
+            lists:sum([
+                prune_cellless_stubs(RealmUri, Node)
+             || Node <- departed_stub_nodes(RealmUri)
+            ])
+    end.
+
+%% @private
+%% The nodestrings this realm holds stubs for that are no longer cluster
+%% members. Membership is only the FILTER, never the licence to delete: a
+%% removal is reversible, and dropping a returning node's stub would
+%% blackhole its routing until it happened to rewrite a cell (this node's
+%% frontier already claims its existing events, so AAE re-ships nothing).
+%% What licenses a delete is the backing cell being gone, checked per key in
+%% `prune_cellless_stubs/2`.
+%%
+%% Scoping to non-members is what keeps this affordable. The predecessor
+%% listed EVERY cell of BOTH RIB tables per realm to diff against the stub
+%% keys; `bondy_db:list/2` pages through `bondy_oplog_core:range_all/5`,
+%% which scatters to every shard and truncates after merging, so it costs
+%% O(cells x shards) decodes. Measured on the Fly fleet at 190,984
+%% subscription cells: 43.5s for ONE table, every sweep. Here the common
+%% case — nobody has departed — is one C-side match-spec scan returning a
+%% handful of nodestrings, and no cell read at all.
+departed_stub_nodes(RealmUri) ->
+    MS = [{{{'_', RealmUri, '_', '_', '$1'}, '_'}, [], ['$1']}],
+    Live = live_nodestrings(),
+    [
+        Node
+     || Node <- lists:usort(ets:select(?STUBS_TAB, MS)),
+        not lists:member(Node, Live)
+    ].
+
+%% @private
+%% Current members as nodestrings, including this node — a stub naming us
+%% would be an echo, never an orphan.
+live_nodestrings() ->
+    [
+        atom_to_binary(Node, utf8)
+     || Node <- partisan_membership:node_names()
+    ] ++ [bondy_config:nodestring()].
+
+%% @private
+%% Deletes `Node`'s stubs in this realm whose backing cell is gone, and
+%% returns how many. The cell is read per key rather than enumerated: the
+%% match spec bounds the work to one departed node's rows, so this is a
+%% point read per row that is already a deletion candidate.
+%%
+%% The cell disappears strictly LATER than the membership change that made
+%% the node a candidate — it goes when the dead-origin reap has zeroed it and
+%% `stabilize/2` has discarded it, which needs causal stability. So this is
+%% expected to find nothing on its first pass or several, and it is on the
+%% periodic sweep precisely because it must retry. A membership-triggered
+%% one-shot would run exactly when the answer is still "the cell is there".
+prune_cellless_stubs(RealmUri, Node) ->
+    MS = [
+        {{{'$1', RealmUri, '$2', '$3', Node}, '_'}, [], [
+            {{'$1', RealmUri, '$2', '$3', Node}}
+        ]}
+    ],
+    lists:foldl(
+        fun(StubKey, Acc) ->
+            case cell_is_gone(StubKey) of
+                true ->
+                    _ = stub_delete(StubKey),
+                    Acc + 1;
+                false ->
+                    Acc
+            end
+        end,
+        0,
+        ets:select(?STUBS_TAB, MS)
+    ).
+
+%% @private
+%% Whether the cell a stub summarises is absent from the local projection.
+%% Fail-closed: anything other than a definite `not_found` — an unreadable
+%% table, an unprovisioned type — leaves the stub alone, because this answer
+%% decides a DELETION.
+cell_is_gone({Type, RealmUri, Policy, Uri, Node}) ->
+    try
+        Table = db_table(Type),
+        Key = term_to_binary({RealmUri, Policy, Uri, Node}),
+        bondy_db:read(Table, RealmUri, Key) == {error, not_found}
+    catch
+        _:_ ->
+            false
+    end.
 
 -doc """
 The RIB consistency gate: compares, per `(Type, Policy, Uri)` in `RealmUri`,
@@ -948,11 +1158,15 @@ do_self_heal(Type, Table, RealmUri, Policy, Uri, LocalCount) ->
                 0 ->
                     ok;
                 Delta ->
-                    %% registration's table is struct-based (tier_2): the
-                    %% `count` field takes a scoped
-                    %% `{apply, count, {inc, _}}` op, not the bare
-                    %% `{inc, _}` subscription's bare pn_counter table
-                    %% takes directly.
+                    %% The op is the CARRIER's language, and the two tables
+                    %% differ: registration's struct takes the field-scoped
+                    %% `{apply, count, {inc, _}}`, subscription's
+                    %% `bondy_oplog_crdt_owned_counter` takes `{inc, _}`
+                    %% directly. Sending the wrong one does not crash here —
+                    %% it fails asynchronously and shows up only as a
+                    %% persistent `rib_divergence`, which is how the
+                    %% previous carrier change slipped past eunit and was
+                    %% caught by `bondy_registry_rib_restart_SUITE`.
                     Op =
                         case Type of
                             registration -> {apply, count, {inc, Delta}};
@@ -1179,11 +1393,11 @@ safe_metric(Type, Spec) ->
 %% projected value is not quite the shape read-side consumers want:
 %% registration's raw `bondy_oplog_crdt_struct` value already has the
 %% schema fields as top-level keys but may omit never-written
-%% `earliest`/`latest` registers (normalised to `undefined` here);
-%% subscription's raw `bondy_oplog_crdt_
-%% pn_counter` value is a bare integer, not a map at all. Called
-%% immediately after every raw read/list, before any `#{count := _}`-
-%% shaped pattern match.
+%% `earliest`/`latest` registers (normalised to `undefined` here).
+%% Subscription's carrier is a bare counter
+%% (`bondy_oplog_crdt_owned_counter`), so its raw value is an INTEGER, not a
+%% map at all. Called immediately after every raw read/list, before any
+%% `#{count := _}`-shaped pattern match.
 -spec reshape_summary(entry_type(), term()) -> map().
 
 reshape_summary(registration, #{count := Count, invoke := Invoke} = Value) ->

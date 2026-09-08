@@ -110,35 +110,34 @@ remote_credential_change_closes_user_sessions_test() ->
         meck:unload(bondy_rbac_user)
     end.
 
-%% A remote realm delete (a `clear` op) must close this node's sessions for that
-%% realm with reason ?WAMP_CLOSE_REALM.
-remote_delete_closes_realm_sessions_test() ->
+%% A remote realm delete (a `clear` op) must run this node's full realm
+%% teardown, not merely close its sessions: a realm's registry entries are
+%% keyed by the realm and the router's own ones have no session, so closing
+%% sessions alone leaves them behind. Pinning `teardown/1` here is what keeps
+%% the peer path and the deleting node's path on one implementation.
+remote_delete_tears_down_realm_test() ->
     ok = meck:new(bondy_realm, [passthrough]),
-    ok = meck:expect(
-        bondy_realm, close, fun(R, Reason) -> {closed, R, Reason} end
-    ),
+    ok = meck:expect(bondy_realm, teardown, fun(R) -> {torn_down, R} end),
     try
         ?assertEqual(
-            {closed, ?REALM, ?WAMP_CLOSE_REALM},
+            {torn_down, ?REALM},
             bondy_aae_reactor:react_realm(?REALM_KEY, clear)
         ),
-        ?assert(
-            meck:called(bondy_realm, close, [?REALM, ?WAMP_CLOSE_REALM])
-        )
+        ?assert(meck:called(bondy_realm, teardown, [?REALM]))
     after
         meck:unload(bondy_realm)
     end.
 
-%% A remote realm `set` (create / update) is a no-op here — it must NOT close
-%% sessions.
-remote_set_does_not_close_realm_sessions_test() ->
+%% A remote realm `set` (create / update) is a no-op here — it must NOT tear
+%% the realm down.
+remote_set_does_not_tear_down_realm_test() ->
     ok = meck:new(bondy_realm, [passthrough]),
-    ok = meck:expect(bondy_realm, close, fun(_, _) -> ok end),
+    ok = meck:expect(bondy_realm, teardown, fun(_) -> ok end),
     try
         ?assertEqual(
             ok, bondy_aae_reactor:react_realm(?REALM_KEY, {set, #{}})
         ),
-        ?assertNot(meck:called(bondy_realm, close, ['_', '_']))
+        ?assertNot(meck:called(bondy_realm, teardown, ['_']))
     after
         meck:unload(bondy_realm)
     end.
