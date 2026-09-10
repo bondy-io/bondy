@@ -989,10 +989,6 @@ cancel_mode(_) -> error.
 do_register(From, Uri, Handler, Opts, Data) ->
     case bondy_connect_handler_spec:validate(Handler) of
         ok ->
-            WireOpts = maps:with(
-                [match, invoke, concurrency, disclose_caller, force_reregister],
-                Opts
-            ),
             Reg1 = bondy_connect_registry:declare_registration(
                 Uri, Handler, Opts, Data#data.registry
             ),
@@ -1000,7 +996,7 @@ do_register(From, Uri, Handler, Opts, Data) ->
                 register,
                 From,
                 fun(ReqId) ->
-                    bondy_wamp_message:register(ReqId, WireOpts, Uri)
+                    bondy_wamp_message:register(ReqId, Opts, Uri)
                 end,
                 ?DEFAULT_ADMIN_TIMEOUT,
                 #{uri => Uri},
@@ -1030,7 +1026,6 @@ do_unregister(From, RegRef, Data) ->
 do_subscribe(From, Topic, Handler, Opts, Data) ->
     case bondy_connect_handler_spec:validate(Handler) of
         ok ->
-            WireOpts = maps:with([match, get_retained, nkey], Opts),
             Reg1 = bondy_connect_registry:declare_subscription(
                 Topic, Handler, Opts, Data#data.registry
             ),
@@ -1038,7 +1033,7 @@ do_subscribe(From, Topic, Handler, Opts, Data) ->
                 subscribe,
                 From,
                 fun(ReqId) ->
-                    bondy_wamp_message:subscribe(ReqId, WireOpts, Topic)
+                    bondy_wamp_message:subscribe(ReqId, Opts, Topic)
                 end,
                 ?DEFAULT_ADMIN_TIMEOUT,
                 #{uri => Topic},
@@ -1066,25 +1061,6 @@ do_unsubscribe(From, SubRef, Data) ->
 
 %% @private
 do_publish(From, Topic, Args, KWArgs, Opts, Data) ->
-    WireOpts = maps:with(
-        [
-            acknowledge,
-            exclude,
-            exclude_me,
-            exclude_authid,
-            exclude_authrole,
-            eligible,
-            eligible_authid,
-            eligible_authrole,
-            disclose_me,
-            retain,
-            %% W3C trace context, pass-through (see bondy_connect_trace).
-            '_traceparent',
-            '_tracestate',
-            '_baggage'
-        ],
-        Opts
-    ),
     case maps:get(acknowledge, Opts, false) of
         true ->
             send_request(
@@ -1092,7 +1068,7 @@ do_publish(From, Topic, Args, KWArgs, Opts, Data) ->
                 From,
                 fun(ReqId) ->
                     bondy_wamp_message:publish(
-                        ReqId, WireOpts, Topic, Args, KWArgs
+                        ReqId, Opts, Topic, Args, KWArgs
                     )
                 end,
                 ?DEFAULT_ADMIN_TIMEOUT,
@@ -1102,7 +1078,7 @@ do_publish(From, Topic, Args, KWArgs, Opts, Data) ->
         false ->
             #data{next_request_id = ReqId} = Data,
             Msg = bondy_wamp_message:publish(
-                ReqId, WireOpts, Topic, Args, KWArgs
+                ReqId, Opts, Topic, Args, KWArgs
             ),
             Reply =
                 case send_msg(Msg, Data) of
@@ -1784,14 +1760,10 @@ replay_declared(Data) ->
     }),
     Data1 = lists:foldl(
         fun({Uri, _Handler, Opts}, D) ->
-            WireOpts = maps:with(
-                [match, invoke, concurrency, disclose_caller, force_reregister],
-                Opts
-            ),
             send_internal_request(
                 register,
                 fun(ReqId) ->
-                    bondy_wamp_message:register(ReqId, WireOpts, Uri)
+                    bondy_wamp_message:register(ReqId, Opts, Uri)
                 end,
                 #{uri => Uri},
                 D
@@ -1802,11 +1774,10 @@ replay_declared(Data) ->
     ),
     lists:foldl(
         fun({Uri, _Handler, Opts}, D) ->
-            WireOpts = maps:with([match, get_retained, nkey], Opts),
             send_internal_request(
                 subscribe,
                 fun(ReqId) ->
-                    bondy_wamp_message:subscribe(ReqId, WireOpts, Uri)
+                    bondy_wamp_message:subscribe(ReqId, Opts, Uri)
                 end,
                 #{uri => Uri},
                 D
@@ -1978,32 +1949,7 @@ resolve_subscription(Uri, Data) when is_binary(Uri) ->
 
 %% @private
 call_msg(Uri, Args, KWArgs, Opts) ->
-    %% Advanced-profile caller options passed through to the dealer:
-    %% `timeout`/`disclose_me` (caller_identification), `runmode`/`rkey`
-    %% (sharded/partitioned routing), `retries` (call_retries),
-    %% `receive_progress` (progressive_call_results, call_async only) and
-    %% `_deadline` (Bondy extension: absolute cap for a progressive call,
-    %% whose `timeout` is an inter-result inactivity window).
-    WireOpts = maps:with(
-        [
-            timeout,
-            disclose_me,
-            receive_progress,
-            %% progressive_calls: marks a non-final CALL of an argument stream.
-            progress,
-            runmode,
-            rkey,
-            retries,
-            '_deadline',
-            %% W3C trace context, pass-through (see bondy_connect_trace).
-            '_traceparent',
-            '_tracestate',
-            '_baggage'
-        ],
-        Opts
-    ),
-    %% request id is filled in by do_request/set_request_id.
-    bondy_wamp_message:call(1, WireOpts, Uri, Args, KWArgs).
+    bondy_wamp_message:call(1, Opts, Uri, Args, KWArgs).
 
 %% @private
 set_request_id(#call{} = M, ReqId) ->

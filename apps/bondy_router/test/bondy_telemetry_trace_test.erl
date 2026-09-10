@@ -9,6 +9,7 @@
 -module(bondy_telemetry_trace_test).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(TP, <<"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01">>).
 -define(TS, <<"congo=t61rcWkgMzE">>).

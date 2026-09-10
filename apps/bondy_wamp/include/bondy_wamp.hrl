@@ -466,6 +466,88 @@ end).
     }
 }).
 
+-define(WAMP_PPT_ATTRS, [ppt_cipher, ppt_keyid, ppt_scheme, ppt_serializer]).
+
+%% W3C Trace Context / Baggage carried as Bondy extension options
+%% (declared in bondy_config's WAMP extended_options and extended_details).
+%% The router is a pass-through: values are copied verbatim from
+%% CALL.Options to INVOCATION.Details and from PUBLISH.Options to
+%% EVENT.Details, never parsed or modified.
+-define(WAMP_TRACE_ATTRS, ['_traceparent', '_tracestate', '_baggage']).
+
+-define(WAMP_EXT_OPTIONS, [
+    {call, [
+        '_routing_key',
+        %% Total distinct cluster nodes a CALL may be routed to before a
+        %% routing failure is final (default 2 — the original candidate
+        %% plus one retry). Consulted by the dealer's bounded
+        %% pre-invocation retry; retries never extend the call timeout and
+        %% never occur once an invocation may have been delivered.
+        '_routing_max_candidates',
+        %% Absolute time budget for the whole call in milliseconds. For a
+        %% progressive call the WAMP `timeout` is an inter-result
+        %% inactivity window that each progressive result restarts; the
+        %% deadline caps the total duration regardless of progress.
+        '_deadline'
+        | ?WAMP_TRACE_ATTRS
+    ]},
+    {cancel, [
+        '_routing_key'
+         | ?WAMP_TRACE_ATTRS
+    ]},
+    {interrupt, [
+        'x_session_info', '_session_info'
+         | ?WAMP_TRACE_ATTRS
+    ]},
+    {register, [
+        'x_disclose_session_info',
+        '_disclose_session_info',
+        '_prefer_local',
+        '_prefer_local',
+        %% number of concurrent, outstanding calls that can exist
+        %% for a single endpoint
+        'x_concurrency',
+        {invoke, [
+            <<"jump_consistent_hash">>,
+            <<"jch">>,
+            <<"queue_least_loaded">>,
+            <<"qll">>,
+            <<"queue_least_loaded_sample">>,
+            <<"qlls">>
+        ]}
+        | ?WAMP_TRACE_ATTRS
+    ]},
+    {publish, [
+        %% The ttl for retained events
+        '_retained_ttl',
+        '_routing_key'
+        | ?WAMP_TRACE_ATTRS
+    ]},
+    {subscribe, [
+        'x_disclose_session_info', '_disclose_session_info'
+    ]},
+    {yield, ?WAMP_TRACE_ATTRS}
+]).
+-define(WAMP_EXT_DETAILS, [
+    {abort, ?WAMP_TRACE_ATTRS},
+    {hello, ['x_authroles', '_authroles' | ?WAMP_TRACE_ATTRS]},
+    {welcome, ['x_authroles', '_authroles' | ?WAMP_TRACE_ATTRS]},
+    {goodbye, ?WAMP_TRACE_ATTRS},
+    {error, ?WAMP_TRACE_ATTRS},
+    {event, [
+        'x_session_info',
+        '_session_info'
+        | ?WAMP_TRACE_ATTRS
+    ]},
+    {call, ?WAMP_TRACE_ATTRS},
+    {invocation, [
+        'x_session_info',
+        '_session_info'
+        | ?WAMP_TRACE_ATTRS
+    ]},
+    {result, ?WAMP_TRACE_ATTRS}
+]).
+
 %% =============================================================================
 %% WAMP MESSAGES
 %% =============================================================================

@@ -83,7 +83,7 @@ ensure_wamp_extensions_test() ->
         ok = lists:foreach(
             fun(P) -> bondy_wamp_config:set(P, []) end, tl(?EXT_PATHS)
         ),
-        ok = bondy_connect_app:ensure_wamp_extensions(),
+        ok = bondy_connect_config:ensure_wamp_extensions(),
         Expected = ['_traceparent', '_tracestate', '_baggage'],
         Call1 = bondy_wamp_config:get([extended_options, call]),
         ?assert(lists:member('_routing_key', Call1)),
@@ -102,7 +102,7 @@ ensure_wamp_extensions_test() ->
         ),
         %% Idempotent: a second run adds nothing (no duplicates).
         Before = [bondy_wamp_config:get(P) || P <- ?EXT_PATHS],
-        ok = bondy_connect_app:ensure_wamp_extensions(),
+        ok = bondy_connect_config:ensure_wamp_extensions(),
         ?assertEqual(Before, [bondy_wamp_config:get(P) || P <- ?EXT_PATHS])
     after
         lists:foreach(
