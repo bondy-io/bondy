@@ -1525,8 +1525,22 @@ find_grants(Realm, {Rolename, '_'}, Type, _Opts) ->
     %% cell) simply fails the generator pattern and is skipped.
     Table = grant_table(Type),
     {Lo, Hi} = bondy_oplog_index_key:col_bounds(Rolename),
-    {ok, Rows} = bondy_db:range_all(Table, Realm, Lo, Hi, #{}),
-    grant_rows(Rows);
+    %% Folded to exhaustion, not `range_all/5`: that returns ONE page, so a
+    %% role with more grants than the default limit silently lost the rest —
+    %% and a missing grant here is a missing PERMISSION.
+    %%
+    %% Pinned to the role's shard: a role's grants co-locate there (catalogue
+    %% `aggregate_root => leading_col`, the Rolename leading the composite
+    %% key), so the band never spans shards. The pin is what keeps this ONE
+    %% durable read — an unpinned `fold/6` walks every shard in sequence, and
+    %% this is the authz path, several calls per `get_context/2`.
+    Shard = bondy_db:shard_for(Table, Realm, Lo),
+    {ok, Rev} = bondy_db:fold(
+        Table, Realm, Lo, Hi, fun(Row, Acc) -> [Row | Acc] end, [], #{
+            shard => Shard
+        }
+    ),
+    grant_rows(lists:reverse(Rev));
 find_grants(Realm, '_', Type, _Opts) ->
     %% Whole-realm enumeration (`grants/2`, an admin "list all grants" call):
     %% inherently `O(realm)`, no role to bound it by, and off the authz hot path.
@@ -1606,11 +1620,29 @@ do_get(Table, RealmUri, Key) ->
 %% to `O(grants-for-role)` — no full-realm decode-and-filter.
 revoke_role_grants(Table, RealmUri, Rolename) ->
     {Lo, Hi} = bondy_oplog_index_key:col_bounds(Rolename),
-    {ok, Rows} = bondy_db:range_all(Table, RealmUri, Lo, Hi, #{}),
-    _ = [
-        bondy_db:apply(Table, RealmUri, EncKey, clear)
-     || {EncKey, _V, _Hlc} <- Rows
-    ],
+    %% Folded to exhaustion, and clearing as it goes. `range_all/5` returned
+    %% one page, so a role with more grants than the default limit kept the
+    %% remainder THROUGH a revocation — a grant surviving the removal of the
+    %% role it belongs to. Clearing from inside the fold is safe: the walk
+    %% runs a forward cursor and a cleared cell holds its place in the band
+    %% until stabilization.
+    %%
+    %% Pinned to the role's shard, for the reason given in `find_grants/4`:
+    %% the band is single-shard by the catalogue's `aggregate_root`, and an
+    %% unpinned `fold/6` would walk every shard in sequence.
+    Shard = bondy_db:shard_for(Table, RealmUri, Lo),
+    {ok, ok} = bondy_db:fold(
+        Table,
+        RealmUri,
+        Lo,
+        Hi,
+        fun({EncKey, _V, _Hlc}, ok) ->
+            _ = bondy_db:apply(Table, RealmUri, EncKey, clear),
+            ok
+        end,
+        ok,
+        #{shard => Shard}
+    ),
     ok.
 
 %% @private

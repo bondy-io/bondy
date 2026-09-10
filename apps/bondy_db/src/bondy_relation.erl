@@ -267,14 +267,26 @@ list(
     end.
 
 -doc """
-Stream every tuple of `Relation` in `Realm` through `Fun` in ascending
-storage-key order, accumulating into `Acc0`.
+Stream every tuple of `Relation` in `Realm` through `Fun`, accumulating into
+`Acc0`.
 
 Unlike collecting `list/3` pages, this never materialises the whole
 relation: it pages internally with a bounded window. Use it for the
 "touch every row" admin operations (rename, bulk-delete) that must be
 complete but must stay within bounded memory. Rejected rows (the
 decoder's `skip`) are not passed to `Fun`.
+
+Ordering follows the relation's **mode**, exactly as `list/3`'s does:
+
+- `partition` (the default) streams shard by shard — key-ordered within a
+  shard, shards in index order — reading each row once.
+- `global` scatter-merges and is globally key-ordered, at the cost of
+  re-reading the band once per shard.
+
+This used to ignore the mode and always scatter, so a `partition` relation's
+`fold/4` silently cost `O(rows x shards)` while the `list/3` beside it cost
+`O(rows)`. A caller that needs its whole-relation output sorted declares
+`mode => global` and pays for it visibly.
 
 Returns `{ok, Acc}` or a substrate `{error, _}`.
 """.
@@ -286,7 +298,18 @@ Returns `{ok, Acc}` or a substrate `{error, _}`.
 ) ->
     {ok, term()} | {error, term()}.
 
-fold(#relation{} = Relation, Realm, Fun, Acc0) when
+fold(#relation{mode = partition} = Relation, Realm, Fun, Acc0) when
+    is_binary(Realm), is_function(Fun, 2)
+->
+    #relation{table = Table, decode = Decode} = Relation,
+    Wrapped = fun(Row, Acc) ->
+        case Decode(Row) of
+            {ok, Tuple} -> Fun(Tuple, Acc);
+            skip -> Acc
+        end
+    end,
+    bondy_db:fold(Table, Realm, <<>>, infinity, Wrapped, Acc0);
+fold(#relation{mode = global} = Relation, Realm, Fun, Acc0) when
     is_binary(Realm), is_function(Fun, 2)
 ->
     do_fold(Relation, Realm, <<>>, Fun, Acc0).
@@ -502,6 +525,8 @@ start_shard(Cursor) ->
     Shard.
 
 %% @private
+%% `global` mode only: scatter-merge each window so the stream is globally
+%% key-ordered. `partition` mode goes straight to `bondy_db:fold/6`.
 do_fold(
     #relation{table = Table, decode = Decode} = Relation, Realm, Lo, Fun, Acc
 ) ->

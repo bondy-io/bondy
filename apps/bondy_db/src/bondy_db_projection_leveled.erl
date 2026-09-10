@@ -302,8 +302,18 @@ range(H, Bucket, Low, High, Opts) when
     {Limiter, FoldFun} =
         case High of
             infinity ->
-                %% Whole-bucket fold, accepting state subkeys with Key >= Low.
-                {{range, Bucket, all}, make_frame_fold_open(Limit, Low)};
+                %% Seek to `Low` and run to the end of the bucket.
+                %% `<<"$all">>` is leveled's open upper bound for a bucket
+                %% key range (`leveled_bookie:return_ledger_keyrange/3`).
+                %% Folding the WHOLE bucket and discarding `Key < Low` in
+                %% the fold function would re-visit every key below `Low`
+                %% on every call, which makes paging a band quadratic —
+                %% and `High = infinity` is precisely the form every
+                %% band-paging caller uses.
+                {
+                    {range, Bucket, {{Low, ?SK_STATE}, <<"$all">>}},
+                    make_frame_fold_open(Limit)
+                };
             _ ->
                 %% Leveled's KeyRange end is inclusive, so the fold drops a
                 %% state subkey whose Key equals `High` (half-open contract).
@@ -676,12 +686,11 @@ make_frame_fold(Limit, High) ->
             Acc
     end.
 
-%% Open-ended (`High =:= infinity`) variant: whole-bucket fold accepting state
-%% subkeys whose Key is `>= Low`, capped at `Limit`.
-make_frame_fold_open(Limit, Low) ->
+%% Open-ended (`High =:= infinity`) variant, capped at `Limit`. It carries no
+%% lower-bound test: the ledger range is already seeded at `Low`, so filtering
+%% here would only re-express a bound the fold never crosses.
+make_frame_fold_open(Limit) ->
     fun
-        (_B, {K, ?SK_STATE}, _Value, Acc) when K < Low ->
-            Acc;
         (_B, {K, ?SK_STATE}, Value, {Count, Results, Pending}) ->
             {Count1, Results1} = finalize_frame(Pending, Count, Results),
             case Count1 >= Limit of

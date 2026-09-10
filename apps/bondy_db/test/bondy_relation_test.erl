@@ -21,7 +21,11 @@
 %%   2. The decoder's `skip` (rejected rows interleaved with accepted ones —
 %%      the user-table-with-aliases shape) is back-filled so every page holds
 %%      `limit` accepted rows, and rejected rows never surface.
-%%   3. `fold/4` streams every accepted row in key order, bounded memory.
+%%   3. `fold/4` streams every accepted row exactly once in bounded memory,
+%%      ordered per the relation's MODE — a set for `partition`, exact key
+%%      order for `global`. It used to scatter regardless of mode, so a
+%%      `partition` relation's fold cost O(rows x shards) while the `list/3`
+%%      beside it cost O(rows).
 %%   4. Cursor encode/decode round-trips and rejects stale/malformed cursors,
 %%      including a cursor minted under the other mode.
 %%   5. The default mode (no `mode` opt) is `partition`.
@@ -54,6 +58,9 @@ bondy_relation_test_() ->
         %% global mode: globally key-ordered, scatter+merge every page
         gen("global_asc_in_key_order", fun global_asc_in_key_order/1),
         gen("global_cursor_roundtrip", fun global_cursor_roundtrip/1),
+        gen(
+            "global_fold_in_key_order", fun global_fold_in_key_order/1
+        ),
         %% mode-agnostic
         gen("fold_streams_accepted_only", fun fold_streams_accepted_only/1),
         gen("lookup_hit_miss_rejected", fun lookup_hit_miss_rejected/1),
@@ -151,12 +158,29 @@ global_asc_in_key_order({_Db, T, _Sup, _Dir}) ->
     ?assertEqual(Keys, [K || {K, _} <- Vals]),
     ?assertEqual([10, 10, 5], [length(P) || P <- Pages]).
 
+%% partition mode: every accepted row exactly once, aliases never surfacing.
+%% Asserted as a SET — the walk concatenates shards, so the stream is
+%% key-ordered only within a shard. Sorting here would hide a duplicate, so
+%% the length is checked against the un-sorted stream as well.
 fold_streams_accepted_only({_Db, T, _Sup, _Dir}) ->
     UserKeys = put_users(T, 30),
     _ = put_aliases(T, 30),
     Rel = relation(T),
     {ok, Acc} = bondy_relation:fold(
         Rel, ?R, fun({K, _V}, A) -> [K | A] end, []
+    ),
+    Got = lists:reverse(Acc),
+    ?assertEqual(length(UserKeys), length(Got)),
+    ?assertEqual(UserKeys, lists:sort(Got)).
+
+%% global mode: the same stream, in exact global key order — the guarantee a
+%% caller opts into `global` to get, and the one the user/group whole-realm
+%% listings depend on.
+global_fold_in_key_order({_Db, T, _Sup, _Dir}) ->
+    UserKeys = put_users(T, 30),
+    _ = put_aliases(T, 30),
+    {ok, Acc} = bondy_relation:fold(
+        relation_global(T), ?R, fun({K, _V}, A) -> [K | A] end, []
     ),
     ?assertEqual(UserKeys, lists:reverse(Acc)).
 

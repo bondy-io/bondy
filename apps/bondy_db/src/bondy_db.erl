@@ -153,6 +153,8 @@ it).
 -export([index_range/6]).
 -export([info/1]).
 -export([list/2]).
+-export([fold/6]).
+-export([fold/7]).
 -export([fold_all/4]).
 -export([map_update/4]).
 -export([namespace/1]).
@@ -185,6 +187,12 @@ it).
 
 -define(DEFAULT_SHARD_COUNT, 8).
 -define(INDEX, primary).
+
+%% Rows pulled per shard per step by the shard walk (`walk_shards/7`). It
+%% bounds the walk's working set, nothing else: unlike a scatter-merge limit
+%% it is not multiplied by the shard count, so it trades syscalls against
+%% memory only.
+-define(WALK_CHUNK, 1000).
 
 %% Topologies that fold the realm into the storage KEY rather than isolating
 %% it by bucket. The full rationale, and the NUL-separator invariant it rests
@@ -1705,23 +1713,106 @@ value is the fold's empty value if its policy requires).
 -spec list(Table :: table(), Realm :: realm()) ->
     {ok, [row()]} | {error, term()}.
 
-list(#{namespace := NS, db_topology := Topology} = Table, Realm) when
-    is_binary(Realm)
-->
-    Bucket = primary_bucket(Table, Realm),
-    %% G-1: under a realm-folding topology scope the scatter-scan to the realm's
-    %% key band and recover the caller's keys; otherwise the Bucket already
-    %% isolates the realm and keys are passed through verbatim.
-    {Lo, Hi} = realm_scan_range(Topology, Realm),
-    case list_pages(NS, Bucket, Lo, Hi, []) of
-        {ok, Rows} ->
-            {ok, [
-                {uncell_key(Topology, Realm, K), V, Hlc}
-             || {K, V, Hlc} <- Rows
-            ]};
+list(Table, Realm) when is_binary(Realm) ->
+    Collect = fun(Row, Acc) -> [Row | Acc] end,
+    case fold(Table, Realm, <<>>, infinity, Collect, []) of
+        {ok, Rev} ->
+            %% `fold/6` yields shard by shard, so the rows arrive
+            %% partition-ordered. This function's contract is ASCENDING
+            %% (`bondy_db_publish_list_test:list_pages_to_completion/0` pins
+            %% it) and it materialises the whole realm regardless, so the
+            %% order is restored by sorting what is already in memory —
+            %% O(N log N) on decoded rows, against the O(N x shards) row
+            %% DECODES a scatter-merge pays to keep them ordered as it goes.
+            {ok, lists:keysort(1, Rev)};
         {error, _} = Err ->
             Err
     end.
+
+-doc """
+Streams every cell of `(Realm, [Low, High))` through `Fun`, complete and in
+bounded memory.
+
+The completeness is the point. `range_all/5` returns ONE page — `limit` rows,
+1000 by default — and a caller that wants a whole band and passes `#{}` gets
+a silently truncated prefix, which reads exactly like a short band. This
+folds the band to exhaustion instead, so "every grant of this role", "every
+source of this user" cannot quietly become "the first 1000 of them".
+
+Rows arrive in ascending key order **within each shard**, shards in index
+order — not globally sorted. A band that needs global ordering is a
+`bondy_relation` in `global` mode, or `range_all/5` for a single bounded
+page.
+
+The shards are walked **one after another**, because `Fun` carries an
+accumulator and may have side effects (`revoke_role_grants/3` clears as it
+folds), which a concurrent scatter could not preserve. So this is the wrong
+entry point for a band that lies on ONE shard: it costs `shard_count` serial
+reads where a single pinned read would do, and the extra ones return
+nothing. Whenever the band is one co-located aggregate — one role's grants,
+one user's sources or memberships — use `fold/7` with
+`shard => shard_for(Table, Realm, Low)`.
+
+Nothing else about the row shape differs: `Fun` receives
+`t:row/0` (`{Key, Value, Hlc}`) with caller-facing keys, and `Low`/`High`
+are realm-folded exactly as in `range/5` (`High => infinity` scans to the
+end of the realm band).
+
+Deleting or clearing rows from inside `Fun` is safe: the walk advances a
+forward cursor over storage keys, and a cleared cell keeps its place in the
+band until stabilization, so nothing is skipped.
+""".
+-spec fold(
+    Table :: table(),
+    Realm :: realm(),
+    Low :: binary(),
+    High :: binary() | infinity,
+    Fun :: fun((row(), Acc) -> Acc),
+    Acc0 :: Acc
+) -> {ok, Acc} | {error, term()} when Acc :: term().
+
+fold(Table, Realm, Low, High, Fun, Acc0) ->
+    fold(Table, Realm, Low, High, Fun, Acc0, #{}).
+
+-doc """
+As `fold/6`, with `Opts`:
+
+- `shard` — restrict the fold to one shard instead of walking them all. For
+  a band the table's partition strategy places entirely on one shard (a
+  co-located aggregate, e.g. one user's membership cells under
+  `aggregate_root => second_col`), walking every shard would add one empty
+  scan per other shard to a hot read for nothing. Pass
+  `shard_for(Table, Realm, Low)` — the same shard `range/5` derives by
+  default — and the fold stays a single-shard scan while still running to
+  exhaustion rather than stopping at a page.
+- `limit` — rows pulled per step. Bounds the working set only; unlike a
+  scatter-merge limit it is not multiplied by the shard count.
+""".
+-spec fold(
+    Table :: table(),
+    Realm :: realm(),
+    Low :: binary(),
+    High :: binary() | infinity,
+    Fun :: fun((row(), Acc) -> Acc),
+    Acc0 :: Acc,
+    Opts :: map()
+) -> {ok, Acc} | {error, term()} when Acc :: term().
+
+fold(#{db_topology := Topology} = Table, Realm, Low, High, Fun, Acc0, Opts) when
+    is_binary(Realm),
+    is_binary(Low),
+    (is_binary(High) orelse High =:= infinity),
+    is_function(Fun, 2),
+    is_map(Opts)
+->
+    %% G-1: fold the realm into both bounds, and recover the caller's keys on
+    %% the way out — the walk itself works in storage keys throughout.
+    Lo = cell_key(Topology, Realm, Low),
+    Hi = fold_high(Topology, Realm, High),
+    Wrapped = fun({K, V, Hlc}, Acc) ->
+        Fun({uncell_key(Topology, Realm, K), V, Hlc}, Acc)
+    end,
+    walk_shards(Table, Realm, Lo, Hi, Wrapped, Acc0, Opts).
 
 -doc """
 Streams **every** cell of `Table`, across **every realm**, into `Fun`.
@@ -1749,9 +1840,15 @@ not know it; callers that need it split on the FIRST NUL, which is exact:
 `assert_nul_free_realm/1` guarantees a realm URI contains none, while the
 key's own bytes (which may) are preserved verbatim after the separator.
 
-Streams. Rows arrive in ascending storage-key order, one merged page at a
-time (`limit`, default 1000), so a table of millions of cells never
-materialises. This is why it is a fold and not a `list_all/1`.
+Streams. Rows arrive one bounded chunk at a time (`limit`, default
+`?WALK_CHUNK`), so a table of millions of cells never materialises. This is
+why it is a fold and not a `list_all/1`.
+
+Order is ascending storage key **within each shard**, shards in index order —
+NOT globally sorted. It never was load-bearing here: both callers build a set
+or replay each cell independently. Restoring a global order would mean
+scatter-merging every chunk across every shard, which costs one read per shard
+per row (see `walk_shards/7`).
 
 ## Partial by construction
 
@@ -1769,40 +1866,14 @@ buckets. Raises `{unsupported_topology, _}` rather than returning `{ok, Acc0}`
     Opts :: map()
 ) -> {ok, Acc} | {error, term()} when Acc :: term().
 
-fold_all(
-    #{namespace := NS, db_topology := Topology} = Table, Fun, Acc0, Opts
-) when
+fold_all(#{db_topology := Topology} = Table, Fun, Acc0, Opts) when
     is_function(Fun, 2), is_map(Opts)
 ->
     ?FOLDS_REALM(Topology) orelse error({unsupported_topology, Topology}),
     %% `bucket_for/3` ignores the realm under a folding topology (the realm is
-    %% in the key), so the bucket is the whole table.
-    Bucket = primary_bucket(Table, <<>>),
-    Limit = maps:get(limit, Opts, 1000),
-    fold_all_pages(NS, Bucket, <<>>, Limit, Fun, Acc0).
-
-%% @private
-%% `list_pages/5`'s loop, applying `Fun` per page instead of accumulating the
-%% rows: same paging contract (advance the inclusive lower bound to the
-%% successor of the last STORAGE key; a short page ends the scan), no upper
-%% bound, and no per-page retention of what has already been folded.
-fold_all_pages(NS, Bucket, Lo, Limit, Fun, Acc) ->
-    Opts = #{limit => Limit},
-    case bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {Lo, infinity}, Opts) of
-        {ok, Rows} ->
-            Acc1 = lists:foldl(Fun, Acc, Rows),
-            case length(Rows) < Limit of
-                true ->
-                    {ok, Acc1};
-                false ->
-                    {LastKey, _, _} = lists:last(Rows),
-                    fold_all_pages(
-                        NS, Bucket, <<LastKey/binary, 0>>, Limit, Fun, Acc1
-                    )
-            end;
-        {error, _} = Err ->
-            Err
-    end.
+    %% in the key), so passing `<<>>` selects the whole table, and the
+    %% un-narrowed band spans every realm in it.
+    walk_shards(Table, <<>>, <<>>, infinity, Fun, Acc0, Opts).
 
 -doc """
 Bounded, globally-ordered range scan over `(Realm, [Low, High))` across
@@ -4116,24 +4187,94 @@ realm_scan_range(Topology, Realm) when is_binary(Realm) ->
             {<<>>, infinity}
     end.
 
+%% =============================================================================
+%% PRIVATE: the shard walk
+%% =============================================================================
+
 %% @private
-%% Page a cross-shard scatter-scan to completion: `range_all/5` caps each
-%% merged page (default 1000), so `list/2` loops, advancing the inclusive
-%% lower bound to the successor of the last STORAGE key, until a short page
-%% signals band exhaustion. Rows accumulate in ascending storage-key order;
-%% the caller unfolds keys once, on the complete result.
-list_pages(NS, Bucket, Lo, Hi, Acc) ->
-    Limit = 1000,
-    Opts = #{limit => Limit},
-    case bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {Lo, Hi}, Opts) of
-        {ok, Rows} when length(Rows) < Limit ->
-            {ok, lists:append(lists:reverse([Rows | Acc]))};
-        {ok, Rows} ->
-            {LastKey, _, _} = lists:last(Rows),
-            list_pages(NS, Bucket, <<LastKey/binary, 0>>, Hi, [Rows | Acc]);
+%% Stream every row of the STORAGE-key band `[Lo, Hi)` through `Fun`, one
+%% shard at a time, in ascending key order WITHIN each shard and shard index
+%% order between them.
+%%
+%% This is the one traversal under `list/2`, `fold_all/4` and `fold/6`. The
+%% alternative — scattering each page to every shard and k-way merging
+%% (`bondy_oplog_core:range_all/5`) — buys global key ordering at the cost of
+%% re-reading the whole band once per shard: per-shard calls take the caller's
+%% `limit` VERBATIM, so a page of `limit` rows costs `shard_count x limit` row
+%% decodes and discards the rest. Draining a band that way is `O(N x shards)`.
+%% Walking is `O(N)`. `bondy_db_read_amplification_test` is the ratchet, and
+%% callers that genuinely need global ordering (`bondy_relation` in `global`
+%% mode) still go through `range_all/5`.
+%%
+%% A shard that is not registered fails the walk with
+%% `{error, shard_not_registered}`, where a scatter would have silently
+%% omitted its rows. That is deliberate: these are the complete-enumeration
+%% entry points, and a silently partial result feeds bulk clears
+%% (`bondy_rbac:clear_all_grants/2`, `bondy_ticket:revoke_all_in/3`) that
+%% would then skip rows they were asked to remove.
+walk_shards(Table, Realm, Lo, Hi, Fun, Acc0, Opts) ->
+    Chunk = maps:get(limit, Opts, ?WALK_CHUNK),
+    Shards =
+        case maps:get(shard, Opts, all) of
+            all -> lists:seq(0, shard_count(Table) - 1);
+            Shard when is_integer(Shard) -> [Shard]
+        end,
+    walk_shard_seq(Table, Realm, Shards, Lo, Hi, Chunk, Fun, Acc0).
+
+%% @private
+walk_shard_seq(_Table, _Realm, [], _Lo, _Hi, _Chunk, _Fun, Acc) ->
+    {ok, Acc};
+walk_shard_seq(Table, Realm, [Shard | Rest], Lo, Hi, Chunk, Fun, Acc) ->
+    case walk_one_shard(Table, Realm, Shard, Lo, Hi, Chunk, Fun, Acc) of
+        {ok, Acc1} ->
+            walk_shard_seq(Table, Realm, Rest, Lo, Hi, Chunk, Fun, Acc1);
         {error, _} = Err ->
             Err
     end.
+
+%% @private
+%% Page one shard's slice of the band, advancing the inclusive lower bound to
+%% the successor of the last STORAGE key seen. A short page ends the shard —
+%% the substrate returns fewer than `Chunk` rows only at band exhaustion.
+walk_one_shard(Table, Realm, Shard, Lo, Hi, Chunk, Fun, Acc) ->
+    case shard_range(Table, Realm, Shard, Lo, Hi, Chunk) of
+        {ok, Rows} ->
+            Acc1 = lists:foldl(Fun, Acc, Rows),
+            case length(Rows) < Chunk of
+                true ->
+                    {ok, Acc1};
+                false ->
+                    {LastKey, _, _} = lists:last(Rows),
+                    walk_one_shard(
+                        Table,
+                        Realm,
+                        Shard,
+                        <<LastKey/binary, 0>>,
+                        Hi,
+                        Chunk,
+                        Fun,
+                        Acc1
+                    )
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+%% @private
+%% One bounded read of `[Lo, Hi)` forced onto `Shard`, in STORAGE keys.
+%%
+%% This goes to `bondy_oplog_core:range/5` rather than the facade's `range/5`
+%% because the bounds here are already realm-folded — `list/2` derives them
+%% from `realm_scan_range/2`, and `fold_all/4`'s span every realm and so
+%% cannot be expressed as one realm's bounds at all. Keys stay in storage
+%% form; each entry point recovers what it needs.
+shard_range(
+    #{namespace := NS} = Table, Realm, Shard, Lo, Hi, Chunk
+) ->
+    Bucket = primary_bucket(Table, Realm),
+    bondy_oplog_core:range(NS, ?INDEX, Bucket, {Lo, Hi}, #{
+        limit => Chunk, shard => Shard
+    }).
 
 %% @private
 %% Fold a single-shard range's upper bound. `infinity` becomes the realm's

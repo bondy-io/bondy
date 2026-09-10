@@ -53,6 +53,9 @@ adapter_test_() ->
         fun range_respects_limit/1,
         fun range_limit_larger_than_data_returns_all/1,
         fun range_asc_returns_ascending/1,
+        fun range_open_ended_is_inclusive_of_low/1,
+        fun range_open_ended_respects_limit_and_bucket/1,
+        fun range_open_ended_agrees_with_a_bounded_range/1,
         fun clear_is_bucket_scoped/1,
         fun clear_is_entity_scoped/1,
         fun cell_keys_is_entity_scoped/1,
@@ -254,6 +257,96 @@ range_asc_returns_ascending({Pid, _Dir}) ->
             #{}
         ),
         ?assertEqual([<<"k01">>, <<"k02">>, <<"k03">>], [K || {K, _} <- Rows])
+    end.
+
+%% ---------------------------------------------------------------------------
+%% `High = infinity` — the form EVERY band-paging caller uses
+%% ---------------------------------------------------------------------------
+%%
+%% This branch used to fold the whole bucket (`{range, Bucket, all}`) and
+%% discard `Key < Low` inside the fold function, so each page re-visited every
+%% key below `Low`. It now seeds the ledger range at `Low` instead.
+%%
+%% These pin EQUIVALENCE, which is all that is testable here. There is
+%% deliberately no cost ratchet: measured, a skipped ledger entry costs about
+%% 0.3us, against roughly 22ms of fixed snapshot setup per `range/5` call, so
+%% at any bucket size a unit test can build the signal sits inside the noise.
+%% The change is an asymptotic one (the drain of a band stops being quadratic
+%% in the band's length) and is not enforced by a test.
+
+range_open_ended_is_inclusive_of_low({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        ok = ?MOD:put_batch(H, [
+            {?BUCKET, key_n(I), mk_frame(value_n(I))}
+         || I <- lists:seq(1, 5)
+        ]),
+        %% `Low` stored: the ledger range start must include it, not begin
+        %% after it.
+        {ok, From3} = ?MOD:range(H, ?BUCKET, key_n(3), infinity, #{}),
+        ?assertEqual(
+            [key_n(3), key_n(4), key_n(5)], [K || {K, _} <- From3]
+        ),
+        %% `Low` absent: land on its successor. The gap key must be a
+        %% SUFFIX extension of a stored key — `<<"k03x">>` would sort above
+        %% `k004` (third byte `3` > `0`), not between them.
+        {ok, FromGap} = ?MOD:range(H, ?BUCKET, <<"k003x">>, infinity, #{}),
+        ?assertEqual([key_n(4), key_n(5)], [K || {K, _} <- FromGap]),
+        %% `Low` past the end: empty, not a wrap.
+        ?assertEqual(
+            {ok, []}, ?MOD:range(H, ?BUCKET, <<"zzz">>, infinity, #{})
+        )
+    end.
+
+range_open_ended_respects_limit_and_bucket({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        %% Neighbouring buckets on both sides: an open upper bound must stop
+        %% at the end of ITS bucket, which is the guarantee `<<"$all">>` is
+        %% relied on for.
+        ok = ?MOD:put_batch(H, [
+            {<<"aaa">>, key_n(1), mk_frame(<<"other">>)},
+            {?BUCKET, key_n(1), mk_frame(value_n(1))},
+            {?BUCKET, key_n(2), mk_frame(value_n(2))},
+            {?BUCKET, key_n(3), mk_frame(value_n(3))},
+            {<<"zzz">>, key_n(1), mk_frame(<<"other">>)}
+        ]),
+        {ok, All} = ?MOD:range(H, ?BUCKET, <<>>, infinity, #{}),
+        ?assertEqual([key_n(1), key_n(2), key_n(3)], [K || {K, _} <- All]),
+        {ok, Two} = ?MOD:range(H, ?BUCKET, <<>>, infinity, #{limit => 2}),
+        ?assertEqual([key_n(1), key_n(2)], [K || {K, _} <- Two])
+    end.
+
+range_open_ended_agrees_with_a_bounded_range({Pid, _Dir}) ->
+    fun() ->
+        H = handle(Pid),
+        %% The oracle: the bounded branch is untouched by this change, so an
+        %% open-ended scan must equal a bounded one whose `High` is above
+        %% every stored key — at every starting point, stored or not, with
+        %% and without a truncating limit. Sweeping `Low` across the whole
+        %% band is what catches an off-by-one at the seeded range start,
+        %% which the fixed examples above only sample.
+        Keys = [key_n(I) || I <- lists:seq(1, 40)],
+        ok = ?MOD:put_batch(H, [
+            {?BUCKET, K, mk_frame(<<K/binary, "v">>)}
+         || K <- Keys
+        ]),
+        Above = <<"zzzz">>,
+        Lows =
+            [<<>>, Above] ++
+                Keys ++
+                %% ...and the between-keys positions the paging callers
+                %% actually use: `<<LastKey, 0>>`.
+                [<<K/binary, 0>> || K <- Keys],
+        _ = [
+            begin
+                {ok, Open} = ?MOD:range(H, ?BUCKET, L, infinity, Opts),
+                {ok, Bounded} = ?MOD:range(H, ?BUCKET, L, Above, Opts),
+                ?assertEqual({L, Opts, Bounded}, {L, Opts, Open})
+            end
+         || L <- Lows, Opts <- [#{}, #{limit => 1}, #{limit => 7}]
+        ],
+        ok
     end.
 
 clear_is_bucket_scoped({Pid, _Dir}) ->

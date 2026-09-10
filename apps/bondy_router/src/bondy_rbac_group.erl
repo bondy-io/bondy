@@ -478,20 +478,29 @@ list(RealmUri, Opts) ->
     %% TODO We SHOULD list the realm's prototype roups as well (amd potentially
     %% marking them with a flag)
     %% The synthetic `?ANONYMOUS` group is not stored; it always heads the list.
-    Relation = relation(),
     case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
         undefined ->
             %% Whole-realm listing — streamed through a bounded keyset fold so
             %% it never materialises the raw cell set.
+            %%
+            %% `global` because this branch's result is user-visible and has
+            %% always come back in groupname order; `bondy_relation:fold/4`
+            %% follows the relation's mode, so the default `partition` would
+            %% silently change that ordering. It costs one read per shard per
+            %% row — the price of the alphabetical listing, now paid where it
+            %% is asked for.
             {ok, Acc} = bondy_relation:fold(
-                Relation, RealmUri, fun(Group, A) -> [Group | A] end, []
+                relation(global),
+                RealmUri,
+                fun(Group, A) -> [Group | A] end,
+                []
             ),
             [?ANONYMOUS | lists:reverse(Acc)];
         Limit ->
             %% Bounded prefix: at most `Limit` rows incl. the leading anonymous
             %% group (mirrors the prior `lists:sublist([?ANONYMOUS | All], _)`).
             {ok, #{values := Groups}} =
-                bondy_relation:list(Relation, RealmUri, #{limit => Limit}),
+                bondy_relation:list(relation(), RealmUri, #{limit => Limit}),
             lists:sublist([?ANONYMOUS | Groups], Limit)
     end.
 
@@ -623,9 +632,17 @@ table() ->
 %% @private
 %% The `security_groups` table as a paginatable relation of group records.
 relation() ->
+    relation(partition).
+
+%% @private
+%% `Mode` fixes how a page (`list/3`) and a whole-relation stream (`fold/4`)
+%% are assembled — see `bondy_relation`. `partition` reads each row once and
+%% is not globally sorted; `global` scatter-merges for groupname order.
+relation(Mode) ->
     bondy_relation:new(?BONDY_DB_GROUP_TAB, #{
         table => table(),
-        decode => fun decode_group_row/1
+        decode => fun decode_group_row/1,
+        mode => Mode
     }).
 
 %% @private

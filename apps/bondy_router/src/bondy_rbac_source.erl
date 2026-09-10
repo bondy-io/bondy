@@ -303,11 +303,28 @@ holds the name.
 remove_all(RealmUri, Username) ->
     Table = table(),
     {Lo, Hi} = bondy_oplog_index_key:col_bounds(Username),
-    {ok, Rows} = bondy_db:range_all(Table, RealmUri, Lo, Hi, #{}),
-    _ = [
-        bondy_db:apply(Table, RealmUri, EncKey, clear)
-     || {EncKey, _V, _Hlc} <- Rows
-    ],
+    %% Folded to exhaustion, not one `range_all/5` page: a user with more
+    %% sources than the default limit kept the remainder, and this function
+    %% exists precisely so that nothing is left behind for whoever next holds
+    %% the name.
+    %%
+    %% Pinned to the user's shard: a user's sources co-locate there (catalogue
+    %% `aggregate_root => leading_col`, the username leading the composite
+    %% key), so the band never spans shards. Unpinned, `fold/6` would walk
+    %% every shard in sequence for a band that lives on one.
+    Shard = bondy_db:shard_for(Table, RealmUri, Lo),
+    {ok, ok} = bondy_db:fold(
+        Table,
+        RealmUri,
+        Lo,
+        Hi,
+        fun({EncKey, _V, _Hlc}, ok) ->
+            _ = bondy_db:apply(Table, RealmUri, EncKey, clear),
+            ok
+        end,
+        ok,
+        #{shard => Shard}
+    ),
     ok.
 
 -doc """
@@ -575,8 +592,25 @@ scan(RealmUri) ->
 %% cells are dropped.
 scan_user(RealmUri, Username) ->
     {Lo, Hi} = bondy_oplog_index_key:col_bounds(Username),
-    {ok, Rows} = bondy_db:range_all(table(), RealmUri, Lo, Hi, #{}),
-    [{decode_key(EncKey), V} || {EncKey, V, _Hlc} <- Rows, is_map(V)].
+    %% Folded to exhaustion: a truncated source list here is an auth-path
+    %% MISMATCH, i.e. a valid source that stops matching.
+    %%
+    %% Pinned to the user's shard, as in `remove_all/2`, and it matters most
+    %% here: this is the AUTHENTICATION path — called for the user and again
+    %% for the prototype's `all` — so an unpinned walk would pay
+    %% `shard_count` serial durable reads per call.
+    Table = table(),
+    Shard = bondy_db:shard_for(Table, RealmUri, Lo),
+    {ok, Rev} = bondy_db:fold(
+        Table, RealmUri, Lo, Hi, fun(Row, Acc) -> [Row | Acc] end, [], #{
+            shard => Shard
+        }
+    ),
+    [
+        {decode_key(EncKey), V}
+     || {EncKey, V, _Hlc} <- lists:reverse(Rev),
+        is_map(V)
+    ].
 
 %% The source store key is the 3-tuple `{Username, AMask, Authmethod}`, encoded
 %% as an order-preserving composite: the username as a type-tagged leading

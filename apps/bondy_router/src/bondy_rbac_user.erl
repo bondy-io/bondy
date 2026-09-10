@@ -874,10 +874,10 @@ back as `cursor` for the next page.
 
 list(RealmUri, Opts) ->
     %% `mode` (`partition` default | `global`) selects how a bounded page is
-    %% assembled — see `relation/0`. It only affects the keyset (limit) branch;
-    %% the whole-realm fold is order-agnostic.
+    %% assembled — see `relation/0`. It applies to the keyset (limit) branch;
+    %% the whole-realm branch below is pinned to `global` so its long-standing
+    %% username ordering does not depend on the option.
     Mode = maps_utils:get_any([mode, <<"mode">>], Opts, partition),
-    Relation = relation(Mode),
     case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
         undefined ->
             %% Whole-realm listing — streamed through a bounded keyset fold so
@@ -885,8 +885,14 @@ list(RealmUri, Opts) ->
             %% + `lists:sublist` could OOM a large realm). Membership is joined
             %% from ONE scan of the realm's forward membership band (rather than
             %% a per-user scan) since the whole realm is materialised anyway.
+            %% `global` because this branch's result is user-visible and
+            %% has always come back in username order; `bondy_relation:fold/4`
+            %% follows the relation's mode, so the default `partition` would
+            %% silently change that ordering. It costs one read per shard per
+            %% row — the price of the alphabetical listing, now paid where it
+            %% is asked for.
             {ok, Acc} = bondy_relation:fold(
-                Relation, RealmUri, fun(User, A) -> [User | A] end, []
+                relation(global), RealmUri, fun(User, A) -> [User | A] end, []
             ),
             GMap = all_member_groups(RealmUri),
             [join_groups(GMap, User) || User <- lists:reverse(Acc)];
@@ -903,7 +909,7 @@ list(RealmUri, Opts) ->
                     _ -> PageOpts0#{cursor => Cursor}
                 end,
             {ok, #{values := Users, next := Next}} =
-                bondy_relation:list(Relation, RealmUri, PageOpts),
+                bondy_relation:list(relation(Mode), RealmUri, PageOpts),
             %% Join groups for the WHOLE page in ONE bounded forward-band scan.
             %% The page's usernames are ascending, so their membership cells
             %% occupy the contiguous band «FWD,first»..«FWD,last». The previous
@@ -1407,12 +1413,27 @@ clear_memberships(RealmUri, Username) ->
 member_groups(RealmUri, Username) ->
     {Lo, Hi} = fwd_band(Username),
     %% Single-shard read: a user's forward cells co-locate on the user's shard
-    %% (catalogue `aggregate_root => second_col`), and `range/5` derives that
-    %% shard from the band's leading bytes (`second_col(Lo) = Username`) — so
-    %% this is one bounded shard scan, not the all-shard scatter `range_all`
-    %% would run. This is the hot auth path (`get_context` → `lookup`).
-    {ok, Rows} = bondy_db:range(member_table(), RealmUri, Lo, Hi, #{}),
-    [fwd_group(Key) || {Key, true, _Hlc} <- Rows].
+    %% (catalogue `aggregate_root => second_col`), and `shard_for/3` derives
+    %% that shard from the band's leading bytes (`second_col(Lo) = Username`)
+    %% — so this is one bounded shard scan, not the all-shard scatter
+    %% `range_all` would run. This is the hot auth path
+    %% (`get_context` → `lookup`).
+    %% Folded to exhaustion rather than read as one page — a user with more
+    %% groups than the default limit silently lost the rest, and a missing
+    %% group is a missing set of PERMISSIONS. `shard` keeps it the single
+    %% co-located scan described above: without it the fold would walk every
+    %% shard, adding an empty scan per other shard to this hot read.
+    Shard = bondy_db:shard_for(member_table(), RealmUri, Lo),
+    {ok, Rev} = bondy_db:fold(
+        member_table(),
+        RealmUri,
+        Lo,
+        Hi,
+        fun(Row, Acc) -> [Row | Acc] end,
+        [],
+        #{shard => Shard}
+    ),
+    [fwd_group(Key) || {Key, true, _Hlc} <- lists:reverse(Rev)].
 
 %% @private
 %% Every user's groups in the realm as `#{Username => [Group]}` — one scan of

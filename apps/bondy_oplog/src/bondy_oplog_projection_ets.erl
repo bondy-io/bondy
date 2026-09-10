@@ -115,44 +115,86 @@ put_batch(Tab, Entries) ->
 
 -doc """
 Single-bucket half-open `[Low, High)` ascending range scan, capped at
-`limit` (default 1000).
+`limit` (default 1000). A non-positive `limit` yields `[]`.
 
 `High` may be the atom `infinity` for an open-ended scan (every key
 `>= Low` in the bucket) — the form the secondary-index primary-scan
 fallback uses, since no finite binary exceeds every possible key.
+
+The scan SEEKS to `Low` and walks forward, so its cost is `O(limit)`
+however far into the bucket `Low` lies. That is load-bearing rather than
+incidental: every caller that pages a band re-enters here with a rising
+`Low`, so a scan whose cost grew with `Low` makes paging a band of N rows
+quadratic in N.
+
+A match-spec guard cannot express the seek. `ets:select/3` narrows an
+`ordered_set` traversal on a bound key PATTERN, never on a `>=` GUARD, so
+the guarded form this replaces re-traversed the bucket from its first key
+on every call — measured at 49,918 reductions to reach row 49,900 of
+50,000, against 0 for a seek. `range_cost_is_flat_in_low/1` in
+`bondy_oplog_projection_ets_test` is the ratchet on that, and
+`bondy_oplog_projection_ets_proper_test` pins this against the guarded
+form it replaces.
+
+The walk steps with `ets:next_lookup/2`, which yields the next key AND its
+object in one atomic operation. A separate `next/2` + `lookup/2` pair would
+race a concurrent writer on this `public` table — the row can vanish between
+the two — and the resulting empty read has no correct handling that is also
+testable: skipping it is right but unreachable from any sequential test, and
+counting it against the limit truncates the page, which a paging caller
+reads as band exhaustion and silently drops the remainder. Stepping
+atomically removes the case instead of arbitrating it.
 """.
+range(_Tab, _Bucket, _Low, _High, #{limit := Limit}) when
+    is_integer(Limit), Limit =< 0
+->
+    {ok, []};
 range(Tab, Bucket, Low, High, Opts) ->
     Limit = maps:get(limit, Opts, ?DEFAULT_RANGE_LIMIT),
-    %% Rows are keyed by `{Bucket, Key}`. To scan a single bucket's
-    %% `[Low, High)` we constrain the composite key to that bucket. An
-    %% `infinity` high drops the upper-bound guard.
-    Guards =
-        case High of
-            infinity ->
-                [
-                    {'=:=', '$1', {const, Bucket}},
-                    {'>=', '$2', {const, Low}}
-                ];
-            _ ->
-                [
-                    {'=:=', '$1', {const, Bucket}},
-                    {'>=', '$2', {const, Low}},
-                    {'<', '$2', {const, High}}
-                ]
+    Seed = {Bucket, Low},
+    {N, Acc0} =
+        case first_row(Tab, Seed, Low, High) of
+            {ok, Row} -> {Limit - 1, [Row]};
+            none -> {Limit, []}
         end,
-    MS = [
-        {
-            {{'$1', '$2'}, '$3'},
-            Guards,
-            [{{'$2', '$3'}}]
-        }
-    ],
-    Result =
-        case ets:select(Tab, MS, Limit) of
-            '$end_of_table' -> [];
-            {Found, _Cont} -> Found
-        end,
-    {ok, Result}.
+    {ok, lists:reverse(walk(Tab, Bucket, Seed, High, N, Acc0))}.
+
+%% @private
+%% `Low` itself, when it is stored and inside the upper bound.
+%% `ets:next_lookup/2` steps STRICTLY forward, so the inclusive lower bound
+%% cannot come out of the walk and needs this probe of its own.
+first_row(_Tab, _Seed, Low, High) when High =/= infinity, Low >= High ->
+    none;
+first_row(Tab, Seed, Low, _High) ->
+    case ets:lookup(Tab, Seed) of
+        [{_, Frame}] -> {ok, {Low, Frame}};
+        [] -> none
+    end.
+
+%% @private
+%% Step forward from `Prev`, emitting at most `N` rows. Rows accumulate
+%% newest-first.
+%%
+%% Leaving the bucket is detected by the key tag, not by a bound: the
+%% successor of a bucket's last key is the FIRST key of the next bucket,
+%% which is a well-formed key of the same shape. The pins are
+%% `prop_never_leaves_its_bucket/0` and the confinement example beside it.
+%%
+%% `High =:= infinity` cannot be folded into the comparison because atoms
+%% sort BEFORE binaries, so `Key < infinity` is false for every key.
+walk(_Tab, _Bucket, _Prev, _High, N, Acc) when N =< 0 ->
+    Acc;
+walk(Tab, Bucket, Prev, High, N, Acc) ->
+    case ets:next_lookup(Tab, Prev) of
+        {{Bucket, Key} = EtsKey, [{_, Frame}]} when
+            High =:= infinity orelse Key < High
+        ->
+            walk(Tab, Bucket, EtsKey, High, N - 1, [{Key, Frame} | Acc]);
+        _ ->
+            %% `'$end_of_table'`, the first key of the NEXT bucket, or a key
+            %% at or past `High`. The band is exhausted in every case.
+            Acc
+    end.
 
 -doc "Single-key delete inside a Bucket.".
 delete(Tab, Bucket, Key) ->
