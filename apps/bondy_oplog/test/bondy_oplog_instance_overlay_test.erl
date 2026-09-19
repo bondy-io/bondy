@@ -44,6 +44,7 @@ overlay_test_() ->
         {timeout, 30, fun first_and_latest_merge_overlay/0},
         {timeout, 30, fun await_apply_drains_overlay/0},
         {timeout, 30, fun overlay_events_cap_returns_backpressure/0},
+        {timeout, 30, fun rejected_events_release_the_cap/0},
         {timeout, 30, fun overlay_value_round_trip/0},
         {timeout, 30, fun overlay_evicts_after_apply/0}
     ]}.
@@ -172,6 +173,44 @@ overlay_events_cap_returns_backpressure() ->
     ok = bondy_oplog:await_apply(Id, 5000),
     ok = bondy_oplog:stop_instance(Id).
 
+rejected_events_release_the_cap() ->
+    %% An event the applier refuses to install leaves the overlay — and
+    %% must leave the admission counters with it. Fill a cap of 2 with two
+    %% events the validator refuses on replay: once the applier has evicted
+    %% their rows, a third append must be admitted, and the counters must
+    %% read empty. Before the fix the rows were deleted but the counters
+    %% never decremented, so every rejected event permanently consumed a
+    %% slot of the cap: two rejections here left the shard refusing every
+    %% write with `backpressure`.
+    Id = mk_id(),
+    {ok, _} = bondy_oplog:start_instance(Id, #{max_overlay_events => 2}),
+    ok = meck:new(bondy_oplog_validator_trust, [passthrough, no_link]),
+    ok = meck:expect(bondy_oplog_validator_trust, verify_event, fun(_E, _S) ->
+        {error, bad_signature}
+    end),
+    try
+        _ = bondy_oplog:append(Id, refused_1),
+        _ = bondy_oplog:append(Id, refused_2),
+        ok = bondy_oplog:await_apply(Id, 5000),
+        Tab = bondy_oplog_registry:overlay_tab(Id),
+        ?assertEqual(0, ets:info(Tab, size)),
+        #{overlay_counters := Ctrs} = bondy_oplog_registry:fast_path(Id),
+        ?assertEqual({0, 0}, {atomics:get(Ctrs, 1), atomics:get(Ctrs, 2)}),
+        ok = meck:unload(bondy_oplog_validator_trust),
+        ?assertMatch(
+            #bondy_oplog_event_key{}, bondy_oplog:append(Id, admitted)
+        ),
+        ok = bondy_oplog:await_apply(Id, 5000)
+    after
+        _ =
+            try
+                meck:unload(bondy_oplog_validator_trust)
+            catch
+                _:_ -> ok
+            end
+    end,
+    ok = bondy_oplog:stop_instance(Id).
+
 overlay_value_round_trip() ->
     %% The Op + Meta written through the overlay path must round-trip
     %% intact through `get/2`.
@@ -217,11 +256,12 @@ mk_id() ->
             )
     ).
 
-%% Build an overlay row with a unique key. Used to simulate a backed-
-%% up applier without involving the real WAL/applier path.
+%% Build an overlay row with a unique key and no awaiting appender. Used
+%% to simulate a backed-up applier without involving the real WAL/applier
+%% path.
 fake_overlay_row(N) ->
     Hlc = 1000 + N,
     Origin = <<0:128>>,
     Key = #bondy_oplog_event_key{hlc = Hlc, origin = Origin, seq = N},
     Value = {fake_op, fake_meta, undefined, undefined},
-    {Key, Value, Hlc, local}.
+    {Key, Value, Hlc, local, undefined}.

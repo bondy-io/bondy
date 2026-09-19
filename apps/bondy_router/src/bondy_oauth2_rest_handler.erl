@@ -57,6 +57,7 @@ credentials, resource owner password and refresh token grant flows.
         allow_null => false,
         allow_undefined => true,
         datatype => binary,
+        validator => fun bondy_data_validators:device_id/1,
         default => undefined
     }
 }).
@@ -316,6 +317,12 @@ do_is_authorized(Req0, St0) ->
                 throw(Reason)
         end
     catch
+        throw:temporarily_unavailable ->
+            %% The AE freshness fence (`bondy_auth:authenticate/4`) refused
+            %% to authenticate anyone on a node whose security view is stale.
+            %% That is this node's condition, not the client's credentials:
+            %% 503, never `invalid_client`.
+            {stop, reply(temporarily_unavailable, Req0), St0};
         throw:EReason ->
             ?LOG_INFO(#{
                 description =>
@@ -426,6 +433,9 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     catch
         throw:Error when is_map(Error) ->
             {stop, reply(Error, Req0), St0};
+        throw:temporarily_unavailable ->
+            %% As in `do_is_authorized/2`: the fence, not the grant.
+            {stop, reply(temporarily_unavailable, Req0), St0};
         throw:EReason ->
             ?LOG_INFO(#{
                 description =>
@@ -528,7 +538,14 @@ revoke_token_flow(Data0, Req0, St) ->
 
         case maps:get(<<"token_type_hint">>, Data1) of
             refresh_token ->
-                bondy_oauth_token:revoke(RealmUri, Token);
+                case bondy_oauth_token:revoke(RealmUri, Token) of
+                    ok ->
+                        ok;
+                    {error, service_unavailable} = Error ->
+                        %% RFC 7009 §2.2.1: a 503 tells the client the token
+                        %% still exists and to retry — never a 200 here.
+                        throw(Error)
+                end;
             access_token ->
                 %% Not supported
                 ok
@@ -551,7 +568,9 @@ revoke_token_flow(Data0, Req0, St) ->
         {true, Req1, St}
     catch
         error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
-            {stop, reply(unsupported_token_type, Req0), St}
+            {stop, reply(unsupported_token_type, Req0), St};
+        throw:{error, service_unavailable} ->
+            {stop, reply(service_unavailable, Req0), St}
     end.
 
 jwks(Req0, St) ->
@@ -612,8 +631,16 @@ reply(Reason, Req) ->
             ?HTTP_INTERNAL_SERVER_ERROR -> ?HTTP_BAD_REQUEST;
             Other -> Other
         end,
+    %% A 503 is a transient condition of this node; `retry-after` tells the
+    %% client to back off rather than treat it as final. One second is a floor
+    %% (the same value the gateway's throttle uses), not a measured drain time.
+    Headers =
+        case Status of
+            ?HTTP_SERVICE_UNAVAILABLE -> #{<<"retry-after">> => <<"1">>};
+            _ -> #{}
+        end,
     cowboy_req:reply(
-        Status, prepare_request(bondy_error:to_map(Error), #{}, Req)
+        Status, prepare_request(bondy_error:to_map(Error), Headers, Req)
     ).
 
 %% @private

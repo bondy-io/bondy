@@ -80,9 +80,12 @@ contract, versioned by the topology manifest's `key_encoding_version`.
 applier: the applier reads the current cell
 frame, decodes via the fold module, folds the event in via
 `apply_event/3`, encodes the new state, and writes it back through the
-projection adapter with Bucket and Key as separate operands. After
-the append, `apply/4` calls `bondy_oplog:await_apply/1` so the next
-`read/3` from the same caller sees the updated cell.
+projection adapter with Bucket and Key as separate operands. The
+append carries the caller's process alias (`bondy_oplog:append_applied/4`)
+and `apply/4` returns when THAT event has been applied — not when the
+shard's whole overlay has drained — so the next `read/3` from the same
+caller sees the updated cell without paying for other appenders'
+backlog.
 
 ## Read path
 
@@ -94,7 +97,7 @@ the append, `apply/4` calls `bondy_oplog:await_apply/1` so the next
 
 Overlay merging is disabled at the facade level — the shard is
 registered with `overlay = disabled`. Read-your-writes is provided by
-`apply/4`'s `await_apply` step, not by an overlay merge.
+`apply/4`'s per-event barrier, not by an overlay merge.
 
 ## Lifecycle
 
@@ -187,6 +190,12 @@ it).
 
 -define(DEFAULT_SHARD_COUNT, 8).
 -define(INDEX, primary).
+
+%% How long `apply/4` and `apply_batch/1` wait for their own events to be
+%% applied (`bondy_oplog:await_applied/3`) before answering
+%% `{error, timeout}` — the write is WAL-durable and still pending. The
+%% same 5 s the whole-overlay `bondy_oplog:await_apply/1` barrier has.
+-define(APPLY_TIMEOUT, 5000).
 
 %% Rows pulled per shard per step by the shard walk (`walk_shards/7`). It
 %% bounds the walk's working set, nothing else: unlike a scatter-merge limit
@@ -901,17 +910,24 @@ Apply a fold-specific event to `(Realm, Key)` inside `Table`.
 
 Builds `{cell_apply, Bucket, Key, FoldEvent}` (Bucket composed via
 `Topology:bucket_for/3`) and appends it through the shard's oplog
-instance. Once the WAL append returns, blocks on
-`bondy_oplog:await_apply/1` so the projection write is visible to a
-subsequent `read/3` from the same caller (read-your-writes).
+instance with the caller's alias (`bondy_oplog:append_applied/4`), then
+blocks until this event's projection write is committed, so it is
+visible to a subsequent `read/3` from the same caller
+(read-your-writes). The wait is for this event alone: other appenders'
+pending events on the shard do not extend it.
 
 The event shape is whatever the table's `fold_module:apply_event/3`
 accepts. Idempotency and conflict resolution are inherited from the
 fold's contract; the facade does not validate event shapes.
 
-Returns `ok` on successful WAL durability + applier commit, or
-`{error, _}` if the WAL refuses the append or the applier's drain
-times out.
+Returns `ok` on successful WAL durability + applier commit;
+`{error, rejected}` when the event is WAL-durable but the applier
+refused to install it (it will never reach the projection);
+`{error, timeout}` when it was not applied within 5 s, and
+`{error, {instance_unavailable, Id}}` the moment the shard's instance
+dies with the write pending (in both the write is durable and still
+pending — the caller cannot tell whether it has been applied since); or
+the WAL's own refusal (`{error, backpressure}`, ...).
 """.
 -spec apply(
     Table :: table(),
@@ -942,9 +958,9 @@ apply(
     InstanceId = instance_for_shard(Table, shard_for(Table, Realm, Key)),
     %% Write→readable latency sampling. The gate is a free `persistent_term`
     %% read; when enabled we time the whole synchronous write (append +
-    %% `await_apply`, plus the tier_2 context read) — that span is exactly
-    %% the user-perceived time until the value is readable. Only successful
-    %% writes are sampled; telemetry never alters the result.
+    %% per-event barrier, plus the tier_2 context read) — that span is
+    %% exactly the user-perceived time until the value is readable. Only
+    %% successful writes are sampled; telemetry never alters the result.
     case bondy_oplog_latency:enabled() of
         false ->
             do_apply(Table, InstanceId, Bucket, SKey, Event, await);
@@ -965,10 +981,10 @@ apply(
 -doc """
 As `apply/4` but WITHOUT the read-your-writes barrier: returns as soon
 as the WAL append is durable, without blocking on the applier/drain
-committing the projection write. Under a deep drain backlog `apply/4`'s
-`await_apply` barrier makes the caller pay the whole backlog's latency;
-this variant costs the caller only the (lock-free, for stateless
-validators) append itself.
+committing the projection write. `apply/4`'s barrier waits for the
+caller's own event — under a deep drain backlog that is still the
+applier's time to reach it; this variant costs the caller only the
+(lock-free, for stateless validators) append itself.
 
 Use it for fire-and-forget deltas whose consumers are eventually
 consistent by design — e.g. the registry RIB summary cells, whose local
@@ -1142,40 +1158,70 @@ group_batch([Bad | _], _Acc) ->
 
 %% @private
 %% Append each shard group's atomic frame (pipelining the WAL appends), then
-%% await each touched instance's drain so the whole batch is read-your-writes.
+%% collect every group's per-event answers so the whole batch is
+%% read-your-writes. One barrier per group, taken before its append: its
+%% events are answered separately (`bondy_oplog:append_many/3`), and
+%% `await_applied/3` releases the barrier whatever the outcome. A group
+%% refused at the append releases the barriers of the groups already
+%% appended without awaiting them — those frames are durable and will be
+%% applied; the batch's answer is the refusal.
 commit_batch_groups(Groups) ->
     case append_batch_groups(Groups, []) of
-        {ok, Instances} ->
-            await_instances(Instances);
+        {ok, Pending} ->
+            await_batch_groups(Pending, ok);
         {error, _} = Err ->
             Err
     end.
 
 %% @private
 append_batch_groups([], Acc) ->
-    {ok, Acc};
+    {ok, lists:reverse(Acc)};
 append_batch_groups([{InstanceId, Items} | Rest], Acc) ->
-    try bondy_oplog:append_many(InstanceId, Items) of
+    Barrier = bondy_oplog:barrier(InstanceId),
+    try bondy_oplog:append_many(InstanceId, Items, Barrier) of
         {error, _} = Err ->
+            release_batch_groups([{InstanceId, Barrier, 0} | Acc]),
             Err;
-        _Keys ->
-            append_batch_groups(Rest, [InstanceId | Acc])
+        Keys ->
+            Group = {InstanceId, Barrier, length(Keys)},
+            append_batch_groups(Rest, [Group | Acc])
     catch
         exit:{noproc, _} ->
+            release_batch_groups([{InstanceId, Barrier, 0} | Acc]),
             {error, {instance_unavailable, InstanceId}};
         exit:{shutdown, _} ->
+            release_batch_groups([{InstanceId, Barrier, 0} | Acc]),
             {error, {instance_unavailable, InstanceId}}
     end.
 
 %% @private
-await_instances([]) ->
-    ok;
-await_instances([InstanceId | Rest]) ->
-    case await(InstanceId) of
-        ok ->
-            await_instances(Rest);
-        {error, _} = Err ->
-            Err
+%% Every group is awaited even after one fails, so no barrier outlives the
+%% call; the first failure is the batch's answer.
+await_batch_groups([], Result) ->
+    Result;
+await_batch_groups([{InstanceId, Barrier, N} | Rest], Result) ->
+    case await_barrier(InstanceId, Barrier, N) of
+        ok -> await_batch_groups(Rest, Result);
+        {error, _} = Err when Result =:= ok -> await_batch_groups(Rest, Err);
+        {error, _} -> await_batch_groups(Rest, Result)
+    end.
+
+%% @private
+%% Awaiting zero answers releases a barrier without waiting.
+release_batch_groups(Pending) ->
+    _ = [bondy_oplog:await_applied(B, 0, 0) || {_Id, B, _N} <- Pending],
+    ok.
+
+%% @private
+%% The facade's spelling of an instance that died before answering:
+%% the same `{instance_unavailable, InstanceId}` an append that found it
+%% gone reports.
+await_barrier(InstanceId, Barrier, N) ->
+    case bondy_oplog:await_applied(Barrier, N, ?APPLY_TIMEOUT) of
+        {error, instance_unavailable} ->
+            {error, {instance_unavailable, InstanceId}};
+        Other ->
+            Other
     end.
 
 %% @private
@@ -1202,8 +1248,8 @@ do_apply(Table, InstanceId, Bucket, Key, Event, Barrier) ->
 %% stays pure (no state-inspecting resolution). This is the ORIGIN
 %% stamp; remote events arrive
 %% already-stamped via `append_remote` and are never re-stamped.
-%% Read-your-writes holds because `await/1` commits each write's
-%% projection before the next write reads context.
+%% Read-your-writes holds because the per-event barrier commits each
+%% write's projection before the same caller's next write reads context.
 apply_with_context(InstanceId, Bucket, Key, Event, Barrier) ->
     try cell_context(InstanceId, Bucket, Key) of
         {error, _} = Err ->
@@ -1219,17 +1265,27 @@ apply_with_context(InstanceId, Bucket, Key, Event, Barrier) ->
     end.
 
 %% @private
-%% `Barrier = await` blocks on the applier/drain committing the write's
-%% projection (read-your-writes; `apply/4`); `none` returns at WAL
-%% durability (`apply_async/4`).
-append_with_barrier(InstanceId, Op, Meta, Barrier) ->
+%% `Barrier = await` blocks until THIS event's projection write is
+%% committed (read-your-writes; `apply/4`) — `bondy_oplog:append_applied/4`,
+%% the per-event barrier: the caller waits for its own event, not for the
+%% shard's whole overlay to drain, so one appender's backlog is not every
+%% appender's latency. `none` returns at WAL durability (`apply_async/4`).
+append_with_barrier(InstanceId, Op, Meta, none) ->
     try bondy_oplog:append(InstanceId, Op, Meta) of
-        {error, _} = Err ->
-            Err;
-        _EventKey when Barrier =:= none ->
-            ok;
-        _EventKey ->
-            await(InstanceId)
+        {error, _} = Err -> Err;
+        _EventKey -> ok
+    catch
+        exit:{noproc, _} ->
+            {error, {instance_unavailable, InstanceId}};
+        exit:{shutdown, _} ->
+            {error, {instance_unavailable, InstanceId}}
+    end;
+append_with_barrier(InstanceId, Op, Meta, await) ->
+    try bondy_oplog:append_applied(InstanceId, Op, Meta, ?APPLY_TIMEOUT) of
+        {error, instance_unavailable} ->
+            {error, {instance_unavailable, InstanceId}};
+        Other ->
+            Other
     catch
         exit:{noproc, _} ->
             {error, {instance_unavailable, InstanceId}};
@@ -1640,7 +1696,7 @@ the facade does not do scatter-merge here.
 
 Routes through `bondy_oplog_core:range/4`. Facade shards register with
 `overlay = disabled`, so the scan reads the projection only;
-read-your-writes comes from `apply/4`'s `await_apply` step, not an
+read-your-writes comes from `apply/4`'s per-event barrier, not an
 overlay merge. Under a realm-folding topology the realm is folded into
 both bounds so the substrate scan stays inside the realm's band.
 

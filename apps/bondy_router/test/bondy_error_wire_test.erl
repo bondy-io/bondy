@@ -97,6 +97,10 @@ derived_status_test() ->
         {{no_such_realm, ~"com.a"}, ?HTTP_BAD_GATEWAY},
         {{invalid_value, ~"k", 1}, ?HTTP_BAD_REQUEST},
         {unavailable, ?HTTP_SERVICE_UNAVAILABLE},
+        %% The router's own overload / refused-write signal (the OAuth2 token
+        %% store reports a refused write with it; the handler remaps 500→400,
+        %% so this must never derive to 500).
+        {service_unavailable, ?HTTP_SERVICE_UNAVAILABLE},
         {too_many_results, ?HTTP_BAD_REQUEST}
     ],
     [

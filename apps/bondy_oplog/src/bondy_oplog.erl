@@ -76,7 +76,12 @@ Per-instance event operations pass through to
 %% Per-instance API (pass-through to bondy_oplog_instance)
 -export([append/2]).
 -export([append/3]).
+-export([append/4]).
 -export([append_many/2]).
+-export([append_many/3]).
+-export([barrier/1]).
+-export([append_applied/4]).
+-export([await_applied/3]).
 -export([append_remote/2]).
 -export([await_apply/1]).
 -export([await_apply/2]).
@@ -118,6 +123,12 @@ Per-instance event operations pass through to
 %% TYPES
 %% =============================================================================
 
+%% The appender's side of the per-event apply barrier (`barrier/1`).
+-opaque barrier() :: #{
+    alias := reference(),
+    monitor := reference() | undefined
+}.
+
 -type retention_pressure() :: #{
     bytes_total := non_neg_integer(),
     max_total_wal_size := pos_integer(),
@@ -144,6 +155,7 @@ Per-instance event operations pass through to
     inputs := retention_inputs()
 }.
 
+-export_type([barrier/0]).
 -export_type([retention_pressure/0]).
 -export_type([retention_inputs/0]).
 -export_type([retention_advice/0]).
@@ -259,6 +271,176 @@ append(InstanceId, Op, Meta) ->
 
 append_many(InstanceId, Items) ->
     bondy_oplog_instance:append_many_fast(InstanceId, Items).
+
+-doc """
+The appender's side of the per-event apply barrier: a process alias
+(`erlang:alias/0`) that the events' overlay rows will carry, and a monitor
+on the instance so that its death answers at once. Pass it to `append/4`
+or `append_many/3`, then collect with `await_applied/3`, which releases
+both.
+
+The monitor is taken BEFORE the append, so an instance that dies at any
+point after the barrier exists is seen: its overlay table — and with it
+every row that would have answered — dies with it, and nothing else ever
+would answer. An instance with no registered pid at this moment (a subtree
+mid-restart) is not monitored; the append then fails on its own, or lands
+on the restarted instance and is answered by it.
+""".
+-spec barrier(instance_id()) -> barrier().
+
+barrier(InstanceId) ->
+    Monitor =
+        case bondy_oplog_registry:instance_pid(InstanceId) of
+            undefined -> undefined;
+            Pid -> monitor(process, Pid)
+        end,
+    #{alias => alias(), monitor => Monitor}.
+
+-doc """
+As `append/3`, with the barrier's alias staged in the event's overlay row.
+The row is answered by whichever process evicts it: `{Alias, ok}` once the
+event is installed — its projection write committed, its MST entry
+published — or `{Alias, {error, rejected}}` when the applier refuses it
+(`verify_event/2` failed). A refused append (this call's `{error, _}`
+return) stages no row and sends nothing.
+
+The interest travels with the row from the moment the row exists, which
+is before the WAL frame the applier reads — so the answer cannot be
+missed, whichever of the two arrives at the row first. This is the
+per-event barrier `append_applied/4` is built on; it replaces the
+whole-overlay `await_apply/1,2` for the write path, where a caller
+otherwise paid for every other appender's backlog on the shard
+(`bondy_oplog_apply_barrier_test`).
+""".
+-spec append(
+    instance_id(),
+    bondy_oplog_event:op(),
+    bondy_oplog_event:meta(),
+    barrier()
+) -> bondy_oplog_event:event_key() | {error, term()}.
+
+append(InstanceId, Op, Meta, #{alias := Alias}) ->
+    bondy_oplog_instance:append_fast(InstanceId, Op, Meta, Alias).
+
+-doc """
+As `append_many/2` with the barrier (`append/4`): every event of the batch
+is answered separately, so `await_applied/3` collects one message per key.
+""".
+-spec append_many(
+    instance_id(),
+    [{bondy_oplog_event:op(), bondy_oplog_event:meta()}],
+    barrier()
+) -> [bondy_oplog_event:event_key()] | {error, term()}.
+
+append_many(InstanceId, Items, #{alias := Alias}) ->
+    bondy_oplog_instance:append_many_fast(InstanceId, Items, Alias).
+
+-doc """
+Collects the answers to `N` events appended with `Barrier` within
+`Timeout` milliseconds, then releases the barrier: `ok` when every event
+was installed, `{error, rejected}` when any was refused,
+`{error, instance_unavailable}` the moment the instance dies with answers
+still owed (an answer that arrived before the death still counts — the
+mailbox is read in order), `{error, timeout}` when an answer did not arrive
+in time. Whatever the outcome, no message for the barrier remains in the
+caller's mailbox and none can arrive later — an answer sent to a
+deactivated alias is dropped by the VM, and the monitor is flushed.
+
+On `{error, timeout}` or `{error, instance_unavailable}` the events are
+durable in the WAL and still pending; the caller cannot tell whether they
+were applied. A barrier is released once; callers must not reuse it.
+`N = 0` releases it without waiting.
+""".
+-spec await_applied(barrier(), N :: non_neg_integer(), timeout()) ->
+    ok | {error, timeout | rejected | instance_unavailable}.
+
+await_applied(#{alias := Alias, monitor := Monitor} = Barrier, N, Timeout) ->
+    Deadline = deadline(Timeout),
+    Result = collect_applied(Alias, Monitor, N, Deadline, ok),
+    ok = release(Barrier),
+    Result.
+
+-doc """
+`barrier/1`, `append/4` and `await_applied/3` for one event: the
+read-your-writes barrier of `bondy_db:apply/4`. Returns `ok` once the
+event's projection write is committed, `{error, rejected}` if the applier
+refused it, `{error, instance_unavailable}` if the instance died first,
+`{error, timeout}` if it was not applied within `Timeout`, or the append's
+own `{error, _}`. The barrier is released on every path, including an
+exception raised by the append (the instance gone mid-call), which is
+re-raised.
+""".
+-spec append_applied(
+    instance_id(),
+    bondy_oplog_event:op(),
+    bondy_oplog_event:meta(),
+    timeout()
+) -> ok | {error, timeout | rejected | instance_unavailable | term()}.
+
+append_applied(InstanceId, Op, Meta, Timeout) ->
+    Barrier = barrier(InstanceId),
+    try append(InstanceId, Op, Meta, Barrier) of
+        {error, _} = Err ->
+            ok = release(Barrier),
+            Err;
+        _Key ->
+            await_applied(Barrier, 1, Timeout)
+    catch
+        Class:Reason:Stacktrace ->
+            ok = release(Barrier),
+            erlang:raise(Class, Reason, Stacktrace)
+    end.
+
+%% @private
+%% Every answer counts; the first `{error, rejected}` decides the result
+%% but the remaining answers are still awaited, so that nothing for the
+%% alias is left in flight when the caller moves on. The instance's
+%% `'DOWN'` ends the wait: no answer can follow it. `Monitor` is
+%% `undefined` when none was taken, which no `'DOWN'` ever matches.
+collect_applied(_Alias, _Monitor, 0, _Deadline, Result) ->
+    Result;
+collect_applied(Alias, Monitor, N, Deadline, Result) ->
+    receive
+        {Alias, ok} ->
+            collect_applied(Alias, Monitor, N - 1, Deadline, Result);
+        {Alias, {error, rejected} = Rejected} ->
+            collect_applied(Alias, Monitor, N - 1, Deadline, Rejected);
+        {'DOWN', Monitor, process, _Pid, _Reason} ->
+            {error, instance_unavailable}
+    after remaining(Deadline) ->
+        {error, timeout}
+    end.
+
+%% @private
+%% Deactivates the alias, drops the answers that reached the mailbox before
+%% that, and flushes the monitor.
+release(#{alias := Alias, monitor := Monitor}) ->
+    _ = unalias(Alias),
+    ok = flush_applied(Alias),
+    case Monitor of
+        undefined -> ok;
+        _ -> true = demonitor(Monitor, [flush])
+    end,
+    ok.
+
+%% @private
+flush_applied(Alias) ->
+    receive
+        {Alias, _} -> flush_applied(Alias)
+    after 0 -> ok
+    end.
+
+%% @private
+deadline(infinity) ->
+    infinity;
+deadline(Timeout) when is_integer(Timeout), Timeout >= 0 ->
+    erlang:monotonic_time(millisecond) + Timeout.
+
+%% @private
+remaining(infinity) ->
+    infinity;
+remaining(Deadline) ->
+    max(0, Deadline - erlang:monotonic_time(millisecond)).
 
 -spec append_remote(instance_id(), bondy_oplog_event:t()) ->
     ok | {error, term()}.

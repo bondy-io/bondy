@@ -2282,10 +2282,12 @@ collect_frames(Iter0, Max, AccRev, N, LastPos) ->
 %% the MST and evicts the matching overlay rows in FIFO order; the
 %% applier does not wait. Events that fail verification are dropped
 %% from the batch: their telemetry is emitted here and their overlay
-%% rows are evicted directly from the applier process so a reader
-%% does not perpetually observe a row whose event the system has
-%% rejected. Subsequent applier passes do not retry rejected events
-%% (replay-from-beginning would just re-fire the same failure).
+%% rows are evicted by the instance (`evict_rejected` cast) — the one
+%% path that also releases the rows' share of the admission counters
+%% and answers the rows' appenders — so a reader does not perpetually
+%% observe a row whose event the system has rejected. Subsequent
+%% applier passes do not retry rejected events (replay-from-beginning
+%% would just re-fire the same failure).
 apply_batch(
     #state{instance_id = Id, instance_pid = InstancePid} = State, Batch
 ) ->
@@ -2312,12 +2314,12 @@ apply_batch(
         [] ->
             ok;
         _ ->
-            ok = evict_rejected_overlay(Id, Rejected),
             %% No `install_local_batch` cast will be issued for these
-            %% events, but the overlay just shrank — hint the instance
-            %% so any caller blocked in `await_apply/1,2` can be
-            %% signalled instead of waiting for the next install batch.
-            gen_server:cast(InstancePid, check_drain_waiters)
+            %% events; the instance evicts their rows instead.
+            gen_server:cast(
+                InstancePid,
+                {evict_rejected, [bondy_oplog_event:key(E) || E <- Rejected]}
+            )
     end,
     VerifiedCount = length(Verified),
     State1 =
@@ -3114,38 +3116,6 @@ verify_batch(#state{} = State, [Event | Rest], VAcc, RAcc) ->
         {error, Reason} ->
             ok = log_verify_failure(State#state.instance_id, Event, Reason),
             verify_batch(State, Rest, VAcc, [Event | RAcc])
-    end.
-
-%% @private
-%% Removes overlay rows for events the applier refused to install.
-%% Uses the registry to find the overlay tid and an `ets:select_delete/2`
-%% with an HLC-conditional guard so a concurrent retry of the same key
-%% with a higher HLC is preserved.
-evict_rejected_overlay(InstanceId, Events) ->
-    case bondy_oplog_registry:overlay_tab(InstanceId) of
-        undefined ->
-            ok;
-        Tab ->
-            lists:foreach(
-                fun(Event) ->
-                    Key = bondy_oplog_event:key(Event),
-                    Hlc = bondy_oplog_event:key_hlc(Key),
-                    _ =
-                        try
-                            ets:select_delete(Tab, [
-                                {
-                                    {Key, '_', '$1', '_'},
-                                    [{'=<', '$1', Hlc}],
-                                    [true]
-                                }
-                            ])
-                        catch
-                            error:badarg -> 0
-                        end
-                end,
-                Events
-            ),
-            ok
     end.
 
 %% @private

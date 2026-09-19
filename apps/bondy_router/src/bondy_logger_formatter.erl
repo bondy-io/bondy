@@ -275,19 +275,27 @@ to_string(X, _) when is_pid(X) ->
     pid_to_list(X);
 to_string(X, _) when is_reference(X) ->
     ref_to_list(X);
+%% Text is recognised with `io_lib:printable_unicode_list/1`, never with
+%% `io_lib:printable_list/1`: the latter follows the VM's `+pc` range, which
+%% defaults to `latin1`, under which any string holding a code point above
+%% 255 (an em dash, a non-Latin name) is not "printable" and falls through to
+%% the depth-limited term printer as a list of integers. The handler encodes
+%% the chardata this module returns with `unicode:characters_to_binary/1`
+%% (`logger_h_common:string_to_binary/1`), so every code point is written
+%% intact as UTF-8. `bondy_logger_formatter_test` holds both facts.
 to_string(X, C) when is_binary(X) ->
     case unicode:characters_to_list(X) of
         % error or incomplete
         {_, _, _} ->
             escape(format_str(C, X));
         List ->
-            case io_lib:printable_list(List) of
+            case io_lib:printable_unicode_list(List) of
                 true -> escape(List);
                 _ -> escape(format_str(C, X))
             end
     end;
 to_string(X, C) when is_list(X) ->
-    case io_lib:printable_list(X) of
+    case io_lib:printable_unicode_list(X) of
         true -> escape(X);
         _ -> escape(format_str(C, X))
     end;

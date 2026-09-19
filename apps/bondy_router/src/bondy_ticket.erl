@@ -1188,8 +1188,7 @@ add_error(#{errors := Errors} = Stats, RealmUri, Reason) ->
 
 %% @private
 %% Lazy reclamation of the other devices' expired tickets, performed while we
-%% are already rewriting this cell — the same shape as
-%% `bondy_oauth_token_set:cleanup_and_truncate/3` on the token write paths.
+%% are already rewriting this cell.
 %% Re-issuing for device A replaces only A's entry, so without this a device
 %% that never comes back leaves its expired ticket in the cell forever.
 %%

@@ -54,6 +54,7 @@ all() ->
         remote_user_delete_closes_peer_sessions,
         remote_realm_delete_purges_peer_registry,
         token_version_rejected_cross_node,
+        concurrent_token_issues_cross_node_both_survive,
         %% Last: they plant cells carrying a runtime-minted atom, and
         %% nothing may depend on suite state after them.
         runtime_atom_value_sync_measured,
@@ -571,6 +572,83 @@ token_version_rejected_cross_node(Config) ->
     ?assertEqual(
         {error, oauth2_invalid_grant},
         erpc:call(N2, ?MODULE, do_authenticate, [Uri, User, JWT])
+    ),
+    ok.
+
+%% One token per cell across the cluster: two nodes issuing DIFFERENT scopes
+%% for ONE user cannot lose each other's token (each is its own cell, merged
+%% by AAE as independent lww registers — the lost update the old one-set-per-
+%% user layout suffered on a whole-set merge), and a `revoke_all/2` on one node
+%% concurrent with an issue on another converges to the same band everywhere
+%% with nothing revoked resurrected: the concurrently issued token is either
+%% present on every node or absent on every node.
+concurrent_token_issues_cross_node_both_survive(Config) ->
+    [N1, N2, N3] = nodes_of(Config),
+    Uri = <<"com.bondy.token_cells">>,
+    User = <<"cell_user">>,
+    Pass = <<"cell_pass_123">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_auth_realm, [Uri, User, Pass]),
+    {ok, TV0} = erpc:call(N1, bondy_rbac_user, token_version, [Uri, User]),
+    [ok = wait_token_version(N, Uri, User, TV0) || N <- [N2, N3]],
+
+    %% Concurrent issues on two nodes, two scopes.
+    Parent = self(),
+    Issuers = [
+        spawn_link(fun() ->
+            Parent !
+                {self(), erpc:call(N, ?MODULE, do_issue_scoped, [Uri, User, D])}
+        end)
+     || {N, D} <- [{N1, <<"d1">>}, {N2, <<"d2">>}]
+    ],
+    [
+        receive
+            {Pid, R} -> ?assertMatch({ok, _}, R)
+        after 30000 -> error({issue_timeout, Pid})
+        end
+     || Pid <- Issuers
+    ],
+    %% Both tokens converge to every node.
+    [
+        ok = wait_token_state(N, Uri, User, D, present)
+     || N <- [N1, N2, N3], D <- [<<"d1">>, <<"d2">>]
+    ],
+
+    %% Revoke on node 1 while node 2 issues a third scope.
+    Revoker = spawn_link(fun() ->
+        Parent !
+            {self(), erpc:call(N1, bondy_oauth_token, revoke_all, [Uri, User])}
+    end),
+    Issuer3 = spawn_link(fun() ->
+        Parent !
+            {
+                self(),
+                erpc:call(N2, ?MODULE, do_issue_scoped, [Uri, User, <<"d3">>])
+            }
+    end),
+    receive
+        {Revoker, RevokeResult} -> ?assertEqual(ok, RevokeResult)
+    after 30000 -> error(revoke_timeout)
+    end,
+    receive
+        {Issuer3, IssueResult} -> ?assertMatch({ok, _}, IssueResult)
+    after 30000 -> error(issue3_timeout)
+    end,
+
+    %% The revoked tokens are gone everywhere — never resurrected by a merge.
+    [
+        ok = wait_token_state(N, Uri, User, D, absent)
+     || N <- [N1, N2, N3], D <- [<<"d1">>, <<"d2">>]
+    ],
+    %% The concurrently issued token converges to ONE answer on every node:
+    %% present everywhere (issued after the revoke's band read) or absent
+    %% everywhere (read and cleared by it). Take node 2's answer, the issuer's,
+    %% once it is stable, and require it of the others.
+    D3 = erpc:call(N2, ?MODULE, do_token_state, [Uri, User, <<"d3">>]),
+    ct:pal("d3 after revoke_all || issue: ~p on the issuing node", [D3]),
+    [ok = wait_token_state(N, Uri, User, <<"d3">>, D3) || N <- [N1, N3]],
+    ?assertEqual(
+        D3, erpc:call(N2, ?MODULE, do_token_state, [Uri, User, <<"d3">>])
     ),
     ok.
 
@@ -1765,6 +1843,37 @@ do_diag(Uri, User) ->
         issue_ok => element(1, Issue),
         auth => Auth
     }.
+
+%% @private
+%% Issues a refresh token for `User` scoped to `Device` on this node.
+do_issue_scoped(Uri, User, Device) ->
+    SessionId = bondy_session_id:new(),
+    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, User, [], {127, 0, 0, 1}),
+    bondy_oauth_token:issue(password, Ctxt, #{device_id => Device}).
+
+%% @private
+%% Whether this node holds `User`'s token for `Device` (scope = the realm,
+%% any client, that device — what `do_issue_scoped/3` issues).
+do_token_state(Uri, User, Device) ->
+    Scope = bondy_auth_scope:new(Uri, all, Device),
+    case bondy_oauth_token:lookup(Uri, User, Scope) of
+        {ok, _} -> present;
+        {error, _} -> absent
+    end.
+
+%% @private
+%% Polls `Node` until `User`'s token for `Device` is `Expected`
+%% (`present` | `absent`), forcing a sync tick each round.
+wait_token_state(Node, Uri, User, Device, Expected) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() ->
+            erpc:call(Node, ?MODULE, do_token_state, [Uri, User, Device])
+        end,
+        Expected,
+        Node,
+        Deadline
+    ).
 
 %% @private
 do_issue_jwt(Uri, User) ->

@@ -81,11 +81,16 @@
 %% Overlay row shape (`ordered_set`, public, per-instance). Keyed by
 %% the event key; carries the encoded value (so reads can return
 %% without going back to the WAL), the event's HLC for CAS-eviction,
-%% and an origin tag for future eager-push support. Tuple positions
-%% are stable; they appear in match-specs.
+%% an origin tag for future eager-push support, and the process alias
+%% (`erlang:alias/0`) of the appender awaiting this event's apply — or
+%% `undefined`. Whoever evicts the row answers the alias:
+%% `{Alias, ok}` once the event is installed, `{Alias, {error,
+%% rejected}}` when the applier refused it. Tuple positions are
+%% stable; they appear in match-specs.
 -define(OVERLAY_KEY_POS, 1).
 -define(OVERLAY_VALUE_POS, 2).
 -define(OVERLAY_HLC_POS, 3).
 -define(OVERLAY_ORIGIN_POS, 4).
+-define(OVERLAY_NOTIFY_POS, 5).
 
 -endif.

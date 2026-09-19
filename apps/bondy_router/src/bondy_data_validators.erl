@@ -18,6 +18,7 @@ endpoints and realm URIs.
 
 -export([authorized_key/1]).
 -export([cidr/1]).
+-export([device_id/1]).
 -export([endpoint/1]).
 -export([existing_atom/1]).
 -export([groupname/1]).
@@ -93,6 +94,22 @@ aliases(L) when is_list(L) ->
             {error, <<"One or more values are not valid aliases.">>}
     end;
 aliases(_) ->
+    false.
+
+-doc """
+A client device identifier: 1 to 254 bytes, the range a username has. It is a
+column of the OAuth2 token cell key and part of the refresh-token string a
+client holds, so its size is bounded where the client supplies it.
+""".
+-spec device_id(Term :: binary()) -> boolean() | {error, binary()}.
+
+device_id(Term) when is_binary(Term) ->
+    case byte_size(Term) of
+        0 -> false;
+        Size when Size =< 254 -> true;
+        _ -> {error, <<"Value is too big (max. is 254 bytes).">>}
+    end;
+device_id(_) ->
     false.
 
 -doc """

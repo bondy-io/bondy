@@ -375,19 +375,33 @@ tables() ->
             fold => lww,
             publish => true
         },
-        %% ticket / oauth_token shard by key — creation + point lookup are
-        %% prioritised over listing / range. Storage-only (no `publish` —
-        %% revocation is inline; nothing subscribes to ticket/token changes).
+        %% ticket shards by key — creation + point lookup are prioritised over
+        %% listing / range. Storage-only (no `publish` — revocation is inline;
+        %% nothing subscribes to ticket/token changes; the same holds for
+        %% oauth_token below).
         #{
             name => ?BONDY_DB_TICKET_TAB,
             db => main,
             durability => durable,
             fold => lww
         },
+        %% oauth_token — ONE CELL PER TOKEN, keyed `[UserHash, Realm, Client,
+        %% Device]` (`bondy_oauth_token:cell_key/2`). The user hash leads the
+        %% composite key, so `leading_col` co-locates a user's tokens on the
+        %% user's shard and the per-user band (bound enforcement,
+        %% `revoke_all/2`) is one pinned scan. Legacy refresh pointers are
+        %% plain `legacy:`-prefixed keys in the same table and route on their
+        %% whole key. Key shape changed with the cell-per-token cut: a data
+        %% dir written under the previous one-set-per-user layout must be
+        %% wiped, not migrated — on EVERY node: a wiped node freezes this
+        %% root, an un-wiped one keeps the old one under `warn`, and the two
+        %% publish different topology fingerprints, which anti-entropy
+        %% refuses to sync across.
         #{
             name => ?BONDY_DB_OAUTH_TOKEN_TAB,
             db => main,
             durability => durable,
+            aggregate_root => leading_col,
             fold => lww
         },
         %% bridge_relay — storage-only (no `publish`): bridge config has no

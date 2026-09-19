@@ -295,7 +295,7 @@ without protocol changes.
     %% the lock-free `append_fast/2,3` path (caller-side) can update
     %% them without going through this gen_server. Slot 1: event
     %% count. Slot 2: byte estimate. Updated on insert
-    %% (`stage_to_overlay/2`) and evict (`evict_overlay_batch/2`).
+    %% (`stage_to_overlay/3`) and evict (`evict_overlay_batch/3`).
     %% With `decentralized_counters: true` on the overlay table, the
     %% equivalent `ets:info/2` calls aggregate across all schedulers
     %% and grow expensive under concurrent appenders — these atomic
@@ -312,7 +312,7 @@ without protocol changes.
     %% Callers blocked in `await_apply/1,2` while the overlay is
     %% non-empty. Each install path that may shrink the overlay
     %% (`install_local_batch` cast, `install_remote` call, and the
-    %% applier's `check_drain_waiters` rejection hint) calls
+    %% applier's `evict_rejected` cast) calls
     %% `maybe_signal_drain_waiters/1` which `gen_server:reply`-s every
     %% queued From the moment the overlay reaches 0.
     drain_waiters = [] :: [gen_server:from()],
@@ -543,9 +543,13 @@ without protocol changes.
 %% Public API (typically called via `bondy_oplog`)
 -export([append/2]).
 -export([append/3]).
+-export([append/4]).
 -export([append_fast/3]).
+-export([append_fast/4]).
 -export([append_many/2]).
+-export([append_many/3]).
 -export([append_many_fast/2]).
+-export([append_many_fast/3]).
 -export([append_remote/2]).
 -export([await_apply/1]).
 -export([await_apply/2]).
@@ -689,7 +693,22 @@ append(Target, Op) ->
 ) -> bondy_oplog_event:event_key().
 
 append(Target, Op, Meta) ->
-    gen_server:call(target(Target), {append, Op, Meta}, infinity).
+    append(Target, Op, Meta, undefined).
+
+-doc """
+As `append/3`, staging the overlay row with `Notify` — the appender's
+process alias, answered when the row is evicted (see
+`evict_overlay_row/3`) — or `undefined` for no answer.
+""".
+-spec append(
+    instance_id() | pid(),
+    bondy_oplog_event:op(),
+    bondy_oplog_event:meta(),
+    undefined | reference()
+) -> bondy_oplog_event:event_key() | {error, term()}.
+
+append(Target, Op, Meta, Notify) ->
+    gen_server:call(target(Target), {append, Op, Meta, Notify}, infinity).
 
 ?DOC("""
 Lock-free single-event append for instances whose validator is
@@ -712,16 +731,29 @@ the registry and falls back to the gen_server when ineligible.
     bondy_oplog_event:meta()
 ) -> bondy_oplog_event:event_key() | {error, term()}.
 
-append_fast(InstanceId, Op, Meta) when is_binary(InstanceId) ->
+append_fast(InstanceId, Op, Meta) ->
+    append_fast(InstanceId, Op, Meta, undefined).
+
+-doc """
+As `append_fast/3` with the appender's alias (`append/4`).
+""".
+-spec append_fast(
+    instance_id(),
+    bondy_oplog_event:op(),
+    bondy_oplog_event:meta(),
+    undefined | reference()
+) -> bondy_oplog_event:event_key() | {error, term()}.
+
+append_fast(InstanceId, Op, Meta, Notify) when is_binary(InstanceId) ->
     case bondy_oplog_registry:fast_path(InstanceId) of
         undefined ->
-            append(InstanceId, Op, Meta);
+            append(InstanceId, Op, Meta, Notify);
         FastPath ->
-            do_append_fast(InstanceId, FastPath, Op, Meta)
+            do_append_fast(InstanceId, FastPath, Op, Meta, Notify)
     end.
 
 %% @private
-do_append_fast(InstanceId, FastPath, Op, Meta) ->
+do_append_fast(InstanceId, FastPath, Op, Meta, Notify) ->
     #{
         hlc := HLC,
         seq := SeqRef,
@@ -752,13 +784,13 @@ do_append_fast(InstanceId, FastPath, Op, Meta) ->
         %% contract it equals the cached one.
         {Event, _} = ValidatorMod:sign_event(Event0, ValidatorState),
         %% Stage the overlay row BEFORE the WAL append. See the matching
-        %% comment in `do_append_local/3` — the applier reads from the WAL
+        %% comment in `do_append_local/4` — the applier reads from the WAL
         %% the instant it becomes durable, and an in-flight overlay insert
-        %% races with `evict_overlay_batch/2`. The overlay tid can briefly
+        %% races with `evict_overlay_batch/3`. The overlay tid can briefly
         %% be `undefined` (or dead) after a one_for_all restart before the
         %% new instance's init/1 republishes it; both cases fall through to
         %% the gen_server path, which mints its own key.
-        {ok, Tab} ?= fast_stage_overlay(InstanceId, [Event]),
+        {ok, Tab} ?= fast_stage_overlay(InstanceId, [Event], Notify),
         overlay_counters_add(Ctrs, [Event]),
         case fast_wal_append_batch_to(Wal, [Event]) of
             ok ->
@@ -771,7 +803,9 @@ do_append_fast(InstanceId, FastPath, Op, Meta) ->
             {error, _} = Err ->
                 %% WAL rejected the batch — drop the staged row so no
                 %% phantom write is observable, and return the seq so the
-                %% origin's sequence stays gap-free.
+                %% origin's sequence stays gap-free. The row's alias is
+                %% not answered: the appender learns of the refusal from
+                %% this return value.
                 ok = unstage_overlay_rows(Tab, Ctrs, [Event]),
                 ok = release_seq_range(SeqRef, InstanceId, [Key]),
                 Err
@@ -783,7 +817,7 @@ do_append_fast(InstanceId, FastPath, Op, Meta) ->
             %% The reservation would otherwise be a silent hole: return it
             %% (or have it filled) before the gen_server mints afresh.
             ok = release_seq_range(SeqRef, InstanceId, Keys),
-            append(InstanceId, Op, Meta)
+            append(InstanceId, Op, Meta, Notify)
     end.
 
 ?DOC("""
@@ -819,9 +853,23 @@ stays unchanged.
     [{bondy_oplog_event:op(), bondy_oplog_event:meta()}]
 ) -> [bondy_oplog_event:event_key()] | {error, term()}.
 
-append_many_fast(_InstanceId, []) ->
+append_many_fast(InstanceId, Items) ->
+    append_many_fast(InstanceId, Items, undefined).
+
+-doc """
+As `append_many_fast/2` with the appender's alias (`append/4`): every
+row of the batch is staged with it, so the appender is answered once
+per event.
+""".
+-spec append_many_fast(
+    instance_id(),
+    [{bondy_oplog_event:op(), bondy_oplog_event:meta()}],
+    undefined | reference()
+) -> [bondy_oplog_event:event_key()] | {error, term()}.
+
+append_many_fast(_InstanceId, [], _Notify) ->
     [];
-append_many_fast(InstanceId, Items) when
+append_many_fast(InstanceId, Items, Notify) when
     is_binary(InstanceId), is_list(Items)
 ->
     case bondy_oplog_registry:fast_path(InstanceId) of
@@ -829,13 +877,13 @@ append_many_fast(InstanceId, Items) when
             %% Stateful validator or fast-path torn down — defer to
             %% the gen_server path which threads validator state
             %% through the batch.
-            append_many(InstanceId, Items);
+            append_many(InstanceId, Items, Notify);
         FastPath ->
-            do_append_many_fast(InstanceId, FastPath, Items)
+            do_append_many_fast(InstanceId, FastPath, Items, Notify)
     end.
 
 %% @private
-do_append_many_fast(InstanceId, FastPath, Items) ->
+do_append_many_fast(InstanceId, FastPath, Items, Notify) ->
     #{
         hlc := HLC,
         seq := SeqRef,
@@ -860,9 +908,9 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
             HLC, SeqRef, Origin, ValidatorMod, ValidatorState, Items
         ),
         %% Stage overlay rows BEFORE the WAL append (see the matching
-        %% comment on `do_append_local/3`); a missing or dead overlay tid
+        %% comment on `do_append_local/4`); a missing or dead overlay tid
         %% falls through to the gen_server path, which mints its own keys.
-        {ok, Tab} ?= fast_stage_overlay(InstanceId, Events),
+        {ok, Tab} ?= fast_stage_overlay(InstanceId, Events, Notify),
         overlay_counters_add(Ctrs, Events),
         case fast_wal_append_batch_to(Wal, Events) of
             ok ->
@@ -886,7 +934,7 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
             %% The reservation would otherwise be a silent hole: return it
             %% (or have it filled) before the gen_server mints afresh.
             ok = release_seq_range(SeqRef, InstanceId, Keys1),
-            append_many(InstanceId, Items)
+            append_many(InstanceId, Items, Notify)
     end.
 
 %% @private
@@ -894,14 +942,13 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
 %% when the tid is unpublished (`undefined`) or names a dead table
 %% (`stale`) — the one_for_all-restart window — carrying the events' keys so
 %% the caller can return the seq range it reserved for them.
-fast_stage_overlay(InstanceId, Events) ->
+fast_stage_overlay(InstanceId, Events, Notify) ->
     case bondy_oplog_registry:overlay_tab(InstanceId) of
         undefined ->
             {no_overlay, [bondy_oplog_event:key(E) || E <- Events]};
         Tab ->
-            case
-                stage_overlay_rows(Tab, [overlay_row(E, local) || E <- Events])
-            of
+            Rows = [overlay_row(E, local, Notify) || E <- Events],
+            case stage_overlay_rows(Tab, Rows) of
                 ok -> {ok, Tab};
                 stale -> {no_overlay, [bondy_oplog_event:key(E) || E <- Events]}
             end
@@ -1104,7 +1151,7 @@ fast_wal_append_batch_to({disk, WalPid}, Events) ->
 %% @private
 %% One disk-WAL batch append with the writer-death exits normalised to
 %% `{error, wal_unavailable}` — shared by the caller-side fast path
-%% (registry-resolved pid) and the gen_server's `do_append_local/3`
+%% (registry-resolved pid) and the gen_server's `do_append_local/4`
 %% (cached, monitored pid).
 wal_append_batch(WalPid, Events) ->
     try bondy_oplog_wal:append_batch(WalPid, Events) of
@@ -1126,10 +1173,24 @@ instance). Returns the assigned keys in input order.
     [{bondy_oplog_event:op(), bondy_oplog_event:meta()}]
 ) -> [bondy_oplog_event:event_key()].
 
-append_many(_Target, []) ->
+append_many(Target, OpsAndMetas) ->
+    append_many(Target, OpsAndMetas, undefined).
+
+-doc """
+As `append_many/2` with the appender's alias (`append_many_fast/3`).
+""".
+-spec append_many(
+    instance_id() | pid(),
+    [{bondy_oplog_event:op(), bondy_oplog_event:meta()}],
+    undefined | reference()
+) -> [bondy_oplog_event:event_key()] | {error, term()}.
+
+append_many(_Target, [], _Notify) ->
     [];
-append_many(Target, OpsAndMetas) when is_list(OpsAndMetas) ->
-    gen_server:call(target(Target), {append_many, OpsAndMetas}, infinity).
+append_many(Target, OpsAndMetas, Notify) when is_list(OpsAndMetas) ->
+    gen_server:call(
+        target(Target), {append_many, OpsAndMetas, Notify}, infinity
+    ).
 
 ?DOC("""
 Inserts an event received from a peer. Idempotent. Validation runs in
@@ -1501,7 +1562,7 @@ frontier(InstanceId) when is_binary(InstanceId) ->
 fold_range(Target, From, To, Fun, Acc0) when is_function(Fun, 2) ->
     %% Routed through the gen_server so the MST snapshot and the
     %% overlay scan are captured in the same callback — `publish/1`
-    %% (registry write) and `evict_overlay_batch/2` are sibling steps
+    %% (registry write) and `evict_overlay_batch/3` are sibling steps
     %% of `install_local_batch`, but they are visible to a lock-free
     %% reader at two independent moments. Under whole-suite load that
     %% race was dropping events from `fold_range/5`. Sync hop cost is
@@ -3040,7 +3101,7 @@ heap_heavy_aae(_) -> false.
 %% field exposed to lock-free readers. We compare only the
 %% *published* subset (see `published_fingerprint/1`) because state
 %% fields that no reader sees — e.g. the in-process overlay counters
-%% maintained by `stage_to_overlay/2` and `evict_overlay_batch/2` —
+%% maintained by `stage_to_overlay/3` and `evict_overlay_batch/3` —
 %% would otherwise force a registry write on every append. Under
 %% mixed read/write load that turned a 4 k/s writer into a
 %% bottleneck on the registry row's per-key lock bucket and dragged
@@ -3075,7 +3136,7 @@ published_fingerprint(#state{} = S) ->
     }.
 
 %% @private
-do_handle_call({append, Op, Meta}, _From, State0) ->
+do_handle_call({append, Op, Meta, Notify}, _From, State0) ->
     %% Pressure check → WAL append (fsync) → overlay insert → reply.
     %% The reply happens inline as soon as the WAL is durable and
     %% the overlay row exists; the applier drains the WAL and casts
@@ -3085,7 +3146,9 @@ do_handle_call({append, Op, Meta}, _From, State0) ->
         ok ->
             case ensure_wal_pid(State0) of
                 {ok, WalPid, State1} ->
-                    case do_append_local(State1, WalPid, [{Op, Meta}]) of
+                    case
+                        do_append_local(State1, WalPid, [{Op, Meta}], Notify)
+                    of
                         {ok, [Key], State2} ->
                             {reply, Key, State2};
                         {error, wal_unavailable} ->
@@ -3100,12 +3163,12 @@ do_handle_call({append, Op, Meta}, _From, State0) ->
         {error, _} = Err ->
             {reply, Err, State0}
     end;
-do_handle_call({append_many, Items}, _From, State0) ->
+do_handle_call({append_many, Items, Notify}, _From, State0) ->
     case admit(State0, length(Items)) of
         ok ->
             case ensure_wal_pid(State0) of
                 {ok, WalPid, State1} ->
-                    case do_append_local(State1, WalPid, Items) of
+                    case do_append_local(State1, WalPid, Items, Notify) of
                         {ok, Keys, State2} ->
                             {reply, Keys, State2};
                         {error, wal_unavailable} ->
@@ -3447,9 +3510,9 @@ do_handle_call(instance_size, _From, State) ->
     %% no `install_local_batch` cast can interleave between the two —
     %% see `size/1`. Slot 1 of `overlay_counters` is shared with
     %% `append_fast/2,3`, so it can transiently grow during this read
-    %% (a concurrent caller appending) but cannot shrink (only this
-    %% gen_server's `evict_overlay_batch/2` decrements it). The
-    %% returned value is therefore monotone over the read window.
+    %% (a concurrent caller appending); it shrinks only when a row
+    %% leaves the overlay — this gen_server's eviction, or a fast-path
+    %% caller rolling back a WAL-refused append (`unstage_overlay_rows/3`).
     Total =
         State#state.live_size +
             atomics:get(State#state.overlay_counters, 1),
@@ -3851,18 +3914,20 @@ handle_cast({install_local_batch, Events}, State0) ->
     AllEvents = lists:append(lists:reverse(EventsRev)),
     State1 = install_local_batch(State0, AllEvents),
     ok = publish(State1),
-    State2 = evict_overlay_batch(State1, AllEvents),
+    State2 = evict_overlay_batch(State1, AllEvents, ok),
     State3 = maybe_signal_drain_waiters(State2),
     ok = release_install_slots(State3, NCasts),
     {noreply, State3};
-handle_cast(check_drain_waiters, State) ->
-    %% Sent by the applier after `evict_rejected_overlay/2` evicts
-    %% events for which no `install_local_batch` cast will be issued
-    %% (the verify step rejected the whole batch). Without this hint a
-    %% caller blocked in `await_overlay_drained` would wait until the
-    %% next install batch shrank the overlay, even though the overlay
-    %% is already empty.
-    {noreply, maybe_signal_drain_waiters(State)};
+handle_cast({evict_rejected, Keys}, State0) ->
+    %% Sent by the applier for the events its verify step refused: no
+    %% `install_local_batch` cast will ever be issued for them, so their
+    %% overlay rows are evicted here — the same eviction the fused path
+    %% runs for its own rejections, which releases the rows' share of
+    %% the admission counters and answers each row's appender
+    %% `{error, rejected}` (`evict_overlay_keys/3`). Then the drain
+    %% waiters, since the overlay may just have reached 0.
+    State1 = evict_overlay_keys(State0, Keys, {error, rejected}),
+    {noreply, maybe_signal_drain_waiters(State1)};
 handle_cast(
     {refresh_validator, Reason},
     #state{
@@ -4207,7 +4272,7 @@ fused_apply_batch(#state{fused_drain = FD, instance_id = Id} = State0, Batch) ->
                 State0;
             _ ->
                 maybe_signal_drain_waiters(
-                    evict_overlay_batch(State0, Rejected)
+                    evict_overlay_batch(State0, Rejected, {error, rejected})
                 )
         end,
     State2 =
@@ -4232,7 +4297,7 @@ fused_apply_batch(#state{fused_drain = FD, instance_id = Id} = State0, Batch) ->
                     },
                     #{instance_id => Id}
                 ),
-                StateB = evict_overlay_batch(StateA, Verified),
+                StateB = evict_overlay_batch(StateA, Verified, ok),
                 maybe_signal_drain_waiters(StateB)
         end,
     %% Emit the SAME canonical end-to-end throughput event the applier emits
@@ -5380,19 +5445,19 @@ is_durable_backend(_) -> true.
 %% signature, and casts `install_local_batch` back to this gen_server
 %% which performs the actual MST install and overlay eviction. The
 %% overlay row closes the read-your-writes gap until the applier
-%% catches up; the row is evicted via HLC-conditional
-%% `ets:select_delete/2` once the install lands.
-do_append_local(#state{} = State0, WalPid, Items) ->
+%% catches up; the row is evicted by key (`evict_overlay_row/3`) once
+%% the install lands, answering `Notify` if the appender awaits it.
+do_append_local(#state{} = State0, WalPid, Items, Notify) ->
     {Events, Keys, State1} = build_events(State0, Items),
     %% Stage overlay rows BEFORE the WAL append. The applier reads
     %% from the WAL the instant `append_batch/2` durably commits;
     %% if we staged after, the applier could send
     %% `install_local_batch` before the overlay row exists — its
-    %% `evict_overlay_batch/2` would then run as a no-op, and a
+    %% `evict_overlay_batch/3` would then run as a no-op, and a
     %% later overlay insert would leave an orphan row whose count
     %% inflates `size/1`. Staging first guarantees the row is
     %% visible the moment the WAL entry is.
-    State2 = stage_to_overlay(State1, Events),
+    State2 = stage_to_overlay(State1, Events, Notify),
     case wal_append_batch(WalPid, Events) of
         ok ->
             telemetry:execute(
@@ -5462,11 +5527,14 @@ unstage_overlay_rows(Tab, Ctrs, Events) ->
 %% byte-estimate counters used by `overlay_admit/2`. Origin is `local`
 %% for events that went through the WAL; a future eager-push receiver
 %% will insert with `eager_pushed` so the applier's eviction protocol
-%% can distinguish the two.
+%% can distinguish the two. `Notify` is the appender's alias (or
+%% `undefined`), answered by whichever path evicts the row.
 stage_to_overlay(
-    #state{overlay = Overlay, overlay_counters = Ctrs} = State, Events
+    #state{overlay = Overlay, overlay_counters = Ctrs} = State,
+    Events,
+    Notify
 ) ->
-    Rows = [overlay_row(E, local) || E <- Events],
+    Rows = [overlay_row(E, local, Notify) || E <- Events],
     true = ets:insert(Overlay, Rows),
     overlay_counters_add(Ctrs, Events),
     State.
@@ -5497,13 +5565,15 @@ overlay_delta(Events) ->
     ).
 
 %% @private
-overlay_row(Event, Origin) ->
+%% Shape per the `?OVERLAY_*_POS` macros in `bondy_oplog.hrl`.
+overlay_row(Event, Origin, Notify) ->
     Key = bondy_oplog_event:key(Event),
     {
         Key,
         value_from_event(Event),
         bondy_oplog_event:key_hlc(Key),
-        Origin
+        Origin,
+        Notify
     }.
 
 %% @private
@@ -5512,7 +5582,7 @@ overlay_row(Event, Origin) ->
 %% forward. Returns `{Events, Keys, NewState}`. Thin state wrapper over
 %% `do_build_events/6` — the same minting core (and the same
 %% single-range seq reservation, which is what makes the WAL-failure
-%% rollback in `do_append_local/3` safe) as the fast paths.
+%% rollback in `do_append_local/4` safe) as the fast paths.
 build_events(State0, Items) ->
     {Events, Keys, VS} = do_build_events(
         State0#state.hlc,
@@ -5924,29 +5994,74 @@ install_local_safe(State, Event, Key, NewValue) ->
 %% globally unique by construction (HLC and Seq are atomics; Origin
 %% is per-instance), so an overlay row at that key corresponds to
 %% exactly this event and no other.
--spec evict_overlay_batch(#state{}, [bondy_oplog_event:t()]) -> #state{}.
+%%
+%% `Reply` is what the row's appender is told (see
+%% `evict_overlay_row/3`): `ok` for an installed event, `{error,
+%% rejected}` for one the fused verify step refused.
+-spec evict_overlay_batch(
+    #state{}, [bondy_oplog_event:t()], ok | {error, rejected}
+) -> #state{}.
 
-evict_overlay_batch(#state{overlay = undefined} = State, _Events) ->
+evict_overlay_batch(State, Events, Reply) ->
+    evict_overlay_keys(State, [bondy_oplog_event:key(E) || E <- Events], Reply).
+
+%% @private
+%% `evict_overlay_batch/3` by event key — the form the applier's
+%% `evict_rejected` cast carries, since the instance needs nothing of a
+%% refused event but its key. The counters' byte share is released
+%% proportionally (`overlay_counters_sub/2`), so the events themselves
+%% are not needed for that either.
+-spec evict_overlay_keys(
+    #state{}, [bondy_oplog_event:event_key()], ok | {error, rejected}
+) -> #state{}.
+
+evict_overlay_keys(#state{overlay = undefined} = State, _Keys, _Reply) ->
     State;
-evict_overlay_batch(State, []) ->
+evict_overlay_keys(State, [], _Reply) ->
     State;
-evict_overlay_batch(
-    #state{overlay = Tab, overlay_counters = Ctrs} = State, Events
+evict_overlay_keys(
+    #state{overlay = Tab, overlay_counters = Ctrs} = State, Keys, Reply
 ) ->
+    %% Only rows that were there are released from the counters: a key
+    %% whose row is already gone — a batch the applier dispatched twice
+    %% across its own restart — was released the first time.
     Count =
         try
-            lists:foreach(
-                fun(E) ->
-                    ets:delete(Tab, bondy_oplog_event:key(E))
-                end,
-                Events
-            ),
-            length(Events)
+            lists:foldl(
+                fun(Key, N) -> N + evict_overlay_row(Tab, Key, Reply) end,
+                0,
+                Keys
+            )
         catch
             error:badarg -> 0
         end,
     overlay_counters_sub(Ctrs, Count),
     State.
+
+%% @private
+%% Deletes the overlay row at `Key` and answers the appender awaiting it,
+%% if any: `{Alias, Reply}` is sent to the alias the row was staged with
+%% (`?OVERLAY_NOTIFY_POS`). The delete precedes the send, so an appender
+%% that has received its reply never observes its row. A stale alias —
+%% the appender gave up (`bondy_oplog:await_applied/3` timed out and
+%% deactivated it) or died — drops the message: that is
+%% `erlang:alias/0`'s contract, and `bondy_oplog_apply_barrier_test`
+%% holds it. Returns 1 when a row was deleted, 0 when there was none.
+%% Raises `badarg` on a dead table, like `ets:delete/2`.
+evict_overlay_row(Tab, Key, Reply) ->
+    %% `absent` is the default for a missing row; a present row carries
+    %% `undefined` or an alias in that position, never `absent`.
+    case ets:lookup_element(Tab, Key, ?OVERLAY_NOTIFY_POS, absent) of
+        absent ->
+            0;
+        undefined ->
+            true = ets:delete(Tab, Key),
+            1;
+        Alias ->
+            true = ets:delete(Tab, Key),
+            _ = Alias ! {Alias, Reply},
+            1
+    end.
 
 %% @private
 %% Removes `Deleted` events from the overlay counters atomics. The
@@ -6316,7 +6431,7 @@ admit(State, Delta) ->
 %%
 %% Reads both slots of the shared `overlay_counters` atomics — slot
 %% 1 the event count, slot 2 the byte estimate. Both are maintained
-%% by `stage_to_overlay/2` and `evict_overlay_batch/2`, and by
+%% by `stage_to_overlay/3` and `evict_overlay_batch/3`, and by
 %% lock-free `append_fast/2,3` callers. Pre-history this read pair
 %% `ets:info/2` on the overlay table for size and memory; under
 %% heavy concurrent appends those calls aggregated decentralised
@@ -8087,14 +8202,16 @@ ets_member(InstanceId) ->
     bondy_oplog_registry:instance_pid(InstanceId) =/= undefined.
 
 %% @private
-%% Shape: `{Key, Value, Hlc, Origin}` per ?OVERLAY_KEY_POS macros.
-%% Tolerates `Tab = undefined` (subtree mid-restart) — `ets:lookup`
-%% on `undefined` raises `badarg`, which we treat as a clean miss
-%% and let the caller fall through to the MST.
+%% Shape: `{Key, Value, Hlc, Origin, Notify}` per the ?OVERLAY_*_POS
+%% macros. Tolerates `Tab = undefined` (subtree mid-restart) —
+%% `ets:lookup` on `undefined` raises `badarg`, which we treat as a
+%% clean miss and let the caller fall through to the MST.
 overlay_lookup_tab(Tab, Key) ->
     try ets:lookup(Tab, Key) of
-        [{Key, Value, _Hlc, _Origin}] -> {ok, event_from_value(Key, Value)};
-        [] -> not_found
+        [{Key, Value, _Hlc, _Origin, _Notify}] ->
+            {ok, event_from_value(Key, Value)};
+        [] ->
+            not_found
     catch
         error:badarg -> not_found
     end.
@@ -8109,7 +8226,7 @@ overlay_range_tab(undefined, _From, _To) ->
 overlay_range_tab(Tab, From, To) ->
     MatchSpec = [
         {
-            {'$1', '$2', '_', '_'},
+            {'$1', '$2', '_', '_', '_'},
             [
                 {'>=', '$1', {const, From}},
                 {'=<', '$1', {const, To}}
@@ -8273,7 +8390,7 @@ validate_coalesce_max(Bad) ->
 %% overlay has reached size 0. Idempotent — re-running with an empty
 %% waiter list or a non-empty overlay is a no-op. Called from every
 %% handler that can shrink the overlay (`install_local_batch`,
-%% `check_drain_waiters`).
+%% `evict_rejected`).
 maybe_signal_drain_waiters(#state{drain_waiters = []} = State) ->
     State;
 maybe_signal_drain_waiters(
