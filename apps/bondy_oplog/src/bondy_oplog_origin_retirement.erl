@@ -19,11 +19,18 @@ membership removal, and the replication of the operator's retirement set.
 ## The division of labour
 
 **Partisan membership is the replicated authority.** A node leaves the
-stability set the moment it is removed from the membership — a deliberate
-join/leave act, never a timeout — and `bondy_oplog_instance:
-reclamation_members/0` observes that directly. Nothing here decides WHO
-has departed; this module only reacts to a membership the cluster has
-already agreed on.
+stability set the moment it is removed from the membership, and
+`bondy_oplog_instance:reclamation_members/0` observes that directly. A
+removal is an explicit `partisan_peer_service:leave/0,1` — the operator's
+`bondy.cluster.leave` (`bondy_cluster_api`) or the node's own shutdown
+under `cluster.automatic_leave` — never a timeout: peer discovery only ever
+JOINS (Partisan >= 6.3.0, `partisan_peer_service:add_members/1`, pinned
+there by `partisan_peer_discovery_agent_test` and
+`partisan_SUITE:discovery_never_evicts_test`). Before 6.3.0 the discovery
+agent evicted any member absent from a lookup — under DNS discovery every
+node that was not yet Ready, once per poll, for the whole of its boot.
+Nothing here decides WHO has departed; this module only reacts to a
+membership the cluster has already agreed on.
 
 **This module owns the node-local cleanup** that should follow: forgetting
 departed peers from `bondy_oplog_peer_state`, and reaping dead origins'
@@ -308,8 +315,9 @@ retired — but that is a check on WHO was asked, not on whether the data has
 settled.
 
 A partitioned node cannot retire the cluster out from under itself: Partisan
-membership changes only by a deliberate join/leave, so an unreachable peer is
-still a member, and a member that cannot answer aborts the complement.
+membership changes only by an explicit leave (see *The division of labour*),
+so an unreachable peer is still a member, and a member that cannot answer
+aborts the complement.
 
 **Run it with every instance up.** The complement is built from what nodes
 advertise, and an instance that was never started — or was stopped by

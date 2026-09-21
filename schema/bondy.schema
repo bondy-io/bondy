@@ -4189,8 +4189,15 @@ end}.
   end
 }.
 
-%% If enabled Bondy will discover peers using the defined
-%% cluster.peer_discovery.type e.g. bondy_peer_discovery_dns_agent.
+%% @doc If enabled Bondy will discover peers using the defined
+%% cluster.peer_discovery.type e.g. dns.
+%%
+%% Discovery only ever joins the peers a lookup reports. A member the lookup
+%% stops reporting — a pod that is not Ready, say — is never removed: a node
+%% leaves the cluster only through `bondy.cluster.leave` or its own shutdown
+%% under cluster.automatic_leave. (Requires the Partisan Bondy ships, 6.3.0 or
+%% later; earlier Partisan evicted such members on every poll.)
+%%
 %% This can only be configured before tuning Bondy.
 {mapping, "cluster.peer_discovery.enabled",
 "partisan.peer_discovery.enabled", [

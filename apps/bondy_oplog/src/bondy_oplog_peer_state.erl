@@ -50,8 +50,9 @@ silent resurrection with no fallback (see BONDY_DB_DELETE_DESIGN.md §3.3).
 supplied by the caller rather than inferred from who happens to be in this
 table. Every member must have a checkpointed root or the call reports which do
 not, so a silent peer holds stability down instead of vanishing from the
-computation. Removing a permanently departed node is then a deliberate,
-replicated membership act, never a timeout.
+computation. Removing a permanently departed node is then an explicit,
+replicated membership act — a Partisan `leave`, never a timeout; peer
+discovery only joins (see `bondy_oplog_origin_retirement`).
 
 The distinction is deliberate: these are not two ways of asking the same
 question. Reclamation MUST use the strict reading.
