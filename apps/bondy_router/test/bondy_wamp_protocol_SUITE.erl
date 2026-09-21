@@ -23,7 +23,8 @@ all() ->
         throttle_when_enabled,
         throttle_message_class,
         hello_admission_when_busy,
-        hello_admission_disabled
+        hello_admission_disabled,
+        router_abort_close_logs_the_reason
     ].
 
 init_per_suite(Config) ->
@@ -392,3 +393,66 @@ handle_inbound(_Config) ->
     ?assertError(
         Error, bondy_wamp_protocol:handle_inbound(<<>>, StateInvalidSP)
     ).
+
+%% -----------------------------------------------------------------------------
+%% bondy_wamp_tcp_connection_handler: a router-initiated close names its reason
+%% -----------------------------------------------------------------------------
+
+%% A HELLO for a realm that does not exist makes the router send an ABORT and
+%% close the connection. The handler stops with `shutdown' and its `terminate/2'
+%% logged `reason => shutdown' — every router-initiated close looked the same,
+%% which is how 218 of them in a customer's logs went unexplained. The ABORT's
+%% reason URI is in the handler state (`shutdown_reason'); the log line must
+%% carry it. The wire half (an ABORT with that URI) is asserted too, so the
+%% case cannot pass by logging some other close.
+router_abort_close_logs_the_reason(_Config) ->
+    #{level := Primary} = logger:get_primary_config(),
+    ok = logger:set_primary_config(level, all),
+    ok = logger:add_handler(?MODULE, ?MODULE, #{config => #{pid => self()}}),
+    try
+        Port = ranch:get_port(wamp_tcp),
+        {ok, Sock} = gen_tcp:connect(
+            {127, 0, 0, 1}, Port, [binary, {active, false}], 5000
+        ),
+        %% RawSocket handshake: max length nibble 15, serializer 1 (JSON).
+        ok = gen_tcp:send(Sock, <<16#7F, 15:4, 1:4, 0:8, 0:8>>),
+        {ok, <<16#7F, _:4, 1:4, 0:8, 0:8>>} = gen_tcp:recv(Sock, 4, 5000),
+
+        Hello = iolist_to_binary(
+            json:encode([
+                1,
+                ~"com.example.no.such.realm",
+                #{roles => #{caller => #{}}}
+            ])
+        ),
+        ok = gen_tcp:send(
+            Sock, <<0:5, 0:3, (byte_size(Hello)):24, Hello/binary>>
+        ),
+        {ok, <<0:5, 0:3, Len:24>>} = gen_tcp:recv(Sock, 4, 5000),
+        {ok, AbortBin} = gen_tcp:recv(Sock, Len, 5000),
+        ?assertMatch(
+            [3, #{}, ?WAMP_NO_SUCH_REALM], json:decode(AbortBin)
+        ),
+
+        receive
+            {closed_by_router, Reason} ->
+                ?assertEqual(?WAMP_NO_SUCH_REALM, Reason)
+        after 5000 ->
+            ct:fail(no_close_log_event)
+        end,
+        ok = gen_tcp:close(Sock)
+    after
+        ok = logger:remove_handler(?MODULE),
+        ok = logger:set_primary_config(level, Primary)
+    end.
+
+%% logger handler callback for the case above: forwards the handler's close
+%% line, and nothing else, to the test process.
+log(
+    #{msg := {report, #{description := "Connection closed by router"} = R}},
+    #{config := #{pid := Pid}}
+) ->
+    Pid ! {closed_by_router, maps:get(reason, R)},
+    ok;
+log(_Event, _Config) ->
+    ok.

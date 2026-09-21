@@ -348,10 +348,19 @@ terminate(timeout, State) ->
         reason => idle_timeout
     }),
     do_terminate(State);
-terminate(shutdown, State) ->
+terminate(shutdown, #state{shutdown_reason = undefined} = State) ->
     ?LOG_INFO(#{
         description => "Connection closed by router",
         reason => shutdown
+    }),
+    do_terminate(State);
+terminate(shutdown, #state{shutdown_reason = Reason} = State) ->
+    %% The router aborted the session: `Reason' is the ABORT's reason URI
+    %% (`bondy_wamp_protocol:stop/3'), stored by `handle_inbound/2'. Pinned by
+    %% `bondy_wamp_protocol_SUITE:router_abort_close_logs_the_reason'.
+    ?LOG_INFO(#{
+        description => "Connection closed by router",
+        reason => Reason
     }),
     do_terminate(State);
 terminate({shutdown, Reason}, State) ->

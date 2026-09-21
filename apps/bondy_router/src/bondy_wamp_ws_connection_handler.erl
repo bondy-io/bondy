@@ -63,6 +63,11 @@ WebSocket subprotocol registry.
     %% observation on terminate (also the "socket_open was emitted" guard).
     start_time :: optional(integer()),
     hibernate = idle :: never | idle | always,
+    %% The ABORT reason URI when the router closes the connection. Cowboy's
+    %% `{shutdown_reason, R}' command only sets the process exit reason;
+    %% `terminate/3' still receives `stop', so the URI is kept here for its
+    %% log line.
+    shutdown_reason :: optional(term()),
     protocol_state :: optional(bondy_wamp_protocol:state())
 }).
 
@@ -306,7 +311,10 @@ websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
             {Cmds, disable_ping(State)};
         {stop, Reason, L, ProtoState} ->
             self() ! {stop, Reason},
-            State = State0#state{protocol_state = ProtoState},
+            State = State0#state{
+                protocol_state = ProtoState,
+                shutdown_reason = Reason
+            },
             Cmds = data_frames(T, L) ++ [{shutdown_reason, Reason}, close],
             {Cmds, disable_ping(State)}
     end;
@@ -360,7 +368,7 @@ websocket_info({stop, Reason}, State) ->
         description => "Connection closing",
         reason => Reason
     }),
-    {[{shutdown_reason, Reason}, close], State};
+    {[{shutdown_reason, Reason}, close], State#state{shutdown_reason = Reason}};
 websocket_info(Msg, State) ->
     ?LOG_DEBUG(#{
         description => "Received unknown message",
@@ -381,10 +389,17 @@ terminate(normal, _Req, State) ->
         reason => normal
     }),
     do_terminate(State);
-terminate(stop, _Req, State) ->
+terminate(stop, _Req, #state{shutdown_reason = undefined} = State) ->
     ?LOG_INFO(#{
         description => "Connection closed",
         reason => stop
+    }),
+    do_terminate(State);
+terminate(stop, _Req, #state{shutdown_reason = Reason} = State) ->
+    %% The router aborted the session; `Reason' is the ABORT's reason URI.
+    ?LOG_INFO(#{
+        description => "Connection closed by router",
+        reason => Reason
     }),
     do_terminate(State);
 terminate(timeout, _Req, State) ->
