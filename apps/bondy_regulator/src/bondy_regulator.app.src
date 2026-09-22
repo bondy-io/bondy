@@ -11,7 +11,9 @@
     {mod, {bondy_regulator_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        %% `alarm_handler', raised to by the memory monitor.
+        sasl
     ]},
     {env, []},
     {modules, []},

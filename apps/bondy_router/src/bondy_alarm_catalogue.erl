@@ -252,6 +252,37 @@ list() ->
             ],
             config_keys => []
         },
+        %% `bondy_regulator_memory:handle_info/2'. The node's memory use is
+        %% above the high watermark of its limit: admission gates refuse new
+        %% work until it drops below the low watermark. `class = node' because
+        %% the limit is the node's. Not readiness-affecting, and it must not
+        %% become so: draining the pressured node moves its load onto the
+        %% others, which is how one node's pressure becomes the cluster's.
+        #{
+            id_pattern => bondy_memory_high,
+            severity => major,
+            class => node,
+            affects_ready => false,
+            summary =>
+                <<
+                    "Node memory use is above the high watermark of its "
+                    "limit; admission gates refuse new work"
+                >>,
+            detail_keys => [usage_bytes, limit_bytes, source],
+            %% The alarm's own details are the handle: no metric reports the
+            %% cgroup reading (`bondy_regulator' starts before the
+            %% `bondy_metrics' server, so it declares none), and the
+            %% Prometheus VM collector's `erlang_vm_memory_*' families are
+            %% not declared through `bondy_metrics' and so cannot be named
+            %% here.
+            observe_with => [],
+            tasks => [],
+            config_keys => [
+                <<"load_regulation.memory_monitor.high_watermark">>,
+                <<"load_regulation.memory_monitor.low_watermark">>,
+                <<"load_regulation.memory_monitor.limit">>
+            ]
+        },
         %% `bondy_oplog_sync_session:adopt_frontier/3`. A peer shipped
         %% catalogue cells for a bucket this instance has no table for, so the
         %% install was partial and the peer's applied frontier was withheld

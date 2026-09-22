@@ -202,7 +202,19 @@ is_authorized(Req0, St0) ->
                 <<"OPTIONS">> ->
                     {true, Req0, St};
                 _ ->
-                    do_is_authorized(Req0, St)
+                    %% Admission gate before any credential work: a busy
+                    %% node would stretch the password hashing, store
+                    %% reads and token write past the client's timeout,
+                    %% and one above its memory high watermark cannot
+                    %% afford them. This node's condition, not the
+                    %% client's credentials: 503 + `retry-after', never
+                    %% `invalid_client'.
+                    case admit() of
+                        {refuse, Reason} ->
+                            {stop, reply(Reason, Req0), St};
+                        ok ->
+                            do_is_authorized(Req0, St)
+                    end
             end;
         {error, {protocol_error, Message}} ->
             ?LOG_INFO(#{
@@ -281,6 +293,31 @@ accept(Req0, St) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% The admission gate for these endpoints, the HTTP counterpart of the HELLO
+%% gate in `bondy_wamp_protocol': refuses when the node is in the busy state
+%% (deep run queues — see `bondy_regulator_load') or the memory-high state
+%% (usage near its limit — see `bondy_regulator_memory') and the gate is
+%% enabled (`load_regulation.oauth2.enabled', default on). Every read is
+%% lock-free; each monitor fails open.
+-spec admit() -> ok | {refuse, overload | memory_pressure}.
+
+admit() ->
+    case bondy_config:get([load_regulation, oauth2, enabled], true) of
+        true ->
+            case bondy_regulator_load:busy() of
+                true ->
+                    {refuse, overload};
+                false ->
+                    case bondy_regulator_memory:high() of
+                        true -> {refuse, memory_pressure};
+                        false -> ok
+                    end
+            end;
+        false ->
+            ok
+    end.
 
 do_is_authorized(Req0, St0) ->
     SourceIP = St0#state.source_ip,
@@ -622,8 +659,35 @@ reply(oauth2_invalid_client = Reason, Req) ->
         ?HTTP_UNAUTHORIZED,
         prepare_request(bondy_error:to_map(Error), Headers, Req)
     );
+reply(overload, Req) ->
+    %% The admission gate refused the request: same URI and status as any
+    %% other transient refusal, with a message that names the condition.
+    reply_error(
+        bondy_error:new(service_unavailable, #{
+            message => <<
+                "The server is overloaded and cannot accept new requests "
+                "at the moment. Please retry."
+            >>
+        }),
+        Req
+    );
+reply(memory_pressure, Req) ->
+    reply_error(
+        bondy_error:new(service_unavailable, #{
+            message => <<
+                "The server is under memory pressure and cannot accept "
+                "new requests at the moment. Please retry."
+            >>
+        }),
+        Req
+    );
 reply(Reason, Req) ->
-    Error = bondy_error:from_term(Reason),
+    reply_error(bondy_error:from_term(Reason), Req).
+
+%% @private
+-spec reply_error(bondy_error:t(), cowboy_req:req()) -> cowboy_req:req().
+
+reply_error(Error, Req) ->
     %% An OAuth2 request that carries no more specific status is a bad request,
     %% unlike the API Gateway, which defaults to a server error.
     Status =

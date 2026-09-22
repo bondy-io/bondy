@@ -117,7 +117,7 @@ catalogue_renders_and_encodes_test() ->
         bondy_alarm_api:render_entry(E)
      || E <- bondy_alarm_catalogue:list()
     ],
-    ?assertEqual(12, length(Entries)),
+    ?assertEqual(13, length(Entries)),
     ?assert(encodes(#{~"entries" => Entries})),
     %% The wildcard survives into the wire form: an operator reading the
     %% catalogue must be able to see WHICH element varies per instance.

@@ -1936,16 +1936,35 @@ end}.
 
 %% -----------------------------------------------------------------------------
 %% @doc Enables the session admission gate: while the node is in the busy
-%% state (see the load_regulation.load_monitor.* settings) new HELLO
+%% state (see the load_regulation.load_monitor.* settings) or the memory
+%% high state (see the load_regulation.memory_monitor.* settings) new HELLO
 %% requests are refused immediately with a retryable
 %% `wamp.error.unavailable` ABORT instead of being accepted into a session
 %% open that deep run queues would stretch past the client's timeout while
-%% holding a socket and session state. Sessions already established, and
+%% holding a socket and session state, or whose heap a node near its
+%% memory limit cannot afford. Sessions already established, and
 %% handshakes already past HELLO, are unaffected.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.hello.enabled",
 "bondy_router.load_regulation.hello.enabled", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Enables the admission gate at the OAuth2 token and revocation
+%% endpoints, the HTTP counterpart of load_regulation.hello.enabled: while
+%% the node is in the busy state (see the load_regulation.load_monitor.*
+%% settings) or the memory high state (see the
+%% load_regulation.memory_monitor.* settings) requests are answered
+%% immediately with a retryable 503 and a Retry-After header, before any
+%% credential verification, store read or token write. Requests already
+%% past the gate are unaffected.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.oauth2.enabled",
+"bondy_router.load_regulation.oauth2.enabled", [
   {default, on},
   {datatype, flag}
 ]}.
@@ -1988,6 +2007,60 @@ end}.
 "bondy_regulator.load_monitor_sample_interval_ms", [
   {default, "100ms"},
   {datatype, {duration, ms}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The node enters the memory-high state when its sampled memory use
+%% reaches this percentage of its limit. Inside a cgroup the use is the
+%% cgroup's anonymous memory and the limit the cgroup's; otherwise see
+%% load_regulation.memory_monitor.limit. While high, admission gates refuse
+%% new work (a session open, a token issue) with a retryable refusal; work
+%% already admitted is not shed. The bondy_memory_high alarm is raised.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.memory_monitor.high_watermark",
+"bondy_regulator.memory_monitor_high_watermark", [
+  {default, 85},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The node returns to normal when its sampled memory use falls to this
+%% percentage of its limit. Must be below the high watermark; the gap is the
+%% hysteresis that prevents the state from flapping at the boundary.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.memory_monitor.low_watermark",
+"bondy_regulator.memory_monitor_low_watermark", [
+  {default, 75},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How often the memory monitor samples memory use. Memory moves more
+%% slowly than the run queue, so the default is ten times the load monitor's.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.memory_monitor.sample_interval",
+"bondy_regulator.memory_monitor_sample_interval_ms", [
+  {default, "1s"},
+  {datatype, {duration, ms}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The memory limit the monitor compares against, when the node is not
+%% in a cgroup that sets one (a bare VM, a developer's machine) or when the
+%% cgroup's limit is not the one that matters. When set it wins over the
+%% cgroup, and use is then measured as the runtime's own total
+%% (erlang:memory(total)). With neither this nor a bounded cgroup the node
+%% never reports memory high.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.memory_monitor.limit",
+"bondy_regulator.memory_monitor_limit", [
+  {datatype, bytesize},
+  {commented, "2GB"}
 ]}.
 
 %% -----------------------------------------------------------------------------

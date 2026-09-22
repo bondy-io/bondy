@@ -98,6 +98,38 @@ makes the node slower to recover but steadier; narrowing it does the reverse.
 Reading the status is a single atomics read behind a cached reference, so
 admission gates can consult it per request without a process hop or a lock.
 
+### The memory monitor: a binary high state
+
+Scheduling delay is not the only way a node fails under a burst. A burst of
+new sessions or token grants allocates heap for each one — session state,
+authentication context, the token's durable write — and a node that admits
+them all can be killed by the container runtime for exceeding its memory
+limit while its run queues still look healthy. That failure is worse than
+overload: an OOM kill takes every established session with it, and on a
+cluster whose nodes are all under the same burst the kills cascade.
+
+`bondy_regulator_memory` samples the node's memory use against its limit
+every `load_regulation.memory_monitor.sample_interval` (1s by default) and
+exposes a second binary status: **high** or **normal**. The limit comes from
+the first of these that applies:
+
+- `load_regulation.memory_monitor.limit`, when set; the use compared against
+  it is the runtime's own total (`erlang:memory(total)`).
+- The cgroup the node runs in (cgroup v2 `memory.max`, or cgroup v1
+  `memory.limit_in_bytes`), which is what a container platform sets from the
+  pod's memory limit; the use is the cgroup's anonymous memory — the part the
+  kernel cannot reclaim and the OOM killer counts.
+- Otherwise there is no limit, the node says so once at boot, and it never
+  reports high.
+
+The node becomes high when use reaches
+`load_regulation.memory_monitor.high_watermark` (85%) of the limit and returns
+to normal only when it falls to `load_regulation.memory_monitor.low_watermark`
+(75%), with the same three-sample dwell as the load monitor, for the same
+reason: a status that drives admission must not flap. Entering the high state
+raises the `bondy_memory_high` alarm with the use, limit and source in its
+details; returning to normal clears it.
+
 ### The anti-entropy signal: a smoothed ratio
 
 Anti-entropy asks a softer question — "is now a good moment for background
@@ -115,13 +147,25 @@ reason to stop syncing.
 
 ## Refusing work at the door
 
-The cheapest work is work never accepted. When the node is busy, Bondy refuses
-**new sessions** at the earliest point it can.
+The cheapest work is work never accepted. When the node is busy or its memory
+is high, Bondy refuses **new sessions** and **new token grants** at the
+earliest point it can.
 
 With `load_regulation.hello.enabled` on (the default), a `HELLO` arriving
-while the node is in the busy state is answered immediately with an `ABORT`
-carrying `wamp.error.unavailable`. The cost to the node is a parse and an
-encoded reply.
+while the node is in the busy state or the memory-high state is answered
+immediately with an `ABORT` carrying `wamp.error.unavailable`. The cost to
+the node is a parse and an encoded reply. The message names the condition —
+overload or memory pressure — so a client's logs tell the two apart; the
+reason URI is the same because the client's correct response is the same.
+
+The OAuth2 token and revocation endpoints have the same gate, reading the
+same two states. With `load_regulation.oauth2.enabled` on (the default), a
+request arriving while the node is busy or memory-high is answered with
+`503` and `retry-after` before any credential work — no password hashing, no
+store reads, no token write. Every token issued is a durable write and a row
+the node keeps, so a token burst on a node near its memory limit is exactly
+the work to refuse first; and on a busy node the grant's hashing and writes
+are what the client would time out waiting for.
 
 The alternative — accepting the session — is far more expensive, and worse for
 the client. Establishing a session means holding a socket, allocating session
@@ -142,8 +186,11 @@ Two properties make this safe to leave on:
   them. A node under pressure keeps its existing clients working rather than
   degrading everyone equally.
 
-Each refusal increments `bondy_wamp_dropped_total` with `reason="admission"`
-and `family="hello"`.
+Each `HELLO` refusal increments `bondy_wamp_dropped_total` with
+`reason="admission"` and `family="hello"`, whichever monitor refused it; the
+`bondy_memory_high` alarm is what says the memory monitor did. A token
+refusal is a `5xx` under `status_class` in `cowboy_requests_total`; the
+message in its body names which state refused it.
 
 ## Shedding work that cannot wait
 
@@ -263,7 +310,8 @@ not overreact to one sample.
 
 | Regulator | Protects | Signal it reads | When it acts | Configuration (default) | Watch |
 |---|---|---|---|---|---|
-| `HELLO` admission gate | latency of admitted sessions | node monitor busy state | immediate retryable `ABORT` (`wamp.error.unavailable`); established sessions unaffected | `load_regulation.hello.enabled` (`on`) | `bondy_wamp_dropped_total{reason="admission"}` |
+| `HELLO` admission gate | latency of admitted sessions; the node's memory limit | node monitor busy state; memory monitor high state | immediate retryable `ABORT` (`wamp.error.unavailable`); established sessions unaffected | `load_regulation.hello.enabled` (`on`) | `bondy_wamp_dropped_total{reason="admission"}` · the `bondy_memory_high` alarm |
+| OAuth2 admission gate | latency of admitted grants; the node's memory limit | node monitor busy state; memory monitor high state | `503` + `retry-after` before any credential work | `load_regulation.oauth2.enabled` (`on`) | `cowboy_requests_total{status_class="5xx"}` · the `bondy_memory_high` alarm |
 | Flow-pool bound | memory and ordering on cluster ingress | a worker's queue vs its share of the budget | the message is shed (at-most-once delivery) | `load_regulation.router.flow_pool.capacity` (100,000) | `bondy_wamp_dropped_total{reason="shed"}` |
 | Anti-entropy concurrency cap | routing fairness | count of running sync sessions | further syncs wait; per-round batch = pages ÷ concurrency | `db.aae.max_concurrency` (3) | — |
 | Anti-entropy page budget | peak memory | reconciliation pages in flight | batches shrink; the node-wide budget holds regardless of dataset size | `db.aae.max_pages_in_flight` (2048) | — |
@@ -435,13 +483,18 @@ throttling is configured. Confirm with the counters.
 
 ## What to watch
 
-Four signals tell you whether regulation is engaging, and they mean different
+Five signals tell you whether regulation is engaging, and they mean different
 things.
 
 - `bondy_wamp_dropped_total{reason="admission",family="hello"}` — sessions
-  refused because the node was busy. A nonzero rate means the node is at its
-  session-establishment ceiling. Sustained, it means you need more nodes or a
-  higher watermark, not a bigger timeout.
+  refused because the node was busy or its memory high. A nonzero rate means
+  the node is at its session-establishment ceiling. Sustained, it means you
+  need more nodes or a higher watermark, not a bigger timeout.
+- The `bondy_memory_high` alarm — the node is refusing new sessions and token
+  grants because its memory use is above the high watermark. Its details
+  carry the use, the limit and where the limit came from. A node that raises
+  it under a burst and clears it afterwards is doing what the gate is for; a
+  node that holds it at idle needs a bigger limit or fewer resident sessions.
 - `bondy_wamp_dropped_total{reason="shed"}` — messages dropped to preserve
   flow ordering, labelled by family. This is data loss by design, and it is
   the signal that a flow is producing faster than its destination consumes.
@@ -470,6 +523,16 @@ tolerate deeper queues before refusing sessions — more sessions admitted, each
 establishing more slowly. Lower it if establishment latency matters more than
 admission volume. Keep the low watermark meaningfully below the high one; a
 narrow gap trades steadiness for recovery speed.
+
+**Memory watermarks are a share of the limit.** The defaults leave 15% of the
+limit between the point the node stops admitting and the point the kernel
+kills it, which is the room the sessions already admitted have to grow.
+Raise `load_regulation.memory_monitor.high_watermark` on a node whose
+resident set is steady and whose bursts are short; lower it on one whose
+established sessions keep allocating after they are admitted. Set
+`load_regulation.memory_monitor.limit` explicitly on a host with no cgroup
+limit — without it the monitor has nothing to compare against and never
+refuses.
 
 **Flow pool capacity is not throughput.** Raising
 `load_regulation.router.flow_pool.capacity` lets a slow flow queue more before

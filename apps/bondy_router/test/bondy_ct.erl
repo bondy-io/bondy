@@ -706,6 +706,8 @@
     start_nodes/2,
     stop_cluster/1,
     freeze_gc/1,
+    with_load_busy/1,
+    with_memory_high/1,
     stop_nodes/1,
     stop_node/1,
     stop_node/2,
@@ -1103,6 +1105,85 @@ freeze_gc_await(Node, Name, Deadline) ->
                 error({gc_workers_stuck, Node, Name, N}),
             timer:sleep(50),
             freeze_gc_await(Node, Name, Deadline)
+    end.
+
+%% -----------------------------------------------------------------------------
+%% @doc Runs `Fun' with the local node's load monitor reporting busy, and
+%% back to normal afterwards.
+%%
+%% Unlike {@link with_memory_high/1} this forces the published status: the
+%% busy state is a run-queue depth this test node cannot reach on demand. The
+%% sampler is suspended for the duration so a tick on the idle node cannot
+%% revert the state mid-test; the sensor itself is covered by
+%% `bondy_regulator_load_test'.
+%% -----------------------------------------------------------------------------
+with_load_busy(Fun) ->
+    Ref = persistent_term:get({bondy_regulator_load, status}),
+    ok = sys:suspend(bondy_regulator_load),
+    ok = atomics:put(Ref, 1, 1),
+    true = bondy_regulator_load:busy(),
+    try
+        Fun()
+    after
+        ok = atomics:put(Ref, 1, 0),
+        ok = sys:resume(bondy_regulator_load)
+    end.
+
+%% -----------------------------------------------------------------------------
+%% @doc Runs `Fun' with the local node's memory monitor in the high state and
+%% returns the monitor to its configured state afterwards.
+%%
+%% The state is reached through the real sampler, not by forcing its
+%% published status: the monitor is restarted against an explicit limit of
+%% one byte, which `erlang:memory(total)' is over on the first sample, so the
+%% dwell commits `high' three samples later. A suite that passes here has
+%% exercised the sensor-to-gate path its gate reads. The restart afterwards
+%% starts a monitor at normal, so `high/0' is false when this returns, and
+%% the alarm the high state raised is cleared by the stop.
+%% -----------------------------------------------------------------------------
+with_memory_high(Fun) ->
+    Keys = [memory_monitor_limit, memory_monitor_sample_interval_ms],
+    Saved = [{K, application:get_env(bondy_regulator, K)} || K <- Keys],
+    ok = application:set_env(bondy_regulator, memory_monitor_limit, 1),
+    ok = application:set_env(
+        bondy_regulator, memory_monitor_sample_interval_ms, 10
+    ),
+    ok = restart_memory_monitor(),
+    ok = await_memory(true, 100),
+    try
+        Fun()
+    after
+        lists:foreach(
+            fun
+                ({K, undefined}) ->
+                    application:unset_env(bondy_regulator, K);
+                ({K, {ok, V}}) ->
+                    application:set_env(bondy_regulator, K, V)
+            end,
+            Saved
+        ),
+        ok = restart_memory_monitor(),
+        false = bondy_regulator_memory:high()
+    end.
+
+%% @private
+restart_memory_monitor() ->
+    Sup = bondy_regulator_sup,
+    Id = bondy_regulator_memory,
+    ok = supervisor:terminate_child(Sup, Id),
+    {ok, _} = supervisor:restart_child(Sup, Id),
+    ok.
+
+%% @private
+await_memory(Expected, Left) ->
+    case bondy_regulator_memory:high() of
+        Expected ->
+            ok;
+        _ when Left > 0 ->
+            timer:sleep(10),
+            await_memory(Expected, Left - 1);
+        Other ->
+            error({memory_monitor_never_reached, Expected, Other})
     end.
 
 %% -----------------------------------------------------------------------------

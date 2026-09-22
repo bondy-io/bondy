@@ -36,6 +36,16 @@ init([]) ->
             type => worker,
             modules => [bondy_regulator_load]
         },
+        %% Node memory monitor (usage-vs-limit sampler behind high/0). Same
+        %% standing as the load monitor: independent of the pair below.
+        #{
+            id => bondy_regulator_memory,
+            start => {bondy_regulator_memory, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_regulator_memory]
+        },
         #{
             id => bondy_regulator_rate_limit,
             start => {bondy_regulator_rate_limit, start_link, []},

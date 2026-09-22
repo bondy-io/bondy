@@ -24,6 +24,7 @@ all() ->
         throttle_message_class,
         hello_admission_when_busy,
         hello_admission_disabled,
+        hello_admission_under_memory_pressure,
         router_abort_close_logs_the_reason
     ].
 
@@ -329,6 +330,50 @@ hello_admission_disabled(_Config) ->
         ok = atomics:put(Ref, 1, 0),
         ok = sys:resume(bondy_regulator_load)
     end.
+
+%% A node whose memory use is above its high watermark refuses a new
+%% HELLO with the same retryable wamp.error.unavailable ABORT as a busy
+%% one, and before any realm or auth work: the realm here does not exist,
+%% and the refusal comes first. The state is the real sampler's (see
+%% `bondy_ct:with_memory_high/1'), not a forced status, so this covers
+%% the sensor-to-gate path; once memory is back to normal the same HELLO
+%% gets past admission and fails on the realm instead.
+hello_admission_under_memory_pressure(_Config) ->
+    Hello = bondy_wamp_message:hello(
+        <<"com.example.test.wamp_protocol.does_not_exist">>,
+        #{roles => #{caller => #{}}}
+    ),
+    Data = bondy_wamp_encoding:encode(Hello, erl),
+    Subprotocol = {raw, binary, erl},
+    NewState = fun() ->
+        {ok, St} = bondy_wamp_protocol:init(
+            Subprotocol, {{10, 8, 8, 10}, 5000}, #{}
+        ),
+        St
+    end,
+
+    bondy_ct:with_memory_high(fun() ->
+        %% Not the load gate: the node is idle.
+        ?assertNot(bondy_regulator_load:busy()),
+        {stop, Uri, [Bin], _} =
+            bondy_wamp_protocol:handle_inbound(Data, NewState()),
+        ?assertEqual(?WAMP_UNAVAILABLE, Uri),
+        %% The message names the condition, so a client's logs tell it
+        %% from an overloaded node.
+        {[#abort{details = Details}], <<>>} =
+            bondy_wamp_encoding:decode(Subprotocol, Bin),
+        ?assertMatch(
+            #{
+                <<"nature">> := <<"transient">>,
+                <<"message">> :=
+                    <<"The router is under memory pressure", _/binary>>
+            },
+            Details
+        )
+    end),
+
+    {stop, Uri2, _, _} = bondy_wamp_protocol:handle_inbound(Data, NewState()),
+    ?assertNotEqual(?WAMP_UNAVAILABLE, Uri2).
 
 throttle_message_class(_Config) ->
     %% The per-message class needs BOTH the master flag AND its own opt-in flag.

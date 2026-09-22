@@ -426,20 +426,21 @@ handle_inbound_messages(
     %% Client is requesting a session
     %% This will return either reply with
     %% wamp_welcome() | wamp_challenge() | wamp_abort()
-    %% Load admission gate first (one atomics read): when the node's run
+    %% Admission gate first (two atomics reads): when the node's run
     %% queues are deep, a session open the node accepts will spend
     %% seconds of wall clock in scheduling delay and likely time out on
     %% the client after holding a socket, session state and auth work
-    %% the whole while. Refusing HERE costs a parse and an encoded
-    %% ABORT, and the reason URI is retryable (wamp.error.unavailable)
-    %% so well-behaved clients back off and try again — admitted
-    %% sessions keep their establishment latency instead of sharing the
-    %% overload with everyone.
+    %% the whole while; when its memory is near the limit, every session
+    %% admitted is heap the node cannot afford. Refusing HERE costs a
+    %% parse and an encoded ABORT, and the reason URI is retryable
+    %% (wamp.error.unavailable) so well-behaved clients back off and try
+    %% again — admitted sessions keep their establishment latency instead
+    %% of sharing the overload with everyone.
     case admit_hello() of
-        false ->
+        {refuse, Reason} ->
             ok = bondy_telemetry:wamp_dropped(admission, hello),
-            stop(overload, St0);
-        true ->
+            stop(Reason, St0);
+        ok ->
             handle_hello(M, St0)
     end;
 handle_inbound_messages([#hello{} | _], #wamp_state{} = St, _) ->
@@ -851,16 +852,27 @@ auth_challenge(Method, St0) ->
 %% =============================================================================
 
 %% @private
-%% The load admission gate for new sessions: refuses when the node is in
-%% the busy state (deep run queues — see `bondy_regulator_load`) and the
-%% gate is enabled (`load_regulation.hello.enabled`, default on). Both
-%% reads are lock-free; fails open.
+%% The admission gate for new sessions: refuses when the node is in the
+%% busy state (deep run queues — see `bondy_regulator_load`) or the
+%% memory-high state (usage near its limit — see `bondy_regulator_memory`)
+%% and the gate is enabled (`load_regulation.hello.enabled`, default on).
+%% Every read is lock-free; each monitor fails open.
+-spec admit_hello() -> ok | {refuse, overload | memory_pressure}.
+
 admit_hello() ->
     case bondy_config:get([load_regulation, hello, enabled], true) of
         true ->
-            not bondy_regulator_load:busy();
+            case bondy_regulator_load:busy() of
+                true ->
+                    {refuse, overload};
+                false ->
+                    case bondy_regulator_memory:high() of
+                        true -> {refuse, memory_pressure};
+                        false -> ok
+                    end
+            end;
         false ->
-            true
+            ok
     end.
 
 %% @private
@@ -1016,6 +1028,19 @@ abort_message(overload) ->
         <<
             "The router is overloaded and cannot accept new sessions "
             "at the moment. Please retry."
+        >>
+    );
+abort_message(memory_pressure) ->
+    %% The admission gate refused this session: the node's memory use is
+    %% above its high watermark, so the heap a session open allocates is
+    %% heap the node cannot afford. The same availability condition as
+    %% `overload' from the client's point of view — retryable, and
+    %% possibly served by another node through the load balancer.
+    abort(
+        service_unavailable,
+        <<
+            "The router is under memory pressure and cannot accept new "
+            "sessions at the moment. Please retry."
         >>
     );
 abort_message({rate_limited, _Class}) ->
