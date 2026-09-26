@@ -1,135 +1,104 @@
-# Contributor Covenant Code of Conduct
+# Code of Conduct
 
-## Our Pledge
+How we treat each other in the Bondy community, where that applies, and what happens when something goes wrong.
 
-We as members, contributors, and leaders pledge to make participation in our
-community a harassment-free experience for everyone, regardless of age, body
-size, visible or invisible disability, ethnicity, sex characteristics, gender
-identity and expression, level of experience, education, socio-economic status,
-nationality, personal appearance, race, religion, or sexual identity
-and orientation.
+> This is a copy of the canonical Bondy Code of Conduct at <https://bondy.io/code-of-conduct>, which covers every Bondy space. If they differ, the website version applies.
 
-We pledge to act and interact in ways that contribute to an open, welcoming,
-diverse, inclusive, and healthy community.
+Bondy is built in the open by people with different backgrounds, first languages and ways of arguing. This code sets the baseline for how we work together, so that everyone can disagree about types, protocols and syntax without anyone being made to feel unwelcome. It also says what to do, and what we will do, when that baseline is not met.
 
-## Our Standards
+It applies to everyone: maintainers, contributors, newcomers, users and moderators alike.
 
-Examples of behavior that contributes to a positive environment for our
-community include:
+## Our pledge
 
-* Demonstrating empathy and kindness toward other people
-* Being respectful of differing opinions, viewpoints, and experiences
-* Giving and gracefully accepting constructive feedback
-* Accepting responsibility and apologizing to those affected by our mistakes,
-  and learning from the experience
-* Focusing on what is best not just for us as individuals, but for the
-  overall community
+We pledge to make our community welcoming, safe and equitable for all.
 
-Examples of unacceptable behavior include:
+We are committed to an environment that respects the dignity, rights and contributions of every person, regardless of characteristics including race, ethnicity, caste, colour, age, physical characteristics, neurodiversity, disability, sex or gender, gender identity or expression, sexual orientation, language, philosophy or religion, national or social origin, socio-economic position, level of education, level of experience, or other status. The same privileges of participation are extended to everyone who takes part in good faith and in line with this code.
 
-* The use of sexualized language or imagery, and sexual attention or
-  advances of any kind
-* Trolling, insulting or derogatory comments, and personal or political attacks
-* Public or private harassment
-* Publishing others' private information, such as a physical or email
-  address, without their explicit permission
-* Other conduct which could reasonably be considered inappropriate in a
-  professional setting
+## How we work together
 
-## Enforcement Responsibilities
+A language is a long argument about trade-offs, and so is a protocol. We want that argument to be sharp about ideas and generous about people.
 
-Community leaders are responsible for clarifying and enforcing our standards of
-acceptable behavior and will take appropriate and fair corrective action in
-response to any behavior that they deem inappropriate, threatening, offensive,
-or harmful.
+- **Be welcoming and patient.** Everyone was new once. No question is too basic, and "read the docs" is not an answer on its own.
+- **Be charitable.** Read what others write in good faith, and assume the most reasonable meaning. Many of us are writing in a second or third language, and tone is easily lost.
+- **Remember every design is a trade-off.** There is seldom one right answer. Say what a choice costs, not that it is wrong.
+- **Be constructive.** Criticise the work, not the person, and pair criticism with a suggestion or a question. Stay on topic; if you want to discuss something else, start a new topic.
+- **Be responsible.** What you say has effects whether or not you intended them. If someone tells you that something you said or did hurt them, don't argue about your intent: listen, stop, and apologise.
+- **Credit others.** Say where code, ideas and text come from.
+- **Help repair harm.** When something goes wrong between people, help put it right, including when you caused it.
 
-Community leaders have the right and responsibility to remove, edit, or reject
-comments, commits, code, wiki edits, issues, and other contributions that are
-not aligned to this Code of Conduct, and will communicate reasons for moderation
-decisions when appropriate.
+## What is not acceptable
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported by contacting the project team at bondy-team@leapsight.com.
+These are violations of this code, as are threats of them and encouraging them:
 
-## Scope
+- **Harassment**: continuing personal attention after a clear request to stop, or crossing boundaries someone has stated. Harassment in private messages counts too.
+- **Character attacks**: insulting, demeaning or belittling comments aimed at a person or group. Swearing is not banned, but never at someone.
+- **Stereotyping or discrimination**: characterising anyone's personality or behaviour on the basis of who they are, including slurs and "jokes" at a group's expense.
+- **Sexualisation**: sexual language, imagery, advances or attention, including sexualised usernames and avatars.
+- **Violating confidentiality**: sharing or acting on someone's personal or private information without their permission ("doxxing").
+- **Endangerment**: causing, encouraging or threatening violence or other harm against anyone.
+- **Misleading identity**: impersonating someone, or using another account to evade moderation.
+- **Spam and disruption**: unsolicited promotion, commercial content outside the norms of a channel, trolling, flaming and deliberate derailing.
+- **Irresponsible communication**: posting or linking to content involving any of the above without clear context and warning.
+- Any other behaviour that threatens the well-being of the community.
 
-This Code of Conduct applies within all community spaces, and also applies when
-an individual is officially representing the community in public spaces.
-Examples of representing our community include using an official e-mail address,
-posting via an official social media account, or acting as an appointed
-representative at an online or offline event.
+## Where this applies
 
-## Enforcement
+This code applies in every Bondy space, including:
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-bondy-team@leapsight.com.
-All complaints will be reviewed and investigated promptly and fairly.
+- the Bondy Zulip ([bondy.zulipchat.com](https://bondy.zulipchat.com)), in public channels and in private messages between members;
+- all repositories, issues, pull requests and discussions under the [bondy-io](https://github.com/bondy-io) GitHub organisation;
+- bondy.io, developer.bondy.io and their comment and feedback channels;
+- Bondy's social media accounts, community calls and meetups;
+- any event where someone represents the Bondy project, whether online or in person.
 
-All community leaders are obligated to respect the privacy and security of the
-reporter of any incident.
+It also applies to behaviour outside these spaces when that behaviour affects the safety or well-being of people in them.
 
-## Enforcement Guidelines
+Other projects and events are welcome to adopt this code, but they must name their own contacts for reports.
 
-Community leaders will follow these Community Impact Guidelines in determining
-the consequences for any action they deem in violation of this Code of Conduct:
+## If something goes wrong
 
-### 1. Correction
+Disagreement is normal and often productive. If it turns personal, and you feel safe doing so, it is often quickest to raise it directly with the person, kindly and in private. Many misunderstandings end there.
 
-**Community Impact**: Use of inappropriate language or other behavior deemed
-unprofessional or unwelcome in the community.
+If that doesn't resolve it, or you don't feel safe raising it, or the behaviour is threatening or harassing, report it. You don't have to be the person affected to report something you saw.
 
-**Consequence**: A private, written warning from community leaders, providing
-clarity around the nature of the violation and an explanation of why the
-behavior was inappropriate. A public apology may be requested.
+### How to report
 
-### 2. Warning
+Email **[bondy-team@leapsight.com](mailto:bondy-team@leapsight.com)**. If it's easier, you can also send a private message to any moderator on the Bondy Zulip.
 
-**Community Impact**: A violation through a single incident or series
-of actions.
+It helps to include:
 
-**Consequence**: A warning with consequences for continued behavior. No
-interaction with the people involved, including unsolicited interaction with
-those enforcing the Code of Conduct, for a specified period of time. This
-includes avoiding interactions in community spaces as well as external channels
-like social media. Violating these terms may lead to a temporary or
-permanent ban.
+- what happened, and where: links, screenshots or message references;
+- when it happened;
+- who was involved, including anyone who saw it;
+- anything else you think we should know, such as whether it is ongoing.
 
-### 3. Temporary Ban
+If your report is about someone who would normally receive it, say so in your message and write to a different moderator. That person will take no part in handling it.
 
-**Community Impact**: A serious violation of community standards, including
-sustained inappropriate behavior.
+### What we do with a report
 
-**Consequence**: A temporary ban from any sort of interaction or public
-communication with the community for a specified period of time. No public or
-private interaction with the people involved, including unsolicited interaction
-with those enforcing the Code of Conduct, is allowed during this period.
-Violating these terms may lead to a permanent ban.
+- We take every report seriously and treat it in confidence. We will not share who reported something without their permission.
+- We acknowledge the report and look into it: we read the messages and logs involved and, where useful, talk to the people concerned.
+- Before taking action against someone, we tell them what was reported and give them a chance to respond, without revealing who reported it. When someone's safety is at risk, for example with ongoing harassment or threats, we may act first and talk afterwards.
+- We may not be able to share every outcome with the person who reported, but we will tell them the report has been dealt with.
+- Moderators are held to a higher standard than everyone else. A moderator who breaks this code should expect less leeway, not more.
 
-### 4. Permanent Ban
+## Consequences and repair
 
-**Community Impact**: Demonstrating a pattern of violation of community
-standards, including sustained inappropriate behavior,  harassment of an
-individual, or aggression toward or disparagement of classes of individuals.
+When we find that this code has been broken, we choose a response that fits what happened, weighing its impact on the people involved and on the community. We may skip steps for serious violations.
 
-**Consequence**: A permanent ban from any sort of public interaction within
-the community.
+1. **Warning.** For a single incident or a first pattern of minor ones: a private, written warning explaining what was wrong. Repair might be an apology, acknowledging the harm, or asking what is expected.
+2. **Cooling-off period.** For a repeat after a warning, or a more serious first incident: a private warning with a time-limited break from particular channels, or from interacting with particular people. Repair might be an apology, and taking the time to reflect before coming back.
+3. **Temporary suspension.** For a pattern that warnings have not changed, or a single serious violation: removal from all Bondy spaces for a set period, with conditions for returning. Repair means respecting the suspension and meeting those conditions.
+4. **Permanent ban.** For a pattern that nothing else has resolved, or a violation so serious that the community cannot be kept safe with that person in it: removal from all Bondy spaces, tools and channels. We use this rarely, and only with strong reasons.
 
-## Attribution
+These steps are a guide, not a limit on moderators' judgement. Messages that break this code may be edited, hidden or removed, and contributions that do so may be rejected.
 
-This Code of Conduct is adapted from the [Contributor Covenant][homepage],
-version 2.0, available at
-[https://www.contributor-covenant.org/version/2/0/code_of_conduct.html][v2.0].
+If you disagree with a moderation decision, raise it privately with the moderator involved or with another moderator. Please don't argue it out in public channels.
 
-Community Impact Guidelines were inspired by
-[Mozilla's code of conduct enforcement ladder][Mozilla CoC].
+## Attribution and licence
 
-For answers to common questions about this code of conduct, see the FAQ at
-[https://www.contributor-covenant.org/faq][FAQ]. Translations are available
-at [https://www.contributor-covenant.org/translations][translations].
+This code is adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 3.0, available at [contributor-covenant.org/version/3/0](https://www.contributor-covenant.org/version/3/0/), and is licensed, like it, under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The consequences ladder was inspired by Mozilla's code of conduct enforcement work.
 
-[homepage]: https://www.contributor-covenant.org
-[v2.0]: https://www.contributor-covenant.org/version/2/0/code_of_conduct.html
-[Mozilla CoC]: https://github.com/mozilla/diversity
-[FAQ]: https://www.contributor-covenant.org/faq
-[translations]: https://www.contributor-covenant.org/translations
+It also draws on the codes of conduct of [Go](https://go.dev/conduct) (its values for technical discussion and its handling of reports), [Rust](https://www.rust-lang.org/policies/code-of-conduct) (its moderation rules, including holding moderators to a higher standard) and [Elixir](https://github.com/elixir-lang/elixir/blob/main/CODE_OF_CONDUCT.md) (naming its own contact for projects that adopt it).
+
+The canonical version of this code is at [bondy.io/code-of-conduct](https://bondy.io/code-of-conduct). Copies in Bondy repositories must match it.
