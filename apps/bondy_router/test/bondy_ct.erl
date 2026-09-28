@@ -715,6 +715,7 @@
     restart_node/5,
     rejoin/3,
     peer_boot/1,
+    stall_main_open/1,
     aae_reset_all_stale/0,
     aae_bump_isolated_all/0,
     aae_mock_nonsolo_membership/0,
@@ -1196,7 +1197,9 @@ await_memory(Expected, Left) ->
 %% -----------------------------------------------------------------------------
 -spec peer_boot([{atom(), term()}]) -> ok.
 
-peer_boot(Env) ->
+peer_boot(Env0) ->
+    PreBoot = key_value:get([bondy_ct, pre_boot], Env0, undefined),
+    Env = lists:keydelete(bondy_ct, 1, Env0),
     ok = ensure_etc(),
     application:set_env([{kernel, ?KERNEL_ENV}]),
     ok = install_peer_log_handler(Env),
@@ -1211,7 +1214,34 @@ peer_boot(Env) ->
         end
      || {App, AppEnv} <- Env
     ],
+    ok = run_pre_boot(PreBoot),
     maybe_error(application:ensure_all_started(bondy_router)).
+
+%% @private
+%% `[bondy_ct, pre_boot]' in a node's ExtraEnv is an `{M, F, A}' run on the
+%% peer after the application env is loaded and before `bondy_router' starts.
+run_pre_boot(undefined) ->
+    ok;
+run_pre_boot({M, F, A}) ->
+    ok = apply(M, F, A).
+
+%% -----------------------------------------------------------------------------
+%% @doc A `[bondy_ct, pre_boot]' hook: holds the boot inside
+%% `bondy_namespace_catalog:init/1', where the durable `main' store opens.
+%% Sends `{main_opening, node(), Catalog}' to `Gate' and blocks until
+%% `Catalog' receives `release'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stall_main_open(pid()) -> ok.
+
+stall_main_open(Gate) ->
+    ok = meck:new(bondy_namespace_catalog, [passthrough, no_link]),
+    meck:expect(bondy_namespace_catalog, init, fun(Args) ->
+        Gate ! {main_opening, node(), self()},
+        receive
+            release -> meck:passthrough([Args])
+        end
+    end).
 
 %% @private
 %% Peer nodes are otherwise SILENT. Two reasons compound:

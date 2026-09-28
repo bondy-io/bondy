@@ -12,7 +12,7 @@
 %% nodes, 2026-09-02.
 %%
 %% These cases pin the dispatch from both sides: `failed` must NOT enter
-%% `configure_services/0` and must still bring up the early listeners;
+%% `configure_services/0` and must still mount the early listeners' routes;
 %% anything else must enter it. `bondy_message_id:init/0` is the first call
 %% `configure_services/0` makes, so it is the probe for "did we go down the
 %% durable path".
@@ -32,6 +32,7 @@ setup() ->
     ok = meck:new(bondy_listener_manager, [passthrough, non_strict]),
     ok = meck:new(bondy_message_id, [passthrough, non_strict]),
     ok = meck:expect(bondy_listener_manager, start, fun(_Phase) -> ok end),
+    ok = meck:expect(bondy_listener_manager, mount_routes, fun() -> ok end),
     ok = meck:expect(bondy_message_id, init, fun() ->
         error(?ENTERED_CONFIGURE_SERVICES)
     end),
@@ -45,8 +46,8 @@ cleanup(_) ->
 
 degraded_boot_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
-        {"a failed main store starts the early listeners",
-            fun early_listeners_started/0},
+        {"a failed main store mounts the early listeners' routes",
+            fun early_routes_mounted/0},
         {"a failed main store never opens a client listener",
             fun no_normal_listeners/0},
         {"a failed main store never enters configure_services",
@@ -55,12 +56,12 @@ degraded_boot_test_() ->
             fun configure_services_entered/0}
     ]}.
 
-%% The whole point of surviving: the node stays inspectable. `/ping` and the
-%% `/ready` probe are served by the early-phase listeners.
-early_listeners_started() ->
+%% The whole point of surviving: the node stays inspectable through the
+%% early-phase listeners, bound before storage with the probe routes only.
+early_routes_mounted() ->
     ok = meck:reset(bondy_listener_manager),
     ?assertEqual(ok, bondy_app:start_services(failed)),
-    ?assert(meck:called(bondy_listener_manager, start, [early])).
+    ?assert(meck:called(bondy_listener_manager, mount_routes, [])).
 
 %% ...but it must not take traffic it cannot serve. `start_normal_listeners/0`
 %% is also what promotes `bondy_config:get(status)` to `ready`, so skipping it

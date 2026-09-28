@@ -15,11 +15,15 @@ around listeners — rebuilding dispatch tables when an API Gateway specificatio
 changes — belongs to the `bondy_http_gateway` gen_server, which already owns
 specification storage and its own debounce.
 
-Startup is two-phase. Listeners marked `start_phase => early` come up before any
-other, so the liveness (`/ping`), readiness (`/ready`) and metrics paths answer
-while `bondy_config:get(status)` still reports `initialising`:
-`bondy_app` sets the status to `ready` only after starting the normal phase.
-Everything else comes up in that later phase.
+Startup is two-phase. Listeners marked `start_phase => early` are bound by
+`start_probes/0` before the storage substrate opens, serving only the liveness
+(`/ping`) and readiness (`/ready`) routes: opening a large store takes minutes,
+and an orchestrator that cannot reach `/ping` for that long kills the node,
+which then reopens the same store and is killed again. `mount_routes/0` gives
+them their full route set once the services behind those routes are up.
+`bondy_app` sets the status to `ready` only after starting the normal phase,
+so `/ready` answers 503 throughout. Everything else comes up in that later
+phase.
 
 `ready` therefore means boot finished, not that no client has connected yet:
 `start(normal)` binds its listeners synchronously and the status flips after it
@@ -39,6 +43,7 @@ a configured inventory, so it cannot be redefined, disabled or removed.
 -include_lib("kernel/include/logger.hrl").
 
 -define(KEY, {?MODULE, listeners}).
+-define(PROBES_ONLY_KEY, {?MODULE, probes_only}).
 
 -type phase() :: early | normal | all.
 
@@ -50,9 +55,12 @@ a configured inventory, so it cannot be redefined, disabled or removed.
 -export([init/0]).
 -export([listener/1]).
 -export([listeners/0]).
+-export([mount_routes/0]).
 -export([names_in_phase/1]).
+-export([probes_only/0]).
 -export([resume/1]).
 -export([start/1]).
+-export([start_probes/0]).
 -export([stop/1]).
 -export([suspend/1]).
 -export([tls_listeners/0]).
@@ -138,6 +146,43 @@ start(Phase) ->
     fold_until_error(fun start_one/1, in_phase(Phase)).
 
 -doc """
+Binds the `early` listeners with only the liveness (`/ping`) and readiness
+(`/ready`) routes mounted, until `mount_routes/0` is called.
+
+For use before anything those listeners' other routes depend on is running.
+`bondy_boot_probes_SUITE` holds a boot inside the `main` open and asserts
+`/ping` 204, `/ready` 503, and `/ws` and `/metrics` 404.
+""".
+-spec start_probes() -> ok | {error, term()}.
+
+start_probes() ->
+    _ = persistent_term:put(?PROBES_ONLY_KEY, true),
+    start(early).
+
+-doc """
+Mounts the full route set on the running `early` HTTP listeners bound by
+`start_probes/0`, by recompiling their dispatch tables in place.
+""".
+-spec mount_routes() -> ok.
+
+mount_routes() ->
+    _ = persistent_term:erase(?PROBES_ONLY_KEY),
+    _ = [
+        bondy_listener_ranch:recompile_dispatch(L)
+     || #{protocol := http, enabled := true} = L <- in_phase(early)
+    ],
+    ok.
+
+-doc """
+Whether HTTP dispatch tables are restricted to the probe routes: `true` from
+`start_probes/0` until `mount_routes/0` or `stop/1` of the `early` phase.
+""".
+-spec probes_only() -> boolean().
+
+probes_only() ->
+    persistent_term:get(?PROBES_ONLY_KEY, false).
+
+-doc """
 Stops the listeners in `Phase`, terminating their connections.
 
 Takes a phase for the same reason `suspend/1` does: `early` is what carries the
@@ -148,6 +193,7 @@ decision from shutting down the listeners that serve clients.
 
 stop(Phase) ->
     _ = [bondy_listener:stop(L) || L <- in_phase(Phase)],
+    Phase =/= normal andalso persistent_term:erase(?PROBES_ONLY_KEY),
     ok.
 
 -doc """
@@ -276,7 +322,7 @@ http_listeners() ->
 %%     accepted the bind, measured on Docker 29.7.2.
 %%
 %% Any of the three aborts boot, because `admin_local` is `early` and
-%% `bondy_app`'s `ok ?= start_early_listeners()` propagates the error. That is
+%% `bondy_app`'s `ok ?= start_probe_listeners()` propagates the error. That is
 %% deliberate: a node that refuses to boot is loud and fixable, whereas one that
 %% boots without its administrable endpoint is discovered when someone is
 %% already locked out. `start_one/1` reports the diagnosis those errors need.

@@ -388,7 +388,7 @@ maybe_prepare_socket(L) ->
 %% Neither result is asserted. A directory that cannot be created or tightened
 %% makes the bind fail, and `log_result/2` turns that into the `{error, Reason}`
 %% the caller acts on — for `admin_local` that is
-%% `bondy_app`'s `ok ?= start_early_listeners()`, since it is an `early`
+%% `bondy_app`'s `ok ?= start_probe_listeners()`, since it is an `early`
 %% listener — whereas a raise here could not be caught there.
 maybe_create_socket_dir(Path) ->
     Dir = filename:dirname(Path),

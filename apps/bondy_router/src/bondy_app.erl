@@ -99,7 +99,13 @@ start(_Type, Args) ->
     %% starting tuplespace, partisan and bondy_db. This is because we are
     %% modifying their application environments.
     ok = bondy_config:init(Args),
+    maybe
+        ok ?= start_probe_listeners(),
+        start_substrate_and_services()
+    end.
 
+%% @private
+start_substrate_and_services() ->
     %% Now that we have initialised the configuration we start the following
     %% dependencies
     {ok, _} = application:ensure_all_started(tuplespace, permanent),
@@ -362,10 +368,11 @@ partisan_peer_ip() ->
 %% Brings up everything above the storage substrate, in one of two shapes
 %% depending on whether the durable `main` DB opened.
 %%
-%% `failed` is the degraded boot: it starts exactly what serves the liveness
-%% and readiness probes, and nothing else. That is the RULE for where a new
-%% boot step belongs — NOT "does it touch durable tables", which is not true
-%% of every step skipped here: `init_registry_indices/0` rebuilds from the
+%% `failed` is the degraded boot: it mounts the early listeners' routes, which
+%% serve the liveness and readiness probes, and nothing else. That is the
+%% RULE for where a new boot step belongs — NOT "does it touch durable
+%% tables", which is not true of every step skipped here:
+%% `init_registry_indices/0` rebuilds from the
 %% registry tables, which are provisioned independently of `main` and can be
 %% healthy while it is not. A node serving no traffic has no use for them.
 %%
@@ -384,13 +391,13 @@ start_services(failed) ->
             "the main-store failure and restart.",
         main_status => failed
     }),
-    start_early_listeners();
+    bondy_listener_manager:mount_routes();
 start_services(_) ->
     maybe
         ok ?= configure_services(),
         ok ?= init_registry_indices(),
         ok ?= setup_wamp_subscriptions(),
-        ok ?= start_early_listeners(),
+        ok ?= bondy_listener_manager:mount_routes(),
         %% Started BEFORE the normal-phase listeners bind: a listener
         %% declaring the `mcp' service must not accept a request while the
         %% application that answers it is down. And not in the early phase
@@ -491,15 +498,14 @@ init_registry_indices() ->
     end.
 
 %% @private
-%% Listeners marked `start_phase => early' come up first so the liveness
-%% (`/ping'), readiness (`/ready') and metrics paths answer while
-%% `bondy_config:get(status)' is still `initialising'.
-start_early_listeners() ->
+%% Before the storage substrate: the liveness probe must answer for however
+%% long the stores take to open. See `bondy_listener_manager`.
+start_probe_listeners() ->
     %% The inventory was resolved during `bondy_config:init/1', which had to
     %% happen there because `bondy_cert_manager:init/0' and `setup_wamp/0' both
     %% consume it.
     ?LOG_NOTICE(#{description => "Starting early-phase listeners"}),
-    bondy_listener_manager:start(early).
+    bondy_listener_manager:start_probes().
 
 %% @private
 start_normal_listeners() ->

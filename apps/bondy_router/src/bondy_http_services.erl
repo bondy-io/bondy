@@ -53,6 +53,10 @@ a specification declares one.
 -doc """
 Assembles the complete Cowboy dispatch table for `Listener`, grouped by host.
 
+While `bondy_listener_manager:probes_only/0` holds, the table is only `/ping`
+and `/ready`, and only on a listener carrying the `admin` service; every other
+route waits for `bondy_listener_manager:mount_routes/0`.
+
 Carriers are asked in a stable order so the resulting table — and therefore the
 `persistent_term` it is stored in — does not churn between boots. Which order,
 and why it is not merely alphabetical, is in `carrier_order/1`.
@@ -66,19 +70,10 @@ never falls through — and both are load-bearing rather than cosmetic; see
 -spec dispatch(bondy_listener_config:t()) -> cowboy_router:routes().
 
 dispatch(Listener) ->
-    Carriers = maps:get(carriers, Listener),
-
-    Claims = lists:foldl(
-        fun(Carrier, Acc) ->
-            #{module := Module} = Spec = maps:get(Carrier, Carriers),
-            Contributed = Module:routes(Carrier, Spec, Listener),
-            merge_routes(Contributed, Carrier, Acc)
-        end,
-        [],
-        carrier_order(Carriers)
-    ),
-
-    by_host(with_wildcard_routes(lists:reverse(Claims))).
+    case bondy_listener_manager:probes_only() of
+        true -> probe_dispatch(Listener);
+        false -> full_dispatch(Listener)
+    end.
 
 -doc "Route rules for a built-in carrier. See `bondy_http_service`.".
 -spec routes(
@@ -125,12 +120,12 @@ routes(longpoll, Spec, Listener) ->
     ];
 routes(admin, _Spec, _Listener) ->
     [
-        {'_', [
-            {"/ping", bondy_admin_ping_http_handler, #{}},
-            {"/ready", bondy_admin_ready_http_handler, #{}},
-            {"/cluster/topology", bondy_admin_cluster_topology_http_handler,
-                #{}}
-        ]}
+        {'_',
+            probe_routes() ++
+                [
+                    {"/cluster/topology",
+                        bondy_admin_cluster_topology_http_handler, #{}}
+                ]}
     ];
 routes(metrics, _Spec, _Listener) ->
     [{'_', [{"/metrics/[:registry]", prometheus_cowboy2_handler, []}]}];
@@ -167,6 +162,38 @@ routes(admin_api, _Spec, Listener) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% The routes `bondy_listener_manager:start_probes/0` binds before storage
+%% opens. Their handlers must not reach anything `bondy_sup` starts;
+%% `bondy_boot_probes_SUITE` serves them with `main` held mid-open.
+probe_routes() ->
+    [
+        {"/ping", bondy_admin_ping_http_handler, #{}},
+        {"/ready", bondy_admin_ready_http_handler, #{}}
+    ].
+
+%% @private
+probe_dispatch(#{carriers := #{admin := _}}) ->
+    [{'_', probe_routes()}];
+probe_dispatch(_) ->
+    [{'_', []}].
+
+%% @private
+full_dispatch(Listener) ->
+    Carriers = maps:get(carriers, Listener),
+
+    Claims = lists:foldl(
+        fun(Carrier, Acc) ->
+            #{module := Module} = Spec = maps:get(Carrier, Carriers),
+            Contributed = Module:routes(Carrier, Spec, Listener),
+            merge_routes(Contributed, Carrier, Acc)
+        end,
+        [],
+        carrier_order(Carriers)
+    ),
+
+    by_host(with_wildcard_routes(lists:reverse(Claims))).
 
 %% @private
 specification_routes(Carrier, Compile, Listener) ->
