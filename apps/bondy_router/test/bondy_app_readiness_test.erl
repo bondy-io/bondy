@@ -5,7 +5,7 @@
 %% EUnit coverage for `bondy_app:is_ready/0`, the single oracle behind the
 %% `/ready` probe and the `bondy_node_ready` Prometheus gauge.
 %%
-%% The three conditions are independent and each is read from exactly one
+%% The four conditions are independent and each is read from exactly one
 %% source, so the tests below drive them one at a time and then together. What
 %% they are aimed at falsifying is the two ways a readiness probe goes wrong:
 %%
@@ -43,6 +43,24 @@ is_ready_test_() ->
         fun an_uninstalled_alarm_handler_reads_as_not_blocking/0
     ]}.
 
+%% Its own fixture: starting `bondy_db` starts SASL, whose `alarm_handler`
+%% manager cannot start while `setup/0` has registered one.
+kept_instance_test_() ->
+    {setup,
+        fun() ->
+            _ = persistent_term:erase(?PT_STATUS),
+            {ok, _} = application:ensure_all_started(bondy_db),
+            gen_event:add_handler(alarm_handler, bondy_alarm_handler, [])
+        end,
+        fun(_) ->
+            _ = gen_event:delete_handler(
+                alarm_handler, bondy_alarm_handler, []
+            ),
+            _ = persistent_term:erase(?PT_STATUS),
+            ok
+        end,
+        {timeout, 30, fun a_kept_instance_not_running_is_not_ready/0}}.
+
 %% =============================================================================
 %% THE DECLARED SET
 %% =============================================================================
@@ -50,7 +68,7 @@ is_ready_test_() ->
 %% Every `Mod:Fun/Arity` `bondy_app:is_ready/0` consults, DECLARED here.
 %%
 %% Declared rather than derived, deliberately. A set discovered by scanning
-%% grows silently the moment a fourth condition is added, which is the one
+%% grows silently the moment another condition is added, which is the one
 %% event this ratchet exists to catch: adding a readiness condition is a change
 %% to what `/ready` and `bondy_node_ready` MEAN, and it should not be possible
 %% to make it without a test failing and someone deciding whether the alarm
@@ -59,6 +77,7 @@ readiness_conjuncts() ->
     [
         {bondy_config, get, 2},
         {bondy_namespace_catalog, main_status, 0},
+        {bondy_oplog_instance_keeper, not_running, 0},
         {bondy_alarm_handler, affects_ready, 0}
     ].
 
@@ -201,6 +220,38 @@ failed_main_db_is_not_ready() ->
     %% Still not ready with the handler gone — the signal does not depend on it.
     ok = gen_event:delete_handler(alarm_handler, bondy_alarm_handler, []),
     ?assertNot(bondy_app:is_ready()).
+
+%% A shard instance whose restarts all fail stays down. Read from the keeper's
+%% table, so it holds with the alarm handler gone, as the `main` condition
+%% does.
+a_kept_instance_not_running_is_not_ready() ->
+    ok = bondy_config:set(status, ready),
+    Id = iolist_to_binary([
+        "readiness_", integer_to_list(erlang:unique_integer([positive]))
+    ]),
+    {ok, Sup} = bondy_oplog:start_instance(Id),
+    ok = meck:new(bondy_oplog_instance_dyn_sup, [passthrough, no_link]),
+    try
+        ok = meck:expect(
+            bondy_oplog_instance_dyn_sup, restart_instance, fun(_, _) ->
+                {error, held_by_test}
+            end
+        ),
+        ?assert(bondy_app:is_ready()),
+        Ref = monitor(process, Sup),
+        exit(Sup, kill),
+        receive
+            {'DOWN', Ref, _, _, _} -> ok
+        end,
+        ?assertNot(bondy_app:is_ready()),
+        ok = gen_event:delete_handler(alarm_handler, bondy_alarm_handler, []),
+        ?assertNot(bondy_app:is_ready()),
+        _ = bondy_oplog:stop_instance(Id),
+        ?assert(bondy_app:is_ready())
+    after
+        _ = meck:unload(bondy_oplog_instance_dyn_sup),
+        _ = bondy_oplog:stop_instance(Id)
+    end.
 
 a_blocking_alarm_makes_the_node_not_ready() ->
     ok = bondy_config:set(status, ready),

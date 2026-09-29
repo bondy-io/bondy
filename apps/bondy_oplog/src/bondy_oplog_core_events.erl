@@ -13,50 +13,28 @@
 ?MODULEDOC("""
 Lightweight intra-node pub/sub for substrate lifecycle events.
 
-The substrate's `bondy_oplog_core_registry` and `bondy_oplog_core_dispatcher`
-gen_servers each own an in-memory ETS table whose lifetime is tied to
-the process. If they crash and the supervisor restarts them, the table
-is wiped and any prior `register/4` or `subscribe/2` calls are lost.
-Without a signal, owners (registered shard-managing processes) and
-subscribers (event consumers) have no way to detect the loss.
+The `bondy_oplog_core_dispatcher` gen_server owns an in-memory ETS table
+whose lifetime is tied to the process. If it crashes and the supervisor
+restarts it, the table is wiped and any prior `subscribe/2` calls are
+lost. Without a signal, subscribers (event consumers) have no way to
+detect the loss.
 
-This module is the missing signal. Each substrate gen_server `notify/2`s
-on its own `init/1`, sending a `{bondy_oplog_core_event, Topic, Payload}`
-message to every process subscribed to the topic. Consumers register
-once at startup, receive the message after every (re)start, and re-arm
-their state (re-register, re-subscribe, refresh cached `epoch`s).
+This module is that signal. The dispatcher `notify/2`s on its own
+`init/1`, sending a `{bondy_oplog_core_event, Topic, Payload}` message to
+every process subscribed to the topic. Consumers register once at
+startup, receive the message after every (re)start, and re-arm their
+state (re-subscribe, refresh cached `epoch`s).
 
 ## Topics
 
 | Topic                            | Payload                | When emitted                       |
 |---|---|---|
-| `bondy_oplog_core_registry_started`  | `Epoch :: reference()` | `bondy_oplog_core_registry` init       |
 | `bondy_oplog_core_dispatcher_started`| `Epoch :: reference()` | `bondy_oplog_core_dispatcher` init     |
 
 The `Epoch` is a fresh `make_ref/0` each time the originating gen_server
 starts. It is monotonic (a later epoch is never `=:=` an earlier one).
 Consumers cache the epoch alongside their cached refs and treat a new
 epoch as a discontinuity.
-
-## Owner pattern
-
-```erlang
-owner_init(NS, Idx, Shard, Config) ->
-    ok = bondy_oplog_core_events:subscribe(bondy_oplog_core_registry_started),
-    ok = re_register(NS, Idx, Shard, Config),
-    {NS, Idx, Shard, Config}.
-
-owner_loop(State = {NS, Idx, Shard, Config}) ->
-    receive
-        {bondy_oplog_core_event, bondy_oplog_core_registry_started, _Epoch} ->
-            ok = re_register(NS, Idx, Shard, Config),
-            owner_loop(State);
-        ...
-    end.
-
-re_register(NS, Idx, Shard, Config) ->
-    bondy_oplog_core_registry:register(NS, Idx, Shard, Config).
-```
 
 ## Subscriber pattern (dispatcher)
 
@@ -84,9 +62,8 @@ restart. Operators should set the supervisor's `intensity` so this
 module effectively never restarts; it is small and has no side-effects,
 so the operational cost is minimal.
 
-The events module starts before `bondy_oplog_core_registry` and
-`bondy_oplog_core_dispatcher` in `bondy_oplog_sup` so the substrate
-modules can notify on their first init.
+The events module starts before `bondy_oplog_core_dispatcher` in
+`bondy_oplog_sup` so the dispatcher can notify on its first init.
 """).
 
 -define(SERVER, ?MODULE).

@@ -44,6 +44,22 @@ lag_test_() ->
         test(
             "saturation_drops_then_rebuild_converges",
             fun saturation_drops_then_rebuild_converges/1
+        ),
+        test(
+            "restarted_writer_keeps_coalesce_ms",
+            fun restarted_writer_keeps_coalesce_ms/1
+        ),
+        test(
+            "close_after_writer_restart_keeps_buffered_ops",
+            fun close_after_writer_restart_keeps_buffered_ops/1
+        ),
+        test(
+            "close_before_rebuild_keeps_lost_ops",
+            fun close_before_rebuild_keeps_lost_ops/1
+        ),
+        test(
+            "close_while_writer_sup_down",
+            fun close_while_writer_sup_down/1
         )
     ]}.
 
@@ -310,9 +326,157 @@ saturation_drops_then_rebuild_converges({Db, _Sup, _Dir}) ->
     ?assertEqual([<<"n8">>], maps:get([<<"name">>], Cols)),
     ok = bondy_db:close_table(T).
 
+%% A writer that `bondy_oplog_secondary_sup` re-creates from the registry keeps
+%% its index's `coalesce_ms`: under the 600 s window of `open_saturating/1` an
+%% indexed write stays in flight until `flush_sync`, where the 5 ms default
+%% would have flushed it within the 200 ms wait.
+restarted_writer_keeps_coalesce_ms({Db, _Sup, _Dir}) ->
+    {ok, T} = open_saturating(Db),
+    SecSup = whereis(bondy_oplog_secondary_sup),
+    Ref = monitor(process, SecSup),
+    exit(SecSup, kill),
+    receive
+        {'DOWN', Ref, process, SecSup, _} -> ok
+    end,
+    ok = wait_for_new(bondy_oplog_secondary_sup, SecSup, 200),
+    ok = bondy_db:apply(T, <<"r1">>, <<"u1">>, {put, <<"status">>, <<"on">>}),
+    timer:sleep(200),
+    ?assert(inflight(T, by_status) > 0),
+    ok = flush_index(T, by_status),
+    ?assertEqual(0, inflight(T, by_status)),
+    ok = bondy_db:close_table(T).
+
+%% An op buffered in a writer re-created by a `bondy_oplog_secondary_sup`
+%% restart must survive a graceful close and reopen: the close flushes the live
+%% writer before it marks the index clean, and a reopened clean index is trusted
+%% without a rebuild.
+close_after_writer_restart_keeps_buffered_ops({Db, _Sup, _Dir}) ->
+    {ok, T0} = open_saturating(Db),
+    NS = maps:get(namespace, bondy_db:info(T0)),
+    ok = restart_writer_sup(),
+    %% Barriers: the restarted supervisor's `init/1` has started its writers,
+    %% and the rebuild each writer requested has run.
+    _ = sys:get_state(bondy_oplog_secondary_sup),
+    _ = sys:get_state(bondy_oplog_index_rebuild),
+    ok = bondy_db:apply(T0, <<"r1">>, <<"u1">>, {put, <<"status">>, <<"on">>}),
+    ?assert(inflight(T0, by_status) > 0),
+    ok = bondy_db:close_table(T0),
+    Self = self(),
+    HandlerId = {?MODULE, rebuild, erlang:unique_integer()},
+    ok = telemetry:attach(
+        HandlerId,
+        [bondy_oplog, secondary_index, rebuild],
+        fun(_E, _M, Meta, _C) -> Self ! {rebuilt, Meta} end,
+        undefined
+    ),
+    {ok, T1} =
+        try
+            open_saturating(Db)
+        after
+            telemetry:detach(HandlerId)
+        end,
+    ?assertMatch(
+        {ok, [{<<"u1">>, _}]},
+        bondy_db:index_get(T1, <<"r1">>, by_status, <<"on">>, #{})
+    ),
+    ?assertEqual(
+        none,
+        receive
+            {rebuilt, #{namespace := NS, index_name := by_status}} -> rebuilt
+        after 0 -> none
+        end
+    ),
+    ok = bondy_db:close_table(T1).
+
+%% An op dispatched while no writer ran is lost from the index until the rebuild
+%% the restarted writer requests. A close before that rebuild must leave the
+%% index untrusted, so the reopen rebuilds it. The rebuild orchestrator is held
+%% suspended until the close has returned.
+close_before_rebuild_keeps_lost_ops({Db, _Sup, _Dir}) ->
+    {ok, T0} = open_lww(Db),
+    R = <<"r1">>,
+    ok = sys:suspend(bondy_oplog_index_rebuild),
+    try
+        ok = sys:suspend(bondy_oplog_sup),
+        SecSup = whereis(bondy_oplog_secondary_sup),
+        Ref = monitor(process, SecSup),
+        exit(SecSup, kill),
+        receive
+            {'DOWN', Ref, process, SecSup, _} -> ok
+        end,
+        ok = bondy_db:apply(
+            T0, R, <<"gap">>, {set, bondy_db:tick(T0), <<"g">>}
+        ),
+        ok = sys:resume(bondy_oplog_sup),
+        ok = wait_for_new(bondy_oplog_secondary_sup, SecSup, 200),
+        ok = bondy_db:close_table(T0)
+    after
+        ok = sys:resume(bondy_oplog_index_rebuild)
+    end,
+    {ok, T1} = open_lww(Db),
+    ?assertEqual(
+        {ok, [{<<"gap">>, #{}}]},
+        bondy_db:index_get(T1, R, by_value, <<"g">>, #{})
+    ),
+    ok = bondy_db:close_table(T1).
+
+%% A table closed while `bondy_oplog_secondary_sup` is down (between its exit
+%% and `bondy_oplog_sup` restarting it) must close, and the restarted supervisor
+%% must not re-create the closed table's writers.
+close_while_writer_sup_down({Db, _Sup, _Dir}) ->
+    {ok, T} = open_saturating(Db),
+    ok = sys:suspend(bondy_oplog_sup),
+    SecSup = whereis(bondy_oplog_secondary_sup),
+    Ref = monitor(process, SecSup),
+    exit(SecSup, kill),
+    receive
+        {'DOWN', Ref, process, SecSup, _} -> ok
+    end,
+    Closed =
+        try
+            bondy_db:close_table(T)
+        catch
+            Class:Reason -> {Class, Reason}
+        after
+            ok = sys:resume(bondy_oplog_sup)
+        end,
+    ok = wait_for_new(bondy_oplog_secondary_sup, SecSup, 200),
+    ?assertEqual(ok, Closed),
+    ?assertEqual([], supervisor:which_children(bondy_oplog_secondary_sup)).
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+restart_writer_sup() ->
+    SecSup = whereis(bondy_oplog_secondary_sup),
+    Ref = monitor(process, SecSup),
+    exit(SecSup, kill),
+    receive
+        {'DOWN', Ref, process, SecSup, _} -> ok
+    end,
+    wait_for_new(bondy_oplog_secondary_sup, SecSup, 200).
+
+wait_for_new(Name, Old, 0) ->
+    error({not_restarted, Name, Old});
+wait_for_new(Name, Old, N) ->
+    case whereis(Name) of
+        Pid when is_pid(Pid), Pid =/= Old ->
+            ok;
+        _ ->
+            timer:sleep(10),
+            wait_for_new(Name, Old, N - 1)
+    end.
+
+inflight(Table, IndexName) ->
+    Info = bondy_db:info(Table),
+    NS = maps:get(namespace, Info),
+    #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
+    lists:sum([
+        bondy_oplog_core_registry:index_inflight(Entry)
+     || Shard <- lists:seq(0, N - 1),
+        {ok, Entry} <- [bondy_oplog_core_registry:lookup(NS, IndexName, Shard)]
+    ]).
 
 open_lww(Db) ->
     bondy_db:open_table(Db, users, #{

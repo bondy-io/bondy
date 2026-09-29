@@ -60,8 +60,8 @@ store to a single file within ~10s.
 One trimmer per `bondy_db_leveled_sup`, started as that supervisor's
 first child, so every topology that provisions Bookies gets one without
 threading anything through the topology modules. Each tick enumerates
-its siblings with `supervisor:which_children/1` and trims each live
-Bookie. `db.journal_trim_interval` sets the cadence; `0` disables the
+the pool's live Bookies with `bondy_db_leveled_sup:bookies/1` and trims
+each one. `db.journal_trim_interval` sets the cadence; `0` disables the
 timer entirely and this process then idles.
 
 A Bookie mid-restart is not an error: the call is wrapped, a failure is
@@ -148,15 +148,8 @@ interval_ms() ->
     end.
 
 %% @private
-%% Trims every live Bookie under `Sup`. The trimmer itself is a child of
-%% that supervisor, so it is filtered out by module rather than by id.
 trim_all(Sup) ->
-    Bookies = [
-        Pid
-     || {_Id, Pid, _Type, Mods} <- safe_children(Sup),
-        is_pid(Pid),
-        Mods =:= [leveled_bookie]
-    ],
+    Bookies = bondy_db_leveled_sup:bookies(Sup),
     Trimmed = lists:foldl(fun trim_one/2, 0, Bookies),
     Trimmed > 0 andalso
         telemetry:execute(
@@ -165,14 +158,6 @@ trim_all(Sup) ->
             #{}
         ),
     Trimmed.
-
-%% @private
-safe_children(Sup) ->
-    try
-        supervisor:which_children(Sup)
-    catch
-        _:_ -> []
-    end.
 
 %% @private
 trim_one(Pid, Acc) ->

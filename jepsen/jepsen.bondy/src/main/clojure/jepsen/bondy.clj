@@ -344,9 +344,89 @@
     kill-bondy!
     restart-bondy!))
 
+(defn joined?
+  "Whether `node`'s own view of the cluster (`GET /cluster/topology`,
+   bondy_cluster_topology:graph/0) lists every node of the test as a member
+   it is connected to."
+  [node nodes]
+  (let [r (Utils/topology (Utils/createClient node))]
+    (and (= 200 (.-status r))
+         (let [views (->> (get (json/parse-string (.-body r)) "nodes")
+                          (map (juxt #(get % "id") identity))
+                          (into {}))]
+           (every? (fn [n]
+                     (let [v (get views (Utils/erlangNodeName n))]
+                       (and (= "yes" (get v "detail__member"))
+                            (= "yes" (get v "detail__connected")))))
+                   nodes)))))
+
+(defn await-joined!
+  "Blocks until every node's view lists every node as a connected member,
+   or fails after `timeout-s`. Checked on every node, not only the one that
+   restarted: a rejoin the survivors never saw is not a rejoin."
+  [nodes timeout-s]
+  (let [deadline (+ (System/currentTimeMillis) (* 1000 timeout-s))]
+    (loop []
+      (cond
+        (every? #(try (joined? % nodes) (catch Exception _ false)) nodes)
+        :joined
+        (> (System/currentTimeMillis) deadline)
+        (throw (ex-info "cluster did not re-form"
+                        {:nodes nodes :timeout-s timeout-s}))
+        :else (do (Thread/sleep 1000) (recur))))))
+
+(defn roll!
+  "Kills `node`, restarts it after `:down-time`, and times how long it takes
+   to answer `/ready` and for the whole cluster to see it again. A step that
+   does not happen within `:rejoin-timeout` is recorded as `nil`, for the
+   checker to fail."
+  [test node]
+  (c/on-nodes test [node] kill-bondy!)
+  (Thread/sleep (* 1000 (:down-time test)))
+  (let [t0      (System/currentTimeMillis)
+        elapsed #(- (System/currentTimeMillis) t0)
+        _       (c/on-nodes test [node] restart-bondy!)
+        ready   (try (await-ready! node (:rejoin-timeout test)) (elapsed)
+                     (catch Exception e (warn e node "did not become ready") nil))
+        joined  (when ready
+                  (try (await-joined! (:nodes test) (:rejoin-timeout test))
+                       (elapsed)
+                       (catch Exception e (warn e "cluster did not re-form") nil)))]
+    (info node "rolled: ready after" ready "ms, cluster re-formed after" joined "ms")
+    (Thread/sleep (* 1000 (:settle test)))
+    {:node node, :ready-ms ready, :joined-ms joined}))
+
+(defn rolling-kill-nemesis
+  "Kills `:rolling-nodes` distinct nodes one after another, each only after
+   the previous one is back and the cluster has re-formed."
+  []
+  (reify nemesis/Nemesis
+    (setup! [this _test] this)
+    (invoke! [_ test op]
+      (case (:f op)
+        :rolling-kill
+        (let [targets (->> (:nodes test) shuffle (take (:rolling-nodes test)))]
+          (assoc op :value (mapv #(roll! test %) targets)))))
+    (teardown! [_ _test])))
+
+(defn rolling-checker
+  "Every node the rolling kill took down came back, answering `/ready`, and
+   every node then saw all nodes as connected members again."
+  [n]
+  (reify checker/Checker
+    (check [_ _test history _opts]
+      (let [rolls (->> history
+                       (filter #(and (= :rolling-kill (:f %)) (vector? (:value %))))
+                       (mapcat :value))
+            failed (remove #(and (:ready-ms %) (:joined-ms %)) rolls)]
+        {:valid? (and (= n (count rolls)) (empty? failed))
+         :rolled (vec rolls)
+         :failed (vec failed)}))))
+
 (def nemesises
   {"none"                      ""
    "kill-erlang-vm"            ""
+   "rolling-kill"              ""
    "random-partition-halves"   ""
    "partition-halves"          ""
    "partition-majorities-ring" ""
@@ -372,6 +452,7 @@
   (case (:nemesis opts)
     "none"                      nemesis/noop
     "kill-erlang-vm"            (kill-erlang-vm-nemesis (:random-nodes opts))
+    "rolling-kill"              (rolling-kill-nemesis)
     "random-partition-halves"   (nemesis/partition-random-halves)
     "partition-halves"          (nemesis/partition-halves)
     "partition-majorities-ring" (nemesis/partition-majorities-ring)
@@ -406,6 +487,12 @@
                       {:type :info :f :stop}])
    :stop-generator (gen/once {:type :info, :f :stop})})
 
+(defn rolling-nemesis-generator
+  [opts]
+  {:generator      [(gen/sleep (:time-before-disruption opts))
+                    {:type :info, :f :rolling-kill}]
+   :stop-generator nil})
+
 (defn none-nemesis-generator
   [_opts]
   {:generator      nil
@@ -415,6 +502,7 @@
   {"none"                      none-nemesis-generator
    "combined"                  combined-nemesis-generator
    "kill-erlang-vm"            single-nemesis-generator
+   "rolling-kill"              rolling-nemesis-generator
    "random-partition-halves"   single-nemesis-generator
    "partition-halves"          single-nemesis-generator
    "partition-majorities-ring" single-nemesis-generator
@@ -482,6 +570,23 @@
     :default  120
     :parse-fn parse-long
     :validate [#(>= % 0) "Must be a non-negative integer."]]
+   [nil "--rolling-nodes NUM" "Nodes rolling-kill takes down, one after another."
+    :default  2
+    :parse-fn parse-long
+    :validate [pos? "Must be a positive integer."]]
+   [nil "--down-time NUM" "Seconds a rolled node stays down before its restart."
+    :default  5
+    :parse-fn parse-long
+    :validate [#(>= % 0) "Must be a non-negative integer."]]
+   [nil "--rejoin-timeout NUM"
+    "Seconds a rolled node has to answer /ready, and the cluster to re-form."
+    :default  180
+    :parse-fn parse-long
+    :validate [pos? "Must be a positive integer."]]
+   [nil "--settle NUM" "Seconds between one rolled node re-forming and the next kill."
+    :default  30
+    :parse-fn parse-long
+    :validate [#(>= % 0) "Must be a non-negative integer."]]
    [nil "--ready-timeout NUM" "Seconds a node has to answer /ready = 204 at setup."
     :default  120
     :parse-fn parse-long
@@ -512,8 +617,10 @@
             :os   debian/os
             :db   (db)
             :checker (checker/compose
-                       {:perf     (checker/perf)
-                        :workload (:checker workload)})
+                       (cond-> {:perf     (checker/perf)
+                                :workload (:checker workload)}
+                         (= "rolling-kill" (:nemesis opts))
+                         (assoc :rolling (rolling-checker (:rolling-nodes opts)))))
             :client     (:client workload)
             :nemesis    nemesis
             :generator

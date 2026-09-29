@@ -26,26 +26,20 @@ needs to satisfy a read:
 | `overlay` | owner's `bondy_oplog_db_overlay:new/0` |
 | `fold_module` | namespace's fold strategy |
 
-The table is a single `public set` ETS owned by this gen_server. Reads
-go directly to ETS (`lookup/3` is the hot path; no roundtrip).
-`register/4` and `unregister/3` are `gen_server:call/2` so the server
-can monitor the registering process and tear the row down if the owner
-dies. The hot read path remains lock-free.
+The table is a single `public set` ETS. Reads go directly to ETS
+(`lookup/3` is the hot path; no roundtrip). `register/4` and
+`unregister/3` are `gen_server:call/2` so the server can monitor the
+registering process and tear the row down if the owner dies. The hot
+read path remains lock-free.
 
 ## Restart semantics
 
-The ETS table is owned by this gen_server; if the gen_server dies the
-table dies with it. On supervisor restart, `init/1` creates a fresh
-empty table — **all in-memory monitor state is lost and previously
-registered shards are orphaned** (their atomics refs still exist, but
-the registry has no row pointing to them). Subsequent `lookup/3` calls
-will return `not_found` until owners re-register.
-
-There is currently no recovery protocol: owners are not signalled when
-the registry restarts. Operators should either set the supervisor's
-`intensity` so the registry effectively never restarts, or wire the
-applier to periodically validate its own registrations and re-register
-on `not_found`. The substrate does not police this.
+The table is borrowed from `bondy_table_manager`, its heir, so it and
+its rows outlive a crash of this process: the atomics and handles the
+owners and appliers hold stay the ones the rows point to. A restarted
+registry claims the table back and monitors the owner recorded in every
+row, so an owner that died meanwhile has its row deleted as if it had
+died under the old process (`bondy_db_bookie_restart_test`).
 
 ## Owner DOWN cleanup
 
@@ -226,7 +220,7 @@ keeps reads parallel.
     %% (`NS/IndexName/idx/SecShard`, one writer per index shard) on a
     %% `per_table_shard` backend. `undefined` for primary shards and for a raw
     %% registration. The durable basis for refcounted writer teardown
-    %% (`writer_key_in_use/1`) and crash/epoch self-healing
+    %% (`writer_key_in_use/1`) and crash self-healing
     %% (`index_entries_for_writer/1`), exactly as `instance_id` is for primaries.
     %% Appended last so existing `#entry`-index `ets:update_element` writes stay
     %% valid.
@@ -238,19 +232,19 @@ keeps reads parallel.
     %% cold-start. `#{}` (default) for every CRDT whose `init/0` needs
     %% nothing. Appended last so existing `#entry`-index `ets:update_element`
     %% writes stay valid.
-    crdt_opts = #{} :: map()
+    crdt_opts = #{} :: map(),
+    %% The process whose exit deletes this row: `register/4`'s `owner`.
+    owner :: pid() | undefined,
+    %% Index shards only. The `coalesce_ms` its index spec asked for, or
+    %% `undefined` for the writer default.
+    coalesce_ms :: non_neg_integer() | undefined
 }).
 
 -record(state, {
     %% MonitorRef -> shard_key()
     mon_to_key = #{} :: #{reference() := shard_key()},
     %% shard_key() -> MonitorRef
-    key_to_mon = #{} :: #{shard_key() := reference()},
-    %% Fresh `make_ref()` per gen_server start. Exposed via
-    %% `current_epoch/0` and broadcast on `bondy_oplog_core_events`
-    %% under topic `bondy_oplog_core_registry_started`. Owners cache the
-    %% epoch and treat a change as "registry was restarted; re-register".
-    epoch :: reference()
+    key_to_mon = #{} :: #{shard_key() := reference()}
 }).
 
 -type shard_key() :: {atom(), atom(), non_neg_integer()}.
@@ -305,7 +299,11 @@ keeps reads parallel.
     %% `bondy_oplog_projection_adapter:cell_keys_scope()` the rebuild passes to
     %% `Adapter:cell_keys/2` to enumerate this primary's cells. Absent ⇒ the
     %% rebuild falls back to the MST walk.
-    primary_cell_scope => bondy_oplog_projection_adapter:cell_keys_scope()
+    primary_cell_scope => bondy_oplog_projection_adapter:cell_keys_scope(),
+    %% Optional. Index shards only. See `#entry.writer_key`.
+    writer_key => binary(),
+    %% Optional. Index shards only. See `#entry.coalesce_ms`.
+    coalesce_ms => non_neg_integer()
 }.
 
 -export_type([shard_entry/0, config/0]).
@@ -321,7 +319,6 @@ keeps reads parallel.
 -export([list/0]).
 
 %% Restart-recovery protocol.
--export([current_epoch/0]).
 
 %% Diagnostic / invariant-checking helper.
 -export([snapshot_for_invariants/0]).
@@ -338,8 +335,10 @@ keeps reads parallel.
 -export([primary_shards_for/1]).
 -export([instance_id_in_use/1]).
 -export([primary_entries_for_instance/1]).
+-export([instance_ae_targets/2]).
 -export([writer_key_in_use/1]).
 -export([index_entries_for_writer/1]).
+-export([index_writers/0]).
 -export([namespaces/0]).
 
 %% Field accessors (so callers do not need the header).
@@ -365,6 +364,7 @@ keeps reads parallel.
 -export([entry_publish_ns/1]).
 -export([entry_secondary_indexes/1]).
 -export([entry_writer_key/1]).
+-export([entry_coalesce_ms/1]).
 -export([entry_last_ae/1]).
 -export([entry_ever_freshened/1]).
 
@@ -453,9 +453,8 @@ Stamp the secondary-index writer pid onto an already-registered
 lock-free, no monitor change (the registry monitor stays bound to the
 projection-handle owner from `register/4` — the writer is a client, not
 the owner, of that row). Returns `not_found` when no row exists for the
-triple (e.g. the index shard was torn down, or the registry restarted
-and the owner has not re-registered yet). Called by
-`bondy_oplog_secondary_writer` at init and on the registry-restart epoch.
+triple (e.g. the index shard was torn down). Called by
+`bondy_oplog_secondary_writer` at init.
 """.
 -spec set_writer_pid(atom(), atom(), non_neg_integer(), pid()) ->
     ok | not_found.
@@ -471,18 +470,6 @@ set_writer_pid(NS, Index, Shard, Pid) when
         true -> ok;
         false -> not_found
     end.
-
--doc """
-Return the current epoch reference. A new epoch is allocated on each
-gen_server start and broadcast on
-`bondy_oplog_core_events:notify(bondy_oplog_core_registry_started, Epoch)`.
-Owners cache the epoch they last saw and treat any change as
-"registry was restarted; re-register every shard I own".
-""".
--spec current_epoch() -> reference().
-
-current_epoch() ->
-    gen_server:call(?MODULE, current_epoch).
 
 -doc """
 Atomic snapshot of `(ETS entries, mon_to_key, key_to_mon)` for
@@ -774,6 +761,22 @@ primary_entries_for_instance(InstanceId) when is_binary(InstanceId) ->
     ets:select(?TABLE, MS).
 
 -doc """
+The anti-entropy freshness targets of `InstanceId`: `Base` plus the key of
+every primary entry registered against it (see
+`primary_entries_for_instance/1`). Read at every start, so a restarted
+instance keeps the targets its sibling tables added with `register_table`
+(`bondy_db_bookie_restart_test`).
+""".
+-spec instance_ae_targets(InstanceId :: binary(), Base :: [shard_key()]) ->
+    [shard_key()].
+
+instance_ae_targets(InstanceId, Base) when
+    is_binary(InstanceId), is_list(Base)
+->
+    MS = [{#entry{instance_id = InstanceId, key = '$1', _ = '_'}, [], ['$1']}],
+    lists:usort(Base ++ ets:select(?TABLE, MS)).
+
+-doc """
 Whether any index shard entry still references the `bondy_oplog_secondary_writer`
 grouping key `WriterKey`.
 
@@ -803,11 +806,11 @@ Every index shard entry whose `bondy_oplog_secondary_writer` grouping key is
 `WriterKey`.
 
 The secondary-side twin of `primary_entries_for_instance/1`: the durable basis
-for a shared writer's crash/epoch self-healing. A writer that serves several
-index shards re-stamps its pid onto every one of these entries (and re-checks
-each for a pending rebuild) on init and on a registry-restart epoch event, so a
-writer crash or a registry flush restores dispatch for every stream on the shard
-— not just the founding one — without re-running provisioning.
+for a shared writer's crash self-healing. A writer that serves several index
+shards re-stamps its pid onto every one of these entries (and re-checks each
+for a pending rebuild) on init, so a writer crash restores dispatch for every
+stream on the shard — not just the founding one — without re-running
+provisioning.
 """.
 -spec index_entries_for_writer(WriterKey :: binary()) -> [shard_entry()].
 
@@ -820,6 +823,26 @@ index_entries_for_writer(WriterKey) when is_binary(WriterKey) ->
         }
     ],
     ets:select(?TABLE, MS).
+
+-doc """
+`{WriterKey, SecShard}` for every writer the registered index shards need:
+the writers `bondy_oplog_secondary_sup` must run.
+""".
+-spec index_writers() -> [{binary(), non_neg_integer()}].
+
+index_writers() ->
+    MS = [
+        {
+            #entry{
+                key = {'_', '_', '$2'},
+                writer_key = '$1',
+                _ = '_'
+            },
+            [{is_binary, '$1'}],
+            [{{'$1', '$2'}}]
+        }
+    ],
+    lists:usort(ets:select(?TABLE, MS)).
 
 %% =============================================================================
 %% Accessors
@@ -889,6 +912,7 @@ entry_secondary_indexes(#entry{secondary_indexes = V}) -> V.
 %% The index shard's `bondy_oplog_secondary_writer` grouping key (the
 %% secondary-side twin of `instance_id`), `undefined` for primary shards.
 entry_writer_key(#entry{writer_key = V}) -> V.
+entry_coalesce_ms(#entry{coalesce_ms = V}) -> V.
 
 %% Last AE-freshness timestamp (monotonic ms), read straight off the
 %% entry's atomics — the sentinel `?STALE_SENTINEL` for a never-freshened
@@ -1225,27 +1249,26 @@ index_clear_clean(_) ->
 %% =============================================================================
 
 init([]) ->
-    _ = ets:new(?TABLE, [
+    {ok, ?TABLE} = bondy_table_manager:add_or_claim(?TABLE, [
         set,
         public,
         named_table,
         {keypos, #entry.key},
         {read_concurrency, true}
     ]),
-    Epoch = erlang:make_ref(),
-    %% Broadcast asynchronously after init returns so subscribers wake
-    %% up *after* the registry is in `ready` state. Synchronous notify
-    %% from inside init would still work because the subscribers are
-    %% other processes, but doing the work inline keeps init fast.
-    self() ! {broadcast_started, Epoch},
-    {ok, #state{epoch = Epoch}}.
+    MS = [{#entry{key = '$1', owner = '$2', _ = '_'}, [], [{{'$1', '$2'}}]}],
+    State = lists:foldl(
+        fun({Key, Owner}, S) -> monitor_owner(Key, Owner, S) end,
+        #state{},
+        ets:select(?TABLE, MS)
+    ),
+    {ok, State}.
 
 handle_call({register, NS, Index, Shard, Owner, Config}, _From, State0) ->
     Key = {NS, Index, Shard},
     %% If a previous registration exists for this key, demonitor it
     %% before installing the new owner.
     State1 = drop_monitor_for_key(Key, State0),
-    Mon = erlang:monitor(process, Owner),
     Ae =
         case maps:find(ae_atomics, Config) of
             {ok, ExistingRef} ->
@@ -1280,20 +1303,16 @@ handle_call({register, NS, Index, Shard, Owner, Config}, _From, State0) ->
         publish_ns = maps:get(publish_ns, Config, undefined),
         secondary_indexes = maps:get(secondary_indexes, Config, undefined),
         writer_key = maps:get(writer_key, Config, undefined),
-        crdt_opts = maps:get(crdt_opts, Config, #{})
+        crdt_opts = maps:get(crdt_opts, Config, #{}),
+        owner = Owner,
+        coalesce_ms = maps:get(coalesce_ms, Config, undefined)
     },
     true = ets:insert(?TABLE, Entry),
-    State2 = State1#state{
-        mon_to_key = maps:put(Mon, Key, State1#state.mon_to_key),
-        key_to_mon = maps:put(Key, Mon, State1#state.key_to_mon)
-    },
-    {reply, ok, State2};
+    {reply, ok, monitor_owner(Key, Owner, State1)};
 handle_call({unregister, Key}, _From, State0) ->
     State1 = drop_monitor_for_key(Key, State0),
     true = ets:delete(?TABLE, Key),
     {reply, ok, State1};
-handle_call(current_epoch, _From, #state{epoch = E} = State) ->
-    {reply, E, State};
 handle_call(snapshot_for_invariants, _From, State) ->
     Snapshot = #{
         entries => ets:select(?TABLE, [{'_', [], ['$_']}]),
@@ -1306,17 +1325,6 @@ handle_call(_Req, _From, State) ->
 
 handle_cast(_, State) -> {noreply, State}.
 
-handle_info({broadcast_started, Epoch}, State) ->
-    %% `bondy_oplog_core_events` is started before this module in
-    %% `bondy_oplog_sup`, so the notify is safe at init time. If the
-    %% events module is down, swallow the error — it is a diagnostic
-    %% gap, not a substrate-correctness issue.
-    try
-        bondy_oplog_core_events:notify(bondy_oplog_core_registry_started, Epoch)
-    catch
-        _:_ -> ok
-    end,
-    {noreply, State};
 handle_info({'DOWN', Mon, process, _Pid, _Reason}, State0) ->
     case maps:take(Mon, State0#state.mon_to_key) of
         {Key, MonToKey1} ->
@@ -1361,6 +1369,13 @@ validate_consistency_class(Config) ->
         {ok, Bad} -> {error, {invalid_consistency_class, Bad}};
         error -> ok
     end.
+
+monitor_owner(Key, Owner, State) ->
+    Mon = erlang:monitor(process, Owner),
+    State#state{
+        mon_to_key = maps:put(Mon, Key, State#state.mon_to_key),
+        key_to_mon = maps:put(Key, Mon, State#state.key_to_mon)
+    }.
 
 drop_monitor_for_key(Key, State) ->
     case maps:take(Key, State#state.key_to_mon) of

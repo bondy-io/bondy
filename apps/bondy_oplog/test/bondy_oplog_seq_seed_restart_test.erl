@@ -28,6 +28,14 @@
 %%   - `mint_before_the_wal_tail_is_replayed` discriminates the WAL seed:
 %%     with `bondy_oplog_wal:init/1` seeding 0 it is red, the other stays
 %%     green.
+%%
+%% `failed_datasync_does_not_remint_its_seq` makes one WAL datasync fail. The
+%% refused append's frame is already in the segment, so the seq the instance
+%% hands back must not be minted again while that frame can survive: every
+%% own-origin seq in the log must be distinct.
+%% `append_to_a_stopping_writer_is_refused` stands a process that exits with
+%% a stop reason in for the WAL writer: the append must be refused with
+%% `{error, wal_unavailable}`, not raise, and its seq must be handed back.
 %% =============================================================================
 -module(bondy_oplog_seq_seed_restart_test).
 
@@ -46,6 +54,12 @@ seq_seed_restart_test_() ->
             end},
             {timeout, 60, fun() ->
                 checkpoint_records_the_minted_seq(Dir)
+            end},
+            {timeout, 60, fun() ->
+                failed_datasync_does_not_remint_its_seq(Dir)
+            end},
+            {timeout, 60, fun() ->
+                append_to_a_stopping_writer_is_refused(Dir)
             end}
         ]
     end}.
@@ -271,6 +285,124 @@ checkpoint_records_the_minted_seq(Dir) ->
 %% This instance's checkpoint files. The tree is shared by every instance the
 %% case set opens under `Dir`, so filter by instance id — asserting over a
 %% sibling's checkpoint would fail on its unrelated origin.
+failed_datasync_does_not_remint_its_seq(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    Origin = bondy_oplog_origin:new(),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    try
+        {ok, _} = open_pack_instance(InstId, NS, Dir, Origin),
+        _ = append_batch(InstId, 1, 1),
+        Wal = bondy_oplog_registry:wal_pid(InstId),
+        Fired = atomics:new(1, []),
+        Refused = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, datasync, fun(Fd) ->
+                case
+                    self() =:= Wal andalso atomics:add_get(Fired, 1, 1) =:= 1
+                of
+                    true -> {error, eio};
+                    false -> meck:passthrough([Fd])
+                end
+            end),
+            try_append(InstId, <<"refused">>)
+        end),
+        ?assertMatch({error, _}, Refused),
+        _ = append_until_accepted(InstId, <<"accepted">>, 100),
+        {ok, It} = bondy_oplog_wal_reader:open(
+            bondy_oplog_registry:wal_pid(InstId), beginning, [{follow, false}]
+        ),
+        Seqs = [
+            bondy_oplog_event:key_seq(bondy_oplog_event:key(E))
+         || E <- read_all(It, []),
+            bondy_oplog_event:key_origin(bondy_oplog_event:key(E)) =:= Origin
+        ],
+        ?assertEqual(lists:usort(Seqs), lists:sort(Seqs))
+    after
+        ok = bondy_oplog:stop_instance(InstId),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj)
+    end.
+
+append_to_a_stopping_writer_is_refused(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    Origin = bondy_oplog_origin:new(),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    try
+        {ok, _} = open_pack_instance(InstId, NS, Dir, Origin),
+        [First] = append_batch(InstId, 1, 1),
+        Wal = bondy_oplog_registry:wal_pid(InstId),
+        Stopping = spawn(fun() ->
+            receive
+                {'$gen_call', _, _} -> exit({datasync_failed, eio})
+            end
+        end),
+        ok = bondy_oplog_registry:set_wal_pid(InstId, Stopping),
+        Refused =
+            try
+                bondy_oplog:append(
+                    InstId, {cell_apply, ?B, <<"r">>, {set, 99_000, <<"r">>}}
+                )
+            after
+                ok = bondy_oplog_registry:set_wal_pid(InstId, Wal)
+            end,
+        ?assertEqual({error, wal_unavailable}, Refused),
+        Next = bondy_oplog:append(
+            InstId, {cell_apply, ?B, <<"n">>, {set, 99_001, <<"n">>}}
+        ),
+        ?assertEqual(
+            bondy_oplog_event:key_seq(First) + 1,
+            bondy_oplog_event:key_seq(Next)
+        )
+    after
+        ok = bondy_oplog:stop_instance(InstId),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj)
+    end.
+
+try_append(InstId, K) ->
+    try bondy_oplog:append(InstId, {cell_apply, ?B, K, {set, 99_000, K}}) of
+        Result -> Result
+    catch
+        Class:Reason -> {error, {Class, Reason}}
+    end.
+
+%% The shard's subtree restarts after the refused datasync; appends made
+%% while it does are refused too.
+append_until_accepted(_InstId, _K, 0) ->
+    error(append_never_accepted);
+append_until_accepted(InstId, K, N) ->
+    case try_append(InstId, K) of
+        {error, _} ->
+            timer:sleep(50),
+            append_until_accepted(InstId, K, N - 1);
+        Key ->
+            Key
+    end.
+
+read_all(It0, Acc) ->
+    case bondy_oplog_wal_reader:next(It0) of
+        {ok, Events, _, _, It} -> read_all(It, Acc ++ Events);
+        end_of_log -> Acc
+    end.
+
+%% Serialises every test that mocks `bondy_mst_io` in this VM (the lock key
+%% is shared with the WAL suites).
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
+    ).
+
 checkpoint_files(Dir, InstId) ->
     Files = [
         F

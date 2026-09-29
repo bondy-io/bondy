@@ -39,8 +39,9 @@ init([]) ->
     },
     Children = [
         ?WORKER(bondy_system_gc, [], permanent, 5000),
-        %% ets table owner used by several other processes
-        ?WORKER(bondy_table_manager, [], permanent, 5000),
+        %% `bondy_table_manager`, the ETS owner every process here borrows
+        %% tables from, is started by `bondy_stdlib` (its supervisor), so
+        %% it is up before this tree.
         %% bondy_db namespace catalogue: owns the durable `main` DB + its
         %% leveled supervisor (gated off by default — see the module).
         ?WORKER(bondy_namespace_catalog, [], permanent, 5000),

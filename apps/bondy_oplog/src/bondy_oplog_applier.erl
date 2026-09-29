@@ -352,8 +352,10 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     %% registered every table on the shard and releases it via
     %% `open_drain_gate/1`. Unlike `lifecycle`, this gate is NOT durable: it
     %% re-engages on every boot, because the registration race recurs on every
-    %% boot. Defaults to `open` so single-table (`per_table_shard`) instances
-    %% and tests are byte-identical to the pre-gate path.
+    %% boot, but not when the applier restarts within one
+    %% (`bondy_oplog_instance_keeper:drain_released/1`). Defaults to `open`
+    %% so single-table (`per_table_shard`) instances and tests are
+    %% byte-identical to the pre-gate path.
     drain_gate = open :: open | gated,
     %% Boot WAL-replay logging state machine (opt-in via `log_boot_replay`).
     %% Emits exactly ONE log when this instance's WAL replay begins and ONE
@@ -1071,7 +1073,9 @@ init(#{instance_id := InstanceId, wal_dir := WalDir} = Opts) ->
     end.
 
 do_init(InstanceId, WalDir, CommitEvery, PollMs, Opts) ->
-    AeTargets = maps:get(ae_targets, Opts, []),
+    AeTargets = bondy_oplog_core_registry:instance_ae_targets(
+        InstanceId, maps:get(ae_targets, Opts, [])
+    ),
     PublishNs = maps:get(publish_ns, Opts, undefined),
     PublishFun = maps:get(publish_fun, Opts, undefined),
     case resolve_cell_apply_ctx(Opts) of
@@ -1106,7 +1110,10 @@ do_init_2(
         apply_batch_max_events, Opts, ?DEFAULT_APPLY_BATCH_MAX_EVENTS
     ),
     DrainGate =
-        case maps:get(drain_gated, Opts, false) of
+        case
+            maps:get(drain_gated, Opts, false) andalso
+                not bondy_oplog_instance_keeper:drain_released(InstanceId)
+        of
             true -> gated;
             false -> open
         end,

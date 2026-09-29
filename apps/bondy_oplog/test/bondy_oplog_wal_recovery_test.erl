@@ -297,6 +297,82 @@ bit_flip_in_last_frame_truncates_test() ->
         rmrf(Dir)
     end.
 
+%% The frame walk reads a segment in 1 MiB chunks. Frame sizes here are
+%% irregular and one frame is larger than a chunk, so frames straddle chunk
+%% boundaries; the scan, a torn tail and the consumer-offset clamp are each
+%% checked past the first chunk.
+scan_across_read_chunks_test() ->
+    HLC = bondy_oplog_hlc:new(),
+    Dir = mktemp_dir(),
+    try
+        Opts = #{
+            dir => Dir, origin => origin(), max_batch_bytes => 4 * 1024 * 1024
+        },
+        {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        Sizes = lists:append(
+            lists:duplicate(6, [1, 5_003, 70_001, 300_007]) ++
+                [[1_500_000], lists:duplicate(40, 997)]
+        ),
+        Events = [
+            bondy_oplog_event:new(
+                bondy_oplog_event:key(bondy_oplog_hlc:now(HLC), origin(), Seq),
+                {op, crypto:strong_rand_bytes(Size)},
+                undefined
+            )
+         || {Seq, Size} <- lists:enumerate(Sizes)
+        ],
+        Offs = [
+            begin
+                {ok, _, {0, Off}} = bondy_oplog_wal:append(P1, E),
+                Off
+            end
+         || E <- Events
+        ],
+        ok = bondy_oplog_wal:close(P1),
+        N = length(Events),
+        InstDir = instance_dir(Dir),
+        SegPath = filename:join(InstDir, bondy_oplog_wal_segment:filename(0)),
+        Size = filelib:file_size(SegPath),
+        ?assert(Size > 3 * 1024 * 1024),
+        LastHlc = bondy_oplog_event:key_hlc(
+            bondy_oplog_event:key(lists:last(Events))
+        ),
+        Target = lists:nth(N - 5, Offs),
+        CO = bondy_oplog_wal_state:with_position(
+            bondy_oplog_wal_state:new_consumer_offset(), 0, Target + 7
+        ),
+        ok = bondy_oplog_wal_state:write_consumer_offset(InstDir, CO),
+        R1 = recover(InstDir),
+        ?assertMatch(
+            #{append_count := N, head_offset := Size, max_seq := N},
+            R1
+        ),
+        ?assertEqual(LastHlc, maps:get(last_hlc, R1)),
+        ?assertEqual(
+            Target,
+            bondy_oplog_wal_state:committed_frame_offset(
+                maps:get(consumer_offset, R1)
+            )
+        ),
+        LastOff = lists:last(Offs),
+        {ok, Fd} = file:open(SegPath, [read, write, raw, binary]),
+        {ok, _} = file:position(Fd, LastOff + 10),
+        ok = file:truncate(Fd),
+        ok = file:close(Fd),
+        Torn = recover(InstDir),
+        ?assertEqual(N - 1, maps:get(append_count, Torn)),
+        ?assertEqual(LastOff, maps:get(head_offset, Torn))
+    after
+        rmrf(Dir)
+    end.
+
+recover(InstDir) ->
+    {ok, R} = bondy_oplog_wal_recovery:recover(
+        InstDir, instance_id(), origin(), #{}
+    ),
+    ok = file:close(maps:get(head_fd, R)),
+    R.
+
 %% =============================================================================
 %% 3. Orphan cleanup
 %% =============================================================================

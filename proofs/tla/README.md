@@ -1177,3 +1177,77 @@ for good. With the cap in place (`_Pending_ExactDoor`) this is unreachable,
 because the hole holds everything above it. The ruling is to keep
 `never_applied/2` on the prefix: it needs no such argument, and the sharpened
 test buys nothing the cap has not already given.
+
+## `RibCountReap.tla` — a RIB cell's count across an owner reboot
+
+**Question.** A registry RIB cell (`{Realm, Policy, Uri, OwnerNode}`) is
+single-writer, and its `count` is a `bondy_oplog_crdt_pn_counter` field declared
+`force_reap => true`: the value is the sum of one net entry per origin, and the
+retirement reap deletes a dead origin's entry. The `registry` DB is in memory
+with no `storage_path`, so it takes `bondy_oplog_origin:default/0`, which is
+fresh on every VM boot. After a reboot, two mechanisms act on the previous
+origin's entry: `self_heal/4` writes `Live - Count` under the new origin when a
+merge of the owner's own cell reaches it, and the reap deletes the old entry
+once no member claims that origin. Does the count settle on the owner's live
+registrations?
+
+```
+java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers 4 -config RibCountReap_Shipped_Routable.cfg RibCountReap.tla
+java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers 4 -config RibCountReap_NoReap.cfg          RibCountReap.tla
+```
+
+All configurations: one owner, one peer, `NumOrigins = 3`, `MaxOps = 3`.
+Properties hold on SETTLED states (no action enabled).
+
+| Configuration | Result |
+| --- | --- |
+| `Shipped_Routable` — `self_heal` + reap, sweep-once (shipped) | **`SettledLiveIsRoutable` violated in 13 states** |
+| `Shipped` — same, all three properties | **`SettledNeverUnderCounts` violated in 12 states** |
+| `NoReap` — `self_heal` only | exhaustive clean: 23,752 distinct states |
+| `NoHeal` — reap only, sweep-once | **`SettledCountIsTruth` violated in 12 states** |
+| `NoHealRescan` — reap only, swept origins rescanned | exhaustive clean: 1,373 distinct states |
+
+**The shipped counterexample.** The owner registers two callees under origin 1;
+the peer receives only the first `+1` before the owner reboots (twice, to origin
+3). One callee re-registers under origin 3. The echo of origin 1's `+1` reaches
+the owner, so its cell reads 2 against 1 live, and `self_heal` writes `-1` under
+origin 3: both replicas now read 1, which is correct. The reap then deletes
+origin 1's entry on both, and both settle on **0 with one live callee**. Nothing
+re-runs `self_heal` (it fires only on a merge of the owner's own cell), so the
+cell stays wrong. Two writers correct the same stale entry: `self_heal` by
+arithmetic under the new origin, the reap by deletion.
+
+**`NoHeal` is the sweep-once rule, not `self_heal`.** The owner reaps origin 1
+after receiving its first event; the second arrives after the sweep and, since
+a swept origin is never scanned again (`Swept` in `reap_complement/4`), stays
+counted for good. The model delivers one event at a time. Anti-entropy delivers
+a whole root per round (see the top of this file), so with two replicas a
+replica receives every event it will ever get from one origin at once; with
+three or more it can receive them from different peers in different rounds.
+That makes this reachable with three or more nodes only, and it applies to
+departed-node RIB reclamation too: `force_reap` is modelled nowhere else.
+
+**Not established.**
+
+- Routing never reads the cell: a peer routes by its stub, refreshed only by a
+  merge event (`on_remote_set/3`). The model checks the cell. The reap rewrites
+  a cell locally and publishes nothing, so a peer's stub can disagree with its
+  cell; `self_heal`'s corrective write is, as a side effect, what refreshes the
+  peers' stubs. Established by reading the code, not modelled.
+- Not reproduced end to end on a cluster; six two-node CT runs did not reach it.
+- Subscriptions (`bondy_oplog_crdt_owned_counter`, same per-origin sum) are
+  covered by the same argument, not by this model.
+
+**Fixes considered and rejected.** Each removes one symptom of the same root —
+a single-writer fact scoped to the owner's incarnation, replicated as a counter
+of deltas across writer ids — and none is independent of durability:
+
+- *Persist the registry's origin and a seq high-water mark.* Makes an in-memory
+  DB claim a continuity it does not have (an origin is a state-epoch identity),
+  leaves the owner's own origin with a hole only peers can fill, and makes
+  correctness depend on a file never going backwards.
+- *Drop `self_heal` and let the reap own old origins.* Needs the reap to
+  refresh stubs and the sweep-once rule changed for `force_reap` fields.
+- *Put the owner's epoch in the cell key.* Old-epoch cells are reclaimed only
+  because the registry's origin rotates per boot; in a durable DB they never
+  would be.

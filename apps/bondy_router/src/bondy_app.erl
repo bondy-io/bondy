@@ -54,7 +54,7 @@ The single readiness oracle: `bondy_admin_ready_http_handler` (`/ready`) and
 the `bondy_node_ready` Prometheus gauge both answer from here, so a load
 balancer and a dashboard cannot disagree about the same node.
 
-Three independent conditions, each read from exactly one source:
+Four independent conditions, each read from exactly one source:
 
 1. **Boot finished.** `start_normal_listeners/0` sets the status to `ready`
    once the client listeners are up. On a degraded boot
@@ -67,7 +67,14 @@ Three independent conditions, each read from exactly one source:
    re-installs the handler with `[]` and `bondy_alarm_handler:init/1` then
    starts empty). Only `failed` disqualifies; `idle` means there was nothing
    to provision, a legitimate configuration.
-3. **No alarm asks for the node to be drained.** Any active alarm carrying
+3. **Every kept shard instance is running.**
+   `bondy_oplog_instance_keeper:not_running/0` is empty. An instance whose
+   subtree has stopped leaves its tables unavailable on this node until the
+   keeper starts it again, however many restarts that takes. Read from the
+   keeper's table, not from the `bondy_oplog_instance_down` alarm that mirrors
+   it, for the same reason as the second condition
+   (`bondy_app_readiness_test:a_kept_instance_not_running_is_not_ready/0`).
+4. **No alarm asks for the node to be drained.** Any active alarm carrying
    `affects_ready => true`. This is a per-alarm declaration and not a severity
    threshold — see `bondy_alarm_handler`.
 
@@ -81,6 +88,7 @@ directory and a healthy control node).
 is_ready() ->
     bondy_config:get(status, undefined) == ready andalso
         bondy_namespace_catalog:main_status() =/= failed andalso
+        bondy_oplog_instance_keeper:not_running() =:= [] andalso
         not bondy_alarm_handler:affects_ready().
 
 -spec vsn() -> list().

@@ -303,6 +303,7 @@ instances.
 ]).
 
 -export([instances_strategy/1]).
+-export([start_shards/2]).
 
 %% =============================================================================
 %% API
@@ -321,4 +322,47 @@ instances_strategy(Module) when is_atom(Module) ->
     case erlang:function_exported(Module, instances_strategy, 0) of
         true -> Module:instances_strategy();
         false -> per_table_shard
+    end.
+
+-doc """
+Runs `Start(Shard)` for every shard in `0..ShardCount - 1` concurrently, each
+in a process of its own, and returns the results in shard order. A start that
+raises or exits yields `{error, {shard_start_crashed, Shard, Reason}}`.
+
+`Start` runs in a process that exits when it returns, so it must not create
+anything its caller has to own: an ETS table, a monitor or a link would go
+with it.
+""".
+-spec start_shards(non_neg_integer(), fun((non_neg_integer()) -> Result)) ->
+    [{non_neg_integer(), Result | {error, term()}}].
+
+start_shards(ShardCount, Start) when is_function(Start, 1) ->
+    Workers = maps:from_list([
+        begin
+            {_, Ref} = spawn_monitor(fun() ->
+                exit({shard_started, Start(I)})
+            end),
+            {Ref, I}
+        end
+     || I <- lists:seq(0, ShardCount - 1)
+    ]),
+    lists:sort(maps:to_list(await_shards(Workers, #{}))).
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+await_shards(Workers, Acc) when map_size(Workers) =:= 0 ->
+    Acc;
+await_shards(Workers, Acc) ->
+    receive
+        {'DOWN', Ref, process, _, Reason} when is_map_key(Ref, Workers) ->
+            {I, Rest} = maps:take(Ref, Workers),
+            Result =
+                case Reason of
+                    {shard_started, R} -> R;
+                    Crash -> {error, {shard_start_crashed, I, Crash}}
+                end,
+            await_shards(Rest, Acc#{I => Result})
     end.

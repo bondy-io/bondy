@@ -296,8 +296,8 @@ invalid_group_commit_max_rejected_test() ->
 %%      `do_fsync_head` fails. per_write promised durability-on-return, so
 %%      EVERY ok-write caller in the group must receive the error (not the
 %%      `{ok, _}` its own write would otherwise have produced), and the
-%%      writer must STAY ALIVE (the failure is recoverable — the non-durable
-%%      tail is truncated on the next open).
+%%      writer must STOP, as for any failed datasync (see the
+%%      `bondy_oplog_wal` moduledoc).
 %%
 %%   2. fatal-during-drain reply fan-out — a drained batch trips a rotation
 %%      that fails *after* the old segment fd was sealed+closed (a
@@ -307,43 +307,38 @@ invalid_group_commit_max_rejected_test() ->
 %%      writer must STOP so the supervisor restart runs recovery.
 
 %% (1) A failed group datasync fans the error out to every grouped caller
-%% and leaves the writer alive. Distinct from the proper-test per-append
-%% fault: this exercises the *group* path (`flush_group/3`), where one
-%% datasync covers many callers.
+%% and stops the writer. Distinct from the proper-test per-append fault:
+%% this exercises the *group* path (`flush_group/3`), where one datasync
+%% covers many callers.
 group_commit_flush_group_datasync_failure_errors_whole_group_test() ->
     Dir = mktemp_dir(),
+    OldTrap = process_flag(trap_exit, true),
     try
         {ok, Pid} = bondy_oplog_wal:start_link(
             instance_id(), (base_opts())#{dir => Dir, group_commit => true}
         ),
-        try
-            N = 5,
-            Events = mk_monotonic_events(N),
-            {Replies, Alive, FsyncCount} = with_meck(
-                bondy_mst_io,
-                fun() ->
-                    ok = meck:expect(
-                        bondy_mst_io, datasync, fun(_Fd) -> {error, eio} end
-                    ),
-                    Rs = suspend_enqueue_resume(Pid, Events),
-                    {
-                        Rs,
-                        is_process_alive(Pid),
-                        maps:get(fsync_count, bondy_oplog_wal:info(Pid))
-                    }
-                end
-            ),
-            %% Every grouped caller observes the datasync failure.
-            ?assertEqual(N, length(Replies)),
-            [?assertEqual({error, eio}, R) || R <- Replies],
-            %% The writer survives — `flush_group/3` returns `{noreply, _}`.
-            ?assert(Alive),
-            %% A failed `do_fsync_head` is not counted (bumps only on ok).
-            ?assertEqual(0, FsyncCount)
-        after
-            ok = bondy_oplog_wal:close(Pid)
+        Ref = monitor(process, Pid),
+        N = 5,
+        Events = mk_monotonic_events(N),
+        Replies = with_meck(
+            bondy_mst_io,
+            fun() ->
+                ok = meck:expect(
+                    bondy_mst_io, datasync, fun(_Fd) -> {error, eio} end
+                ),
+                suspend_enqueue_resume(Pid, Events)
+            end
+        ),
+        ?assertEqual(N, length(Replies)),
+        [?assertEqual({error, {datasync_failed, eio}}, R) || R <- Replies],
+        receive
+            {'DOWN', Ref, process, Pid, Reason} ->
+                ?assertEqual({datasync_failed, eio}, Reason)
+        after 5000 ->
+            error(writer_not_stopped)
         end
     after
+        process_flag(trap_exit, OldTrap),
         rmrf(Dir)
     end.
 

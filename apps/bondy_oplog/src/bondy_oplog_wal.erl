@@ -49,6 +49,15 @@ Current behaviour:
 - `close/1` fsyncs and stops the writer; `info/1` exposes the writer's
   current state (including `head_offset`, `durable_offset`,
   `fsync_mode`, `last_fsync_at`).
+- A failed write or datasync on the head segment stops the writer, and
+  every caller whose frame was not yet durable gets
+  `{error, {write_failed | datasync_failed, Reason}}`. The writer does not
+  retry: a failed write can leave part of a frame past its offset, and a
+  datasync retried after a failure can succeed for pages the kernel
+  discarded. Recovery on restart truncates the head at its last valid
+  frame, so no frame is acknowledged behind a torn one
+  (`bondy_oplog_wal_durability_test`, `prop_failed_fsync/0` in
+  `bondy_oplog_wal_proper_test`).
 
 ## Choosing an `fsync_mode`
 
@@ -511,6 +520,13 @@ Rejections (all leave the writer state untouched):
   the next append — `max_segment_bytes` is a soft target, not a hard
   limit.)
 
+Failures that stop the writer (see the moduledoc):
+- `{error, {write_failed, Reason}}`, `{error, {datasync_failed, Reason}}`
+  — the batch may or may not be in the log recovery leaves; an instance
+  restarted with it seeds its seq counter from that log
+  (`bondy_oplog_instance:seed_seq/2`), so its seqs are not minted again
+  (`bondy_oplog_seq_seed_restart_test`).
+
 Durability semantics match `append/2`: in `per_write` mode the batch
 is durable on return; in `batched` mode it is durable at the next
 fsync boundary.
@@ -853,8 +869,11 @@ handle_call({append_batch, Events}, From, State0) ->
     end;
 handle_call(sync, _From, #state{head_fd = Fd} = State) when Fd =/= undefined ->
     case do_fsync_head(State) of
-        {ok, State1} -> {reply, ok, State1};
-        {error, _} = E -> {reply, E, State}
+        {ok, State1} ->
+            {reply, ok, State1};
+        {fatal, Reason, State1} ->
+            ok = log_fatal(Reason),
+            {stop, Reason, {error, Reason}, State1}
     end;
 handle_call(durable_position, _From, State) ->
     {reply, {State#state.durable_segment_id, State#state.durable_offset},
@@ -911,8 +930,11 @@ handle_cast(_Msg, State) ->
 handle_info(flush_tick, State0) ->
     State1 = State0#state{flush_timer = undefined},
     case maybe_batched_fsync(State1) of
-        {ok, State2} -> {noreply, State2};
-        {error, _} -> {noreply, State1}
+        {ok, State2} ->
+            {noreply, State2};
+        {fatal, Reason, State2} ->
+            ok = log_fatal(Reason),
+            {stop, Reason, State2}
     end;
 %% `await_durable/3` deadline elapsed. Remove the matching waiter from
 %% the pending list (if still present) and reply `{error, timeout}`.
@@ -1598,19 +1620,7 @@ handle_inline_append(State0, Events) ->
             State1 = emit_wal_full_telemetry(State0, Reason),
             {reply, {error, wal_full}, State1};
         {fatal, Reason, State1} ->
-            %% Rotation failed *after* the old segment fd was closed.
-            %% The writer cannot serve further requests safely; stop so
-            %% the supervisor can restart and recovery (run from `init/1`)
-            %% reconciles the on-disk state. We reply to this caller with
-            %% the underlying reason so the integration layer can surface
-            %% a meaningful error before the gen_server exits.
-            ?LOG_ERROR(#{
-                description =>
-                    "bondy_oplog_wal stopping after a non-recoverable "
-                    "rotation failure; supervisor restart will run "
-                    "recovery to reconcile the on-disk state",
-                reason => Reason
-            }),
+            ok = log_fatal(Reason),
             {stop, Reason, {error, Reason}, State1};
         {error, _} = E ->
             {reply, E, State0}
@@ -1646,27 +1656,14 @@ group_commit_append(State0, From, Events) ->
                     reply_all([{F, {error, Reason}} || {F, _} <- Oks]),
                     reply_all(Errs),
                     gen_server:reply(FatalFrom, {error, Reason}),
-                    ?LOG_ERROR(#{
-                        description =>
-                            "bondy_oplog_wal stopping after a "
-                            "non-recoverable rotation failure during a "
-                            "group commit; supervisor restart will run "
-                            "recovery to reconcile the on-disk state",
-                        reason => Reason
-                    }),
+                    ok = log_fatal(Reason),
                     {stop, Reason, StateF}
             end;
         {wal_full, Reason} ->
             State1 = emit_wal_full_telemetry(State0, Reason),
             {reply, {error, wal_full}, State1};
         {fatal, Reason, State1} ->
-            ?LOG_ERROR(#{
-                description =>
-                    "bondy_oplog_wal stopping after a non-recoverable "
-                    "rotation failure; supervisor restart will run "
-                    "recovery to reconcile the on-disk state",
-                reason => Reason
-            }),
+            ok = log_fatal(Reason),
             {stop, Reason, {error, Reason}, State1};
         {error, _} = E ->
             {reply, E, State0}
@@ -1716,19 +1713,19 @@ drain_queued_appends(State, {Oks, Errs} = Acc, N) ->
 %% @private
 %% One datasync makes every frame written in this group durable, then all
 %% callers are replied. On a datasync failure the ok-write callers get the
-%% error (per_write promised durability); err/wal_full callers keep their
-%% own replies. Offsets stay advanced; recovery truncates any non-durable
-%% tail on next open.
+%% error (per_write promised durability), err/wal_full callers keep their
+%% own replies, and the writer stops.
 flush_group(StateN, Oks, Errs) ->
     case do_fsync_head(StateN) of
         {ok, StateD} ->
             reply_all(Oks),
             reply_all(Errs),
             {noreply, StateD};
-        {error, Reason} ->
+        {fatal, Reason, StateF} ->
             reply_all([{F, {error, Reason}} || {F, _} <- Oks]),
             reply_all(Errs),
-            {noreply, StateN}
+            ok = log_fatal(Reason),
+            {stop, Reason, StateF}
     end.
 
 %% @private
@@ -1740,16 +1737,13 @@ reply_all(Replies) ->
 %% @private
 %% Single-call append: write the frame, then apply per-call durability —
 %% a `per_write` fsync now (returning durable), or a `batched`-mode
-%% accumulate + maybe-trigger. Contract unchanged: `{ok, Entries, State}`
-%% on success; a per_write datasync failure surfaces as `{error, Reason}`
-%% (the caller keeps `State0` — recovery's break-and-truncate reconciles
-%% the non-durable tail on next open).
+%% accumulate + maybe-trigger.
 do_append_batch(State0, Events) ->
     case do_write_batch(State0, Events) of
         {ok, Entries, State1, FrameLen} ->
             case post_write_durability(State1, FrameLen) of
                 {ok, State2} -> {ok, Entries, State2};
-                {error, _} = E -> E
+                {fatal, _, _} = Fatal -> Fatal
             end;
         Other ->
             Other
@@ -1804,9 +1798,7 @@ do_write_batch(#state{max_batch_bytes = MaxBatch} = State0, Events) ->
                                         BatchMaxSeq
                                     );
                                 {fatal, _, _} = Fatal ->
-                                    Fatal;
-                                {error, _} = E ->
-                                    E
+                                    Fatal
                             end;
                         {wal_full, _Reason} = Full ->
                             Full
@@ -1886,10 +1878,9 @@ maybe_rotate(State, _FrameLen) ->
 %% @private
 %% Returns:
 %%   {ok, NewState}            — rotation succeeded.
-%%   {error, Reason}           — rotation failed *before* the old fd was
-%%                               closed (only the initial datasync of
-%%                               `OldFd`). State0 is unchanged and the
-%%                               caller can retry.
+%%   {fatal, {datasync_failed, _}, _}
+%%                             — the datasync sealing `OldFd` failed
+%%                               (see `halt_head/2`).
 %%   {fatal, Reason, PartialState}
 %%                             — rotation failed *after* `OldFd` was
 %%                               closed. The writer's in-memory state
@@ -1910,9 +1901,8 @@ rotate(
 ) ->
     T0 = erlang:monotonic_time(microsecond),
     case bondy_mst_io:datasync(OldFd) of
-        {error, _} = E ->
-            %% Pre-close failure: old fd still valid, state unchanged.
-            E;
+        {error, Reason} ->
+            halt_head(State0, {datasync_failed, Reason});
         ok ->
             %% The just-sealed segment is now fully durable. Advance the
             %% durable boundary so any `await_durable/3` waiters at
@@ -2083,7 +2073,7 @@ write_batch_frame(
     BatchMaxSeq
 ) ->
     Frame = bondy_oplog_wal_frame:encode(Body, [{flags, Flags}]),
-    case prim_file:write(Fd, Frame) of
+    case bondy_mst_io:write(Fd, Frame) of
         ok ->
             NewOff = Off + FrameLen,
             FirstHlc = hd(Hlcs),
@@ -2117,36 +2107,23 @@ write_batch_frame(
             %% design).
             publish_head_offset(HeadRef, NewOff),
             {ok, Entries, State1, FrameLen};
-        {error, _} = E ->
-            E
+        {error, Reason} ->
+            halt_head(State0, {write_failed, Reason})
     end.
 
 %% @private
-%% Mode-specific durability step. The return contract differs by mode:
-%%
-%% - `per_write`: returns `{ok, State}` on a successful datasync, or
-%%   `{error, Reason}` so the caller surfaces the failure to the
-%%   client (durability was promised — silently swallowing the error
-%%   would break the contract).
-%%
-%% - `batched`: ALWAYS returns `{ok, State}`. A failed size-triggered
-%%   fsync is logged and retried via the interval timer; the batched
-%%   contract is "best-effort fsync at some later boundary", so a
-%%   single failed attempt is not promoted to a per-append error.
+%% Mode-specific durability step: a `per_write` datasync now, or a
+%% `batched` accumulate that datasyncs once the size threshold is crossed.
+%% `{fatal, _, _}` when that datasync fails.
 post_write_durability(#state{fsync_mode = per_write} = State, _FrameLen) ->
-    case do_fsync_head(State) of
-        {ok, _} = OK -> OK;
-        {error, _} = E -> E
-    end;
+    do_fsync_head(State);
 post_write_durability(
     #state{fsync_mode = batched, pending_fsync_bytes = P} = State, FrameLen
 ) ->
     State1 = State#state{pending_fsync_bytes = P + FrameLen},
     case maybe_size_trigger_fsync(State1) of
-        {ok, State2} ->
-            {ok, maybe_arm_flush_timer(State2)};
-        {error, _} ->
-            {ok, maybe_arm_flush_timer(State1)}
+        {ok, State2} -> {ok, maybe_arm_flush_timer(State2)};
+        {fatal, _, _} = Fatal -> Fatal
     end.
 
 %% @private
@@ -2479,9 +2456,27 @@ do_fsync_head(
             emit_fsync_telemetry(State, Pending, Duration),
             State1 = advance_durable(State, Seg, Off),
             {ok, State1#state{fsync_count = FsyncCount + 1}};
-        {error, _} = E ->
-            E
+        {error, Reason} ->
+            halt_head(State, {datasync_failed, Reason})
     end.
+
+%% @private
+%% A failed write or datasync leaves the head segment's contents unknown to
+%% this process, so it stops (see the moduledoc). The fd is closed first so
+%% `terminate/2` does not datasync it again and report that retry to waiters
+%% (`bondy_oplog_wal_durability_test`).
+halt_head(#state{head_fd = Fd} = State, Reason) ->
+    _ = prim_file:close(Fd),
+    {fatal, Reason, State#state{head_fd = undefined}}.
+
+%% @private
+log_fatal(Reason) ->
+    ?LOG_ERROR(#{
+        description =>
+            "bondy_oplog_wal stopping; the supervisor restart runs recovery "
+            "to reconcile the head segment",
+        reason => Reason
+    }).
 
 %% @private
 %% Try a size-triggered fsync. Returns the original state if the
@@ -2496,9 +2491,7 @@ maybe_size_trigger_fsync(State) ->
 
 %% @private
 %% Fsync if any bytes are pending. Called from the `flush_tick` timer
-%% handler. Returns `{ok, State}` (possibly unchanged) or `{error, _}`
-%% on datasync failure — the timer handler treats the error as
-%% best-effort and leaves the pending bytes for a later attempt.
+%% handler.
 maybe_batched_fsync(#state{pending_fsync_bytes = 0} = S) -> {ok, S};
 maybe_batched_fsync(#state{head_fd = undefined} = S) -> {ok, S};
 maybe_batched_fsync(State) -> do_fsync_head(State).

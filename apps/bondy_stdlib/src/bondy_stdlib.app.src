@@ -4,9 +4,14 @@
 %% =============================================================================
 
 {application, bondy_stdlib,
- [{description, "An OTP library"},
+ [{description,
+   "Bondy's shared library: data structures, clocks, errors — and "
+   "bondy_table_manager, the ETS owner-of-last-resort every Bondy app "
+   "borrows tables from, started by this app's supervisor so it is up "
+   "before any of them."},
   {vsn, "1.0.0"},
-  {registered, []},
+  {registered, [bondy_stdlib_sup, bondy_table_manager]},
+  {mod, {bondy_stdlib_app, []}},
   {applications,
    [kernel,
     stdlib,

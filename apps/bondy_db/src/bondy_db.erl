@@ -278,9 +278,7 @@ it).
     sec_shard_count := pos_integer(),
     topology := module(),
     table_state := bondy_db_topology:table_state(),
-    cache_handles := #{non_neg_integer() := term()},
-    %% Per-secondary-shard `bondy_oplog_secondary_writer` pid.
-    writer_pids := #{non_neg_integer() := pid()}
+    cache_handles := #{non_neg_integer() := term()}
 }.
 
 %% =============================================================================
@@ -2577,6 +2575,10 @@ provision_seq(Count, ProvisionFun, TeardownFun, Shard, AccA, AccB) ->
 %% `backend` (e.g. `bondy_mst_pack_store`), `storage_path`, or
 %% `fsync_mode`. Per-shard `fold_module`, `applier`, and `wal` opts
 %% take precedence over keys with the same name in `OplogOpts`.
+%%
+%% Each shard's cache and registry row are created here, in the caller, which
+%% owns and is monitored for them; only the instance starts, which run each
+%% shard's recovery, run concurrently (`bondy_db_topology:start_shards/2`).
 provision_shards(
     NS,
     DbName,
@@ -2590,31 +2592,52 @@ provision_shards(
     Topology,
     TableState
 ) ->
-    provision_seq(
-        ShardCount,
-        fun(Shard) ->
-            provision_shard(
-                NS,
-                DbName,
-                EntityType,
+    Teardown = fun(S, Ids, Caches) ->
+        teardown_shard(NS, S, Ids, Caches, Topology, TableState)
+    end,
+    maybe
+        {ok, Starts, Caches} ?=
+            provision_seq(
                 ShardCount,
-                FoldModule,
-                CrdtModule,
-                CrdtOpts,
-                OplogOpts,
-                SecIndexes,
-                Topology,
-                TableState,
-                Shard
-            )
-        end,
-        fun(S, Ids, Caches) ->
-            teardown_shard(NS, S, Ids, Caches, Topology, TableState)
-        end
-    ).
+                fun(Shard) ->
+                    register_shard(
+                        NS,
+                        DbName,
+                        EntityType,
+                        ShardCount,
+                        FoldModule,
+                        CrdtModule,
+                        CrdtOpts,
+                        OplogOpts,
+                        SecIndexes,
+                        Topology,
+                        TableState,
+                        Shard
+                    )
+                end,
+                fun(S, _Starts, Caches) -> Teardown(S, #{}, Caches) end
+            ),
+        start_shard_instances(ShardCount, Starts, Caches, Teardown)
+    end.
 
 %% @private
-provision_shard(
+start_shard_instances(ShardCount, Starts, Caches, Teardown) ->
+    Results = bondy_db_topology:start_shards(
+        ShardCount, fun(Shard) -> (maps:get(Shard, Starts))() end
+    ),
+    Ids = maps:from_list([{S, Id} || {S, {ok, Id}} <- Results]),
+    case [Err || {_, {error, _} = Err} <- Results] of
+        [] ->
+            {ok, Ids, Caches};
+        [Err | _] ->
+            _ = [Teardown(S, Ids, Caches) || S <- lists:seq(0, ShardCount - 1)],
+            Err
+    end.
+
+%% @private
+%% Creates `Shard`'s cache and registry row and returns the start of its
+%% instance, which `provision_shards/11` runs outside this process.
+register_shard(
     NS,
     DbName,
     EntityType,
@@ -2699,19 +2722,19 @@ provision_shard(
                         )
                     of
                         ok ->
-                            start_or_join_shard_instance(
-                                Strategy,
-                                NS,
-                                InstanceId,
-                                Shard,
-                                EntityType,
-                                FoldModule,
-                                OplogOpts,
-                                SecIndexes,
-                                CacheHandle,
-                                Topology,
-                                TableState
-                            );
+                            Start = fun() ->
+                                start_or_join_shard_instance(
+                                    Strategy,
+                                    NS,
+                                    InstanceId,
+                                    Shard,
+                                    EntityType,
+                                    FoldModule,
+                                    OplogOpts,
+                                    SecIndexes
+                                )
+                            end,
+                            {ok, Start, CacheHandle};
                         {error, _} = Err ->
                             ok = release_cache(
                                 Topology, TableState, CacheHandle
@@ -2897,9 +2920,6 @@ start_shard_instance(
     FoldModule,
     OplogOpts,
     SecIndexes,
-    CacheHandle,
-    Topology,
-    TableState,
     MaybeBucket
 ) ->
     CallerApplier0 = maps:get(applier, OplogOpts, #{}),
@@ -2927,12 +2947,8 @@ start_shard_instance(
     },
     Opts = maps:merge(OplogOpts, Pinned),
     case bondy_oplog:start_instance(InstanceId, Opts) of
-        {ok, _Sup} ->
-            {ok, InstanceId, CacheHandle};
-        {error, _} = Err ->
-            ok = bondy_oplog_core_registry:unregister(NS, ?INDEX, Shard),
-            ok = release_cache(Topology, TableState, CacheHandle),
-            Err
+        {ok, _Sup} -> {ok, InstanceId};
+        {error, _} = Err -> Err
     end.
 
 %% @private
@@ -2961,8 +2977,8 @@ collapse_bucket(EntityType) ->
 %% instance-mapping strategy. `per_table_shard` starts a dedicated instance;
 %% `per_shard` founds the shared instance with this table as the seed, or — when
 %% a sibling table already founded it — joins it by registering this table's
-%% entity-type bucket. Both return `{ok, InstanceId, CacheHandle}` so the caller
-%% accumulates the shard's instance id and cache handle uniformly.
+%% entity-type bucket. Both return `{ok, InstanceId}`; on error the caller's
+%% rollback (`teardown_shard/6`) removes the shard's row and cache.
 start_or_join_shard_instance(
     per_shard,
     NS,
@@ -2971,10 +2987,7 @@ start_or_join_shard_instance(
     EntityType,
     FoldModule,
     OplogOpts,
-    SecIndexes,
-    CacheHandle,
-    Topology,
-    TableState
+    SecIndexes
 ) ->
     Bucket = collapse_bucket(EntityType),
     case bondy_oplog_instance:whereis(InstanceId) of
@@ -2988,9 +3001,6 @@ start_or_join_shard_instance(
                 FoldModule,
                 OplogOpts,
                 SecIndexes,
-                CacheHandle,
-                Topology,
-                TableState,
                 Bucket
             );
         _Pid ->
@@ -3010,14 +3020,8 @@ start_or_join_shard_instance(
                     InstanceId, Bucket, {NS, ?INDEX, Shard}, TableOpts
                 )
             of
-                ok ->
-                    {ok, InstanceId, CacheHandle};
-                {error, _} = Err ->
-                    ok = bondy_oplog_core_registry:unregister(
-                        NS, ?INDEX, Shard
-                    ),
-                    ok = release_cache(Topology, TableState, CacheHandle),
-                    Err
+                ok -> {ok, InstanceId};
+                {error, _} = Err -> Err
             end
     end;
 start_or_join_shard_instance(
@@ -3028,22 +3032,10 @@ start_or_join_shard_instance(
     _EntityType,
     FoldModule,
     OplogOpts,
-    SecIndexes,
-    CacheHandle,
-    Topology,
-    TableState
+    SecIndexes
 ) ->
     start_shard_instance(
-        NS,
-        InstanceId,
-        Shard,
-        FoldModule,
-        OplogOpts,
-        SecIndexes,
-        CacheHandle,
-        Topology,
-        TableState,
-        undefined
+        NS, InstanceId, Shard, FoldModule, OplogOpts, SecIndexes, undefined
     ).
 
 %% @private
@@ -3250,14 +3242,13 @@ provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
                     Strategy
                 )
             of
-                {ok, CacheHandles, Writers} ->
+                {ok, CacheHandles, _Writers} ->
                     {ok, Name, #{
                         spec => Spec,
                         sec_shard_count => SecShardCount,
                         topology => Topology,
                         table_state => TableState,
-                        cache_handles => CacheHandles,
-                        writer_pids => Writers
+                        cache_handles => CacheHandles
                     }};
                 {error, _} = Err ->
                     _ = Topology:close_table(TableState, EffState),
@@ -3286,10 +3277,8 @@ provision_index_shards(
                 Shard
             )
         end,
-        fun(S, Caches, Writers) ->
-            teardown_index_shard(
-                NS, Name, S, Caches, Writers, Topology, TableState
-            )
+        fun(S, Caches, _Writers) ->
+            teardown_index_shard(NS, Name, S, Caches, Topology, TableState)
         end
     ).
 
@@ -3316,7 +3305,7 @@ provision_index_shard(
         {ok, ProjAdapter, ProjHandle} ->
             case acquire_cache(Topology, TableState, NS, Name, Shard) of
                 {ok, Owner, CacheAdapter, CacheHandle} ->
-                    Config = #{
+                    Config0 = #{
                         shard_count => SecShardCount,
                         cache_adapter => CacheAdapter,
                         cache_handle => CacheHandle,
@@ -3348,35 +3337,16 @@ provision_index_shard(
                         writer_key => WriterKey,
                         owner => Owner
                     },
+                    Config =
+                        case CoalesceMs of
+                            undefined -> Config0;
+                            _ -> Config0#{coalesce_ms => CoalesceMs}
+                        end,
                     case
-                        bondy_oplog_core_registry:register(
-                            NS, Name, Shard, Config
-                        )
+                        join_index_writer(NS, Name, Shard, Config, WriterKey)
                     of
-                        ok ->
-                            case
-                                find_or_start_index_writer(
-                                    WriterKey, Shard, CoalesceMs
-                                )
-                            of
-                                {ok, WriterPid} ->
-                                    %% Stamp the (possibly shared) writer onto
-                                    %% this stream synchronously, so the next
-                                    %% index shard's find-or-start sees it and a
-                                    %% dispatch can route here immediately.
-                                    _ = bondy_oplog_core_registry:set_writer_pid(
-                                        NS, Name, Shard, WriterPid
-                                    ),
-                                    {ok, CacheHandle, WriterPid};
-                                {error, _} = Err ->
-                                    _ = bondy_oplog_core_registry:unregister(
-                                        NS, Name, Shard
-                                    ),
-                                    ok = release_cache(
-                                        Topology, TableState, CacheHandle
-                                    ),
-                                    Err
-                            end;
+                        {ok, WriterPid} ->
+                            {ok, CacheHandle, WriterPid};
                         {error, _} = Err ->
                             ok = release_cache(
                                 Topology, TableState, CacheHandle
@@ -3391,50 +3361,6 @@ provision_index_shard(
     end.
 
 %% @private
-%% Find the live `bondy_oplog_secondary_writer` already driving `WriterKey`, or
-%% start one. Discovery is via the registry — the same registry-as-membership
-%% pattern the primary collapse uses (`bondy_oplog_instance:whereis/1`): a
-%% sibling index shard provisioned earlier under the same key stamped its
-%% writer's pid onto its row, which `index_entries_for_writer/1` returns. Index
-%% provisioning is serialised under `open_table/7`, and the founding shard's
-%% `set_writer_pid/4` stamp is synchronous, so this needs no in-flight
-%% accumulator: by the time a joining index shard runs, the founding one's row
-%% already carries the live pid. On a `per_table_shard` backend the key is
-%% unique per index shard, so this always starts a fresh writer.
-find_or_start_index_writer(WriterKey, Shard, CoalesceMs) ->
-    case live_writer_for(WriterKey) of
-        {ok, Pid} ->
-            {ok, Pid};
-        none ->
-            start_index_writer(WriterKey, Shard, CoalesceMs)
-    end.
-
-%% @private
-live_writer_for(WriterKey) ->
-    Entries = bondy_oplog_core_registry:index_entries_for_writer(WriterKey),
-    Pids = [
-        P
-     || E <- Entries,
-        P <- [bondy_oplog_core_registry:entry_writer_pid(E)],
-        is_pid(P),
-        is_process_alive(P)
-    ],
-    case Pids of
-        [Pid | _] -> {ok, Pid};
-        [] -> none
-    end.
-
-%% @private
-start_index_writer(WriterKey, Shard, CoalesceMs) ->
-    Args0 = #{writer_key => WriterKey, shard => Shard},
-    Args =
-        case CoalesceMs of
-            undefined -> Args0;
-            _ -> Args0#{coalesce_ms => CoalesceMs}
-        end,
-    bondy_oplog_secondary_sup:start_writer(Args).
-
-%% @private
 teardown_indexes(NS, IndexMap) ->
     maps:foreach(
         fun(Name, Provision) ->
@@ -3442,13 +3368,12 @@ teardown_indexes(NS, IndexMap) ->
                 sec_shard_count := SecShardCount,
                 topology := Topology,
                 table_state := TableState,
-                cache_handles := Caches,
-                writer_pids := Writers
+                cache_handles := Caches
             } = Provision,
             lists:foreach(
                 fun(Shard) ->
                     teardown_index_shard(
-                        NS, Name, Shard, Caches, Writers, Topology, TableState
+                        NS, Name, Shard, Caches, Topology, TableState
                     )
                 end,
                 lists:seq(0, SecShardCount - 1)
@@ -3467,87 +3392,104 @@ teardown_indexes(NS, IndexMap) ->
 %% `teardown_shared_shard/6` refcounts a shared primary instance. For a unique
 %% (`per_table_shard`) key the refcount degenerates to "stop now". Best-effort
 %% throughout (it is also the rollback path for a half-built index).
-teardown_index_shard(
-    NS, Name, Shard, CacheHandles, Writers, Topology, TableState
-) ->
+teardown_index_shard(NS, Name, Shard, CacheHandles, Topology, TableState) ->
     %% Clean-shutdown sequence: durably flush this shard's writer and stamp its
     %% clean flag BEFORE the writer/registry row are torn down, so a graceful
     %% close leaves the index complete-to-head and the next open trusts it
     %% (`cold_start_indexes/2`). Must precede the unregister, which drops the
     %% entry whose projection handle the flag is written through.
-    ok = flush_and_mark_clean(NS, Name, Shard, Writers),
-    %% Read the writer's grouping key + live pid off the row before it is
-    %% unregistered (the refcount and the stop both need them).
-    {WriterKey, WriterPid} =
-        case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
-            {ok, Entry} ->
-                {
-                    bondy_oplog_core_registry:entry_writer_key(Entry),
-                    bondy_oplog_core_registry:entry_writer_pid(Entry)
-                };
-            not_found ->
-                {undefined, undefined}
-        end,
-    _ = bondy_oplog_core_registry:unregister(NS, Name, Shard),
+    ok = flush_and_mark_clean(NS, Name, Shard),
+    ok = leave_index_writer(NS, Name, Shard),
     case maps:get(Shard, CacheHandles, undefined) of
         undefined ->
             ok;
         CacheHandle ->
             _ = release_cache(Topology, TableState, CacheHandle),
             ok
-    end,
-    maybe_stop_index_writer(WriterKey, WriterPid, Shard, Writers),
-    ok.
-
-%% @private
-%% Stop the index writer only once its `writer_key` is no longer referenced by
-%% any registry entry. `undefined` key means the row was already gone (an
-%% idempotent re-teardown) — the writer was handled when its last referencing
-%% entry went, so there is nothing to do.
-maybe_stop_index_writer(undefined, _WriterPid, _Shard, _Writers) ->
-    ok;
-maybe_stop_index_writer(WriterKey, WriterPid, Shard, Writers) ->
-    case bondy_oplog_core_registry:writer_key_in_use(WriterKey) of
-        true ->
-            ok;
-        false ->
-            Pid =
-                case WriterPid of
-                    P when is_pid(P) -> P;
-                    _ -> maps:get(Shard, Writers, undefined)
-                end,
-            case Pid of
-                P2 when is_pid(P2) ->
-                    _ = bondy_oplog_secondary_sup:stop_writer(P2),
-                    ok;
-                _ ->
-                    ok
-            end
     end.
 
 %% @private
-%% `flush_sync` the shard's writer (so its coalesce buffer reaches disk) then
-%% stamp the durable clean-shutdown flag, both via the still-registered entry.
-%% Best-effort: a dead/wedged writer or a gone row just leaves the shard dirty,
-%% which a rebuild on the next open recovers. On an ephemeral (ets) index the
-%% flag is wiped with the table on restart — harmless (the index rebuilds).
-flush_and_mark_clean(NS, Name, Shard, Writers) ->
-    case maps:get(Shard, Writers, undefined) of
-        Pid when is_pid(Pid) ->
-            _ =
-                try
-                    bondy_oplog_secondary_writer:flush_sync(Pid)
-                catch
-                    _:_ -> ok
-                end;
-        _ ->
-            ok
-    end,
+%% Register an index shard and start or join the writer for its `writer_key`.
+%% Holds the key's lock, so the join cannot land between a concurrent
+%% `leave_index_writer/3` finding the key unused and stopping its writer
+%% (`bondy_db_shared_writer_test:open_during_last_close_of_writer_key/1`). A
+%% writer already running for the key adopted its streams before this row
+%% existed, so the row is stamped here.
+join_index_writer(NS, Name, Shard, Config, WriterKey) ->
+    with_writer_key(WriterKey, fun() ->
+        maybe
+            ok ?= bondy_oplog_core_registry:register(NS, Name, Shard, Config),
+            {ok, Pid} ?=
+                start_index_writer(NS, Name, Shard, #{
+                    writer_key => WriterKey, shard => Shard
+                }),
+            _ = bondy_oplog_core_registry:set_writer_pid(NS, Name, Shard, Pid),
+            {ok, Pid}
+        end
+    end).
+
+%% @private
+start_index_writer(NS, Name, Shard, Args) ->
+    case bondy_oplog_secondary_sup:start_writer(Args) of
+        {ok, _} = Ok ->
+            Ok;
+        {error, _} = Err ->
+            _ = bondy_oplog_core_registry:unregister(NS, Name, Shard),
+            Err
+    end.
+
+%% @private
+%% Unregister an index shard, and stop its writer once no registered shard
+%% references the `writer_key`, under the key's lock. A row already gone (an
+%% idempotent re-teardown) had its writer handled when it went.
+leave_index_writer(NS, Name, Shard) ->
     case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
         {ok, Entry} ->
-            bondy_oplog_core_registry:index_mark_clean(Entry);
-        _ ->
+            WriterKey = bondy_oplog_core_registry:entry_writer_key(Entry),
+            with_writer_key(WriterKey, fun() ->
+                _ = bondy_oplog_core_registry:unregister(NS, Name, Shard),
+                case bondy_oplog_core_registry:writer_key_in_use(WriterKey) of
+                    true -> ok;
+                    false -> bondy_oplog_secondary_sup:stop_writer(WriterKey)
+                end
+            end);
+        not_found ->
             ok
+    end.
+
+%% @private
+with_writer_key(WriterKey, Fun) ->
+    global:trans({{?MODULE, writer_key, WriterKey}, self()}, Fun, [node()]).
+
+%% @private
+%% Stamp the durable clean-shutdown flag only when every op dispatched to the
+%% shard reached its projection: the registry's current writer flushed, and no
+%% dispatch is left in flight (an op cast to a writer that died leaves its
+%% reservation behind until a rebuild resets it). Otherwise the shard stays
+%% dirty and the next open rebuilds it (`bondy_db_index_lag_test`:
+%% `close_after_writer_restart_keeps_buffered_ops/1`,
+%% `close_before_rebuild_keeps_lost_ops/1`).
+flush_and_mark_clean(NS, Name, Shard) ->
+    maybe
+        {ok, Entry} ?= bondy_oplog_core_registry:lookup(NS, Name, Shard),
+        ok ?= flush_index_writer(Entry),
+        0 ?= bondy_oplog_core_registry:index_inflight(Entry),
+        bondy_oplog_core_registry:index_mark_clean(Entry)
+    else
+        _ -> ok
+    end.
+
+%% @private
+flush_index_writer(Entry) ->
+    case bondy_oplog_core_registry:entry_writer_pid(Entry) of
+        Pid when is_pid(Pid) ->
+            try
+                bondy_oplog_secondary_writer:flush_sync(Pid)
+            catch
+                exit:Reason -> {error, Reason}
+            end;
+        undefined ->
+            {error, no_writer}
     end.
 
 %% @private

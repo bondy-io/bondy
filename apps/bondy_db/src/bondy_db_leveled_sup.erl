@@ -39,26 +39,41 @@ them.
   _)` — without threading any topology state between `open_table`
   calls.
 
+## Keyed Bookies open concurrently
+
+Each keyed Bookie lives under its own per-key supervisor, a `temporary`,
+`significant` child of the pool (this module's second `init/1` clause).
+A supervisor runs a child's start function inside its own process
+(`supervisor:handle_start_child/2`), and leveled replays its journal in
+`init/1`, so Bookies started through one supervisor open one at a time.
+Through one supervisor per key they open concurrently: callers of
+`get_or_start_bookie/3` for different keys do not wait on each other
+(`bondy_db_leveled_sup_test`, which holds every open at a gate).
+
 ## Crash recovery (keyed Bookies)
 
-A **keyed** Bookie is `permanent`: leveled acks a put only after the
-journal write, so a reopen replays the journal and recovers every acked
-write — restarting in place is safe and strictly better than leaving the
-shard dead. The restarted Bookie has a NEW pid, so keyed children are
-started through `start_registered/3`, which publishes the pid under the
-`persistent_term` key `{bondy_db_bookie, Sup, Key}` on every (re)start.
-Routing handles carry `{pt, PTKey}` instead of the raw pid
-(`bookie_ref/2`) and `bondy_db_projection_leveled` resolves it per call,
-so readers and the applier follow a restart with no handle rewiring.
+A **keyed** Bookie is `permanent` under its per-key supervisor: leveled
+acks a put only after the journal write, so a reopen replays the journal
+and recovers every acked write — restarting in place is safe and strictly
+better than leaving the shard dead. The restarted Bookie has a NEW pid, so
+keyed children are started through `start_registered/3`, which publishes
+the pid under the `persistent_term` key `{bondy_db_bookie, Sup, Key}` on
+every (re)start. Routing handles carry `{pt, PTKey}` instead of the raw
+pid (`bookie_ref/2`) and `bondy_db_projection_leveled` resolves it per
+call, so readers and the applier follow a restart with no handle rewiring.
 This is the plum_db partition-store model; Riak's lazy vnode-proxy
 restart was rejected (it fits dynamic ownership this design lacks).
 
 A crash-LOOP (e.g. a corrupted store that dies on every reopen) exhausts
-the supervisor's restart intensity — sized to tolerate a few slow leveled
-reopens, not a tight loop — and fells the supervisor. The owner
-(`bondy_namespace_catalog` for the main DB) links it and stops on its
-EXIT, escalating the failure up the OTP tree instead of serving a
-silently dead shard.
+the per-key supervisor's restart intensity — sized to tolerate a few slow
+leveled reopens, not a tight loop, and counted per key. That supervisor
+then exits, and because it is `significant` the pool shuts down with it
+(`auto_shutdown => any_significant`). The owner
+(`bondy_namespace_catalog` for the main DB) links the pool and stops on
+its EXIT, escalating the failure up the OTP tree instead of serving a
+silently dead shard. `stop_bookie/2` removes a per-key supervisor with
+`supervisor:terminate_child/2`, which does not count as the child exiting
+by itself and so leaves the pool running (`bondy_db_leveled_sup_test`).
 
 **Anonymous** Bookies (`start_bookie/2`; the `single_bookie` /
 `per_entity` topologies, which stash the raw pid in their own state)
@@ -82,6 +97,7 @@ down.
 -export([stop_bookie/2]).
 -export([bookie_ref/2]).
 -export([bookie_count/1]).
+-export([bookies/1]).
 
 %% Child start callback (keyed Bookies) — not part of the public API.
 -export([start_registered/3]).
@@ -101,7 +117,7 @@ down.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 
 start_link() ->
-    supervisor:start_link(?MODULE, []).
+    supervisor:start_link(?MODULE, pool).
 
 -doc """
 Stop the supervisor and every Bookie it owns. Returns `ok` once every
@@ -219,6 +235,9 @@ which the first call fixed). This is how
 table in the DB: the supervisor — itself shared via `topology_opts.sup`
 — is the registry, so no topology state needs threading between
 `open_table/4` calls.
+
+On `{error, _}` the key's supervisor stays, empty: a later call retries
+the start in it, and `stop_bookie/2` removes it.
 """.
 -spec get_or_start_bookie(
     Sup :: pid(),
@@ -227,10 +246,11 @@ table in the DB: the supervisor — itself shared via `topology_opts.sup`
 ) -> {ok, pid()} | {error, term()}.
 
 get_or_start_bookie(Sup, Key, Opts) when is_pid(Sup), is_list(Opts) ->
-    case supervisor:start_child(Sup, keyed_child_spec(Sup, Key, Opts)) of
-        {ok, Pid} -> {ok, Pid};
-        {error, {already_started, Pid}} -> {ok, Pid};
-        {error, _} = Err -> Err
+    maybe
+        {ok, KeySup} ?= started(supervisor:start_child(Sup, key_sup_spec(Key))),
+        started(
+            supervisor:start_child(KeySup, keyed_child_spec(Sup, Key, Opts))
+        )
     end.
 
 -doc """
@@ -286,36 +306,51 @@ between tables sharing the pool.
 -spec bookie_count(Sup :: pid()) -> non_neg_integer().
 
 bookie_count(Sup) when is_pid(Sup) ->
-    %% Filter by module: this supervisor also owns a `journal_trimmer`
-    %% child, which is not a Bookie.
-    length([
-        Pid
-     || {_Id, Pid, _Type, Mods} <- supervisor:which_children(Sup),
-        is_pid(Pid),
-        Mods =:= [leveled_bookie]
+    length(bookies(Sup)).
+
+-doc """
+The live Bookies the pool owns: anonymous ones, and keyed ones under their
+per-key supervisors.
+""".
+-spec bookies(Sup :: pid()) -> [pid()].
+
+bookies(Sup) when is_pid(Sup) ->
+    lists:append([
+        child_bookies(Pid, Type, Mods)
+     || {_Id, Pid, Type, Mods} <- supervisor:which_children(Sup),
+        is_pid(Pid)
     ]).
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
 
-init([]) ->
-    %% `one_for_one` (not `simple_one_for_one`) so children carry stable,
-    %% caller-chosen ids — the precondition for `get_or_start_bookie/3`'s
-    %% idempotent keying. Intensity is sized for leveled REOPENS, not tight
-    %% loops: a restart replays the journal (seconds on a large store), so 5
-    %% restarts in 60s already indicates a store that cannot stay up — the
-    %% supervisor then dies and the owner escalates (see moduledoc).
+init(key) ->
+    %% Intensity is sized for leveled REOPENS, not tight loops: a restart
+    %% replays the journal (seconds on a large store), so 5 restarts in 60s
+    %% already indicates a store that cannot stay up — this supervisor then
+    %% exits and takes the pool with it (see moduledoc).
     SupFlags = #{
         strategy => one_for_one,
         intensity => 5,
         period => 60
     },
+    {ok, {SupFlags, []}};
+init(pool) ->
+    %% `one_for_one` (not `simple_one_for_one`) so children carry stable,
+    %% caller-chosen ids — the precondition for `get_or_start_bookie/3`'s
+    %% idempotent keying.
+    SupFlags = #{
+        strategy => one_for_one,
+        intensity => 5,
+        period => 60,
+        auto_shutdown => any_significant
+    },
     %% The journal trimmer is this supervisor's own child, started here
     %% rather than by each topology, so every Bookie pool gets exactly one
     %% without threading anything through the three topology modules. It
-    %% enumerates its siblings via `which_children/1` — `init/1` runs in
-    %% the supervisor process, so `self()` is the pid it needs. Bookies are
+    %% enumerates the pool through `bookies/1` — `init/1` runs in the
+    %% supervisor process, so `self()` is the pid it needs. Bookies are
     %% `head_only`, where nothing in leveled reclaims journal disk on its
     %% own; see `bondy_db_journal_trimmer`.
     Trimmer = #{
@@ -342,7 +377,7 @@ child_spec(Id, Opts) ->
         %% the same start plus the archived-file sweep. `modules` stays
         %% `[leveled_bookie]`: it declares the callback module for code
         %% change, and is also what identifies Bookies among this
-        %% supervisor's children (see `bookie_count/1`).
+        %% supervisor's children (see `bookies/1`).
         start => {?MODULE, book_start, [Opts]},
         restart => temporary,
         shutdown => 30_000,
@@ -387,6 +422,43 @@ sweep_archived(RootPath) ->
             deleted => Deleted
         }),
     Deleted.
+
+%% @private
+%% The per-key supervisor, under the pool. `temporary` + `significant`: it
+%% is never restarted, and its exit takes the pool down (see moduledoc).
+key_sup_spec(Key) ->
+    #{
+        id => Key,
+        start => {supervisor, start_link, [?MODULE, key]},
+        restart => temporary,
+        significant => true,
+        shutdown => infinity,
+        type => supervisor,
+        modules => [?MODULE]
+    }.
+
+%% @private
+started({ok, Pid}) -> {ok, Pid};
+started({error, {already_started, Pid}}) -> {ok, Pid};
+started({error, _} = Err) -> Err.
+
+%% @private
+child_bookies(Pid, worker, [leveled_bookie]) ->
+    [Pid];
+child_bookies(KeySup, supervisor, [?MODULE]) ->
+    %% A per-key supervisor can exit between being listed and being asked.
+    try supervisor:which_children(KeySup) of
+        Children ->
+            [
+                Pid
+             || {_Id, Pid, worker, [leveled_bookie]} <- Children,
+                is_pid(Pid)
+            ]
+    catch
+        exit:_ -> []
+    end;
+child_bookies(_Pid, _Type, _Mods) ->
+    [].
 
 %% @private
 %% Keyed child: permanent, started through `start_registered/3` so every

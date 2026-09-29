@@ -1152,16 +1152,17 @@ fast_wal_append_batch_to({disk, WalPid}, Events) ->
 %% One disk-WAL batch append with the writer-death exits normalised to
 %% `{error, wal_unavailable}` — shared by the caller-side fast path
 %% (registry-resolved pid) and the gen_server's `do_append_local/4`
-%% (cached, monitored pid).
+%% (cached, monitored pid). A call that exits, whatever the writer's stop
+%% reason, may have written its frame; the writer's exit restarts this
+%% instance's subtree, which seeds the seq counter above every frame the
+%% recovered log holds (`bondy_oplog_seq_seed_restart_test`).
 wal_append_batch(WalPid, Events) ->
     try bondy_oplog_wal:append_batch(WalPid, Events) of
         {ok, _Entries} -> ok;
         {error, _} = Err -> Err
     catch
-        exit:{noproc, _} -> {error, wal_unavailable};
         exit:noproc -> {error, wal_unavailable};
-        exit:{normal, _} -> {error, wal_unavailable};
-        exit:{shutdown, _} -> {error, wal_unavailable}
+        exit:{_, {gen_server, call, [WalPid | _]}} -> {error, wal_unavailable}
     end.
 
 ?DOC("""
@@ -2328,6 +2329,7 @@ open_drain_gate(InstanceId) when is_binary(InstanceId) ->
             %% race to gate.
             ok;
         _ ->
+            ok = bondy_oplog_instance_keeper:release_drain_gate(InstanceId),
             case bondy_oplog_registry:applier_pid(InstanceId) of
                 undefined ->
                     {error, instance_not_running};
@@ -2803,10 +2805,12 @@ init({InstanceId, Opts}) ->
     %% outlived a one_for_all restart) is overwritten. Symmetric with
     %% `set_wal_pid/2` / `set_applier_pid/2`.
     ok = bondy_oplog_registry:set_overlay_tab(InstanceId, Overlay),
-    %% Publish the substrate read-side AE targets. Top-level instance opt;
-    %% immutable for the instance's lifetime. Validation is deferred to
-    %% startup: a malformed list crashes init before any peer can interact.
-    AeTargets = validate_ae_targets(maps:get(ae_targets, Opts, [])),
+    %% Publish the substrate read-side AE targets: the opt plus every table
+    %% registered against this instance. Validation is deferred to startup: a
+    %% malformed list crashes init before any peer can interact.
+    AeTargets = bondy_oplog_core_registry:instance_ae_targets(
+        InstanceId, validate_ae_targets(maps:get(ae_targets, Opts, []))
+    ),
     ok = bondy_oplog_registry:set_ae_targets(InstanceId, AeTargets),
     %% Restore the applied-frontier convergence oracle (`#{Origin => max Seq}`)
     %% from the compaction checkpoint — the COMPACTED prefix's maxima (events
@@ -2939,9 +2943,9 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
         %% the live MST, `undefined` when it does not. Paired with the
         %% `fused_replay` kick below, which is then a cheap `no_change`.
         last_replayed_root = compute_replay_anchor(State),
-        %% Already validated at `init/1` (`validate_ae_targets/1`, which
-        %% runs before this); the fused commit + remote replay bump them.
-        ae_targets = maps:get(ae_targets, Opts, []),
+        %% Published at `init/1`, which runs before this; the fused commit +
+        %% remote replay bump them.
+        ae_targets = bondy_oplog_registry:ae_targets(State#state.instance_id),
         %% Reached here only for fused instances; the supervisor has already
         %% gated `mem` on `fused`. Anything other than `mem` is the disk WAL.
         wal_backend =

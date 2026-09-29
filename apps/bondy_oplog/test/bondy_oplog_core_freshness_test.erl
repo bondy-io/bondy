@@ -35,7 +35,7 @@ freshness_test_() ->
         fun re_register_demonitors_previous_owner/0,
         fun explicit_owner_decouples_from_caller/0,
         fun register_missing_required_field_returns_error/0,
-        fun registry_crash_loses_all_registrations/0,
+        fun registry_crash_keeps_registrations/0,
         fun owner_down_does_not_call_adapter_close/0
     ]}.
 
@@ -280,34 +280,23 @@ register_missing_required_field_returns_error() ->
     %% Registry is still alive and serving.
     ?assert(is_pid(whereis(bondy_oplog_core_registry))).
 
-registry_crash_loses_all_registrations() ->
-    %% Pin the documented operational gap: a registry crash wipes all
-    %% in-memory state. Owners must re-register; the substrate does not
-    %% recover automatically.
+%% The row a crashed registry comes back with is the one registered before,
+%% freshness atomics included, so the owner and appliers holding them need
+%% not register again.
+registry_crash_keeps_registrations() ->
     NS = mk_ns(),
     {Setup, _} = setup_shard(NS, primary, 0, 1, lww_register),
-    ?assertMatch({ok, _}, bondy_oplog_core_registry:lookup(NS, primary, 0)),
+    {ok, Before} = bondy_oplog_core_registry:lookup(NS, primary, 0),
     OldPid = whereis(bondy_oplog_core_registry),
     OldMon = erlang:monitor(process, OldPid),
     exit(OldPid, kill),
     receive
         {'DOWN', OldMon, process, OldPid, killed} -> ok
     end,
-    %% Wait for the supervisor to restart the registry.
     ok = wait_for_registry_restart(OldPid, 50),
-    %% Previously registered shard is gone — no recovery.
-    ?assertEqual(not_found, bondy_oplog_core_registry:lookup(NS, primary, 0)),
-    %% Re-registering succeeds against the fresh table.
-    ok = bondy_oplog_core_registry:register(NS, primary, 0, #{
-        shard_count => 1,
-        cache_adapter => maps:get(cache_adapter, Setup, bondy_oplog_cache_ets),
-        cache_handle => maps:get(cache_handle, Setup),
-        projection_adapter => bondy_oplog_projection_ets,
-        projection_handle => maps:get(projection, Setup),
-        overlay => maps:get(overlay, Setup),
-        fold_module => lww_register
-    }),
-    ?assertMatch({ok, _}, bondy_oplog_core_registry:lookup(NS, primary, 0)),
+    ?assertEqual(
+        {ok, Before}, bondy_oplog_core_registry:lookup(NS, primary, 0)
+    ),
     teardown_shard(Setup).
 
 owner_down_does_not_call_adapter_close() ->

@@ -51,6 +51,7 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `MuxBucketSkip.tla` | Can the applied-frontier VV claim an event whose cell was never installed because its BUCKET had no context? Two independent channels — the fold and the bootstrap adoption — and which mechanisms are load-bearing for each. |
 | `FrontierPending.tla` | Can the applied frontier be maintained by ONE INTEGER per origin, given that batch boundaries are set by drain timing? Which of the three claim rules survives restarts, the compaction door and every interleaving? |
 | `ConfirmedCompaction.tla` | Is a peer's recorded ROOT the right witness for what it holds? Does confirmed compaction converge, and do the compaction sites honour the watermark door's hold? |
+| `RibCountReap.tla` | Does a registry RIB cell's `count` settle on its owner's live registrations when the owner reboots under a new origin and both `self_heal` and the `force_reap` reap act on the old one? |
 
 ## Scope
 

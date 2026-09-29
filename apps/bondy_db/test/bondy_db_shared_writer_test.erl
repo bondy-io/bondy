@@ -36,7 +36,16 @@ shared_writer_test_() ->
             "independent_index_projections",
             fun independent_index_projections/1
         ),
-        gen("refcounted_writer_teardown", fun refcounted_writer_teardown/1)
+        gen("refcounted_writer_teardown", fun refcounted_writer_teardown/1),
+        gen(
+            "secondary_sup_restart_keeps_writers",
+            fun secondary_sup_restart_keeps_writers/1
+        ),
+        gen("one_writer_per_writer_key", fun one_writer_per_writer_key/1),
+        gen(
+            "open_during_last_close_of_writer_key",
+            fun open_during_last_close_of_writer_key/1
+        )
     ]}.
 
 gen(Title, Fn) ->
@@ -214,9 +223,156 @@ refcounted_writer_teardown({_Db, Users, Groups, _Sup, _Dir}) ->
     ),
     ?assert(lists:all(fun(P) -> not is_process_alive(P) end, Shared)).
 
+%% A restart of `bondy_oplog_secondary_sup` (here a kill; in production the
+%% exhaustion of its restart intensity) takes every writer with it. The
+%% restarted supervisor must drive every registered index shard again, and the
+%% write made while no writer ran must reach the index through the rebuild.
+%% Covers a single restart; a crash loop that exhausts `bondy_oplog_sup` too is
+%% not exercised.
+secondary_sup_restart_keeps_writers({_Db, Users, Groups, _Sup, _Dir}) ->
+    R = <<"r1">>,
+    populate(Users, <<"u">>),
+    populate(Groups, <<"g">>),
+    ok = flush_index(Users, by_value),
+    ok = flush_index(Groups, by_value),
+    Before = lists:usort(maps:values(writer_pids(Users, by_value))),
+
+    ok = sys:suspend(bondy_oplog_sup),
+    SecSup = whereis(bondy_oplog_secondary_sup),
+    Ref = monitor(process, SecSup),
+    exit(SecSup, kill),
+    receive
+        {'DOWN', Ref, process, SecSup, _} -> ok
+    end,
+    ok = bondy_db:apply(
+        Users, R, <<"gap">>, {set, bondy_db:tick(Users), <<"gap">>}
+    ),
+    ok = sys:resume(bondy_oplog_sup),
+    ok = wait_until(
+        fun() ->
+            New = whereis(bondy_oplog_secondary_sup),
+            is_pid(New) andalso New =/= SecSup
+        end,
+        200
+    ),
+
+    lists:foreach(
+        fun(Table) ->
+            Pids = lists:usort(maps:values(writer_pids(Table, by_value))),
+            ?assertEqual(?SHARDS, length(Pids)),
+            ?assert(lists:all(fun erlang:is_process_alive/1, Pids)),
+            ?assertEqual([], Pids -- live_writers())
+        end,
+        [Users, Groups]
+    ),
+    ?assertNot(lists:any(fun erlang:is_process_alive/1, Before)),
+
+    ok = bondy_db:apply(
+        Groups, R, <<"after">>, {set, bondy_db:tick(Groups), <<"after">>}
+    ),
+    ok = flush_index(Groups, by_value),
+    ?assertEqual(
+        {ok, [{<<"after">>, #{}}]},
+        bondy_db:index_get(Groups, R, by_value, <<"after">>, #{})
+    ),
+    ?assertEqual(
+        ok,
+        wait_until(
+            fun() ->
+                {ok, [{<<"gap">>, #{}}]} =:=
+                    bondy_db:index_get(Users, R, by_value, <<"gap">>, #{})
+            end,
+            500
+        )
+    ).
+
+%% Starting a writer for a `writer_key` that already has one returns the
+%% running writer rather than a second process for the same streams.
+one_writer_per_writer_key({_Db, Users, _Groups, _Sup, _Dir}) ->
+    #{0 := Pid} = writer_pids(Users, by_value),
+    NS = maps:get(namespace, bondy_db:info(Users)),
+    {ok, Entry} = bondy_oplog_core_registry:lookup(NS, by_value, 0),
+    WriterKey = bondy_oplog_core_registry:entry_writer_key(Entry),
+    Live = live_writers(),
+    ?assertEqual(
+        {ok, Pid},
+        bondy_oplog_secondary_sup:start_writer(
+            #{writer_key => WriterKey, shard => 0}
+        )
+    ),
+    ?assertEqual(Live, live_writers()).
+
+%% Opening a table whose index shards share a `writer_key` with a table whose
+%% close is stopping that key's writer. The close is held inside the stop (its
+%% `terminate_child` call waits on the suspended supervisor), after it found the
+%% key unused, and the open is let run until it blocks too. Covers this one
+%% interleaving; an open that reaches the supervisor before the stop is not
+%% forced.
+open_during_last_close_of_writer_key({Db, Users, Groups, _Sup, _Dir}) ->
+    ok = bondy_db:close_table(Groups),
+    SecSup = whereis(bondy_oplog_secondary_sup),
+    ok = sys:suspend(SecSup),
+    Self = self(),
+    _ = spawn_link(fun() -> Self ! {closed, bondy_db:close_table(Users)} end),
+    ok = wait_until(fun() -> queue_len(SecSup) >= 1 end, 200),
+    %% The opener owns the table's registry rows, so it lives until the checks
+    %% below are done.
+    Opener = spawn_link(fun() ->
+        Self ! {opened, bondy_db:open_table(Db, groups, groups_opts())},
+        receive
+            {close, T} -> Self ! {closed_again, bondy_db:close_table(T)}
+        end
+    end),
+    _ = wait_until(fun() -> queue_len(SecSup) >= 2 end, 30),
+    ok = sys:resume(SecSup),
+    Closed =
+        receive
+            {closed, C} -> C
+        after 30000 -> timeout
+        end,
+    Opened =
+        receive
+            {opened, O} -> O
+        after 30000 -> timeout
+        end,
+    ?assertEqual(ok, Closed),
+    ?assertMatch({ok, _}, Opened),
+    {ok, Groups1} = Opened,
+    Pids = maps:values(writer_pids(Groups1, by_value)),
+    ?assert(lists:all(fun erlang:is_process_alive/1, Pids)),
+    ok = bondy_db:apply(
+        Groups1, <<"r1">>, <<"k">>, {set, bondy_db:tick(Groups1), <<"v">>}
+    ),
+    ok = flush_index(Groups1, by_value),
+    ?assertEqual(
+        {ok, [{<<"k">>, #{}}]},
+        bondy_db:index_get(Groups1, <<"r1">>, by_value, <<"v">>, #{})
+    ),
+    Opener ! {close, Groups1},
+    receive
+        {closed_again, ok} -> ok
+    end.
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+queue_len(Pid) ->
+    {message_queue_len, N} = process_info(Pid, message_queue_len),
+    N.
+
+groups_opts() ->
+    #{
+        fold_module => lww_register,
+        indexes => [#{name => by_value, extract => []}]
+    }.
+
+live_writers() ->
+    lists:sort([
+        P
+     || {_, P, _, _} <- supervisor:which_children(bondy_oplog_secondary_sup),
+        is_pid(P)
+    ]).
 
 populate(Table, Tag) ->
     R = <<"r1">>,

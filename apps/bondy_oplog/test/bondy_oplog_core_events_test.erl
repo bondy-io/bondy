@@ -7,10 +7,7 @@
 %%   - duplicate subscribe is idempotent
 %%   - `unsubscribe/1` cleanly removes
 %%   - subscriber DOWN auto-removes the row
-%%   - the registry broadcasts a fresh epoch on every (re)start
 %%   - the dispatcher broadcasts a fresh epoch on every (re)start
-%%   - `current_epoch/0` returns the latest broadcast value
-%%   - registry restart wakes subscribers (and the new epoch differs)
 %% =============================================================================
 
 -module(bondy_oplog_core_events_test).
@@ -31,10 +28,7 @@ events_test_() ->
         fun other_topic_does_not_match/0,
         fun duplicate_subscribe_is_idempotent/0,
         fun subscriber_down_auto_removes/0,
-        fun registry_emits_started_at_init/0,
-        fun dispatcher_emits_started_at_init/0,
-        fun current_epoch_matches_broadcast/0,
-        fun registry_restart_changes_epoch_and_wakes_subscribers/0
+        fun dispatcher_emits_started_at_init/0
     ]}.
 
 %% =============================================================================
@@ -102,37 +96,9 @@ subscriber_down_auto_removes() ->
 %% Substrate restart-recovery protocol
 %% =============================================================================
 
-registry_emits_started_at_init() ->
-    %% By this point the registry is already started (app:ensure_all_started),
-    %% so we observe an epoch via current_epoch/0 and assert it is a ref.
-    Epoch = bondy_oplog_core_registry:current_epoch(),
-    ?assert(is_reference(Epoch)).
-
 dispatcher_emits_started_at_init() ->
     Epoch = bondy_oplog_core_dispatcher:current_epoch(),
     ?assert(is_reference(Epoch)).
-
-current_epoch_matches_broadcast() ->
-    %% Subscribe to the started topic, then force a restart of the
-    %% registry. The broadcast payload must equal what `current_epoch/0`
-    %% returns after the restart settles.
-    ok = bondy_oplog_core_events:subscribe(bondy_oplog_core_registry_started),
-    Before = bondy_oplog_core_registry:current_epoch(),
-    ok = kill_and_wait(bondy_oplog_core_registry),
-    Payload = expect_event(bondy_oplog_core_registry_started, 500),
-    After = bondy_oplog_core_registry:current_epoch(),
-    ?assertNotEqual(Before, After),
-    ?assertEqual(Payload, After),
-    bondy_oplog_core_events:unsubscribe(bondy_oplog_core_registry_started).
-
-registry_restart_changes_epoch_and_wakes_subscribers() ->
-    ok = bondy_oplog_core_events:subscribe(bondy_oplog_core_registry_started),
-    Before = bondy_oplog_core_registry:current_epoch(),
-    ok = kill_and_wait(bondy_oplog_core_registry),
-    After = expect_event(bondy_oplog_core_registry_started, 500),
-    ?assertNotEqual(Before, After),
-    ?assert(is_reference(After)),
-    bondy_oplog_core_events:unsubscribe(bondy_oplog_core_registry_started).
 
 %% =============================================================================
 %% Helpers
@@ -156,32 +122,4 @@ try_expect_event(Topic, TimeoutMs) ->
         {bondy_oplog_core_event, Topic, Payload} -> Payload
     after TimeoutMs ->
         timeout
-    end.
-
-%% Kill a registered gen_server and wait for the supervisor to restart
-%% it so subsequent calls hit the new pid.
-kill_and_wait(Name) ->
-    OldPid = whereis(Name),
-    true = is_pid(OldPid),
-    OldRef = erlang:monitor(process, OldPid),
-    exit(OldPid, kill),
-    receive
-        {'DOWN', OldRef, process, OldPid, _} -> ok
-    after 1000 ->
-        erlang:error({did_not_die, Name})
-    end,
-    wait_for_register(Name, OldPid, 20).
-
-wait_for_register(Name, OldPid, 0) ->
-    erlang:error({did_not_restart, Name, OldPid});
-wait_for_register(Name, OldPid, Attempts) ->
-    case whereis(Name) of
-        undefined ->
-            timer:sleep(25),
-            wait_for_register(Name, OldPid, Attempts - 1);
-        OldPid ->
-            timer:sleep(25),
-            wait_for_register(Name, OldPid, Attempts - 1);
-        _Other ->
-            ok
     end.

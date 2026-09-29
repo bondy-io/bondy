@@ -31,8 +31,9 @@ Children, in start order:
 | `bondy_oplog_sync_scheduler`     | `gen_server`; optional default scheduler |
 | `bondy_oplog_gc_scheduler`       | `gen_server`; optional default scheduler |
 | `bondy_oplog_index_rebuild`      | `gen_server`; serialised secondary-index rebuild orchestrator |
-| `bondy_oplog_secondary_sup`      | `simple_one_for_one`; spawns per-(NS,Index,Shard) index writers |
+| `bondy_oplog_secondary_sup`      | `one_for_one`; one index writer per `writer_key`, rebuilt from the core registry |
 | `bondy_oplog_instance_dyn_sup`   | `simple_one_for_one`; spawns per-instance workers |
+| `bondy_oplog_instance_keeper`   | `gen_server`; starts a stopped instance again |
 
 Strategy is `one_for_one`: a singleton crash does not cascade across
 the others. In particular, peer state crashing must not take running
@@ -101,6 +102,7 @@ init([]) ->
             shutdown => infinity,
             type => supervisor,
             modules => [bondy_oplog_instance_dyn_sup]
-        }
+        },
+        bondy_oplog_instance_keeper:child_spec()
     ],
     {ok, {SupFlags, ChildSpecs}}.

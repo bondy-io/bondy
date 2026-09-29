@@ -1633,22 +1633,21 @@ is_prefix(Read, Events) ->
 %% P14 — failed fsync (fault injection)
 %% =============================================================================
 
-%% P14. A failed `prim_file:datasync/1` in the writer's per_write fsync
+%% P14. A failed `bondy_mst_io:datasync/1` in the writer's per_write fsync
 %% path must:
 %%
-%%   (a) Surface as `{error, _}` to the caller of `append/2` /
-%%       `append_batch/2`.
-%%   (b) Not advance `durable_offset` past the failed fsync's
-%%       boundary — the durable view stays at the last successful
-%%       fsync.
-%%   (c) Leave the writer process alive and serving subsequent calls
-%%       (info/1, close/1, etc.).
+%%   (a) Surface as `{error, {datasync_failed, _}}` to the caller whose
+%%       append it was.
+%%   (b) Stop the writer, so no later append is acknowledged by a process
+%%       whose state no longer describes the file.
+%%   (c) Leave a directory that reopens: the durable offset does not
+%%       shrink below what was acknowledged before the fault, the head is
+%%       at or past it, and the reopened writer accepts an append.
 %%
-%% Implementation: mock `bondy_mst_io:datasync/1` to return
-%% `{error, eio}` after a configurable number of successful calls. The
-%% generator chooses how many appends to perform before flipping the
-%% switch, so each trial exercises both the "fsync still ok" path and
-%% the "fsync now fails" path.
+%% Implementation: the first `Half` appends run unmocked; then
+%% `bondy_mst_io:datasync/1` returns `{error, eio}` and the next append
+%% trips it. Recovery may keep the faulted frame (its bytes were written),
+%% so the reopened durable offset is not bounded from above.
 prop_failed_fsync() ->
     ?FORALL(
         N,
@@ -1664,9 +1663,6 @@ prop_failed_fsync() ->
             {ok, Pid} = bondy_oplog_wal:start_link(instance_id(), Opts),
             true = unlink(Pid),
             try
-                %% First half: succeed. Second half: fail. Keep the
-                %% warm-up unmocked so meck's tracing layer doesn't add
-                %% per-call overhead before we actually need the seam.
                 Half = max(1, N div 2),
                 {First, Rest} = lists:split(Half, Events),
                 FirstResults = [bondy_oplog_wal:append(Pid, E) || E <- First],
@@ -1677,95 +1673,50 @@ prop_failed_fsync() ->
                     end,
                     FirstResults
                 ),
-                InfoBefore = bondy_oplog_wal:info(Pid),
-                #{
-                    durable_offset := DurableBefore,
-                    durable_segment := DurSegBefore
-                } = InfoBefore,
-                %% Install meck under the wal_io fault lock — the lock
-                %% serialises any test that mocks `bondy_mst_io`,
-                %% which is necessary because `meck:new/2` swaps the
-                %% module in the VM-wide code server.
-                {FaultResults, Alive, Info2} = with_io_fault_lock(
+                #{durable_offset := DurableBefore} = bondy_oplog_wal:info(Pid),
+                Ref = monitor(process, Pid),
+                Fault = with_io_fault_lock(
                     fun() ->
                         ok = meck:expect(
                             bondy_mst_io,
                             datasync,
                             fun(_Fd) -> {error, eio} end
                         ),
-                        FaultRs = [bondy_oplog_wal:append(Pid, E) || E <- Rest],
-                        AliveBool = is_process_alive(Pid),
-                        Inf = bondy_oplog_wal:info(Pid),
-                        {FaultRs, AliveBool, Inf}
+                        safe_append(Pid, hd(Rest))
                     end
                 ),
-                FaultErrors = lists:all(
-                    fun
-                        ({error, eio}) -> true;
-                        (_) -> false
+                Stopped =
+                    receive
+                        {'DOWN', Ref, process, Pid, _} -> true
+                    after 5000 -> false
                     end,
-                    FaultResults
-                ),
-                DurableUnchanged =
-                    maps:get(durable_offset, Info2) =:= DurableBefore andalso
-                        maps:get(durable_segment, Info2) =:=
-                            DurSegBefore,
-                %% E8 — reopen invariant. The fault path pwrite'd the
-                %% bytes but the writer held `durable_offset` back
-                %% because no datasync completed. After close + reopen,
-                %% recovery scans the segment, CRC-verifies every frame,
-                %% and the in-memory state must reflect what is actually
-                %% on disk (WAL_DESIGN §16.3 (b)).
-                try
-                    _ = bondy_oplog_wal:close(Pid)
-                catch
-                    _:_ -> ok
-                end,
                 {ReopenOk, ReopenDurable, ReopenHead, PostReopenAppendOk} = reopen_and_probe(
                     Opts, HLC
                 ),
-                %% After reopen, the WAL_DESIGN §16.3 (b) invariant is:
-                %% "in-memory state consistent with on-disk". Concretely:
-                %%   1. `durable_offset` must not shrink — every ACK'd
-                %%      append from before the fault is still durable.
-                %%   2. `head_offset >= durable_offset` (the writer's
-                %%      authoritative position is at or beyond what is
-                %%      durable on disk).
-                %% Recovery's break-and-truncate may legitimately accept
-                %% fault-path frames that pwrite'd successfully (their
-                %% CRCs pass) and push durable past where the writer's
-                %% in-memory head was, so we do *not* bound durable from
-                %% above against the pre-reopen head — the disk is the
-                %% source of truth and may legitimately contain more.
-                ReopenDurableSafe = ReopenDurable >= DurableBefore,
-                ReopenHeadSafe = ReopenHead >= ReopenDurable,
                 ?WHENFAIL(
                     io:format(
                         user,
                         "prop_failed_fsync failed: N=~p FirstOk=~p "
-                        "FaultErrors=~p Alive=~p DurableUnchanged=~p "
-                        "DurableBefore=~p Info2=~p ReopenOk=~p "
+                        "Fault=~p Stopped=~p DurableBefore=~p ReopenOk=~p "
                         "ReopenDurable=~p ReopenHead=~p "
                         "PostReopenAppendOk=~p~n",
                         [
                             N,
                             FirstOk,
-                            FaultErrors,
-                            Alive,
-                            DurableUnchanged,
+                            Fault,
+                            Stopped,
                             DurableBefore,
-                            Info2,
                             ReopenOk,
                             ReopenDurable,
                             ReopenHead,
                             PostReopenAppendOk
                         ]
                     ),
-                    FirstOk andalso FaultErrors andalso
-                        Alive andalso DurableUnchanged andalso
-                        ReopenOk andalso
-                        ReopenDurableSafe andalso
-                        ReopenHeadSafe andalso
+                    FirstOk andalso
+                        Fault =:= {error, {datasync_failed, eio}} andalso
+                        Stopped andalso ReopenOk andalso
+                        ReopenDurable >= DurableBefore andalso
+                        ReopenHead >= ReopenDurable andalso
                         PostReopenAppendOk
                 )
             after
@@ -1782,20 +1733,12 @@ prop_failed_fsync() ->
 %% P14 — failed fsync (batched-mode variant)
 %% =============================================================================
 
-%% P14 in batched mode. The per-append return contract differs from
-%% `per_write`: `append/2` returns `{ok, _, _}` even when the deferred
-%% datasync ultimately fails, because the durability promise is
-%% "fsync at some later boundary, retried on failure". The invariants
-%% under a sustained datasync fault are therefore:
-%%
-%%   (a) Appends still return `{ok, _, _}` — the failure is logged and
-%%       retried by the next `flush_tick`, not surfaced to the caller.
-%%   (b) `durable_offset` is held back — no datasync has completed, so
-%%       the writer cannot advance the durable boundary.
-%%   (c) `pending_fsync_bytes` stays > 0 — the un-fsync'd byte budget
-%%       is preserved for the next retry attempt.
-%%   (d) The writer stays alive across multiple failed `flush_tick`
-%%       firings.
+%% P14 in batched mode. `append/2` returns before the datasync, so appends
+%% made before the first failed datasync are acknowledged. The first
+%% `flush_tick` whose datasync fails must stop the writer rather than leave
+%% the bytes pending for a retry, and the directory must reopen and accept
+%% an append. An append that races the stop gets `{error, noproc}` or the
+%% stop reason; none may be acknowledged after the stop.
 prop_failed_fsync_batched() ->
     ?FORALL(
         N,
@@ -1803,10 +1746,6 @@ prop_failed_fsync_batched() ->
         with_wal_dir(fun(Dir) ->
             HLC = bondy_oplog_hlc:new(),
             Events = generate_events(HLC, N),
-            %% Short interval so the timer fires repeatedly inside the
-            %% test window. Size threshold is high so the *timer* is
-            %% what triggers fsync attempts (we are testing the
-            %% interval-retry semantics).
             Opts = #{
                 dir => Dir,
                 origin => origin(),
@@ -1816,52 +1755,51 @@ prop_failed_fsync_batched() ->
             },
             {ok, Pid} = bondy_oplog_wal:start_link(instance_id(), Opts),
             true = unlink(Pid),
+            Ref = monitor(process, Pid),
             try
-                {BatchResults, Alive, Info2} = with_io_fault_lock(
+                {Results, Stopped} = with_io_fault_lock(
                     fun() ->
                         ok = meck:expect(
                             bondy_mst_io,
                             datasync,
                             fun(_Fd) -> {error, eio} end
                         ),
-                        BR = [bondy_oplog_wal:append(Pid, E) || E <- Events],
-                        %% Sleep long enough that several `flush_tick`s
-                        %% have fired and been rejected.
-                        timer:sleep(200),
-                        AliveBool = is_process_alive(Pid),
-                        Inf = bondy_oplog_wal:info(Pid),
-                        {BR, AliveBool, Inf}
+                        Rs = [safe_append(Pid, E) || E <- Events],
+                        St =
+                            receive
+                                {'DOWN', Ref, process, Pid, _} -> true
+                            after 5000 -> false
+                            end,
+                        {Rs, St}
                     end
                 ),
-                BatchOk = lists:all(
+                {Oks, Rest} = lists:splitwith(
                     fun
                         ({ok, _, _}) -> true;
                         (_) -> false
                     end,
-                    BatchResults
+                    Results
                 ),
-                DurableHeldBack =
-                    maps:get(durable_offset, Info2) =< ?SEG_HEADER,
-                PendingHeld =
-                    maps:get(pending_fsync_bytes, Info2, 0) > 0,
+                NoAckAfterStop = lists:all(
+                    fun
+                        ({ok, _, _}) -> false;
+                        ({error, _}) -> true
+                    end,
+                    Rest
+                ),
+                {ReopenOk, _, _, PostReopenAppendOk} = reopen_and_probe(
+                    Opts, HLC
+                ),
                 ?WHENFAIL(
                     io:format(
                         user,
                         "prop_failed_fsync_batched failed: N=~p "
-                        "BatchOk=~p Alive=~p DurableHeldBack=~p "
-                        "PendingHeld=~p Info2=~p~n",
-                        [
-                            N,
-                            BatchOk,
-                            Alive,
-                            DurableHeldBack,
-                            PendingHeld,
-                            Info2
-                        ]
+                        "Results=~p Stopped=~p ReopenOk=~p "
+                        "PostReopenAppendOk=~p~n",
+                        [N, Results, Stopped, ReopenOk, PostReopenAppendOk]
                     ),
-                    BatchOk andalso Alive andalso
-                        DurableHeldBack andalso
-                        PendingHeld
+                    Oks =/= [] andalso NoAckAfterStop andalso Stopped andalso
+                        ReopenOk andalso PostReopenAppendOk
                 )
             after
                 try

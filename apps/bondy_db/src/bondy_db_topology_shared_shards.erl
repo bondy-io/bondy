@@ -229,63 +229,47 @@ ensure_shards(ShardCount, #{sup := Sup} = State) ->
     end.
 
 %% @private
+%% Shards start concurrently (see `bondy_db_leveled_sup`).
 get_or_start_shards(ShardCount, State) ->
-    case get_or_start_shards(0, ShardCount, State, #{}) of
-        {ok, Shards} ->
+    Results = bondy_db_topology:start_shards(
+        ShardCount, fun(I) -> get_or_start_shard(I, State) end
+    ),
+    case [Err || {_, {error, _} = Err} <- Results] of
+        [] ->
+            Shards = maps:from_list([{I, Ref} || {I, {ok, Ref}} <- Results]),
             {ok, Shards, State#{
                 shard_count := ShardCount,
                 shards := Shards
             }};
-        {error, _} = Err ->
-            Err
-    end.
-
-get_or_start_shards(N, N, _State, Acc) ->
-    {ok, Acc};
-get_or_start_shards(
-    I,
-    N,
-    #{
-        sup := Sup,
-        dir := Dir,
-        book_opts_fun := BookOptsFun
-    } = State,
-    Acc
-) ->
-    ShardDir = shard_dir(Dir, I),
-    case ?COMMON:ensure_dir(ShardDir) of
-        ok ->
-            BookOpts = BookOptsFun(ShardDir),
-            case
-                bondy_db_leveled_sup:get_or_start_bookie(
-                    Sup, {shard, I}, BookOpts
-                )
-            of
-                {ok, _Bookie} ->
-                    %% Route by REFERENCE, not pid — the ref survives a
-                    %% supervisor restart of the Bookie (crash recovery).
-                    Ref = bondy_db_leveled_sup:bookie_ref(Sup, {shard, I}),
-                    get_or_start_shards(I + 1, N, State, Acc#{I => Ref});
-                {error, _} = Err ->
-                    rollback_shards(Sup, Acc),
-                    Err
-            end;
-        {error, _} = Err ->
-            rollback_shards(Sup, Acc),
+        [Err | _] ->
+            ok = rollback_shards(maps:get(sup, State), ShardCount),
             Err
     end.
 
 %% @private
-%% Best-effort rollback of Bookies THIS call started. On the reuse path
-%% `get_or_start_bookie/3` returns existing pids without error, so a rollback
-%% only fires on the first (creating) table — never closing a pool a sibling
-%% table is already using. Must go through `stop_bookie/2` (terminate +
-%% delete + handle erase): a plain close would leave a `permanent` child for
-%% the supervisor to immediately restart.
-rollback_shards(Sup, Acc) ->
+get_or_start_shard(
+    I, #{sup := Sup, dir := Dir, book_opts_fun := BookOptsFun}
+) ->
+    ShardDir = shard_dir(Dir, I),
+    maybe
+        ok ?= ?COMMON:ensure_dir(ShardDir),
+        {ok, _Bookie} ?=
+            bondy_db_leveled_sup:get_or_start_bookie(
+                Sup, {shard, I}, BookOptsFun(ShardDir)
+            ),
+        %% Route by REFERENCE, not pid — the ref survives a supervisor
+        %% restart of the Bookie (crash recovery).
+        {ok, bondy_db_leveled_sup:bookie_ref(Sup, {shard, I})}
+    end.
+
+%% @private
+%% Removes every attempted shard: a failed start leaves its key's supervisor
+%% behind. Only the creating table can fail here (reuse returns the existing
+%% pids), so this never closes a pool a sibling table is using.
+rollback_shards(Sup, ShardCount) ->
     _ = [
         bondy_db_leveled_sup:stop_bookie(Sup, {shard, I})
-     || I <- maps:keys(Acc)
+     || I <- lists:seq(0, ShardCount - 1)
     ],
     ok.
 

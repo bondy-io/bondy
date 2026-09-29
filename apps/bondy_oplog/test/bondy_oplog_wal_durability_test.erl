@@ -512,3 +512,154 @@ invalid_batched_bytes_rejected_test() ->
     after
         rmrf(Dir)
     end.
+
+%% =============================================================================
+%% Write and datasync failures
+%% =============================================================================
+
+%% A write that fails after half its frame reached the file, as `enospc`
+%% can, is refused. Every append acknowledged after it, by that writer or by
+%% one started again on the same directory, must be read back after a
+%% restart, in order, and the refused frame must not.
+torn_write_keeps_later_acked_appends_test() ->
+    Dir = mktemp_dir(),
+    Opts = (base_opts())#{dir => Dir},
+    OldTrap = process_flag(trap_exit, true),
+    HLC = bondy_oplog_hlc:new(),
+    Ev = fun(Seq) -> mk_event(bondy_oplog_hlc:now(HLC), Seq) end,
+    try
+        {ok, W0} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        E1 = Ev(1),
+        {ok, _, _} = bondy_oplog_wal:append(W0, E1),
+        Torn = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, write, fun(Fd, Bytes) ->
+                Bin = iolist_to_binary(Bytes),
+                ok = prim_file:write(
+                    Fd, binary:part(Bin, 0, byte_size(Bin) div 2)
+                ),
+                {error, enospc}
+            end),
+            bondy_oplog_wal:append(W0, Ev(2))
+        end),
+        ?assertEqual({error, {write_failed, enospc}}, Torn),
+        {Acked, W} = lists:foldl(
+            fun(E, {Acc, P0}) ->
+                P = live_writer(P0, Opts),
+                {ok, _, _} = bondy_oplog_wal:append(P, E),
+                {[E | Acc], P}
+            end,
+            {[E1], W0},
+            [Ev(3), Ev(4)]
+        ),
+        ok = bondy_oplog_wal:close(W),
+        {ok, W2} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        try
+            ?assertEqual(lists:reverse(Acked), read_all(W2))
+        after
+            ok = bondy_oplog_wal:close(W2)
+        end
+    after
+        process_flag(trap_exit, OldTrap),
+        rmrf(Dir)
+    end.
+
+%% A datasync that fails once stops the writer without confirming the
+%% position a waiter is parked on: a second datasync, as `terminate/2` would
+%% issue, can succeed for pages the first one lost.
+failed_datasync_does_not_satisfy_waiters_test() ->
+    Dir = mktemp_dir(),
+    Opts = (base_opts())#{
+        dir => Dir,
+        fsync_mode => batched,
+        batched_fsync_interval => 10_000,
+        batched_fsync_bytes => 100 * 1024 * 1024
+    },
+    OldTrap = process_flag(trap_exit, true),
+    try
+        {ok, Pid} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        {_Hlc, _Start, EndPos} = append_one(Pid, bondy_oplog_hlc:new(), 1),
+        Parent = self(),
+        Waiter = spawn(fun() ->
+            Result =
+                try
+                    bondy_oplog_wal:await_durable(Pid, EndPos, 5000)
+                catch
+                    exit:Reason -> {exit, Reason}
+                end,
+            Parent ! {self(), Result}
+        end),
+        ok = wait_for_waiters(Pid, 1, 40),
+        Fired = atomics:new(1, []),
+        Sync = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, datasync, fun(Fd) ->
+                case atomics:add_get(Fired, 1, 1) of
+                    1 -> {error, eio};
+                    _ -> meck:passthrough([Fd])
+                end
+            end),
+            Res = bondy_oplog_wal:sync(Pid),
+            receive
+                {'EXIT', Pid, _} -> ok
+            after 5000 -> error(writer_not_stopped)
+            end,
+            Res
+        end),
+        ?assertEqual({error, {datasync_failed, eio}}, Sync),
+        receive
+            {Waiter, Result} -> ?assertNotEqual(ok, Result)
+        after 6000 ->
+            error(waiter_did_not_reply)
+        end
+    after
+        process_flag(trap_exit, OldTrap),
+        rmrf(Dir)
+    end.
+
+wait_for_waiters(_Pid, _N, 0) ->
+    error(waiter_not_parked);
+wait_for_waiters(Pid, N, Tries) ->
+    case maps:get(waiter_count, bondy_oplog_wal:info(Pid)) of
+        N ->
+            ok;
+        _ ->
+            timer:sleep(25),
+            wait_for_waiters(Pid, N, Tries - 1)
+    end.
+
+%% The writer `Pid` if it is still running, otherwise one started again on
+%% the same directory, which runs recovery.
+live_writer(Pid, Opts) ->
+    case is_process_alive(Pid) of
+        true ->
+            Pid;
+        false ->
+            {ok, New} = bondy_oplog_wal:start_link(instance_id(), Opts),
+            New
+    end.
+
+read_all(Pid) ->
+    {ok, It} = bondy_oplog_wal_reader:open(Pid, beginning, [{follow, false}]),
+    read_all(It, []).
+
+read_all(It0, Acc) ->
+    case bondy_oplog_wal_reader:next(It0) of
+        {ok, Events, _, _, It} -> read_all(It, Acc ++ Events);
+        end_of_log -> Acc
+    end.
+
+%% Serialises every test that mocks `bondy_mst_io` in this VM (the lock
+%% key is shared with the other WAL suites).
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
+    ).

@@ -39,9 +39,25 @@ the WAL pid and instance pid from the registry at init time. The
 scrubber is started last and resolves the WAL pid from the registry
 lazily on each scrub run, so it has no init-time dependency on its
 peers.
+
+## Children start in the caller
+
+`start_link/1` starts the supervisor with no children and
+`start_children/3` then adds them, in the order above, with
+`supervisor:start_child/2`. A child's start function runs inside the
+supervisor that starts it, so children declared in `init/1` would run
+every instance's recovery inside the one `bondy_oplog_instance_dyn_sup`,
+one instance at a time; added here, it runs in this instance's own
+supervisor, concurrently with other instances'
+(`bondy_oplog_instance_sup_test`). A `one_for_all` restart restarts
+children in the order they were added, as it does for children declared
+in `init/1`: OTP `supervisor:save_child/2` prepends each to the list that
+`terminate_children/2` reverses, and `bondy_oplog_instance_sup_test` checks
+the order across a restart.
 """).
 
--export([start_link/2]).
+-export([start_link/1]).
+-export([start_children/3]).
 -export([init/1]).
 
 -export([wal_pid/1]).
@@ -54,13 +70,27 @@ peers.
 %% API
 %% =============================================================================
 
--spec start_link(instance_id(), bondy_oplog_instance:opts()) ->
-    supervisor:startlink_ret().
+-spec start_link(instance_id()) -> supervisor:startlink_ret().
 
-start_link(InstanceId, Opts) when
-    is_binary(InstanceId), byte_size(InstanceId) > 0, is_map(Opts)
-->
-    supervisor:start_link(?MODULE, {InstanceId, Opts}).
+start_link(InstanceId) when is_binary(InstanceId), byte_size(InstanceId) > 0 ->
+    supervisor:start_link(?MODULE, InstanceId).
+
+?DOC("""
+Starts the instance's children under `SupPid`, a supervisor from
+`start_link/1` that has none yet. On failure the children already started
+stay under `SupPid`; the caller stops it. The error is
+`{origin, Path, Reason}` when the persisted origin cannot be loaded (see
+`bondy_oplog_origin:load_or_create/1`), and otherwise has the shape an
+`init/1` child failure has: `{shutdown, {failed_to_start_child, Id, Reason}}`.
+""").
+-spec start_children(pid(), instance_id(), bondy_oplog_instance:opts()) ->
+    ok | {error, term()}.
+
+start_children(SupPid, InstanceId, Opts0) when is_pid(SupPid), is_map(Opts0) ->
+    maybe
+        {ok, Opts} ?= resolve_origin_opt(InstanceId, Opts0),
+        start_children(SupPid, child_specs(InstanceId, Opts))
+    end.
 
 ?DOC("""
 Returns the pid of the per-instance `bondy_oplog_instance` child for
@@ -99,25 +129,36 @@ scrubber_pid(SupPid) when is_pid(SupPid) ->
 %% supervisor CALLBACKS
 %% =============================================================================
 
-init({InstanceId, Opts0}) ->
-    %% Resolve origin once and inject it into the opts so every child
-    %% (instance gen_server + WAL writer) sees the same value. When
-    %% `storage_path` is set and no explicit `origin` was provided, the
-    %% origin is loaded from disk (or generated and persisted on first
-    %% boot) so kill -9 + restart recovers the WAL instead of crashing
-    %% with `{orphan_segment, origin_mismatch}`.
-    Opts = resolve_origin_opt(InstanceId, Opts0),
-    %% Emit a one-shot warning when the WAL is about to be parked under
-    %% the /tmp/<os_pid>/ default — that path changes across BEAM
-    %% restarts and silently abandons fsynced frames. The supervisor is
-    %% the natural place to surface this: it's the single point where
-    %% both the WAL path and the persistence intent are known.
-    ok = maybe_warn_default_wal_path(InstanceId, Opts),
+init(InstanceId) when is_binary(InstanceId) ->
     SupFlags = #{
         strategy => one_for_all,
         intensity => 5,
         period => 10
     },
+    {ok, {SupFlags, []}}.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+start_children(_SupPid, []) ->
+    ok;
+start_children(SupPid, [#{id := Id} = Spec | Specs]) ->
+    case supervisor:start_child(SupPid, Spec) of
+        {ok, _} ->
+            start_children(SupPid, Specs);
+        {error, {Reason, _ChildRecord}} ->
+            {error, {shutdown, {failed_to_start_child, Id, Reason}}}
+    end.
+
+%% @private
+child_specs(InstanceId, Opts) ->
+    %% Emit a one-shot warning when the WAL is about to be parked under
+    %% the /tmp/<os_pid>/ default — that path changes across BEAM
+    %% restarts and silently abandons fsynced frames. This is the one
+    %% point where both the WAL path and the persistence intent are known.
+    ok = maybe_warn_default_wal_path(InstanceId, Opts),
     InstanceSpec = #{
         id => bondy_oplog_instance,
         start => {bondy_oplog_instance, start_link, [InstanceId, Opts]},
@@ -170,18 +211,16 @@ init({InstanceId, Opts0}) ->
     %% separate applier would double-drain the WAL. Omit it. `fused` is
     %% default-off, so every durable (and non-fused ephemeral) instance
     %% keeps the full applier+instance pipeline verbatim.
-    Children =
-        case {maps:get(fused, Opts, false), WalBackend} of
-            {true, mem} ->
-                %% Fused + in-memory WAL: instance drains inline (no applier),
-                %% mem WAL has no sealed segments (no scrubber).
-                [InstanceSpec, WalSpec];
-            {true, disk} ->
-                [InstanceSpec, WalSpec, ScrubberSpec];
-            {false, _} ->
-                [InstanceSpec, WalSpec, ApplierSpec, ScrubberSpec]
-        end,
-    {ok, {SupFlags, Children}}.
+    case {maps:get(fused, Opts, false), WalBackend} of
+        {true, mem} ->
+            %% Fused + in-memory WAL: instance drains inline (no applier),
+            %% mem WAL has no sealed segments (no scrubber).
+            [InstanceSpec, WalSpec];
+        {true, disk} ->
+            [InstanceSpec, WalSpec, ScrubberSpec];
+        {false, _} ->
+            [InstanceSpec, WalSpec, ApplierSpec, ScrubberSpec]
+    end.
 
 %% @private
 %% Resolve the WAL storage backend. The in-memory backend (`mem`) is opt-in via
@@ -213,10 +252,6 @@ wal_backend(Opts) ->
             }),
             disk
     end.
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
 
 %% @private
 find_child(SupPid, Id) ->
@@ -251,9 +286,9 @@ wal_opts(InstanceId, Opts) ->
         ],
         Opts
     ),
-    %% `origin` is pre-populated by `resolve_origin_opt/2` at supervisor
-    %% init so the WAL writer and the instance gen_server see the same
-    %% value. The `default/0` fallback here only covers callers that
+    %% `origin` is pre-populated by `resolve_origin_opt/2` in
+    %% `start_children/3` so the WAL writer and the instance gen_server see
+    %% the same value. The `default/0` fallback here only covers callers that
     %% bypass the supervisor (tests building wal_opts directly).
     Origin = maps:get(origin, Opts, bondy_oplog_origin:default()),
     Dir = wal_base_dir(InstanceId, Opts),
@@ -336,8 +371,7 @@ scrubber_opts(InstanceId, Opts) ->
 %%   1. Caller-provided `origin` wins.
 %%   2. Otherwise, if `storage_path` is set, load (or create + persist)
 %%      the origin under that path so it survives BEAM restarts.
-%%   3. Otherwise, fall back to the per-VM ephemeral default — same
-%%      behaviour as pre-change for tests and ephemeral instances.
+%%   3. Otherwise, fall back to the per-VM ephemeral default.
 %%
 %% The on-disk path is `<storage_path-for-instance>/origin` (i.e.,
 %% alongside the `wal/` subdir, not inside it), so the WAL recovery's
@@ -345,16 +379,19 @@ scrubber_opts(InstanceId, Opts) ->
 resolve_origin_opt(InstanceId, Opts) ->
     case maps:is_key(origin, Opts) of
         true ->
-            Opts;
+            {ok, Opts};
         false ->
-            Origin =
-                case origin_persist_path(InstanceId, Opts) of
-                    undefined ->
-                        bondy_oplog_origin:default();
-                    Path ->
-                        bondy_oplog_origin:load_or_create(Path)
-                end,
-            Opts#{origin => Origin}
+            case origin_persist_path(InstanceId, Opts) of
+                undefined ->
+                    {ok, Opts#{origin => bondy_oplog_origin:default()}};
+                Path ->
+                    case bondy_oplog_origin:load_or_create(Path) of
+                        {ok, Origin} ->
+                            {ok, Opts#{origin => Origin}};
+                        {error, Reason} ->
+                            {error, {origin, Path, Reason}}
+                    end
+            end
     end.
 
 %% @private
@@ -377,11 +414,10 @@ origin_persist_path(InstanceId, Opts) ->
 %% is intentional test-isolation behaviour but a footgun under any
 %% kill-restart scenario (Jepsen, systemd-restart, OOM-killer).
 %%
-%% No dedup needed: `bondy_oplog_instance_sup:init/1` runs once per
-%% `bondy_oplog:start_instance/2` call (the parent is
-%% `simple_one_for_one`, so each instance is a fresh child). The
-%% supervisor's own `intensity` governs child restarts within an
-%% instance but does not re-invoke init/1. Tests run with
+%% No dedup needed: `start_children/3` runs once per
+%% `bondy_oplog:start_instance/2` call. The supervisor's own `intensity`
+%% governs child restarts within an instance, which reuse the child specs
+%% and do not re-run it. Tests run with
 %% `logger_level = error`, so this is silent in the eunit suite.
 %%
 %% Avoiding `persistent_term` for dedup is deliberate: every

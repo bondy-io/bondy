@@ -37,6 +37,7 @@ suites) so concurrent test modules don't see each other's mocks.
 
 -export([fsync_dir/1]).
 -export([datasync/1]).
+-export([write/2]).
 -export([rename/2]).
 
 %% =============================================================================
@@ -102,6 +103,16 @@ don't see another suite's mock.
 
 datasync(Fd) ->
     prim_file:datasync(Fd).
+
+?DOC("""
+Write seam — same rationale as `datasync/1`. The WAL's frame appends
+funnel through here, so a test can make a write fail after only part of
+its bytes reached the file, as `enospc` can.
+""").
+-spec write(file:fd(), iodata()) -> ok | {error, term()}.
+
+write(Fd, Bytes) ->
+    prim_file:write(Fd, Bytes).
 
 ?DOC("""
 Rename seam — same rationale as `datasync/1`. Every atomic

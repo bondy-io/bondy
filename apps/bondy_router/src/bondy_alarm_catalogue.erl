@@ -49,7 +49,7 @@ producer's raise site from its compiled abstract code and fails if a declared
 key is not among the literal keys of the `details` map passed there. It checks
 that direction only: a producer may carry more than it declares.
 
-**Eight of the twelve entries declare keys and four declare `[]`**, so the
+**Ten of the fourteen entries declare keys and four declare `[]`**, so the
 check runs over most of the table but not all of it. Some of the four are
 correct as they stand — `bondy_mcp_name_collision` carries its realm and name
 in the ID, and says so at its entry — but the rest are producers that pass no
@@ -84,12 +84,13 @@ Bondy Lang one points the opposite way: these references are pulled, not
 pushed. `bondy_task_catalogue` already used `observe_with` for the same kind of
 thing, so the rename removes a synonym rather than adding a word.
 
-**Ten of the twelve entries have no task at all, and that is the finding
+**Twelve of the fourteen entries have no task at all, and that is the finding
 rather than an omission.** Only the mail relay and the MCP collision have a
 sanctioned remediation in the WAMP API; nothing in `bondy.*` fixes a stalled
 drain, an unopenable main DB, an unwritable retirement set, an oversized sync
-item, a retention ceiling, a frontier hole, a receipt-derived frontier or an
-undeclared table a peer replicates into. An empty list is the answer an agent
+item, a retention ceiling, a frontier hole, a receipt-derived frontier, a
+shard instance that will not start or an undeclared table a peer replicates
+into. An empty list is the answer an agent
 needs — it stops looking rather than improvising.
 
 The join KEY is `bondy_alarm_api`'s `catalogue_id`, stamped on every rendered
@@ -145,9 +146,10 @@ not, pass them.
 Every declared alarm, in id order.
 
 `affects_ready` is `false` on every entry, and that is a finding rather than an
-oversight: of the eleven conditions below, only `bondy_db_main_unavailable` stops
-the node serving, and its readiness signal deliberately does not run through the
-alarm — see that entry's `readiness_via`.
+oversight: of the fourteen conditions below, only `bondy_db_main_unavailable` and
+`bondy_oplog_instance_down` stop the node serving its tables, and their readiness
+signals deliberately do not run through the alarm — see each entry's
+`readiness_via`.
 
 **So the readiness mechanism has no live producer, and its path is exercised
 only by tests.** `bondy_alarm_handler` publishes the blocking flag into an
@@ -415,6 +417,26 @@ list() ->
             observe_with => [],
             tasks => [],
             config_keys => [<<"platform_data_dir">>]
+        },
+        %% `bondy_oplog_instance_keeper`. Raised when a shard
+        %% instance's subtree stops, cleared when the keeper has started it
+        %% again or it is stopped on purpose. Its readiness signal is the
+        %% keeper's table, for the reason given at the entry above.
+        #{
+            id_pattern => {bondy_oplog_instance_down, '_'},
+            severity => critical,
+            class => node,
+            affects_ready => false,
+            readiness_via => <<"bondy_oplog_instance_keeper:not_running/0">>,
+            summary =>
+                <<
+                    "A shard instance is not running, so its tables are "
+                    "unavailable on this node"
+                >>,
+            detail_keys => [instance_id],
+            observe_with => [],
+            tasks => [],
+            config_keys => []
         },
         %% `bondy_oplog_origin_bans:634`. `class = cluster` because reaping
         %% needs EVERY member to hold the retirement, so one node's unwritable

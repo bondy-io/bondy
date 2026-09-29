@@ -140,6 +140,10 @@ public final class Utils {
     sb.append("platform_runtime_dir = ").append(INSTALL_DIR).append("/run\n");
     sb.append("security.config_file = ").append(INSTALL_DIR)
         .append("/etc/security_config.json\n");
+    // Anonymous auth is loopback-only by default; the background load
+    // connects from another container. Still gated per realm by its
+    // anonymous source, which only the load realm declares.
+    sb.append("security.allow_anonymous_user = on\n");
     sb.append("log.level = info\n");
     sb.append("log.handlers.default.level = info\n");
 
@@ -189,6 +193,13 @@ public final class Utils {
   public static final String MASTER_REALM = "com.leapsight.bondy";
 
   /**
+   * The realm background load (`harness/k6/fleet_smoke.js`) publishes and
+   * subscribes in, so load traffic never touches the workload realm the
+   * checkers read.
+   */
+  public static final String LOAD_REALM = "com.jepsen.load";
+
+  /**
    * The declarative security configuration every node applies at boot.
    * Applied on every node independently (the same file, the same way a
    * multi-node deployment ships it), so both realms exist on each node
@@ -206,6 +217,8 @@ public final class Utils {
    *    grants the anonymous role `wamp.call` on every URI for exactly this
    *    reason; this is that grant, and nothing more.
    *  - The workload realm, empty: the users are what the workload writes.
+   *  - The load realm: anonymous WAMP sessions may publish, subscribe and
+   *    unsubscribe.
    */
   public static String securityConfig(String realmUri) {
     return "[\n" +
@@ -233,6 +246,23 @@ public final class Utils {
         "    \"groups\": [],\n" +
         "    \"sources\": [],\n" +
         "    \"grants\": []\n" +
+        "  },\n" +
+        "  {\n" +
+        "    \"uri\": \"" + LOAD_REALM + "\",\n" +
+        "    \"description\": \"jepsen.bondy background load realm\",\n" +
+        "    \"authmethods\": [\"anonymous\"],\n" +
+        "    \"security_enabled\": true,\n" +
+        "    \"users\": [],\n" +
+        "    \"groups\": [],\n" +
+        "    \"sources\": [\n" +
+        "      {\"usernames\": [\"anonymous\"], \"authmethod\": \"anonymous\",\n" +
+        "       \"cidr\": \"0.0.0.0/0\", \"meta\": {}}\n" +
+        "    ],\n" +
+        "    \"grants\": [\n" +
+        "      {\"permissions\": [\"wamp.publish\", \"wamp.subscribe\",\n" +
+        "                       \"wamp.unsubscribe\"],\n" +
+        "       \"uri\": \"\", \"match\": \"prefix\", \"roles\": [\"anonymous\"]}\n" +
+        "    ]\n" +
         "  }\n" +
         "]\n";
   }
@@ -263,6 +293,14 @@ public final class Utils {
   /** `GET /ready` on the admin listener. */
   public static HttpResult ready(Client client) throws Exception {
     return client.get("/ready");
+  }
+
+  /**
+   * `GET /cluster/topology` on the admin listener: this node's own view of
+   * the cluster (`bondy_cluster_topology:graph/0`).
+   */
+  public static HttpResult topology(Client client) throws Exception {
+    return client.get("/cluster/topology");
   }
 
   /**

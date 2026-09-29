@@ -5,7 +5,6 @@
 
 -module(bondy_oplog_origin).
 
--include_lib("kernel/include/logger.hrl").
 -include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
@@ -30,8 +29,8 @@ externally and pass it via the `origin` start_instance option.
 
 ## Disk persistence
 
-`load_or_create/1` reads a previously persisted origin from a file or
-generates and persists a fresh one. The on-disk layout is a single
+`load_or_create/1` reads a previously persisted origin from a file, or
+generates and persists a fresh one when there is no file. The on-disk layout is a single
 `?BONDY_OPLOG_ORIGIN_BYTES`-byte file written via the standard
 durability sequence (tmp + datasync + rename + fsync_dir, mirroring
 `bondy_mst_pack_manifest`). The supervisor calls it automatically when
@@ -47,6 +46,8 @@ non-empty binary. Uniqueness is the operator's responsibility.
 """).
 
 -type t() :: binary().
+
+-define(DEFAULT_KEY, {?MODULE, default}).
 
 -export_type([t/0]).
 
@@ -69,16 +70,19 @@ seen events from the previous identity will treat the restarted node as a
 new participant. Production deployments that need identity continuity should
 generate the id externally and pass it via the `origin` start_instance
 option.
+
+Concurrent first calls all return the one value that is cached: the value
+is generated under a node-local lock, after checking the cache again
+(`bondy_oplog_origin_test:concurrent_first_calls_agree_test/0`).
 """).
 -spec default() -> t().
 
 default() ->
-    Key = {?MODULE, default},
-    case persistent_term:get(Key, undefined) of
+    case persistent_term:get(?DEFAULT_KEY, undefined) of
         undefined ->
-            Id = new(),
-            ok = persistent_term:put(Key, Id),
-            Id;
+            global:trans(
+                {?DEFAULT_KEY, self()}, fun create_default/0, [node()]
+            );
         Id when is_binary(Id) ->
             Id
     end.
@@ -92,36 +96,34 @@ new() ->
     crypto:strong_rand_bytes(?BONDY_OPLOG_ORIGIN_BYTES).
 
 ?DOC("""
-Reads a previously persisted origin from `Path`, or generates a fresh
-one and writes it there. Returns the origin in either case.
+Returns the origin persisted at `Path`, generating and persisting one only
+when `Path` does not exist (`enoent`).
 
-Failure to read a non-`enoent` error or to persist a freshly minted
-origin is logged at warning and falls through to an in-memory origin
-— the caller still gets a usable id, but it is ephemeral until
-persistence succeeds.
+Any other outcome is an error, and an existing file is never rewritten:
+a read error, a file that is not `?BONDY_OPLOG_ORIGIN_BYTES` long
+(`{corrupted, unexpected_size}`), or a fresh origin that could not be
+persisted. An origin that differs from the one the instance's WAL segments
+were written with makes WAL recovery reject them as
+`{orphan_segment, origin_mismatch}`, so a start that fails here is retried
+with the persisted origin intact (`bondy_oplog_origin_test`,
+`bondy_oplog_instance_keeper_test:unreadable_origin_heals/0`).
 
 The on-disk layout is a single `?BONDY_OPLOG_ORIGIN_BYTES`-byte file
 written via the standard durability sequence: temp file, `datasync`
 the fd, atomic `rename`, `fsync_dir` on the containing directory.
 """).
--spec load_or_create(Path :: file:filename_all()) -> t().
+-spec load_or_create(Path :: file:filename_all()) ->
+    {ok, t()} | {error, term()}.
 
 load_or_create(Path) ->
     PathBin = unicode:characters_to_binary(Path),
     case read_persisted(PathBin) of
-        {ok, Origin} ->
-            Origin;
+        {ok, _} = Ok ->
+            Ok;
         {error, enoent} ->
             create_and_persist(PathBin);
-        {error, Reason} ->
-            ?LOG_WARNING(#{
-                description =>
-                    "Failed to read persisted origin; regenerating "
-                    "(prior identity will be lost)",
-                path => PathBin,
-                reason => Reason
-            }),
-            create_and_persist(PathBin)
+        {error, _} = Error ->
+            Error
     end.
 
 ?DOC("""
@@ -153,18 +155,8 @@ read_persisted(Path) ->
 create_and_persist(Path) ->
     Origin = new(),
     case persist(Path, Origin) of
-        ok ->
-            Origin;
-        {error, Reason} ->
-            ?LOG_WARNING(#{
-                description =>
-                    "Failed to persist origin; identity will be "
-                    "ephemeral until persistence succeeds (kill -9 + "
-                    "restart will be rejected by WAL recovery)",
-                path => Path,
-                reason => Reason
-            }),
-            Origin
+        ok -> {ok, Origin};
+        {error, _} = Error -> Error
     end.
 
 %% @private
@@ -206,4 +198,17 @@ write_and_sync(Tmp, Bin) ->
             end;
         {error, _} = E ->
             E
+    end.
+
+%% @private
+%% `?MODULE:new()` so a test can widen the window between the check and the
+%% put (`bondy_oplog_origin_test:concurrent_first_calls_agree_test/0`).
+create_default() ->
+    case persistent_term:get(?DEFAULT_KEY, undefined) of
+        undefined ->
+            Id = ?MODULE:new(),
+            ok = persistent_term:put(?DEFAULT_KEY, Id),
+            Id;
+        Id ->
+            Id
     end.

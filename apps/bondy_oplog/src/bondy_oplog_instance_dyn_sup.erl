@@ -20,10 +20,18 @@ one_for_all subtree (WAL writer + instance gen_server + applier).
 The dyn sup keeps the registry's `sup_pid` field in step with
 `supervisor:start_child/2` so `start_instance/2` is idempotent and
 `stop_instance/1` can locate the subtree by `InstanceId`.
+
+This supervisor starts each subtree empty and the caller of
+`start_instance/2` fills it (`bondy_oplog_instance_sup:start_children/3`),
+so instances recover concurrently rather than one at a time inside this
+process (`bondy_oplog_instance_sup_test`). The subtree is `temporary`:
+restarted here it would come back empty. `bondy_oplog_instance_keeper`
+starts a stopped instance again instead.
 """).
 
 -export([start_link/0]).
 -export([start_instance/2]).
+-export([restart_instance/2]).
 -export([stop_instance/1]).
 -export([init/1]).
 
@@ -58,19 +66,30 @@ start_instance(InstanceId, Opts) when
     is_binary(InstanceId), is_map(Opts)
 ->
     ok = bondy_oplog_path:validate_instance_id(InstanceId),
-    case bondy_oplog_registry:sup_pid(InstanceId) of
-        Pid when is_pid(Pid) ->
-            case is_process_alive(Pid) of
-                true -> {ok, Pid};
-                false -> do_start(InstanceId, Opts)
-            end;
+    case running(InstanceId) of
+        {ok, _} = Running ->
+            Running;
         undefined ->
-            do_start(InstanceId, Opts)
+            first_start(InstanceId, Opts)
+    end.
+
+?DOC("""
+`start_instance/2` for `bondy_oplog_instance_keeper`, which already keeps
+`InstanceId`: starts it unless a subtree for it is running.
+""").
+-spec restart_instance(instance_id(), bondy_oplog_instance:opts()) ->
+    {ok, pid()} | {error, term()}.
+
+restart_instance(InstanceId, Opts) ->
+    case running(InstanceId) of
+        {ok, _} = Running -> Running;
+        undefined -> do_start(InstanceId, Opts)
     end.
 
 -spec stop_instance(instance_id() | pid()) -> ok | {error, not_found}.
 
 stop_instance(InstanceId) when is_binary(InstanceId) ->
+    ok = bondy_oplog_instance_keeper:forget(InstanceId),
     case bondy_oplog_registry:sup_pid(InstanceId) of
         undefined ->
             %% No registry row — but the SUBTREE may still be running. A
@@ -108,6 +127,7 @@ stop_instance(SupPid) when is_pid(SupPid) ->
     %% `sup_pid` indirectly (via the dyn supervisor's child bookkeeping)
     %% on some Erlang versions.
     InstanceId = bondy_oplog_registry:instance_id_by_sup_pid(SupPid),
+    ok = bondy_oplog_instance_keeper:forget(SupPid),
     case supervisor:terminate_child(?SERVER, SupPid) of
         ok ->
             case InstanceId of
@@ -134,7 +154,7 @@ init([]) ->
     ChildSpec = #{
         id => bondy_oplog_instance_sup,
         start => {bondy_oplog_instance_sup, start_link, []},
-        restart => transient,
+        restart => temporary,
         shutdown => infinity,
         type => supervisor,
         modules => [bondy_oplog_instance_sup]
@@ -144,6 +164,33 @@ init([]) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+first_start(InstanceId, Opts) ->
+    case bondy_oplog_instance_keeper:is_kept(InstanceId) of
+        true ->
+            bondy_oplog_instance_keeper:start_now(InstanceId);
+        false ->
+            maybe
+                {ok, SupPid} ?= do_start(InstanceId, Opts),
+                ok = bondy_oplog_instance_keeper:watch(
+                    InstanceId, SupPid, Opts
+                ),
+                {ok, SupPid}
+            end
+    end.
+
+%% @private
+running(InstanceId) ->
+    case bondy_oplog_registry:sup_pid(InstanceId) of
+        Pid when is_pid(Pid) ->
+            case is_process_alive(Pid) of
+                true -> {ok, Pid};
+                false -> undefined
+            end;
+        undefined ->
+            undefined
+    end.
 
 %% @private
 %% Locates a running per-instance subtree by asking each child's instance
@@ -179,18 +226,17 @@ instance_id_of(InstancePid) ->
 
 %% @private
 do_start(InstanceId, Opts) ->
-    case supervisor:start_child(?SERVER, [InstanceId, Opts]) of
-        {ok, SupPid} ->
-            ok = bondy_oplog_registry:set_sup_pid(InstanceId, SupPid),
-            {ok, SupPid};
-        {ok, SupPid, _Info} ->
-            ok = bondy_oplog_registry:set_sup_pid(InstanceId, SupPid),
-            {ok, SupPid};
+    maybe
+        {ok, SupPid} ?= supervisor:start_child(?SERVER, [InstanceId]),
+        ok ?= start_children(SupPid, InstanceId, Opts),
+        ok = bondy_oplog_registry:set_sup_pid(InstanceId, SupPid),
+        {ok, SupPid}
+    else
         {error, _} = E ->
             %% A subtree that dies during start leaves its registry row
             %% behind: the instance registers in its own `init/1`, before a
             %% later child (an applier rejecting its options, a backend
-            %% refusing a path) brings the subtree down. Because
+            %% refusing a path) fails to start. Because
             %% `list_instances/0` enumerates the registry, that row is a
             %% phantom instance — every scheduler would dispatch gc and sync
             %% work to something that does not exist, for the lifetime of the
@@ -199,4 +245,14 @@ do_start(InstanceId, Opts) ->
             %% when `sup_pid` is `undefined` or its process is dead.
             _ = bondy_oplog_registry:unregister(InstanceId),
             E
+    end.
+
+%% @private
+start_children(SupPid, InstanceId, Opts) ->
+    case bondy_oplog_instance_sup:start_children(SupPid, InstanceId, Opts) of
+        ok ->
+            ok;
+        {error, _} = Err ->
+            _ = supervisor:terminate_child(?SERVER, SupPid),
+            Err
     end.

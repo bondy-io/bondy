@@ -59,7 +59,12 @@ the op arrived from a local WAL drain or a peer replay.
 ## Coalescing
 
 Ops buffer and flush on a short timer (`coalesce_ms`, default 5 ms) so a burst
-of primary writes collapses into one `put_batch` per touched stream.
+of primary writes collapses into one `put_batch` per touched stream. A writer
+takes the smallest `coalesce_ms` among the index specs of the streams registered
+when it starts, a spec without one counting as the default. A writer re-created
+by a `bondy_oplog_secondary_sup` restart keeps its single stream's value
+(`bondy_db_index_lag_test:restarted_writer_keeps_coalesce_ms/1`); the
+several-stream case has no test.
 `flush_sync/1` forces an immediate flush of **every** stream and is the
 deterministic barrier tests (and the read-side `await_index`) use to observe a
 write without polling. `reset/2` discards one stream's buffered ops (the rebuild
@@ -70,21 +75,21 @@ orchestrator uses it before a re-fold) without disturbing the others.
 The writer caches nothing across flushes: each flush re-`lookup/3`s the touched
 stream's registry row for the projection adapter/handle, cache pair, freshness
 atomics, and high-water ref. This keeps it correct across a registry
-re-registration (epoch change) for free — and it never owns the ETS tables it
+re-registration for free — and it never owns the ETS tables it
 writes (the topology's DB-scoped owner does), so a writer crash/restart loses
 only buffered, not-yet-flushed ops, which the rebuild recovers.
 
 ## Registry stamp and self-healing
 
 A writer's streams are not held in its process state — they live in the
-registry, every entry that shares the writer's `writer_key`. At init (and on the
-registry-restart epoch event) the writer re-derives that set via
+registry, every entry that shares the writer's `writer_key`. At init the writer
+re-derives that set via
 `index_entries_for_writer/1`, stamps its pid onto each row with `set_writer_pid/4`
 so the primary applier can dispatch to it, and requests a rebuild for any stream
 whose shard a crash left un-recoverable. A stream provisioned **after** the
 writer started (a sibling index joining an already-running writer) is stamped by
-the facade with the writer's known pid; the writer picks it up on the next epoch
-event. The stamp does **not** transfer the registry monitor — the
+the facade with the writer's known pid. The stamp does **not** transfer the
+registry monitor — the
 projection-handle owner keeps it.
 """).
 
@@ -203,25 +208,22 @@ reset(Pid, {_NS, _IName} = Stream) when is_pid(Pid) ->
 %% gen_server callbacks
 %% =============================================================================
 
-init(#{writer_key := WriterKey, shard := Shard} = Args) ->
+init(#{writer_key := WriterKey, shard := Shard}) ->
     %% Per-op `{idx_update, …}` cast receiver under write load: keep the
     %% mailbox off the process heap so a transient backlog isn't re-scanned
     %% by the GC (same rationale as the instance/applier/WAL processes).
     process_flag(message_queue_data, off_heap),
-    CoalesceMs = maps:get(coalesce_ms, Args, ?DEFAULT_COALESCE_MS),
     %% Stamp our pid onto every stream already registered under this
     %% writer_key so the primary appliers can dispatch to us, and request a
     %% rebuild for any stream a crash left un-recoverable. On a fresh
     %% provisioning only the founding stream exists (siblings the facade
     %% stamps as they join); on a crash restart all of the shard's streams do.
-    ok = adopt_streams(WriterKey, Shard),
-    %% Re-adopt if the registry restarts (epoch change drops every row,
-    %% including our writer_pid stamps).
-    ok = bondy_oplog_core_events:subscribe(bondy_oplog_core_registry_started),
+    Entries = bondy_oplog_core_registry:index_entries_for_writer(WriterKey),
+    ok = adopt_streams(Entries),
     {ok, #state{
         shard = Shard,
         writer_key = WriterKey,
-        coalesce_ms = CoalesceMs
+        coalesce_ms = coalesce_ms(Entries)
     }}.
 
 handle_call(flush_sync, _From, State0) ->
@@ -251,16 +253,6 @@ handle_cast(_, State) ->
 handle_info(flush, State0) ->
     State1 = State0#state{flush_timer = undefined},
     {noreply, do_flush(State1)};
-handle_info(
-    {bondy_oplog_core_event, bondy_oplog_core_registry_started, _Epoch},
-    #state{writer_key = WriterKey, shard = Shard} = State
-) ->
-    %% The registry restarted: every row (including our writer_pid stamps)
-    %% was lost. Re-adopt best-effort. A stream whose projection-handle owner
-    %% has not re-registered its row yet is simply absent from the scan; the
-    %% index is rebuildable, so we do not block on it.
-    ok = adopt_streams(WriterKey, Shard),
-    {noreply, State};
 handle_info(_, State) ->
     {noreply, State}.
 
@@ -275,11 +267,11 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 %% @private
-%% Stamp our pid onto every index shard registered under `WriterKey`, and
+%% Stamp our pid onto every index shard registered under our `writer_key`, and
 %% request a rebuild for any one a crash left un-recoverable. Idempotent:
 %% `set_writer_pid/4` is a single-field update and `request/2` is debounced,
-%% so re-running it on each epoch event is cheap.
-adopt_streams(WriterKey, _Shard) ->
+%% so re-running it on each restart is cheap.
+adopt_streams(Entries) ->
     lists:foreach(
         fun(Entry) ->
             {NS, IName, Shard} = bondy_oplog_core_registry:entry_key(Entry),
@@ -288,8 +280,20 @@ adopt_streams(WriterKey, _Shard) ->
             ),
             ok = maybe_request_rebuild(NS, IName, Entry)
         end,
-        bondy_oplog_core_registry:index_entries_for_writer(WriterKey)
+        Entries
     ).
+
+%% @private
+coalesce_ms([]) ->
+    ?DEFAULT_COALESCE_MS;
+coalesce_ms(Entries) ->
+    lists:min([
+        case bondy_oplog_core_registry:entry_coalesce_ms(E) of
+            undefined -> ?DEFAULT_COALESCE_MS;
+            Ms -> Ms
+        end
+     || E <- Entries
+    ]).
 
 %% @private
 maybe_request_rebuild(NS, IName, Entry) ->

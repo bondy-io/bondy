@@ -35,6 +35,11 @@ the latest read-relevant state of every running instance:
 | `overlay_tab`  | `init` of the instance gen_server (immutable thereafter) |
 | `fused`        | `init` (immutable thereafter) |
 
+The table is borrowed from `bondy_table_manager`, its heir, so its rows
+outlive a crash of this process and a restarted registry claims them back;
+the rows are written by the instances, which keep running across it
+(`bondy_db_bookie_restart_test`).
+
 ## Why ETS, not persistent_term
 
 `persistent_term:put/2` triggers a *global GC scan of every process*
@@ -1335,7 +1340,7 @@ set_remote_gen(InstanceId, Ref) when is_binary(InstanceId) ->
 
 init([]) ->
     process_flag(trap_exit, true),
-    _Tab = ets:new(?TABLE, [
+    {ok, ?TABLE} = bondy_table_manager:add_or_claim(?TABLE, [
         named_table,
         set,
         public,

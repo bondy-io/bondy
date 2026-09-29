@@ -56,6 +56,16 @@ frame boundary.
 
 -define(SEG_HEADER_BYTES, ?BONDY_OPLOG_WAL_SEGMENT_HEADER_BYTES).
 -define(FRAME_HEADER_BYTES, ?BONDY_OPLOG_WAL_FRAME_HEADER_BYTES).
+-define(READ_CHUNK_BYTES, (1024 * 1024)).
+
+%% A frame walk reads its segment a chunk at a time rather than a pread per
+%% frame header and per body. A chunk is valid only while nothing writes the
+%% file: `bondy_oplog_wal:init/1` runs recovery before it holds a head fd.
+-record(reader, {
+    fd :: file:fd(),
+    offset = 0 :: non_neg_integer(),
+    chunk = <<>> :: binary()
+}).
 
 -type recovery_mode() :: strict | rescan.
 
@@ -551,27 +561,26 @@ rebuild_sealed_idx(IdxPath, Fd, SegId, Interval, BodyEnc) ->
 %% @private
 %% Scans the segment from offset 48 to EOF. For each frame the
 %% accumulator decides via `would_index/2` whether the body must be
-%% decoded; non-indexed frames are skipped header-only (a single pread
-%% of the 16-byte frame header per frame). Sealed segments are trusted
-%% (only their segment header is validated on recovery), so skipping
-%% CRC verification for non-indexed frames is consistent with the
-%% recovery contract.
+%% decoded; non-indexed frames are skipped header-only. Sealed segments
+%% are trusted (only their segment header is validated on recovery), so
+%% skipping CRC verification for non-indexed frames is consistent with
+%% the recovery contract.
 scan_segment_for_index(Fd, Interval, BodyEnc) ->
     Acc0 = bondy_oplog_wal_idx:new(Interval),
-    scan_loop_for_index(Fd, ?SEG_HEADER_BYTES, Acc0, BodyEnc).
+    scan_loop_for_index(reader(Fd), ?SEG_HEADER_BYTES, Acc0, BodyEnc).
 
 %% @private
-scan_loop_for_index(Fd, Off, Acc, BodyEnc) ->
-    case peek_frame_header(Fd, Off) of
-        {ok, FrameLen} ->
+scan_loop_for_index(R0, Off, Acc, BodyEnc) ->
+    case peek_frame_header(R0, Off) of
+        {{ok, FrameLen}, R1} ->
             case bondy_oplog_wal_idx:would_index(Acc, FrameLen) of
                 true ->
                     case
                         read_and_decode_frame_body(
-                            Fd, Off, FrameLen, BodyEnc
+                            R1, Off, FrameLen, BodyEnc
                         )
                     of
-                        {ok, Body} ->
+                        {{ok, Body}, R} ->
                             case decode_frame_bounds(Body) of
                                 {ok, FirstHlc, LastHlc, _MaxSeq} ->
                                     Acc1 =
@@ -579,17 +588,17 @@ scan_loop_for_index(Fd, Off, Acc, BodyEnc) ->
                                             Acc, FirstHlc, LastHlc, Off
                                         ),
                                     scan_loop_for_index(
-                                        Fd, Off + FrameLen, Acc1, BodyEnc
+                                        R, Off + FrameLen, Acc1, BodyEnc
                                     );
                                 {error, _} = E ->
                                     E
                             end;
-                        {truncate, Reason} ->
+                        {{truncate, Reason}, _} ->
                             %% Sealed segment body corruption is a real
                             %% recovery error — surface so the operator
                             %% sees it.
                             {error, {sealed_body, Reason}};
-                        {error, _} = E ->
+                        {{error, _} = E, _} ->
                             E
                     end;
                 false ->
@@ -597,14 +606,14 @@ scan_loop_for_index(Fd, Off, Acc, BodyEnc) ->
                         Acc, FrameLen
                     ),
                     scan_loop_for_index(
-                        Fd, Off + FrameLen, Acc1, BodyEnc
+                        R1, Off + FrameLen, Acc1, BodyEnc
                     )
             end;
-        eof ->
+        {eof, _} ->
             {ok, Acc};
-        {truncate, Reason} ->
+        {{truncate, Reason}, _} ->
             {error, {sealed_header, Reason}};
-        {error, _} = E ->
+        {{error, _} = E, _} ->
             E
     end.
 
@@ -688,7 +697,7 @@ finalize_head(Fd, SegId, Header, Dir, Opts) ->
         idx_acc = bondy_oplog_wal_idx:new(IdxInterval),
         body_encryption = BodyEnc
     },
-    case scan_head_loop(Fd, ?SEG_HEADER_BYTES, State0) of
+    case scan_head_loop(reader(Fd), ?SEG_HEADER_BYTES, State0) of
         {ok, LastValid, S} ->
             maybe_compact_and_finalize(Fd, SegId, Header, Dir, LastValid, S);
         {error, Reason} ->
@@ -775,44 +784,44 @@ head_result(Fd, SegId, LastValid, TruncatedBytes, S) ->
 %% logged, the bytes are counted as skipped, and the scan resumes
 %% from the next frame magic (or the end of the corrupted frame, if
 %% the header parsed cleanly).
-scan_head_loop(Fd, Off, S) ->
-    case peek_frame_header(Fd, Off) of
-        {ok, FrameLen} ->
-            scan_with_header(Fd, Off, FrameLen, S);
-        eof ->
+scan_head_loop(R0, Off, S) ->
+    case peek_frame_header(R0, Off) of
+        {{ok, FrameLen}, R} ->
+            scan_with_header(R, Off, FrameLen, S);
+        {eof, _} ->
             {ok, Off, S};
-        {truncate, Reason} ->
-            handle_skip_or_stop(Fd, Off, undefined, Reason, S);
-        {error, _} = E ->
+        {{truncate, Reason}, R} ->
+            handle_skip_or_stop(R, Off, undefined, Reason, S);
+        {{error, _} = E, _} ->
             E
     end.
 
 %% @private
-scan_with_header(Fd, Off, FrameLen, S) ->
+scan_with_header(R0, Off, FrameLen, S) ->
     case
         read_and_decode_frame_body(
-            Fd, Off, FrameLen, S#head_scan.body_encryption
+            R0, Off, FrameLen, S#head_scan.body_encryption
         )
     of
-        {ok, Body} ->
-            absorb_frame(Fd, Off, FrameLen, Body, S);
-        {truncate, Reason} ->
-            handle_skip_or_stop(Fd, Off, FrameLen, Reason, S);
-        {error, _} = E ->
+        {{ok, Body}, R} ->
+            absorb_frame(R, Off, FrameLen, Body, S);
+        {{truncate, Reason}, R} ->
+            handle_skip_or_stop(R, Off, FrameLen, Reason, S);
+        {{error, _} = E, _} ->
             E
     end.
 
 %% @private
-absorb_frame(Fd, Off, FrameLen, Body, S) ->
+absorb_frame(R, Off, FrameLen, Body, S) ->
     case decode_frame_bounds(Body) of
         {ok, FirstHlc, LastHlc, MaxSeq} ->
             S1 = accept_frame(Off, FrameLen, FirstHlc, LastHlc, MaxSeq, S),
-            scan_head_loop(Fd, Off + FrameLen, S1);
+            scan_head_loop(R, Off + FrameLen, S1);
         {error, Reason} ->
             %% CRC-clean but body isn't a well-formed batch list. Strict
             %% treats this as truncation; rescan logs and skips past
             %% the known FrameLen (the frame's header was valid).
-            handle_skip_or_stop(Fd, Off, FrameLen, {bad_body, Reason}, S)
+            handle_skip_or_stop(R, Off, FrameLen, {bad_body, Reason}, S)
     end.
 
 %% @private
@@ -846,10 +855,10 @@ accept_frame(Off, FrameLen, FirstHlc, LastHlc, MaxSeq, S) ->
 %% `FrameLen` is `undefined` when the failure happened at the header
 %% level (we don't know how long the corrupt frame is supposed to be).
 handle_skip_or_stop(
-    _Fd, Off, _FrameLen, _Reason, #head_scan{mode = strict} = S
+    _R, Off, _FrameLen, _Reason, #head_scan{mode = strict} = S
 ) ->
     {ok, Off, S};
-handle_skip_or_stop(Fd, Off, FrameLen, Reason, #head_scan{mode = rescan} = S) ->
+handle_skip_or_stop(R, Off, FrameLen, Reason, #head_scan{mode = rescan} = S) ->
     %% Two strategies based on what we know:
     %% - Header parsed cleanly (FrameLen known): the frame body is
     %%   corrupt, but FrameLen is from a CRC-unverified header — we
@@ -857,11 +866,11 @@ handle_skip_or_stop(Fd, Off, FrameLen, Reason, #head_scan{mode = rescan} = S) ->
     %%   if there's no magic there, fall back to byte-by-byte scan.
     %% - Header did not parse (FrameLen undefined): scan byte-by-byte
     %%   from Off + 1 for the next magic.
-    Resume = next_resume_offset(Fd, Off, FrameLen),
-    handle_rescan_resume(Fd, Off, FrameLen, Reason, Resume, S).
+    Resume = next_resume_offset(R#reader.fd, Off, FrameLen),
+    handle_rescan_resume(R, Off, FrameLen, Reason, Resume, S).
 
 %% @private
-handle_rescan_resume(_Fd, Off, _FrameLen, Reason, eof, S) ->
+handle_rescan_resume(_R, Off, _FrameLen, Reason, eof, S) ->
     %% No more magics; treat everything from Off onwards as skipped
     %% trailing garbage. Stop the scan at Off (the last good offset).
     ?LOG_WARNING(#{
@@ -875,7 +884,7 @@ handle_rescan_resume(_Fd, Off, _FrameLen, Reason, eof, S) ->
     %% inflate skipped_bytes with the trailing garbage — that's
     %% truncation, not skip-with-survivors-past-it.
     {ok, Off, S};
-handle_rescan_resume(Fd, Off, FrameLen, Reason, {ok, NextOff}, S) ->
+handle_rescan_resume(R, Off, FrameLen, Reason, {ok, NextOff}, S) ->
     Skipped = NextOff - Off,
     ?LOG_WARNING(#{
         description => "Rescan recovery: skipping corrupt frame",
@@ -890,7 +899,7 @@ handle_rescan_resume(Fd, Off, FrameLen, Reason, {ok, NextOff}, S) ->
         skipped_frames = S#head_scan.skipped_frames + 1,
         skipped_bytes = S#head_scan.skipped_bytes + Skipped
     },
-    scan_head_loop(Fd, NextOff, S1).
+    scan_head_loop(R, NextOff, S1).
 
 %% @private
 %% Picks the offset to resume the scan at after a corruption event.
@@ -1241,7 +1250,7 @@ forward_scan_to_boundary(Dir, Seg, Anchor, Target) ->
     case prim_file:open(Path, [read, raw, binary]) of
         {ok, Fd} ->
             try
-                walk_to_boundary(Fd, Anchor, Target, Anchor)
+                walk_to_boundary(reader(Fd), Anchor, Target, Anchor)
             after
                 _ = prim_file:close(Fd)
             end;
@@ -1250,13 +1259,13 @@ forward_scan_to_boundary(Dir, Seg, Anchor, Target) ->
     end.
 
 %% @private
-walk_to_boundary(Fd, Off, Target, Best) when Off =< Target ->
-    case peek_frame_header(Fd, Off) of
-        {ok, FrameLen} ->
+walk_to_boundary(R0, Off, Target, Best) when Off =< Target ->
+    case peek_frame_header(R0, Off) of
+        {{ok, FrameLen}, R} ->
             Next = Off + FrameLen,
             if
                 Next =< Target ->
-                    walk_to_boundary(Fd, Next, Target, Next);
+                    walk_to_boundary(R, Next, Target, Next);
                 true ->
                     %% The next frame would overshoot Target; current
                     %% frame's start is the largest boundary ≤ Target.
@@ -1265,7 +1274,7 @@ walk_to_boundary(Fd, Off, Target, Best) when Off =< Target ->
         _ ->
             Best
     end;
-walk_to_boundary(_Fd, _Off, _Target, Best) ->
+walk_to_boundary(_R, _Off, _Target, Best) ->
     Best.
 
 %% -----------------------------------------------------------------------------
@@ -1273,13 +1282,35 @@ walk_to_boundary(_Fd, _Off, _Target, Best) ->
 %% -----------------------------------------------------------------------------
 
 %% @private
+reader(Fd) ->
+    #reader{fd = Fd}.
+
+%% @private
+%% Meant to return `prim_file:pread/3`'s result for the same arguments,
+%% served from the current chunk when it covers `[Off, Off + Len)` and
+%% otherwise from a new chunk read at `Off`. `scan_across_read_chunks_test`
+%% checks frames that straddle a chunk and one larger than a chunk.
+pread(#reader{offset = COff, chunk = Chunk} = R, Off, Len) when
+    Off >= COff, Off + Len =< COff + byte_size(Chunk)
+->
+    {{ok, binary:part(Chunk, Off - COff, Len)}, R};
+pread(#reader{fd = Fd} = R, Off, Len) ->
+    case prim_file:pread(Fd, Off, max(Len, ?READ_CHUNK_BYTES)) of
+        {ok, Chunk} ->
+            Bin = binary:part(Chunk, 0, min(Len, byte_size(Chunk))),
+            {{ok, Bin}, R#reader{offset = Off, chunk = Chunk}};
+        Other ->
+            {Other, R}
+    end.
+
+%% @private
 %% Reads just the 16-byte frame header at `Off` and returns the frame
 %% length. Does **not** CRC-verify the body — that's
-%% `read_and_decode_frame_body/3`'s job. Callers that don't need the
+%% `read_and_decode_frame_body/4`'s job. Callers that don't need the
 %% body (sealed-segment rebuild for non-indexed frames, the consumer-
-%% offset clamp walk) save the body pread + decode.
+%% offset clamp walk) save the body decode.
 %%
-%% Returns:
+%% Returns, paired with the advanced reader:
 %%
 %% - `{ok, FrameLen}`: header parsed, magic OK, FrameLen ≥ header size.
 %% - `eof`: file ends before a full header is available.
@@ -1287,24 +1318,29 @@ walk_to_boundary(_Fd, _Off, _Target, Best) ->
 %%   length out of range). The head-segment scan treats this as the
 %%   truncation point.
 %% - `{error, Reason}`: I/O error (surfaced to the caller).
-peek_frame_header(Fd, Off) ->
-    case prim_file:pread(Fd, Off, ?FRAME_HEADER_BYTES) of
-        {ok, HeaderBin} when byte_size(HeaderBin) =:= ?FRAME_HEADER_BYTES ->
-            case bondy_oplog_wal_frame:decode_header(HeaderBin) of
-                {ok, #{frame_len := FrameLen}} -> {ok, FrameLen};
-                {error, Reason} -> {truncate, Reason}
-            end;
-        {ok, Short} when byte_size(Short) < ?FRAME_HEADER_BYTES ->
-            eof;
-        eof ->
-            eof;
-        {error, Reason} ->
-            {error, Reason}
-    end.
+peek_frame_header(R0, Off) ->
+    {Res, R} = pread(R0, Off, ?FRAME_HEADER_BYTES),
+    {decode_frame_header(Res), R}.
+
+%% @private
+decode_frame_header({ok, HeaderBin}) when
+    byte_size(HeaderBin) =:= ?FRAME_HEADER_BYTES
+->
+    case bondy_oplog_wal_frame:decode_header(HeaderBin) of
+        {ok, #{frame_len := FrameLen}} -> {ok, FrameLen};
+        {error, Reason} -> {truncate, Reason}
+    end;
+decode_frame_header({ok, _Short}) ->
+    eof;
+decode_frame_header(eof) ->
+    eof;
+decode_frame_header({error, _} = E) ->
+    E.
 
 %% @private
 %% Reads the full frame at `Off`, CRC-verifies it, and runs the codec
-%% to recover the inner batch bytes. Returns:
+%% to recover the inner batch bytes. Returns, paired with the advanced
+%% reader:
 %%
 %% - `{ok, Body}`: frame decoded successfully; `Body` is the inner
 %%   bytes (the encoded `[Event_1, ..., Event_N]` list). For frames
@@ -1315,8 +1351,13 @@ peek_frame_header(Fd, Off) ->
 %%   treats this as the truncation point; the sealed-segment rebuild
 %%   surfaces it as corruption.
 %% - `{error, Reason}`: I/O error.
-read_and_decode_frame_body(Fd, Off, FrameLen, BodyEnc) ->
-    case prim_file:pread(Fd, Off, FrameLen) of
+read_and_decode_frame_body(R0, Off, FrameLen, BodyEnc) ->
+    {Res, R} = pread(R0, Off, FrameLen),
+    {decode_frame(Res, FrameLen, BodyEnc), R}.
+
+%% @private
+decode_frame(Res, FrameLen, BodyEnc) ->
+    case Res of
         {ok, Bin} when byte_size(Bin) =:= FrameLen ->
             case bondy_oplog_wal_frame:decode(Bin) of
                 {ok, RawBody, #{flags := Flags}} ->
