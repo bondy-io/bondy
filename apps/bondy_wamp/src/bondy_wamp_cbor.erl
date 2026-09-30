@@ -214,11 +214,25 @@ do_encode(Term, Opts) ->
             bondy_cbor:encode_key_value_list_checked(Value, Encode);
         ([{_, _} | _] = Value, Encode) when is_list(Value), Checked == false ->
             bondy_cbor:encode_key_value_list(Value, Encode);
+        (Bin, _Encode) when is_binary(Bin) ->
+            encode_binary(Bin);
         (Value, Encode) ->
             bondy_cbor:encode_value(Value, Encode)
     end,
 
     iolist_to_binary(bondy_cbor:encode(Term, Fun)).
+
+%% @private
+%% WAMP's CBOR serialization carries strings as CBOR text strings (major type
+%% 3), and clients look values up by them -- a CHALLENGE's AuthMethod, a dict
+%% key. Erlang has one type for both text and bytes, so a binary that is valid
+%% UTF-8 is sent as text, and anything else as a byte string (major type 2).
+%% This matches what a JSON client sees, where every binary is a string.
+encode_binary(Bin) ->
+    case unicode:characters_to_binary(Bin) of
+        Bin -> bondy_cbor:encode_string(Bin);
+        _ -> bondy_cbor:encode_binary(Bin)
+    end.
 
 %% @private
 do_decode(Term, []) ->

@@ -24,7 +24,11 @@ all() ->
         test_encode_with_tail,
         test_validate_opts,
         test_roundtrip,
-        test_error_cases
+        test_error_cases,
+        test_utf8_binary_is_text_string,
+        test_non_utf8_binary_is_byte_string,
+        test_map_keys_are_text_strings,
+        test_challenge_method_is_text_string
     ].
 
 init_per_suite(Config) ->
@@ -437,4 +441,43 @@ test_error_cases(_) ->
     %% Invalid encode options
     ?assertError(
         badarg, bondy_wamp_cbor:encode(#{}, [{check_duplicate_keys, invalid}])
+    ).
+
+%% =============================================================================
+%% STRING TYPES
+%%
+%% WAMP's CBOR serialization carries strings as CBOR text strings (major type
+%% 3). Bondy's own decoder reads both text and byte strings as binaries, so a
+%% round trip cannot tell them apart; these check the encoded bytes.
+%% =============================================================================
+
+test_utf8_binary_is_text_string(_) ->
+    ?assertEqual(<<16#65, "hello">>, bondy_wamp_cbor:encode(<<"hello">>)),
+    ?assertEqual(<<16#60>>, bondy_wamp_cbor:encode(<<>>)),
+    Accented = <<"h", 16#C3, 16#A9, "llo">>,
+    ?assertEqual(<<16#66, Accented/binary>>, bondy_wamp_cbor:encode(Accented)).
+
+test_non_utf8_binary_is_byte_string(_) ->
+    ?assertEqual(<<16#42, 255, 0>>, bondy_wamp_cbor:encode(<<255, 0>>)),
+    %% Truncated multi-byte sequence.
+    ?assertEqual(<<16#41, 16#C3>>, bondy_wamp_cbor:encode(<<16#C3>>)).
+
+test_map_keys_are_text_strings(_) ->
+    ?assertEqual(
+        <<16#A1, 16#63, "key", 16#65, "value">>,
+        bondy_wamp_cbor:encode(#{<<"key">> => <<"value">>})
+    ).
+
+%% A client looks up its authenticator by the CHALLENGE's AuthMethod; sent as a
+%% byte string, strict clients reject it (autobahn-python) or find no
+%% authenticator (wampy).
+test_challenge_method_is_text_string(_) ->
+    M = bondy_wamp_message:challenge(
+        <<"cryptosign">>, #{<<"challenge">> => <<"5D1E7FAF">>}
+    ),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M, cbor)),
+    ?assertMatch(<<16#83, 4, 16#6A, "cryptosign", _/binary>>, Bin),
+    ?assertMatch(
+        [4, <<"cryptosign">>, #{<<"challenge">> := <<"5D1E7FAF">>}],
+        bondy_wamp_cbor:decode(Bin)
     ).
