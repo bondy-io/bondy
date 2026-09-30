@@ -151,7 +151,7 @@ postcondition(M0, Call, {NotRunning, Alarmed}) ->
 %% =============================================================================
 
 start(S) ->
-    {ok, _} = bondy_oplog:start_instance(id(S)),
+    {ok, _} = bondy_oplog_test_projection:start_instance(id(S)),
     observe().
 
 kill(S) ->

@@ -752,7 +752,7 @@ unsynced_count(#?MODULE{unsynced_count = N}) -> N.
 
 %% @private
 do_open(Dir, InstanceId, HashAlgo, Policy) ->
-    case ensure_dir(Dir) of
+    case ensure_synced_dir(Dir) of
         ok ->
             case load_or_create_manifest(Dir, InstanceId, HashAlgo) of
                 {ok, Manifest} ->
@@ -778,6 +778,20 @@ do_open(Dir, InstanceId, HashAlgo, Policy) ->
             end;
         {error, R} ->
             {error, {manifest, R}}
+    end.
+
+%% @private
+%% The orphan sweep deletes whatever the manifest does not name, so the
+%% directory is synced before the manifest is read.
+ensure_synced_dir(Dir) ->
+    case ensure_dir(Dir) of
+        ok ->
+            case bondy_mst_io:fsync_dir(Dir) of
+                ok -> ok;
+                {error, Reason} -> {error, {dir_fsync_failed, Dir, Reason}}
+            end;
+        {error, _} = E ->
+            E
     end.
 
 %% @private

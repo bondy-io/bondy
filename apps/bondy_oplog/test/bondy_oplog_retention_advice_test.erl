@@ -195,7 +195,7 @@ advice_returns_error_when_instance_not_running() ->
 
 advice_against_idle_instance_returns_none() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{}),
     try
         {ok, Advice} = bondy_oplog:retention_advice(Id),
         ?assertEqual(none, maps:get(recommended_action, Advice)),
@@ -212,7 +212,7 @@ advice_against_idle_instance_returns_none() ->
 
 advice_propagates_bootstrap_consumers_opt() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{}),
     try
         {ok, Advice} = bondy_oplog:retention_advice(
             Id, #{bootstrap_consumers => 3}

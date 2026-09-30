@@ -65,7 +65,7 @@ trigger_invokes_dispatch() ->
         #{peers => [{peer, a}, {peer, b}]}
     ),
     Inst = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(Inst),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     bondy_oplog_sync_scheduler:trigger(),
     receive
         {Ref, Inst, [{peer, a}, {peer, b}]} -> ok
@@ -85,8 +85,8 @@ dispatch_per_running_instance() ->
     ),
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A),
-    {ok, _} = bondy_oplog:start_instance(B),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B),
     bondy_oplog_sync_scheduler:trigger(),
     Got = collect(Ref, 2, 1000),
     ?assertEqual(
@@ -112,7 +112,7 @@ no_dispatch_when_no_instances() ->
 no_dispatch_when_dispatch_unset() ->
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     Inst = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(Inst),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     %% Should not crash even though no dispatch is set.
     bondy_oplog_sync_scheduler:trigger(),
     timer:sleep(50),
@@ -131,7 +131,7 @@ peer_source_supplies_peers() ->
         fun(_, Got) -> Self ! {Ref, Got} end
     ),
     Inst = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(Inst),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     bondy_oplog_sync_scheduler:trigger(),
     receive
         {Ref, Got} -> ?assertEqual(Peers, Got)

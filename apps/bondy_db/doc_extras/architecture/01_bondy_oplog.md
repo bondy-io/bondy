@@ -44,8 +44,7 @@ stateless. The gen_server serialises:
 - stateful-validator appends (`append`, `append_many`);
 - peer event installs (`install_remote`);
 - MST page exchanges (`get_pages`, `merge_pages`, `missing_set`);
-- compaction operations (`compact`, `truncate_prefix`,
-  `load_snapshot`);
+- compaction operations (`compact`, `truncate_prefix`);
 - applier sync barriers (`drain_install_queue`,
   `await_overlay_drained`) — in fused mode these are serviced by the
   instance itself between drain slices (see below).
@@ -486,11 +485,9 @@ behind the fastest few) calls
    published events — it is always at or below the installed
    watermark, so `compact/1` needs **no** overlay-drain barrier and
    runs safely under sustained write load (fused included).
-2. **Catalogue (projection-backed) instances skip the re-fold
-   entirely** — the projection, maintained eagerly on write, *is* the
-   per-cell `interpret_cog` checkpoint. A bare single-CRDT instance
-   folds the stable range through `interpret_cog/2` and persists the
-   result via the **compaction checkpoint**
+2. **skips any re-fold** — the projection, maintained eagerly on
+   write, is the materialised state — and persists the watermark and
+   applied-frontier vector via the **compaction checkpoint**
    (`bondy_oplog_compaction_checkpoint`; file-backed when
    `storage_path` is set, ETS otherwise).
 3. atomically truncates the MST via `bondy_mst:truncate/2` — a
@@ -504,23 +501,18 @@ behind the fastest few) calls
 flowchart LR
     PEERS["bondy_oplog_peer_state<br/>fresh roots + applied frontiers"]
     FRONT["compute_frontier_for"]
-    MODE{"catalogue?"}
-    FAST["projection already current<br/>(no re-fold)"]
-    INTERP["CrdtMod:interpret_cog<br/>(bare single-CRDT only)"]
-    CKPT[compaction_checkpoint:put]
+    CKPT["compaction_checkpoint:put<br/>(watermark + applied frontier)"]
     TRUNC["bondy_mst:truncate/2<br/>(structural O(log N) prefix drop)"]
     GC["bondy_mst:gc/1<br/>(sweep unlinked pages · ETS backend)"]
     WM[watermark advance]
 
-    PEERS --> FRONT --> MODE
-    MODE -->|yes| FAST --> TRUNC
-    MODE -->|no| INTERP --> CKPT --> TRUNC
+    PEERS --> FRONT --> CKPT --> TRUNC
     TRUNC --> GC --> WM
 ```
 
-At full quiescence the live MST is empty; new replicas bootstrap from
-the checkpoint (or, for catalogues, the catalogue snapshot protocol)
-via `bondy_oplog_sync_session` instead of replaying history.
+At full quiescence the live MST is empty; new replicas bootstrap through
+the catalogue snapshot protocol (`bondy_oplog_sync_session`) instead of
+replaying history.
 [Chapter 06](06_compaction_and_bootstrap.md) walks through the full
 lifecycle.
 
@@ -566,7 +558,7 @@ Implementation:
   `_manifest.erl`, `_codec.erl` — on-disk format.
 - `bondy_oplog_sync_scheduler.erl` — single global scheduler;
   `run_tick/1`, `dispatch_for/2`.
-- `bondy_oplog_sync_session.erl` — `run/3`, `bootstrap/3`,
+- `bondy_oplog_sync_session.erl` — `run/3`, `bootstrap_catalogue/3`,
   `pull_until_complete`; `bump_ae_on_sync/2` and
   `maybe_bump_ae_isolated/1` (the per-round freshness heartbeat) and
   `should_certify_freshness/1` (the isolation policy).

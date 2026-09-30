@@ -72,6 +72,10 @@ passes a new Bucket value to `get/3`, `put_batch/2`, `range/5`, or
   and the rebuild falls back to the MST walk — correct only for the
   ephemeral/peer-synced path (e.g. the registry), whose cells are never
   compacted away. Probe it via `cell_keys_exported/1`.
+- `sync/1` — make every write `put_batch/2` has acknowledged durable. A
+  durable adapter whose acknowledged writes can still be lost to a power
+  failure exports it; call it through `sync/2`, which is `ok` for an adapter
+  that does not.
 
 Adapters MUST be safe under concurrent readers; `put_batch/2` may be
 single-writer (the substrate guarantees one applier per shard).
@@ -98,6 +102,7 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 ]).
 
 -export([cell_keys_exported/1]).
+-export([sync/2]).
 
 -type handle() :: any().
 -type bucket() :: term().
@@ -212,7 +217,9 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -callback cell_keys(handle(), Scope :: cell_keys_scope()) ->
     [{bucket(), Key :: term()}].
 
--optional_callbacks([head/3, clear/2, cell_keys/2]).
+-callback sync(handle()) -> ok | {error, term()}.
+
+-optional_callbacks([head/3, clear/2, cell_keys/2, sync/1]).
 
 %% =============================================================================
 %% API
@@ -234,3 +241,16 @@ instead of silently building empty indexes on the next rebuild.
 cell_keys_exported(Adapter) when is_atom(Adapter) ->
     _ = code:ensure_loaded(Adapter),
     erlang:function_exported(Adapter, cell_keys, 2).
+
+-doc """
+Makes every write `put_batch/2` has acknowledged on `Handle` durable, through
+`Adapter`'s optional `sync/1`. `ok` when `Adapter` does not export it.
+""".
+-spec sync(Adapter :: module(), handle()) -> ok | {error, term()}.
+
+sync(Adapter, Handle) when is_atom(Adapter) ->
+    _ = code:ensure_loaded(Adapter),
+    case erlang:function_exported(Adapter, sync, 1) of
+        true -> Adapter:sync(Handle);
+        false -> ok
+    end.

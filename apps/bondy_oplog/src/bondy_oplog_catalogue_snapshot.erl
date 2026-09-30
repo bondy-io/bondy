@@ -15,10 +15,10 @@ Peer-side responder for the catalogue-snapshot bootstrap protocol.
 
 Two entry points:
 
-- `init/1,2` — opens a session. Detects whether the instance has a
-  catalogue projection at all. Returns `{ok, {Watermark, Cursor}}` on
-  success, or `{ok, no_snapshot}` for legacy single-CRDT instances and
-  for catalogue instances that have not yet wired a `cell_apply_target`.
+- `init/1,2` — opens a session. Returns `{ok, {Watermark, Cursor}}` on
+  success, or `{ok, no_snapshot}` when neither an applier nor a fused
+  instance process is registered for it, or its projection shard is not
+  registered in `bondy_oplog_core_registry`.
 - `next/2` — pulls the next chunk of `(Bucket, Key, Frame)` triples
   from the projection. Returns `{ok, {batch, {Cursor, Cells}}}` while
   there is more, `{ok, {done, []}}` on end-of-keyspace, or
@@ -115,12 +115,7 @@ single-bucket walk over the default bucket (`<<>>`). See `init/2` to snapshot
 one explicit bucket.
 """).
 init(InstanceId) ->
-    case bondy_oplog_instance:crdt_module(InstanceId) of
-        Mod when is_atom(Mod), Mod =/= undefined ->
-            {ok, no_snapshot};
-        undefined ->
-            init_catalogue_multi(InstanceId)
-    end.
+    init_catalogue_multi(InstanceId).
 
 -spec init(instance_id(), Bucket :: binary()) ->
     {ok, {non_neg_integer(), bondy_oplog_catalogue_cursor:cursor()}}
@@ -129,14 +124,7 @@ init(InstanceId) ->
 init(InstanceId, Bucket) when
     is_binary(InstanceId), is_binary(Bucket)
 ->
-    %% Step 1 — detect catalogue mode. Single-CRDT mode has a defined
-    %% `crdt_module`; catalogue mode does not.
-    case bondy_oplog_instance:crdt_module(InstanceId) of
-        Mod when is_atom(Mod), Mod =/= undefined ->
-            {ok, no_snapshot};
-        undefined ->
-            init_catalogue(InstanceId, Bucket)
-    end.
+    init_catalogue(InstanceId, Bucket).
 
 -spec next(
     instance_id(),
@@ -188,8 +176,6 @@ next(InstanceId, Cursor) when
 init_catalogue(InstanceId, Bucket) ->
     case resolve_cell_apply_target(InstanceId) of
         undefined ->
-            %% Not running, or a catalogue instance with no projection
-            %% wiring — nothing to snapshot.
             {ok, no_snapshot};
         {ok, {NS, Index, Shard}} ->
             init_with_target(InstanceId, NS, Index, Shard, Bucket)
@@ -234,10 +220,7 @@ resolve_cell_apply_target(InstanceId) ->
                     undefined
             end;
         ApplierPid ->
-            case bondy_oplog_applier:cell_apply_target(ApplierPid) of
-                {ok, {_, _, _}} = Ok -> Ok;
-                _ -> undefined
-            end
+            bondy_oplog_applier:cell_apply_target(ApplierPid)
     end.
 
 %% @private

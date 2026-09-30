@@ -11,14 +11,8 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-File-backed compaction checkpoint store. Durable, single-checkpoint,
-atomic.
-
-One file per instance, holding the latest `{Watermark, Checkpoint}`
-as an Erlang External Term Format binary. Writes use the standard
-tmp + datasync + atomic-rename + dir-fsync idiom; a partial write or
-power failure leaves the previous good file in place, and readers
-see either the old checkpoint or the new one, never a partial mix.
+File-backed compaction checkpoint store: one file per instance, holding the
+latest `{Watermark, Checkpoint}` as an Erlang External Term Format binary.
 
 ## Opts
 
@@ -26,17 +20,11 @@ see either the old checkpoint or the new one, never a partial mix.
 |---|---|---|
 | `path` | yes      | Base directory. The instance's checkpoint is stored at `<path>/<InstanceId>/checkpoint.etf`. |
 
-## Durability sequence (`put_checkpoint/3`)
+## Durability (`put_checkpoint/3`)
 
-1. Encode `{Watermark, Checkpoint}` as ETF.
-2. Open `<dir>/checkpoint.etf.tmp` raw, write the body, datasync the
-   fd, close. After this point the data bytes are on disk.
-3. `rename(tmp, final)` via `bondy_mst_io:rename/2` — POSIX-atomic.
-4. `bondy_mst_io:fsync_dir/1` on the enclosing directory so the
-   dirent change is durable. Required on ext4 / xfs.
-
-If any step fails the function returns `{error, Reason}`; the tmp
-file is removed and the prior on-disk checkpoint is left intact.
+The checkpoint, `{Watermark, Checkpoint}` as ETF, is written with
+`bondy_mst_io:write_file_atomic/2`, and `put_checkpoint/3` has its error
+contract.
 
 ## Corruption detection
 
@@ -65,7 +53,6 @@ store needs.
 
 -record(state, {
     instance_id :: instance_id(),
-    dir :: file:filename_all(),
     path :: file:filename_all()
 }).
 
@@ -94,28 +81,20 @@ init(InstanceId, Opts) when is_binary(InstanceId), is_map(Opts) ->
             Dir = filename:join(BaseDir, InstanceId),
             File = filename:join(Dir, "checkpoint.etf"),
             ok = filelib:ensure_dir(File),
-            {ok, #state{instance_id = InstanceId, dir = Dir, path = File}}
+            case bondy_mst_io:fsync_dir(Dir) of
+                ok ->
+                    {ok, #state{instance_id = InstanceId, path = File}};
+                {error, Reason} ->
+                    {error, {dir_fsync_failed, Dir, Reason}}
+            end
     end.
 
-put_checkpoint(#state{dir = Dir, path = Path}, Watermark, Checkpoint) ->
+put_checkpoint(#state{path = Path}, Watermark, Checkpoint) ->
     Bin = erlang:term_to_binary(
         {checkpoint_v1, Watermark, Checkpoint},
         [{minor_version, 2}]
     ),
-    Tmp = tmp_path(Path),
-    case write_and_sync(Tmp, Bin) of
-        ok ->
-            case bondy_mst_io:rename(Tmp, Path) of
-                ok ->
-                    bondy_mst_io:fsync_dir(Dir);
-                {error, _} = E ->
-                    _ = prim_file:delete(Tmp),
-                    E
-            end;
-        {error, _} = E ->
-            _ = prim_file:delete(Tmp),
-            E
-    end.
+    bondy_mst_io:write_file_atomic(Path, Bin).
 
 get_checkpoint(#state{path = Path}) ->
     case file:read_file(Path) of
@@ -149,28 +128,6 @@ close(#state{}) ->
 %% =============================================================================
 
 %% @private
-%% Same shape as bondy_mst_pack_manifest:write_and_sync/2: open raw,
-%% write, datasync via the shared seam, close. The fd is closed even
-%% if write or datasync fails so the tmp delete in the caller can
-%% proceed.
-write_and_sync(TmpPath, Bin) ->
-    case prim_file:open(TmpPath, [write, raw, binary]) of
-        {ok, Fd} ->
-            try
-                case prim_file:write(Fd, Bin) of
-                    ok ->
-                        bondy_mst_io:datasync(Fd);
-                    {error, _} = E ->
-                        E
-                end
-            after
-                _ = prim_file:close(Fd)
-            end;
-        {error, _} = E ->
-            E
-    end.
-
-%% @private
 %% Decode without `[safe]`: this file holds bytes this node wrote itself, and
 %% `[safe]` rejects any atom not already in the atom table. A checkpoint
 %% carries atoms from modules that need not be loaded yet at the point the
@@ -191,9 +148,3 @@ decode(Bin) ->
         error:Reason ->
             {error, {corrupted, Reason}}
     end.
-
-%% @private
-tmp_path(Path) when is_list(Path) ->
-    Path ++ ".tmp";
-tmp_path(Path) when is_binary(Path) ->
-    <<Path/binary, ".tmp">>.

@@ -323,7 +323,7 @@ read_ignores_stale_tmp_file_test() ->
         M = sample(),
         ok = bondy_mst_pack_manifest:write(Dir, M),
         %% Drop an orphan tmp with bogus contents.
-        TmpPath = bondy_mst_pack_manifest:tmp_path(Dir),
+        TmpPath = filename:join(Dir, "manifest.tmp"),
         ok = file:write_file(TmpPath, <<"garbage that won't parse\n">>),
         {ok, Read} = bondy_mst_pack_manifest:read(Dir),
         ?assertEqual(M, Read)
@@ -345,10 +345,6 @@ path_helpers_test() ->
     ?assertEqual(
         filename:join(Dir, "manifest"),
         bondy_mst_pack_manifest:path(Dir)
-    ),
-    ?assertEqual(
-        filename:join(Dir, "manifest.tmp"),
-        bondy_mst_pack_manifest:tmp_path(Dir)
     ).
 
 %% =============================================================================

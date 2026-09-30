@@ -40,9 +40,11 @@ the NS's shards.
 ## Read path
 
 1. **Cache hit** — `Cache:get(Handle, Bucket, Key)` returns immediately.
-2. **Cache miss** — read the projection cell, decode the frame,
-   merge overlay events whose HLC is newer than the cell's HLC,
-   apply the fold, populate the cache, return.
+2. **Cache miss** — take a cache ticket, read the projection cell,
+   decode the frame, merge overlay events whose HLC is newer than the
+   cell's HLC, apply the fold, fill the cache under the ticket, return.
+   The ticket keeps a fill that raced a projection write from outliving
+   that write's invalidation (see `bondy_oplog_cache_adapter`).
 
 This module is read-only; writes flow through `bondy_oplog_instance`
 and reach the projection via the applier. Writers can call
@@ -691,7 +693,14 @@ do_read_traced(Entry, Bucket, Key) ->
         {ok, {Value, Hlc}} ->
             {{Value, Hlc}, cache};
         not_found ->
-            slow_read_traced(Entry, Bucket, Key)
+            Ticket = CA:ticket(CH),
+            case slow_read_traced(Entry, Bucket, Key) of
+                {{_, _} = Found, _} = Result ->
+                    ok = CA:fill(CH, Bucket, Key, Found, Ticket),
+                    Result;
+                Result ->
+                    Result
+            end
     end.
 
 slow_read_traced(Entry, Bucket, Key) ->
@@ -716,15 +725,7 @@ slow_read_no_projection(Entry, Bucket, Key, Kernel) ->
                 bondy_oplog_cell_kernel:interpret_overlay(
                     Kernel, InitState, 0, Events
                 ),
-            finalise_slow_read(
-                Entry,
-                Bucket,
-                Key,
-                Kernel,
-                NewState,
-                NewHlc,
-                overlay_only
-            )
+            finalise_slow_read(Kernel, NewState, NewHlc, overlay_only)
     end.
 
 slow_read_with_projection(Entry, Bucket, Key, Kernel, ProjHlc, ValueBytes) ->
@@ -736,9 +737,7 @@ slow_read_with_projection(Entry, Bucket, Key, Kernel, ProjHlc, ValueBytes) ->
                 undefined ->
                     {undefined, projection};
                 Value ->
-                    cache_and_return(
-                        Entry, Bucket, Key, Value, ProjHlc, projection
-                    )
+                    {{Value, ProjHlc}, projection}
             end;
         Events ->
             %% Overlay events need the full state to apply incrementally.
@@ -749,29 +748,17 @@ slow_read_with_projection(Entry, Bucket, Key, Kernel, ProjHlc, ValueBytes) ->
                     Kernel, State, ProjHlc, Events
                 ),
             finalise_slow_read(
-                Entry,
-                Bucket,
-                Key,
-                Kernel,
-                NewState,
-                NewHlc,
-                projection_with_overlay
+                Kernel, NewState, NewHlc, projection_with_overlay
             )
     end.
 
-finalise_slow_read(Entry, Bucket, Key, Kernel, NewState, NewHlc, Source) ->
+finalise_slow_read(Kernel, NewState, NewHlc, Source) ->
     case bondy_oplog_cell_kernel:to_value(Kernel, NewState) of
         undefined ->
             {undefined, Source};
         Value ->
-            cache_and_return(Entry, Bucket, Key, Value, NewHlc, Source)
+            {{Value, NewHlc}, Source}
     end.
-
-cache_and_return(Entry, Bucket, Key, Value, Hlc, Source) ->
-    CA = bondy_oplog_core_registry:entry_cache_adapter(Entry),
-    CH = bondy_oplog_core_registry:entry_cache_handle(Entry),
-    ok = CA:put(CH, Bucket, Key, {Value, Hlc}),
-    {{Value, Hlc}, Source}.
 
 %% Fast-path projection read: returns `{ok, Hlc, ValueBytes}` via the
 %% adapter's `head/3` callback when available, else falls back to
@@ -1210,17 +1197,9 @@ check_consistency_class(Reads, eventual) ->
     end.
 
 do_write_through(Entry, Bucket, Key, _Event) ->
-    %% The cache now stores the user-facing `Value` (post-`to_value/1`),
-    %% not the fold state. Applying an event in-place would need the
-    %% fold's `apply_value_delta/2` callback, which no current fold
-    %% exports. Invalidate instead so the next read repopulates from
-    %% the HEAD fast-path (which sees the writer's overlay event).
     CA = bondy_oplog_core_registry:entry_cache_adapter(Entry),
     CH = bondy_oplog_core_registry:entry_cache_handle(Entry),
-    case CA:get(CH, Bucket, Key) of
-        not_found -> ok;
-        {ok, _} -> ok = CA:delete(CH, Bucket, Key)
-    end.
+    CA:delete(CH, Bucket, Key).
 
 %% =============================================================================
 %% Telemetry

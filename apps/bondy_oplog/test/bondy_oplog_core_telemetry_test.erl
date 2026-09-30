@@ -47,7 +47,9 @@ telemetry_test_() ->
 read_cache_hit_emits_source_cache() ->
     NS = mk_ns(),
     {Setup, #{cache_handle := CH}} = setup_shard(NS, primary, 0),
-    ok = bondy_oplog_cache_ets:put(CH, <<>>, <<"k">>, {<<"v">>, 99}),
+    ok = bondy_oplog_cache_ets:fill(
+        CH, <<>>, <<"k">>, {<<"v">>, 99}, bondy_oplog_cache_ets:ticket(CH)
+    ),
     with_handler(?EVENTS, fun() ->
         {<<"v">>, 99} = bondy_oplog_core:read(NS, primary, <<"k">>)
     end),

@@ -851,9 +851,11 @@ end}.
 %% (battery-backed write cache).
 %%
 %% This governs the durable *projection*, not the write-ahead log. A write is
-%% already durable in the WAL before the fold reaches leveled, and the
-%% projection can be rebuilt from the log, so `none` is the deliberate
-%% default. Durability of the write itself is `db.wal.fsync_mode`.
+%% already durable in the WAL before the fold reaches leveled. With `none`,
+%% Bondy syncs the projection itself before it compacts the log or records
+%% what the projection has applied, meant to keep in the log every write the
+%% projection could still lose to a power failure. Durability of the write
+%% itself is `db.wal.fsync_mode`.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.sync_strategy", "bondy_db.leveled_sync_strategy", [
@@ -2174,26 +2176,6 @@ end}.
 "bondy_router.registry_rib_check_interval", [
   {datatype, {duration, ms}},
   {default, "5m"}
-]}.
-
-%% -----------------------------------------------------------------------------
-%% @doc RIB update damping (route-flap control), owner side. Reachability
-%% transitions — a procedure's first registration on this node, or its last
-%% one leaving — always propagate immediately. With a non-zero window, an
-%% update that changes ONLY the summary's count / latest fields (i.e. the
-%% node keeps serving the procedure, just with a different number of
-%% callees) is coalesced: at most one such cell write per window, with a
-%% trailing update carrying the final value. `0` (default) disables damping
-%% and every summary change is written through.
-%% @end
-%% -----------------------------------------------------------------------------
-%% `integer` is listed alongside the duration so that `0` is expressible: the
-%% duration parser rejects zero in every spelling (`0`, `0ms`, `0s`), so a
-%% bare duration datatype makes the documented "set 0 to disable" impossible
-%% to write and makes the generated defaults file fail to parse back.
-{mapping, "registry.rib.damping", "bondy_router.registry_rib_damping", [
-  {datatype, [integer, {duration, ms}]},
-  {default, 0}
 ]}.
 
 %% =============================================================================

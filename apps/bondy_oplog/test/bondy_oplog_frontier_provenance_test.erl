@@ -224,7 +224,6 @@ register_shard(NS) ->
 open_instance(Id, NS, Dir, Origin) ->
     bondy_oplog:start_instance(Id, #{
         origin => Origin,
-        fold_module => lww_register,
         backend => bondy_mst_pack_store,
         storage_path => unicode:characters_to_binary(Dir),
         seed => true,
@@ -238,7 +237,7 @@ append_batch(Id, N) ->
             EvKey = bondy_oplog:append(
                 Id, {cell_apply, ?B, Key, {set, 1000 + J, Key}}
             ),
-            _ = bondy_oplog:projection(Id),
+            ok = bondy_oplog_test_projection:drain(Id),
             EvKey
         end
      || J <- lists:seq(1, N)

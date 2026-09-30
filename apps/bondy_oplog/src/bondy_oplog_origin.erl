@@ -31,9 +31,8 @@ externally and pass it via the `origin` start_instance option.
 
 `load_or_create/1` reads a previously persisted origin from a file, or
 generates and persists a fresh one when there is no file. The on-disk layout is a single
-`?BONDY_OPLOG_ORIGIN_BYTES`-byte file written via the standard
-durability sequence (tmp + datasync + rename + fsync_dir, mirroring
-`bondy_mst_pack_manifest`). The supervisor calls it automatically when
+`?BONDY_OPLOG_ORIGIN_BYTES`-byte file written with
+`bondy_mst_io:write_file_atomic/2`. The supervisor calls it automatically when
 the caller configured `storage_path` but did not provide an explicit
 `origin`, so a default-configured durable instance survives kill -9 +
 restart without WAL recovery rejecting its own segments as
@@ -108,9 +107,11 @@ were written with makes WAL recovery reject them as
 with the persisted origin intact (`bondy_oplog_origin_test`,
 `bondy_oplog_instance_keeper_test:unreadable_origin_heals/0`).
 
-The on-disk layout is a single `?BONDY_OPLOG_ORIGIN_BYTES`-byte file
-written via the standard durability sequence: temp file, `datasync`
-the fd, atomic `rename`, `fsync_dir` on the containing directory.
+The on-disk layout is a single `?BONDY_OPLOG_ORIGIN_BYTES`-byte file written
+with `bondy_mst_io:write_file_atomic/2`. A persisted origin is returned only
+after its directory has been fsynced, so an origin written by a start whose
+directory fsync failed is durable before a retried start uses it
+(`bondy_oplog_origin_test`).
 """).
 -spec load_or_create(Path :: file:filename_all()) ->
     {ok, t()} | {error, term()}.
@@ -119,7 +120,11 @@ load_or_create(Path) ->
     PathBin = unicode:characters_to_binary(Path),
     case read_persisted(PathBin) of
         {ok, _} = Ok ->
-            Ok;
+            Dir = filename:dirname(PathBin),
+            case bondy_mst_io:fsync_dir(Dir) of
+                ok -> Ok;
+                {error, Reason} -> {error, {dir_fsync_failed, Dir, Reason}}
+            end;
         {error, enoent} ->
             create_and_persist(PathBin);
         {error, _} = Error ->
@@ -160,41 +165,15 @@ create_and_persist(Path) ->
     end.
 
 %% @private
-%% tmp + datasync + rename + fsync_dir — mirrors the durability
-%% sequence used by `bondy_mst_pack_manifest:write/2`.
+%% It runs in the process starting the instance, which on first boot is the
+%% catalogue opening its tables, so a failed directory fsync is returned.
 persist(Path, Origin) ->
-    Dir = filename:dirname(Path),
-    Tmp = <<Path/binary, ".tmp">>,
     case filelib:ensure_dir(Path) of
         ok ->
-            case write_and_sync(Tmp, Origin) of
-                ok ->
-                    case bondy_mst_io:rename(Tmp, Path) of
-                        ok ->
-                            bondy_mst_io:fsync_dir(Dir);
-                        {error, _} = E ->
-                            _ = prim_file:delete(Tmp),
-                            E
-                    end;
-                {error, _} = E ->
-                    _ = prim_file:delete(Tmp),
-                    E
-            end;
-        {error, _} = E ->
-            E
-    end.
-
-%% @private
-write_and_sync(Tmp, Bin) ->
-    case prim_file:open(Tmp, [write, raw, binary]) of
-        {ok, Fd} ->
             try
-                case prim_file:write(Fd, Bin) of
-                    ok -> bondy_mst_io:datasync(Fd);
-                    {error, _} = E -> E
-                end
-            after
-                _ = prim_file:close(Fd)
+                bondy_mst_io:write_file_atomic(Path, Origin)
+            catch
+                error:{dir_fsync_failed, _, _} = Reason -> {error, Reason}
             end;
         {error, _} = E ->
             E

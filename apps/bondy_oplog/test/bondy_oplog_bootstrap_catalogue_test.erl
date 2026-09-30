@@ -10,11 +10,9 @@
 %%   - A fresh local replica pulls all cells from a peer replica.
 %%   - The local projection ends up with byte-identical V2 frames.
 %%   - finalize_catalogue_bootstrap marks the local instance `live`.
-%%   - When the peer reports `no_snapshot` (single-CRDT mode) the
+%%   - When the peer reports `no_snapshot` (it has no projection) the
 %%     caller falls through to plain sync and the local instance is
 %%     left untouched.
-%%   - A single-CRDT local instance refuses bootstrap_catalogue with
-%%     `{error, not_a_catalogue_instance}`.
 %% =============================================================================
 -module(bondy_oplog_bootstrap_catalogue_test).
 
@@ -40,11 +38,11 @@ bootstrap_catalogue_test_() ->
         fun fresh_replica_bootstraps_from_peer/0,
         fun bootstrap_marks_local_live/0,
         fun finalize_adopts_peer_frontier/0,
+        fun finalize_does_not_go_live_on_an_unpersisted_frontier/0,
         fun bootstrap_seeds_local_frontier/0,
         fun bootstrap_absorbs_installed_hlcs/0,
         fun live_sync_refuses_phantom_frontier_bootstrap_adopts/0,
         fun no_snapshot_falls_through_to_sync/0,
-        fun single_crdt_local_refuses_bootstrap_catalogue/0,
         fun live_replica_recovers_lossless_via_anti_entropy/0
     ]}.
 
@@ -70,7 +68,7 @@ live_sync_refuses_phantom_frontier_bootstrap_adopts() ->
     {Local, _, _, _} = setup_instance(),
     %% A real shared event so the round genuinely converges (equal roots).
     _ = bondy_oplog:append(Peer, {cell_apply, ?B, <<"k">>, {set, 10, <<"v">>}}),
-    _ = barrier(Peer),
+    ok = bondy_oplog_test_projection:drain(Peer),
     %% Inject a phantom origin: present in the peer's frontier but carried by NO
     %% event `Local` can pull — stands in for a compacted-prefix maximum.
     Phantom = <<"peer-compacted-origin">>,
@@ -151,7 +149,7 @@ bootstrap_absorbs_installed_hlcs() ->
             {<<"far2">>, FarHlc, <<"v2">>}
         ]
     ],
-    _ = barrier(Peer),
+    ok = bondy_oplog_test_projection:drain(Peer),
 
     %% Compact the peer's MST away entirely: projection cells survive (they are
     %% what the snapshot ships), the events do not.
@@ -202,6 +200,24 @@ finalize_adopts_peer_frontier() ->
     teardown(Local),
     teardown(Other).
 
+%% A fresh replica goes live on the frontier it adopted, so a frontier that
+%% could not be made durable is returned as an error and the replica stays
+%% `pre_bootstrap`.
+finalize_does_not_go_live_on_an_unpersisted_frontier() ->
+    {Local, _, _, _} = setup_instance_persistent(
+        test_dir(), #{backend => bondy_mst_pack_store}
+    ),
+    ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Local)),
+    Result = with_io_fault_lock(fun() ->
+        ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+        bondy_oplog_instance:finalize_catalogue_bootstrap(
+            Local, 0, #{<<"origin-a">> => 1}, 0, false
+        )
+    end),
+    ?assertMatch({error, {dir_fsync_failed, _, eio}}, Result),
+    ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Local)),
+    teardown(Local).
+
 %% End-to-end reproduction of node2's production symptom: a DURABLE
 %% `pre_bootstrap` replica bootstrapping from a peer whose MST has been
 %% COMPACTED EMPTY (data folded into the checkpoint + projection, the normal
@@ -224,7 +240,7 @@ bootstrap_seeds_local_frontier() ->
         bondy_oplog:append(Peer, {cell_apply, ?B, K, {set, Hlc, V}})
      || {K, Hlc, V} <- Cells
     ],
-    _ = barrier(Peer),
+    ok = bondy_oplog_test_projection:drain(Peer),
 
     %% Compact the peer's MST empty — exactly node1's post-import state: the
     %% data lives in the projection + checkpoint, the MST is gone.
@@ -267,7 +283,7 @@ fresh_replica_bootstraps_from_peer() ->
         bondy_oplog:append(Peer, {cell_apply, ?B, K, {set, Hlc, V}})
      || {K, Hlc, V} <- Cells
     ],
-    _ = barrier(Peer),
+    ok = bondy_oplog_test_projection:drain(Peer),
 
     %% Pre-bootstrap: peer high-water = 25, local high-water = 0.
     ?assertMatch(
@@ -320,7 +336,7 @@ bootstrap_marks_local_live() ->
     {Peer, _, _, _} = setup_instance_persistent(BaseDir, #{seed => true}),
     {Local, _, _, _} = setup_instance_persistent(BaseDir, #{}),
     _ = bondy_oplog:append(Peer, {cell_apply, ?B, <<"k">>, {set, 1, <<"v">>}}),
-    _ = barrier(Peer),
+    ok = bondy_oplog_test_projection:drain(Peer),
 
     %% Peer is live (seeded), Local is pre_bootstrap.
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Peer)),
@@ -336,19 +352,27 @@ bootstrap_marks_local_live() ->
     file:del_dir_r(BaseDir).
 
 no_snapshot_falls_through_to_sync() ->
-    %% Peer = single-CRDT mode (returns no_snapshot). Local = catalogue.
-    Peer = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Peer, #{
-        crdt_module => bondy_oplog_crdt_lww_register
-    }),
+    %% A peer whose shard has left the core registry answers `no_snapshot`;
+    %% the bootstrap then runs the plain pull, which still ships its events.
+    {Peer, PeerNS, _, _} = setup_instance(),
     {Local, _, _, _} = setup_instance(),
-    ?assertMatch(
-        {ok, _},
-        bondy_oplog_sync_session:bootstrap_catalogue(
-            Local, Peer, #{}
+    _ = bondy_oplog:append(
+        Peer, {cell_apply, ?B, <<"k">>, {set, 1, <<"v">>}}
+    ),
+    ok = bondy_oplog_test_projection:drain(Peer),
+    ok = bondy_oplog_core_registry:unregister(PeerNS, primary, 0),
+    ?assertEqual(
+        {ok, no_snapshot},
+        bondy_oplog_transport_inline:request(
+            Peer, Local, get_catalogue_snapshot_init, #{}
         )
     ),
-    bondy_oplog:stop_instance(Peer),
+    ?assertMatch(
+        {ok, _},
+        bondy_oplog_sync_session:bootstrap_catalogue(Local, Peer, #{})
+    ),
+    ?assertEqual(1, bondy_oplog:size(Local)),
+    teardown(Peer),
     teardown(Local).
 
 live_replica_recovers_lossless_via_anti_entropy() ->
@@ -370,12 +394,12 @@ live_replica_recovers_lossless_via_anti_entropy() ->
     _ = bondy_oplog:append(
         Local, {cell_apply, ?B, <<"k2">>, {set, 30, <<"local-k2">>}}
     ),
-    _ = barrier(Local),
+    ok = bondy_oplog_test_projection:drain(Local),
     %% Peer: a higher-HLC K1@20 and nothing else.
     _ = bondy_oplog:append(
         Peer, {cell_apply, ?B, <<"k1">>, {set, 20, <<"peer-k1">>}}
     ),
-    _ = barrier(Peer),
+    ok = bondy_oplog_test_projection:drain(Peer),
 
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Local)),
 
@@ -401,22 +425,6 @@ live_replica_recovers_lossless_via_anti_entropy() ->
     teardown(Peer),
     teardown(Local).
 
-single_crdt_local_refuses_bootstrap_catalogue() ->
-    Local = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Local, #{
-        crdt_module => bondy_oplog_crdt_lww_register
-    }),
-    Peer = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Peer, #{
-        crdt_module => bondy_oplog_crdt_lww_register
-    }),
-    ?assertEqual(
-        {error, not_a_catalogue_instance},
-        bondy_oplog_sync_session:bootstrap_catalogue(Local, Peer, #{})
-    ),
-    bondy_oplog:stop_instance(Local),
-    bondy_oplog:stop_instance(Peer).
-
 %% =============================================================================
 %% Helpers
 %% =============================================================================
@@ -426,7 +434,6 @@ setup_instance() ->
     NS = ns_of(Id),
     {Cache, Proj} = register_shard(NS, primary, 0),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         %% A distinct origin per instance — these model two separate replicas,
         %% which in production carry distinct persisted origins. Without it both
         %% ephemeral instances inherit `bondy_oplog_origin:default()` and their
@@ -449,7 +456,6 @@ setup_instance_persistent(BaseDir, ExtraOpts) ->
     ok = filelib:ensure_path(Path),
     Opts = maps:merge(
         #{
-            fold_module => lww_register,
             applier => #{
                 cell_apply_target => {NS, primary, 0}
             },
@@ -503,9 +509,6 @@ mk_id() ->
 ns_of(Id) when is_binary(Id) ->
     binary_to_atom(<<"ns_", Id/binary>>, utf8).
 
-barrier(Id) ->
-    bondy_oplog:projection(Id).
-
 %% Force the synchronous per-cell projection replay: project the events a
 %% sync session integrated into the MST onto the per-cell projection.
 replay(Id) ->
@@ -520,3 +523,19 @@ peer_entry(Id) ->
     NS = ns_of(Id),
     {ok, Entry} = bondy_oplog_core_registry:lookup(NS, primary, 0),
     Entry.
+
+%% The node-wide lock every suite that mocks `bondy_mst_io` takes.
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
+    ).

@@ -83,7 +83,7 @@ unavailable_flags_and_rebootstraps() ->
         %% sync.
         bondy_oplog_sync_scheduler:trigger(),
         Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
-        ?assertMatch(#{peer := ?PEER, mode := catalogue}, Meta)
+        ?assertMatch(#{peer := ?PEER}, Meta)
     end),
     bondy_oplog:stop_instance(Inst).
 
@@ -98,7 +98,6 @@ gap_two_strikes_rebootstraps_fused() ->
     set_mode(gap),
     Inst = mk_fused_inst(),
     ?assertEqual(true, bondy_oplog_registry:fused(Inst)),
-    ?assertNotEqual(true, bondy_oplog_registry:mst_retention(Inst)),
     with_telemetry(fun() ->
         %% Strike 1: the session ends `{error, {frontier_gap, _}}`; the
         %% debounce records it, nothing is scheduled yet.
@@ -117,7 +116,7 @@ gap_two_strikes_rebootstraps_fused() ->
         %% The flag is consumed by a bootstrap dispatch.
         bondy_oplog_sync_scheduler:trigger(),
         Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
-        ?assertMatch(#{peer := ?PEER, mode := catalogue}, Meta)
+        ?assertMatch(#{peer := ?PEER}, Meta)
     end),
     bondy_oplog:stop_instance(Inst).
 
@@ -146,7 +145,7 @@ unservable_behind_three_strikes_rebootstraps() ->
             ),
         bondy_oplog_sync_scheduler:trigger(),
         Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
-        ?assertMatch(#{peer := ?PEER, mode := catalogue}, Meta)
+        ?assertMatch(#{peer := ?PEER}, Meta)
     end),
     bondy_oplog:stop_instance(Inst).
 
@@ -267,7 +266,7 @@ mk_inst() ->
     Id = iolist_to_binary([
         "rb_", integer_to_binary(erlang:unique_integer([positive]))
     ]),
-    {ok, _} = bondy_oplog:start_instance(Id, #{}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{}),
     Id.
 
 %% A bare FUSED instance (no `mst_retention`) — a class the frontier-gap
@@ -276,7 +275,7 @@ mk_fused_inst() ->
     Id = iolist_to_binary([
         "rbf_", integer_to_binary(erlang:unique_integer([positive]))
     ]),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         fused => true, wal_backend => mem, durability => ephemeral
     }),
     Id.

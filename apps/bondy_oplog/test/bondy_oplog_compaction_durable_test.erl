@@ -165,7 +165,6 @@ compaction_advances_wal_watermark_and_sweeps(Dir) ->
     Open = fun() ->
         bondy_oplog:start_instance(InstId, #{
             origin => Origin,
-            fold_module => lww_register,
             backend => bondy_mst_pack_store,
             storage_path => unicode:characters_to_binary(Dir),
             backend_options => #{auto_seal_records => ?SEAL_EVERY},
@@ -236,7 +235,6 @@ wal_watermark_advances_only_after_the_checkpoint(Dir) ->
     try
         {ok, _} = bondy_oplog:start_instance(InstId, #{
             origin => bondy_oplog_origin:new(),
-            fold_module => lww_register,
             backend => bondy_mst_pack_store,
             storage_path => unicode:characters_to_binary(Dir),
             backend_options => #{auto_seal_records => ?SEAL_EVERY},
@@ -313,7 +311,6 @@ close_shard(Cache, Proj) ->
 open_pack_instance(InstanceId, NS, Dir) ->
     bondy_oplog:start_instance(InstanceId, #{
         origin => bondy_oplog_origin:new(),
-        fold_module => lww_register,
         backend => bondy_mst_pack_store,
         storage_path => unicode:characters_to_binary(Dir),
         backend_options => #{auto_seal_records => ?SEAL_EVERY},
@@ -332,7 +329,7 @@ append_batch(InstanceId, I, Batch) ->
             _ = bondy_oplog:append(
                 InstanceId, {cell_apply, ?B, Key, {set, Hlc, Key}}
             ),
-            _ = bondy_oplog:projection(InstanceId)
+            ok = bondy_oplog_test_projection:drain(InstanceId)
         end,
         lists:seq(1, Batch)
     ).

@@ -42,10 +42,13 @@ applier_gated_in_pre_bootstrap() ->
     Id = mk_id(),
     try
         Opts = persistent_opts(Tmp),
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
         ?assertEqual(pre_bootstrap, lifecycle_state(Id)),
 
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 5)],
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 5)
+        ],
 
         %% `await_apply` blocks until the overlay drains. While gated
         %% the applier issues no `install_local_batch` casts so the
@@ -72,11 +75,14 @@ mark_live_drains_backlog() ->
     Id = mk_id(),
     try
         Opts = persistent_opts(Tmp),
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
         ?assertEqual(pre_bootstrap, lifecycle_state(Id)),
 
         N = 7,
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, N)],
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, N)
+        ],
 
         %% Gated.
         ?assertEqual(
@@ -101,9 +107,14 @@ mark_live_drains_backlog() ->
 ephemeral_default_live_drains_normally() ->
     Id = mk_id(),
     try
-        {ok, _} = bondy_oplog:start_instance(Id, ephemeral_opts()),
+        {ok, _} = bondy_oplog_test_projection:start_instance(
+            Id, ephemeral_opts()
+        ),
         ?assertEqual(live, lifecycle_state(Id)),
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 4)],
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 4)
+        ],
         ok = bondy_oplog:await_apply(Id),
         ?assertEqual(4, bondy_oplog:size(Id))
     after
@@ -117,9 +128,12 @@ ephemeral_seed_false_gates() ->
     Id = mk_id(),
     try
         Opts = (ephemeral_opts())#{seed => false},
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
         ?assertEqual(pre_bootstrap, lifecycle_state(Id)),
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 3)],
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 3)
+        ],
         ?assertEqual(
             {error, timeout}, bondy_oplog:await_apply(Id, 200)
         ),
@@ -139,9 +153,12 @@ seed_true_starts_live() ->
     Id = mk_id(),
     try
         Opts = (persistent_opts(Tmp))#{seed => true},
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
         ?assertEqual(live, lifecycle_state(Id)),
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 2)],
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 2)
+        ],
         ok = bondy_oplog:await_apply(Id),
         ?assertEqual(2, bondy_oplog:size(Id)),
         %% Flag file materialised.
@@ -166,17 +183,10 @@ mk_id() ->
     ).
 
 ephemeral_opts() ->
-    #{
-        crdt_module => bondy_oplog_test_counter,
-        origin => bondy_oplog_origin:new()
-    }.
+    #{origin => bondy_oplog_origin:new()}.
 
 persistent_opts(BaseDir) ->
-    #{
-        crdt_module => bondy_oplog_test_counter,
-        origin => bondy_oplog_origin:new(),
-        storage_path => BaseDir
-    }.
+    #{origin => bondy_oplog_origin:new(), storage_path => BaseDir}.
 
 lifecycle_state(Id) ->
     bondy_oplog_instance:lifecycle_state(Id).

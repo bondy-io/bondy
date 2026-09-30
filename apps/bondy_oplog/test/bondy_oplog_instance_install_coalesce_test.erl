@@ -206,8 +206,7 @@ mk_event(Origin, Hlc, Seq) ->
     bondy_oplog_event:new(Key, {set, Seq, mk_val(Seq)}, undefined).
 
 start(Id, CoalesceMax) ->
-    bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    bondy_oplog_test_projection:start_instance(Id, #{
         max_install_in_flight => 100000,
         install_coalesce_max => CoalesceMax
     }).

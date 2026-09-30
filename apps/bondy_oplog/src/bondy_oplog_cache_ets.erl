@@ -33,8 +33,11 @@ For LRU/LFU/TTL/ARC semantics, supply a richer adapter.
 
 ## Handle shape
 
-The adapter's handle is the ETS tid. All callbacks are wait-free except
-`invalidate_all/1` (which calls `ets:delete_all_objects/1`).
+The adapter's handle is the ETS tid. The table reserves one row,
+`{'$meta', MaxEntries, Generation}`; `delete/3` and `invalidate_all/1`
+advance `Generation` before they remove rows, and a ticket is the
+`Generation` it was taken at. All callbacks are wait-free except
+`invalidate_all/1`, which scans the table.
 """).
 
 -behaviour(bondy_oplog_cache_adapter).
@@ -43,7 +46,8 @@ The adapter's handle is the ETS tid. All callbacks are wait-free except
     init/4,
     close/1,
     get/3,
-    put/4,
+    ticket/1,
+    fill/5,
     delete/3,
     invalidate_all/1,
     info/1
@@ -70,7 +74,7 @@ init(_NS, _Index, _Shard, Opts) ->
         {write_concurrency, WriteConc},
         {decentralized_counters, true}
     ]),
-    ok = maybe_set_max_entries(Tab, Opts),
+    true = ets:insert(Tab, {'$meta', max_entries(Opts), 0}),
     {ok, Tab}.
 
 -spec close(ets:tid()) -> ok.
@@ -88,66 +92,66 @@ get(Tab, Bucket, Key) ->
         [{_, Value, Hlc}] -> {ok, {Value, Hlc}}
     end.
 
--spec put(
+-spec ticket(ets:tid()) -> non_neg_integer().
+
+ticket(Tab) ->
+    ets:lookup_element(Tab, '$meta', 3).
+
+-spec fill(
     ets:tid(),
     Bucket :: term(),
     Key :: term(),
-    {Value :: term(), Hlc :: bondy_oplog_hlc:hlc()}
+    {Value :: term(), Hlc :: bondy_oplog_hlc:hlc()},
+    Ticket :: non_neg_integer()
 ) -> ok.
 
-put(Tab, Bucket, Key, {Value, Hlc}) ->
-    true = ets:insert(Tab, {{Bucket, Key}, Value, Hlc}),
-    ok = maybe_evict(Tab),
-    ok.
+fill(Tab, Bucket, Key, {Value, Hlc}, Ticket) ->
+    Row = {{Bucket, Key}, Value, Hlc},
+    true = ets:insert(Tab, Row),
+    case ticket(Tab) of
+        Ticket ->
+            maybe_evict(Tab);
+        _ ->
+            true = ets:delete_object(Tab, Row),
+            ok
+    end.
 
 -spec delete(ets:tid(), Bucket :: term(), Key :: term()) -> ok.
 
 delete(Tab, Bucket, Key) ->
+    _ = ets:update_counter(Tab, '$meta', {3, 1}),
     true = ets:delete(Tab, {Bucket, Key}),
     ok.
 
 -spec invalidate_all(ets:tid()) -> ok.
 
 invalidate_all(Tab) ->
-    true = ets:delete_all_objects(Tab),
+    _ = ets:update_counter(Tab, '$meta', {3, 1}),
+    _ = ets:select_delete(Tab, [{{{'_', '_'}, '_', '_'}, [], [true]}]),
     ok.
 
 -spec info(ets:tid()) -> #{atom() => term()}.
 
 info(Tab) ->
     #{
-        size => ets:info(Tab, size),
+        size => ets:info(Tab, size) - 1,
         memory => ets:info(Tab, memory),
-        max_entries => persistent_max_entries(Tab)
+        max_entries => ets:lookup_element(Tab, '$meta', 2)
     }.
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-maybe_set_max_entries(Tab, #{max_entries := N}) when
-    is_integer(N), N > 0
-->
-    %% Stash the bound in the table itself under a reserved key so the
-    %% adapter is self-contained (no persistent_term, no parallel ETS).
-    true = ets:insert(Tab, {'$max_entries', N}),
-    ok;
-maybe_set_max_entries(_Tab, _Opts) ->
-    ok.
-
-persistent_max_entries(Tab) ->
-    case ets:lookup(Tab, '$max_entries') of
-        [{_, N}] -> N;
-        [] -> infinity
-    end.
+max_entries(#{max_entries := N}) when is_integer(N), N > 0 ->
+    N;
+max_entries(_) ->
+    infinity.
 
 maybe_evict(Tab) ->
-    case persistent_max_entries(Tab) of
-        infinity ->
-            ok;
-        N ->
-            %% Subtract one to account for the reserved '$max_entries' row.
-            evict_until(Tab, N)
+    case ets:lookup_element(Tab, '$meta', 2) of
+        infinity -> ok;
+        N -> evict_until(Tab, N)
     end.
 
 evict_until(Tab, N) ->
@@ -155,13 +159,11 @@ evict_until(Tab, N) ->
         Size when Size =< N + 1 ->
             ok;
         _ ->
-            %% Walk from the lowest key, skipping the reserved
-            %% `'$max_entries'` row, and drop one row per pass.
             case ets:first(Tab) of
                 '$end_of_table' ->
                     ok;
-                '$max_entries' ->
-                    case ets:next(Tab, '$max_entries') of
+                '$meta' ->
+                    case ets:next(Tab, '$meta') of
                         '$end_of_table' ->
                             ok;
                         Next ->

@@ -54,7 +54,7 @@ instance_test_() ->
 
 empty_root_is_undefined() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     ?assertEqual(undefined, bondy_oplog:root_hash(Id)),
     ?assertEqual(0, bondy_oplog:size(Id)),
     ?assertEqual(empty, bondy_oplog:first_key(Id)),
@@ -63,7 +63,7 @@ empty_root_is_undefined() ->
 
 append_changes_root() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     _ = bondy_oplog:append(Id, a),
     ok = bondy_oplog:await_apply(Id),
     R1 = bondy_oplog:root_hash(Id),
@@ -76,7 +76,7 @@ append_changes_root() ->
 
 append_round_trip() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     K = bondy_oplog:append(Id, {payload, hello}),
     {ok, E} = bondy_oplog:get(Id, K),
     ?assertEqual({payload, hello}, bondy_oplog_event:op(E)),
@@ -87,7 +87,7 @@ append_round_trip() ->
 
 append_orders_keys() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Keys = [
         bondy_oplog:append(Id, {n, N})
      || N <- lists:seq(1, 50)
@@ -98,7 +98,7 @@ append_orders_keys() ->
 
 append_meta_round_trip() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Meta = {dots, [bondy_oplog_event:key(1, <<"x">>, 1)]},
     K = bondy_oplog:append(Id, op, Meta),
     {ok, E} = bondy_oplog:get(Id, K),
@@ -107,7 +107,7 @@ append_meta_round_trip() ->
 
 idempotent_append_remote() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     PeerKey = bondy_oplog_event:key(
         bondy_oplog_hlc:encode(erlang:system_time(millisecond) + 1000, 0),
         <<"peer-origin-aaaa">>,
@@ -139,10 +139,10 @@ deterministic_root_across_replicas() ->
     ],
     IdA = mk_id(),
     IdB = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(IdA, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdA, #{
         origin => bondy_oplog_origin:new()
     }),
-    {ok, _} = bondy_oplog:start_instance(IdB, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdB, #{
         origin => bondy_oplog_origin:new()
     }),
     [bondy_oplog:append_remote(IdA, E) || E <- Events],
@@ -155,7 +155,7 @@ deterministic_root_across_replicas() ->
 
 fold_range_inclusive() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Keys = [bondy_oplog:append(Id, N) || N <- lists:seq(1, 10)],
     [_, _, K3 | _] = Keys,
     K8 = lists:nth(8, Keys),
@@ -171,7 +171,7 @@ fold_range_inclusive() ->
 
 range_returns_events_in_key_order() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     %% Capture append returns so a silent `{error, _}` from one of
     %% the writes does not masquerade as a read-path bug downstream.
     AppendKeys = [bondy_oplog:append(Id, N) || N <- lists:seq(1, 20)],
@@ -192,7 +192,7 @@ range_returns_events_in_key_order() ->
 
 truncate_prefix() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Keys = [bondy_oplog:append(Id, N) || N <- lists:seq(1, 20)],
     Watermark = lists:nth(10, Keys),
     Removed = bondy_oplog:truncate_prefix(Id, Watermark),
@@ -208,7 +208,7 @@ truncate_prefix() ->
 %% dropped.
 truncate_prefix_advances_watermark() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Base = erlang:system_time(millisecond) + 1_000_000,
     MkEvent = fun(N) ->
         Key = bondy_oplog_event:key(
@@ -216,7 +216,9 @@ truncate_prefix_advances_watermark() ->
             <<"peer-twwm-aaaa">>,
             N
         ),
-        bondy_oplog_event:new(Key, {n, N}, undefined)
+        bondy_oplog_event:new(
+            Key, bondy_oplog_test_projection:cell_op(N), undefined
+        )
     end,
     Events = [MkEvent(N) || N <- lists:seq(1, 5)],
     [ok = bondy_oplog:append_remote(Id, E) || E <- Events],
@@ -239,7 +241,10 @@ truncate_prefix_advances_watermark() ->
         100
     ),
     ok = bondy_oplog:append_remote(
-        Id, bondy_oplog_event:new(FreshKey, {n, 100}, undefined)
+        Id,
+        bondy_oplog_event:new(
+            FreshKey, bondy_oplog_test_projection:cell_op(100), undefined
+        )
     ),
     ok = bondy_oplog:await_apply(Id),
     ?assertEqual(3, bondy_oplog:size(Id)),
@@ -251,7 +256,7 @@ truncate_prefix_advances_watermark() ->
 
 size_tracks_inserts_and_truncations() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     ?assertEqual(0, bondy_oplog:size(Id)),
     _ = [bondy_oplog:append(Id, N) || N <- lists:seq(1, 5)],
     ?assertEqual(5, bondy_oplog:size(Id)),
@@ -262,7 +267,7 @@ size_tracks_inserts_and_truncations() ->
 
 concurrent_appends_unique_and_ordered() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Parent = self(),
     NWorkers = 8,
     NPerWorker = 100,
@@ -289,7 +294,7 @@ concurrent_appends_unique_and_ordered() ->
 
 append_many_atomic() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Items = [{op_a, undefined}, {op_b, undefined}, {op_c, undefined}],
     Keys = bondy_oplog:append_many(Id, Items),
     ?assertEqual(3, length(Keys)),
@@ -299,7 +304,7 @@ append_many_atomic() ->
 
 first_and_latest_keys() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     K1 = bondy_oplog:append(Id, a),
     K2 = bondy_oplog:append(Id, b),
     K3 = bondy_oplog:append(Id, c),
@@ -311,7 +316,7 @@ first_and_latest_keys() ->
 rejects_remote_event_with_local_origin() ->
     Id = mk_id(),
     Origin = bondy_oplog_origin:new(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{origin => Origin}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{origin => Origin}),
     Bogus = bondy_oplog_event:new(
         bondy_oplog_event:key(1, Origin, 1),
         op,
@@ -326,7 +331,7 @@ rejects_remote_event_with_local_origin() ->
 
 info_returns_diagnostic() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Info = bondy_oplog:info(Id),
     ?assertMatch(#{instance_id := Id}, Info),
     ?assertMatch(#{backend := ets}, Info),
@@ -334,8 +339,6 @@ info_returns_diagnostic() ->
         #{validator := bondy_oplog_validator_trust},
         Info
     ),
-    %% F7: fold_module defaults to undefined; fold_opts to #{}.
-    ?assertMatch(#{fold_module := undefined, fold_opts := #{}}, Info),
     ok = bondy_oplog:stop_instance(Id).
 
 %% Two remote events with the same `{HLC, Origin, Seq}` but different
@@ -345,7 +348,7 @@ info_returns_diagnostic() ->
 %% as the canonical value.
 divergent_remote_events_are_quarantined() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Key = bondy_oplog_event:key(
         bondy_oplog_hlc:encode(erlang:system_time(millisecond) + 1000, 0),
         <<"peer-origin-zzzz">>,
@@ -376,7 +379,7 @@ divergent_remote_events_are_quarantined() ->
 %% returns `{error, refused}` and check the API surfaces the error.
 custom_validator_can_reject_remote() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         validator => bondy_oplog_test_reject_validator
     }),
     Peer = bondy_oplog_event:new(
@@ -399,7 +402,7 @@ refresh_validator_rotates_applier_snapshot() ->
     Id = mk_id(),
     Tab = ets:new(refresh_rule, [public, set]),
     true = ets:insert(Tab, {allow_op, op_a}),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         validator => bondy_oplog_test_refreshable_validator,
         validator_opts => #{rule_table => Tab}
     }),
@@ -427,7 +430,7 @@ refresh_validator_rotates_applier_snapshot() ->
 %% and subsequent verifications still use the original snapshot.
 refresh_validator_noop_when_callback_not_exported() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         validator => bondy_oplog_test_reject_validator
     }),
     ?assertEqual(
@@ -457,7 +460,7 @@ refresh_validator_rotates_fused_instance_snapshot() ->
     Id = mk_id(),
     Tab = ets:new(refresh_rule_fused, [public, set]),
     true = ets:insert(Tab, {allow_op, op_a}),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         validator => bondy_oplog_test_refreshable_validator,
         validator_opts => #{rule_table => Tab},
         fused => true
@@ -497,7 +500,7 @@ refresh_validator_in_flight_keeps_old_snapshot() ->
     %% applier's eventual refresh swaps verdict ok -> refused.
     Tab = ets:new(bondy_oplog_test_blocking_validator, [public, named_table]),
     true = ets:insert(Tab, {Self, #{verdict => refused}}),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         validator => bondy_oplog_test_blocking_validator,
         validator_opts => #{coordinator => Self, verdict => ok}
     }),
@@ -563,8 +566,8 @@ refresh_validator_in_flight_keeps_old_snapshot() ->
 list_instances_reports_running() ->
     A = mk_id(),
     B = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(A),
-    {ok, _} = bondy_oplog:start_instance(B),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B),
     Inst = bondy_oplog:list_instances(),
     ?assert(lists:member(A, Inst)),
     ?assert(lists:member(B, Inst)),
@@ -573,8 +576,8 @@ list_instances_reports_running() ->
 
 start_instance_idempotent() ->
     Id = mk_id(),
-    {ok, Pid1} = bondy_oplog:start_instance(Id),
-    {ok, Pid2} = bondy_oplog:start_instance(Id),
+    {ok, Pid1} = bondy_oplog_test_projection:start_instance(Id),
+    {ok, Pid2} = bondy_oplog_test_projection:start_instance(Id),
     ?assertEqual(Pid1, Pid2),
     ok = bondy_oplog:stop_instance(Id).
 
@@ -632,7 +635,7 @@ backpressure_test_() ->
 
 rejects_append_when_full() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         max_working_set => 3,
         origin => bondy_oplog_origin:new()
     }),
@@ -647,7 +650,7 @@ rejects_append_when_full() ->
 
 infinity_disables_backpressure() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         max_working_set => infinity,
         origin => bondy_oplog_origin:new()
     }),
@@ -658,7 +661,7 @@ infinity_disables_backpressure() ->
 %% append_many is atomic: either all events fit under the cap or none.
 append_many_atomic_under_cap() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         max_working_set => 5,
         origin => bondy_oplog_origin:new()
     }),
@@ -675,141 +678,3 @@ append_many_atomic_under_cap() ->
     %% Atomic — no partial insert.
     ?assertEqual(3, bondy_oplog:size(Id)),
     ok = bondy_oplog:stop_instance(Id).
-
-%% =============================================================================
-%% F7: Fold strategy config wiring (FOLD_STRATEGY_DESIGN §6/§7)
-%% =============================================================================
-
-fold_config_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
-        fun fold_module_defaults_to_undefined/0,
-        fun fold_module_shorthand_accepted/0,
-        fun fold_module_custom_module_accepted/0,
-        fun fold_module_unknown_atom_crashes_init/0,
-        fun fold_module_non_atom_crashes_init/0,
-        fun fold_opts_non_map_crashes_init/0,
-        fun fold_opts_passed_through_verbatim/0,
-        fun registry_exposes_fold_fields/0
-    ]}.
-
-fold_module_defaults_to_undefined() ->
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
-    Info = bondy_oplog:info(Id),
-    ?assertEqual(undefined, maps:get(fold_module, Info)),
-    ?assertEqual(#{}, maps:get(fold_opts, Info)),
-    ok = bondy_oplog:stop_instance(Id).
-
-fold_module_shorthand_accepted() ->
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register
-    }),
-    Info = bondy_oplog:info(Id),
-    %% Shorthand atom recorded verbatim; resolution happens at call time.
-    ?assertEqual(lww_register, maps:get(fold_module, Info)),
-    ?assertEqual(#{}, maps:get(fold_opts, Info)),
-    ok = bondy_oplog:stop_instance(Id).
-
-fold_module_custom_module_accepted() ->
-    %% The fully-qualified former-fold module name is a valid label — it
-    %% resolves to its native CRDT twin (PR-Z) and is recorded verbatim.
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => bondy_oplog_fold_lww_register
-    }),
-    Info = bondy_oplog:info(Id),
-    ?assertEqual(bondy_oplog_fold_lww_register, maps:get(fold_module, Info)),
-    ok = bondy_oplog:stop_instance(Id).
-
-fold_module_unknown_atom_crashes_init() ->
-    Id = mk_id(),
-    Result = bondy_oplog:start_instance(Id, #{
-        fold_module => not_a_real_fold_module_xyz
-    }),
-    %% init/1 raises (the label has no native CRDT twin); the supervisor
-    %% surfaces the wrapped reason. We assert on the unwrapped structured
-    %% reason and skip stop_instance — the instance never started.
-    ?assertMatch(
-        {error,
-            {invalid_fold_module, Id, {unknown, not_a_real_fold_module_xyz}}},
-        normalize_start_error(Result)
-    ).
-
-fold_module_non_atom_crashes_init() ->
-    Id = mk_id(),
-    Result = bondy_oplog:start_instance(Id, #{fold_module => 42}),
-    ?assertMatch(
-        {error, {invalid_fold_module, Id, {unknown, 42}}},
-        normalize_start_error(Result)
-    ).
-
-fold_opts_non_map_crashes_init() ->
-    Id = mk_id(),
-    Result = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
-        fold_opts => [{not_a_map, 1}]
-    }),
-    ?assertMatch(
-        {error, {invalid_fold_opts, _}},
-        normalize_start_error(Result)
-    ).
-
-fold_opts_passed_through_verbatim() ->
-    Id = mk_id(),
-    Opts = #{custom_key => some_value, nested => #{deep => true}},
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
-        fold_opts => Opts
-    }),
-    ?assertEqual(Opts, maps:get(fold_opts, bondy_oplog:info(Id))),
-    ok = bondy_oplog:stop_instance(Id).
-
-registry_exposes_fold_fields() ->
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
-        fold_opts => #{tag => abc}
-    }),
-    ?assertEqual(lww_register, bondy_oplog_registry:fold_module(Id)),
-    ?assertEqual(#{tag => abc}, bondy_oplog_registry:fold_opts(Id)),
-    %% Also verify presence in the full lookup map.
-    {ok, Entry} = bondy_oplog_registry:lookup(Id),
-    ?assertMatch(#{fold_module := lww_register}, Entry),
-    ?assertMatch(#{fold_opts := #{tag := abc}}, Entry),
-    ok = bondy_oplog:stop_instance(Id).
-
-%% Supervisor start_instance wraps init/1 errors. The actual nesting
-%% observed in practice is
-%%   {error, {shutdown, {failed_to_start_child, Mod, {{Reason, Stack}, _}}}}
-%% which we unwrap to surface `{error, Reason}` for the test assertions.
-%% Various intermediate forms are tolerated so the helper stays useful
-%% if the supervisor changes its wrapping later.
-normalize_start_error({ok, _Pid}) ->
-    %% Failure was expected — surfacing ok lets the assertMatch fail
-    %% with a descriptive expected/got pair.
-    ok;
-normalize_start_error({error, Term}) ->
-    {error, unwrap_supervisor_error(Term)};
-normalize_start_error(Other) ->
-    {error, Other}.
-
-unwrap_supervisor_error({shutdown, Inner}) ->
-    unwrap_supervisor_error(Inner);
-unwrap_supervisor_error({failed_to_start_child, _Mod, Inner}) ->
-    unwrap_supervisor_error(Inner);
-unwrap_supervisor_error({Reason, Stack}) when is_list(Stack) ->
-    %% gen_server crash form: `{Reason, Stacktrace}`. Distinguish
-    %% from a "Reason that happens to be a 2-tuple with list payload"
-    %% by checking that Stack is a list of 4-element stack frames.
-    case is_stacktrace(Stack) of
-        true -> Reason;
-        false -> {Reason, Stack}
-    end;
-unwrap_supervisor_error(Reason) ->
-    Reason.
-
-is_stacktrace([Top | _]) when is_tuple(Top), tuple_size(Top) =:= 4 ->
-    is_atom(element(1, Top)) andalso is_atom(element(2, Top));
-is_stacktrace(_) ->
-    false.

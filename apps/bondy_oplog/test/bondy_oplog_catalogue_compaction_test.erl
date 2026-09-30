@@ -3,31 +3,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Catalogue (projection-backed) compaction — COG_REGROUNDING_PLAN.md
-%% §8.2, PR-2 step 1 (α: bound the catalogue MST).
-%%
-%% Before this change a fold-backed catalogue instance had
-%% `crdt_module = undefined`, so `do_compact_async` returned
-%% `{error, no_crdt_module}` and the catalogue MST grew unbounded. Now a
-%% catalogue instance compacts by truncating the MST's stable prefix —
-%% the materialised state lives in the durable projection, so the
-%% compaction checkpoint records only the watermark.
-%%
-%% The new correctness condition (vs. the monolithic `crdt_module` path,
-%% which is self-contained) is that truncation must NOT outrun the
-%% async projection: a peer-merged event can be in the MST (and thus in
-%% the stability frontier) but not yet folded into the projection by the
-%% applier. Truncation is therefore capped at the projection's applied
-%% high-water. These tests pin both halves:
-%%
-%%   1. With a projection that has folded every event (await_apply →
-%%      high-water covers the frontier), compaction truncates the MST to
-%%      empty and reads stay correct (the projection is the durable read
-%%      source, untouched by truncation).
-%%   2. Without a projection (no `cell_apply_target` → high-water 0),
-%%      compaction is *enabled* (not `{error, no_crdt_module}`) but the
-%%      safe gate defers truncation — there is no projection holding the
-%%      state, so removing MST events would lose data.
+%% Catalogue (projection-backed) compaction truncates the MST's stable prefix:
+%% the materialised state lives in the durable projection, so the compaction
+%% checkpoint records only the watermark. Truncation must not outrun the async
+%% projection: a peer-merged event can be in the MST, and so in the stability
+%% frontier, before the applier folds it. Truncation is therefore capped at the
+%% projection's applied high-water. With a projection that has folded every
+%% event (await_apply → high-water covers the frontier), compaction truncates
+%% the MST to empty and reads stay correct (the projection is the durable read
+%% source, untouched by truncation).
 
 -module(bondy_oplog_catalogue_compaction_test).
 
@@ -57,8 +41,6 @@ catalogue_compaction_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {timeout, 30, fun truncates_and_preserves_reads/0},
         {timeout, 30, fun idempotent_after_truncation/0},
-        {timeout, 30, fun no_projection_defers_truncation/0},
-        {timeout, 30, fun neither_fold_nor_crdt_returns_error/0},
         {timeout, 30, fun crdt_kernel_compaction_matches_from_scratch/0},
         {timeout, 30, fun remote_event_survives_catalogue_compaction/0},
         {timeout, 30, fun compaction_makes_no_synchronous_applier_call/0}
@@ -78,7 +60,7 @@ truncates_and_preserves_reads() ->
     InstId = mk_id(),
     NS = ns_of(InstId),
     {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
-    {ok, _} = open_instance(InstId, NS, bondy_oplog_origin:new(), lww_register),
+    {ok, _} = open_instance(InstId, NS, bondy_oplog_origin:new()),
     try
         ok = append_cell(InstId, <<"a">>, 10, <<"v-a">>),
         ok = append_cell(InstId, <<"b">>, 20, <<"v-b">>),
@@ -137,7 +119,7 @@ idempotent_after_truncation() ->
     InstId = mk_id(),
     NS = ns_of(InstId),
     {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
-    {ok, _} = open_instance(InstId, NS, bondy_oplog_origin:new(), lww_register),
+    {ok, _} = open_instance(InstId, NS, bondy_oplog_origin:new()),
     try
         ok = append_cell(InstId, <<"k">>, 5, <<"v">>),
         _ = bondy_oplog_instance:await_apply(InstId),
@@ -155,37 +137,6 @@ idempotent_after_truncation() ->
         ok = bondy_oplog:stop_instance(InstId),
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
         close_shard(Cache, Proj)
-    end.
-
-%% A fold instance with NO projection wiring: the applied high-water is
-%% 0, so the safe gate refuses to truncate (removing MST events would
-%% lose state with no projection to hold it). Compaction is enabled —
-%% it returns `{ok, no_change}`, NOT `{error, no_crdt_module}`.
-no_projection_defers_truncation() ->
-    InstId = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(InstId, #{
-        origin => bondy_oplog_origin:new(),
-        fold_module => lww_register
-    }),
-    try
-        _ = bondy_oplog:append(
-            InstId, {cell_apply, ?B, <<"k">>, {set, 1, <<"v">>}}
-        ),
-        _ = bondy_oplog:append(
-            InstId, {cell_apply, ?B, <<"k2">>, {set, 2, <<"v2">>}}
-        ),
-        _ = bondy_oplog_instance:await_apply(InstId),
-        SizeBefore = bondy_oplog:size(InstId),
-        ?assert(SizeBefore >= 2),
-        Root = bondy_oplog_instance:root_hash(InstId),
-        ?assertEqual(
-            {ok, no_change},
-            bondy_oplog_instance:compact(InstId, [Root])
-        ),
-        ?assertEqual(SizeBefore, bondy_oplog:size(InstId)),
-        ?assertEqual(undefined, bondy_oplog:current_watermark(InstId))
-    after
-        ok = bondy_oplog:stop_instance(InstId)
     end.
 
 %% The catalogue's per-cell `interpret_cog` checkpoint IS the durable
@@ -222,12 +173,12 @@ crdt_kernel_compaction_matches_from_scratch() ->
     AId = mk_id(),
     ANS = ns_of(AId),
     {AC, AP} = register_shard_crdt(ANS, primary, 0, lww_register, ?CRDT),
-    {ok, _} = open_instance(AId, ANS, bondy_oplog_origin:new(), lww_register),
+    {ok, _} = open_instance(AId, ANS, bondy_oplog_origin:new()),
     %% Instance B — from scratch, never compacted.
     BId = mk_id(),
     BNS = ns_of(BId),
     {BC, BP} = register_shard_crdt(BNS, primary, 0, lww_register, ?CRDT),
-    {ok, _} = open_instance(BId, BNS, bondy_oplog_origin:new(), lww_register),
+    {ok, _} = open_instance(BId, BNS, bondy_oplog_origin:new()),
     try
         [append_op(AId, K, Op) || {K, Op} <- Events],
         [append_op(BId, K, Op) || {K, Op} <- Events],
@@ -282,8 +233,8 @@ remote_event_survives_catalogue_compaction() ->
     BNS = ns_of(BId),
     {AC, AP} = register_shard(ANS, primary, 0, lww_register),
     {BC, BP} = register_shard(BNS, primary, 0, lww_register),
-    {ok, _} = open_instance(AId, ANS, bondy_oplog_origin:new(), lww_register),
-    {ok, _} = open_instance(BId, BNS, bondy_oplog_origin:new(), lww_register),
+    {ok, _} = open_instance(AId, ANS, bondy_oplog_origin:new()),
+    {ok, _} = open_instance(BId, BNS, bondy_oplog_origin:new()),
     try
         %% A local event on A.
         append_cell(AId, <<"l">>, 60, <<"lval">>),
@@ -328,8 +279,8 @@ compaction_makes_no_synchronous_applier_call() ->
     BNS = ns_of(BId),
     {AC, AP} = register_shard(ANS, primary, 0, lww_register),
     {BC, BP} = register_shard(BNS, primary, 0, lww_register),
-    {ok, _} = open_instance(AId, ANS, bondy_oplog_origin:new(), lww_register),
-    {ok, _} = open_instance(BId, BNS, bondy_oplog_origin:new(), lww_register),
+    {ok, _} = open_instance(AId, ANS, bondy_oplog_origin:new()),
+    {ok, _} = open_instance(BId, BNS, bondy_oplog_origin:new()),
     Pattern = {bondy_oplog_applier, '_', '_'},
     try
         append_cell(AId, <<"l">>, 60, <<"lval">>),
@@ -370,21 +321,6 @@ collect_applier_calls(Acc) ->
             collect_applier_calls([{F, length(Args)} | Acc])
     after 100 ->
         Acc
-    end.
-
-%% An instance with neither a fold nor a crdt module still reports
-%% `{error, no_crdt_module}` — the guard only enables compaction when at
-%% least one is configured.
-neither_fold_nor_crdt_returns_error() ->
-    InstId = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(InstId),
-    try
-        ?assertEqual(
-            {error, no_crdt_module},
-            bondy_oplog_instance:compact(InstId, [])
-        )
-    after
-        ok = bondy_oplog:stop_instance(InstId)
     end.
 
 %% =============================================================================
@@ -455,10 +391,9 @@ close_shard(Cache, Proj) ->
     ok = bondy_oplog_cache_ets:close(Cache),
     ok.
 
-open_instance(InstanceId, NS, Origin, FoldModule) ->
+open_instance(InstanceId, NS, Origin) ->
     bondy_oplog:start_instance(InstanceId, #{
         origin => Origin,
-        fold_module => FoldModule,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }
@@ -469,5 +404,5 @@ append_cell(InstanceId, Key, Hlc, Value) ->
 
 append_op(InstanceId, Key, Op) ->
     _ = bondy_oplog:append(InstanceId, {cell_apply, ?B, Key, Op}),
-    _ = bondy_oplog:projection(InstanceId),
+    ok = bondy_oplog_test_projection:drain(InstanceId),
     ok.

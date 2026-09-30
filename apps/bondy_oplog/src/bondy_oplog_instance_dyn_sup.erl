@@ -49,7 +49,9 @@ start_link() ->
 ?DOC("""
 Spawns a per-instance subtree. Idempotent: if a subtree for
 `InstanceId` is already running, returns its existing supervisor pid
-without starting a duplicate.
+without starting a duplicate. Otherwise returns
+`{error, {missing_required_opt, cell_apply_target}}`, before any process
+starts, when `Opts` has no `applier.cell_apply_target`.
 
 Raises `{invalid_instance_id, InstanceId, Reason}` for an id that cannot
 name one directory (`bondy_oplog_path:validate_instance_id/1`). This is
@@ -70,7 +72,10 @@ start_instance(InstanceId, Opts) when
         {ok, _} = Running ->
             Running;
         undefined ->
-            first_start(InstanceId, Opts)
+            maybe
+                ok ?= require_cell_apply_target(Opts),
+                first_start(InstanceId, Opts)
+            end
     end.
 
 ?DOC("""
@@ -164,6 +169,14 @@ init([]) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+require_cell_apply_target(#{applier := #{cell_apply_target := T}}) when
+    T =/= undefined
+->
+    ok;
+require_cell_apply_target(_) ->
+    {error, {missing_required_opt, cell_apply_target}}.
 
 %% @private
 first_start(InstanceId, Opts) ->

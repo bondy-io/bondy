@@ -15,7 +15,8 @@
     init/4,
     close/1,
     get/3,
-    put/4,
+    ticket/1,
+    fill/5,
     delete/3,
     invalidate_all/1,
     info/1
@@ -35,7 +36,10 @@ close(Counter) ->
 get(_Counter, _Bucket, _Key) ->
     not_found.
 
-put(_Counter, _Bucket, _Key, _Value) ->
+ticket(_Counter) ->
+    0.
+
+fill(_Counter, _Bucket, _Key, _Value, _Ticket) ->
     ok.
 
 delete(_Counter, _Bucket, _Key) ->

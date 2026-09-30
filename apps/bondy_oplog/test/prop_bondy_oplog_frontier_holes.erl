@@ -421,7 +421,7 @@ ensure_started() ->
             ok = bondy_oplog_sync_scheduler:set_dispatch(undefined),
             ok = bondy_oplog_gc_scheduler:set_trigger(undefined),
             Id = <<"prop_frontier_holes">>,
-            {ok, _} = bondy_oplog:start_instance(Id),
+            {ok, _} = bondy_oplog_test_projection:start_instance(Id),
             persistent_term:put({?MODULE, instance}, Id),
             Id;
         Id ->

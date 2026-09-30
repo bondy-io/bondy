@@ -59,6 +59,11 @@ child that reads the store on its own, nor what the probe actually answers.
 -export([supervision_tree_holds/1]).
 -export([durable_ops_fail_cleanly_and_registry_works/1]).
 -export([healthy_control_takes_the_durable_path/1]).
+-export([main_is_not_open_while_it_closes_or_opens/1]).
+-export([main_closes_cleanly_however_long_it_takes/1]).
+-export([a_leftover_handle_is_not_open/1]).
+-export([a_reopened_main_is_no_longer_failed/1]).
+-export([a_serving_node_is_not_ready_until_main_reopens/1]).
 
 -define(NODE_NAME, bondy_degraded1).
 -define(CONTROL_NODE_NAME, bondy_degraded_ctrl).
@@ -77,7 +82,14 @@ all() ->
         only_early_listeners_and_no_bridges,
         supervision_tree_holds,
         durable_ops_fail_cleanly_and_registry_works,
-        healthy_control_takes_the_durable_path
+        healthy_control_takes_the_durable_path,
+        main_is_not_open_while_it_closes_or_opens,
+        main_closes_cleanly_however_long_it_takes,
+        %% Last: they restart the degraded node's catalogue, repair it, and
+        %% break the control.
+        a_leftover_handle_is_not_open,
+        a_reopened_main_is_no_longer_failed,
+        a_serving_node_is_not_ready_until_main_reopens
     ].
 
 init_per_suite(Config) ->
@@ -203,6 +215,128 @@ healthy_control_takes_the_durable_path(Config) ->
     ?assert(lists:member(admin_local, Bound)),
     ?assert(lists:member(?NORMAL_LISTENER, Bound)).
 
+%% The handle is withdrawn before anything closes and published only once the
+%% drain gates are released, so `main` is not reported open while the
+%% catalogue is inside either.
+main_is_not_open_while_it_closes_or_opens(Config) ->
+    Node = control_node(Config),
+    ok = erpc:call(Node, meck, new, [bondy_db, [passthrough, no_link]]),
+    try
+        ok = hold(Node, close),
+        ok = while_held(fun() -> stop_catalogue(Node) end, Node),
+        ok = hold(Node, start_draining),
+        ok = while_held(fun() -> start_catalogue(Node) end, Node)
+    after
+        erpc:call(Node, meck, unload, [bondy_db])
+    end,
+    ?assertEqual(
+        open, erpc:call(Node, bondy_namespace_catalog, main_status, [])
+    ).
+
+%% Stopping the catalogue closes every `main` Bookie, however long the closes
+%% take together: here they take longer than 5 s. A Bookie cut short exits
+%% `shutdown` instead of `normal`.
+main_closes_cleanly_however_long_it_takes(Config) ->
+    Node = control_node(Config),
+    #{topology_state := #{sup := Sup}} = erpc:call(
+        Node, persistent_term, get, [{bondy_namespace_catalog, db, main}]
+    ),
+    Bookies = erpc:call(Node, bondy_db_leveled_sup, bookies, [Sup]),
+    Delay = 6000 div length(Bookies) + 1,
+    ok = erpc:call(Node, meck, new, [leveled_bookie, [passthrough, no_link]]),
+    try
+        ok = erpc:call(Node, meck, expect, [
+            leveled_bookie,
+            book_close,
+            fun(Bookie) ->
+                timer:sleep(Delay),
+                meck:passthrough([Bookie])
+            end
+        ]),
+        Mons = [{B, erlang:monitor(process, B)} || B <- Bookies],
+        ok = stop_catalogue(Node),
+        Exits = [
+            receive
+                {'DOWN', M, process, B, R} -> R
+            after 30000 -> still_up
+            end
+         || {B, M} <- Mons
+        ],
+        ?assertEqual([normal], lists:usort(Exits))
+    after
+        erpc:call(Node, meck, unload, [leveled_bookie])
+    end,
+    ok = start_catalogue(Node),
+    ?assertEqual(
+        open, erpc:call(Node, bondy_namespace_catalog, main_status, [])
+    ).
+
+%% A catalogue that dies without running `terminate/2` leaves its handle
+%% published. The next one withdraws it before opening, so a failed open is
+%% not read as `open`.
+a_leftover_handle_is_not_open(Config) ->
+    Node = degraded_node(Config),
+    ok = stop_catalogue(Node),
+    ok = erpc:call(
+        Node, persistent_term, put, [{bondy_namespace_catalog, db, main}, stale]
+    ),
+    ok = start_catalogue(Node),
+    ?assertEqual(
+        failed, erpc:call(Node, bondy_namespace_catalog, main_status, [])
+    ),
+    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])).
+
+%% Once the squatter is gone, a restarted catalogue opens `main`, and neither
+%% the status nor the alarm may still report the earlier failure. The node
+%% stays NOT READY: its boot stopped at `start_services(failed)`, so its
+%% realms were never configured.
+a_reopened_main_is_no_longer_failed(Config) ->
+    Node = degraded_node(Config),
+    DataDir = filename:join(
+        ?config(priv_dir, Config), atom_to_list(?NODE_NAME)
+    ),
+    ok = file:delete(filename:join([DataDir, "bondy_db", "main"])),
+    ok = stop_catalogue(Node),
+    ok = start_catalogue(Node),
+    ?assertEqual(
+        open, erpc:call(Node, bondy_namespace_catalog, main_status, [])
+    ),
+    Alarms = erpc:call(Node, bondy_alarm_handler, get_alarms, []),
+    ?assertNot(lists:keymember(bondy_db_main_unavailable, 1, Alarms)),
+    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])).
+
+%% A node that booted ready is NOT READY from the moment its catalogue stops
+%% until a restarted catalogue has opened `main` again, including while a
+%% reopen is failing.
+a_serving_node_is_not_ready_until_main_reopens(Config) ->
+    Node = control_node(Config),
+    MainDir = filename:join([
+        ?config(priv_dir, Config),
+        atom_to_list(?CONTROL_NODE_NAME),
+        "bondy_db",
+        "main"
+    ]),
+    Aside = MainDir ++ ".aside",
+    ok = stop_catalogue(Node),
+    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])),
+    ok = file:rename(MainDir, Aside),
+    ok = file:write_file(MainDir, <<"squatter">>),
+    ok = start_catalogue(Node),
+    ?assertEqual(
+        failed, erpc:call(Node, bondy_namespace_catalog, main_status, [])
+    ),
+    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])),
+    ok = stop_catalogue(Node),
+    ok = file:delete(MainDir),
+    ok = file:rename(Aside, MainDir),
+    ok = start_catalogue(Node),
+    ?assertEqual(
+        open, erpc:call(Node, bondy_namespace_catalog, main_status, [])
+    ),
+    Alarms = erpc:call(Node, bondy_alarm_handler, get_alarms, []),
+    ?assertNot(lists:keymember(bondy_db_main_unavailable, 1, Alarms)),
+    ?assert(erpc:call(Node, bondy_app, is_ready, [])).
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -216,6 +350,59 @@ degraded_node(Config) ->
 control_node(Config) ->
     {_, Node, _} = lists:keyfind(?CONTROL_NODE_NAME, 1, ?config(nodes, Config)),
     Node.
+
+%% @private
+stop_catalogue(Node) ->
+    erpc:call(
+        Node, supervisor, terminate_child, [bondy_sup, bondy_namespace_catalog]
+    ).
+
+%% @private
+start_catalogue(Node) ->
+    {ok, _} = erpc:call(
+        Node, supervisor, restart_child, [bondy_sup, bondy_namespace_catalog]
+    ),
+    ok.
+
+%% @private
+%% Every call to `bondy_db:Fun/1` on `Node` waits for the test to release it.
+hold(Node, Fun) ->
+    Test = self(),
+    erpc:call(Node, meck, expect, [
+        bondy_db,
+        Fun,
+        fun(Arg) ->
+            Test ! {held, self()},
+            receive
+                release -> meck:passthrough([Arg])
+            end
+        end
+    ]).
+
+%% @private
+%% Runs `Action`, asserting at each held call that `main` is not open.
+while_held(Action, Node) ->
+    {_, Ref} = spawn_monitor(fun() -> ok = Action() end),
+    while_held_loop(Ref, Node, 0).
+
+%% @private
+while_held_loop(Ref, Node, Held) ->
+    receive
+        {held, Pid} ->
+            ?assertEqual(
+                failed,
+                erpc:call(Node, bondy_namespace_catalog, main_status, [])
+            ),
+            Pid ! release,
+            while_held_loop(Ref, Node, Held + 1);
+        {'DOWN', Ref, process, _, normal} ->
+            ?assert(Held > 0),
+            ok;
+        {'DOWN', Ref, process, _, Reason} ->
+            error(Reason)
+    after 30000 ->
+        error(timeout)
+    end.
 
 %% @private
 %% The processes whose death was each pre-fix failure mode, plus the root

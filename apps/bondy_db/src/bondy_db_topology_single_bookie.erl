@@ -132,7 +132,7 @@ open_table(
     EntityType,
     _ShardCount,
     _TableOpts,
-    #{bookie := Bookie} = State
+    #{bookie := Bookie, dir := Dir} = State
 ) when
     is_atom(EntityType)
 ->
@@ -144,12 +144,13 @@ open_table(
     %% NS isolates them.
     TableState = #{
         bookie => Bookie,
+        root_path => Dir,
         entity_type => EntityType
     },
     {ok, TableState, State}.
 
-route(_Shard, #{bookie := Bookie}) ->
-    Handle = #{bookie => Bookie},
+route(_Shard, #{bookie := Bookie, root_path := Dir}) ->
+    Handle = #{bookie => Bookie, root_path => Dir},
     {ok, ?PROJECTION_ADAPTER, Handle}.
 
 -doc """
@@ -183,9 +184,5 @@ close_table(_TableState, State) ->
     %% been closed.
     {ok, State}.
 
-shutdown(#{sup := Sup, bookie := Bookie}) ->
-    %% Tell leveled to flush + close before bringing the supervisor
-    %% down, tolerating an already-dead Bookie. `stop/1` then reaps
-    %% whatever supervisor children remain.
-    ok = ?COMMON:stop_bookie_safe(Bookie),
+shutdown(#{sup := Sup}) ->
     bondy_db_leveled_sup:stop(Sup).

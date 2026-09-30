@@ -42,11 +42,31 @@ to configure to turn it on.
 Local calls and events never leave the node — they resolve against the local
 registry directly.
 
+## Restarts and clocks
+
+A summary cell carries its node's latest *reading* of how many live entries it
+has, stamped from a node-wide hybrid logical clock. On every replica the
+highest-stamped reading wins, so a reading left over from before a restart is
+replaced by the node's next one, never added to or subtracted from.
+
+The registry lives in memory, in the node's `registry` database. Every open of
+that database is followed by a restore that rewrites the node's summary cells
+from its registry. It opens at boot, and again whenever one of its processes
+dies in a running node: the node then closes and reopens the whole database
+and logs `A process of the bondy_db registry DB died; reopening the DB` at
+error level.
+
+This relies on one operational rule: **a node's wall clock must not go back,
+across a restart, past the last stamp the node issued.** A node restarted with
+its clock stepped far enough back writes readings that lose to its own older
+ones, and a peer may keep routing to callees the node no longer has. Keep node
+clocks synchronised (NTP or equivalent) and never step a clock backwards
+across a restart.
+
 ## Configuration
 
-Routing on the RIB is unconditional; there is nothing to enable. Two optional
-settings tune observability and flap control. Neither changes what the registry
-replicates.
+Routing on the RIB is unconditional; there is nothing to enable. One optional
+setting tunes observability; it does not change what the registry replicates.
 
 ### Consistency sweep
 
@@ -58,21 +78,6 @@ Each node periodically compares its summary cells against the registry ground
 truth per realm and logs a warning naming any divergence. In steady state the
 sweep finds nothing; a persistent divergence is worth investigating.
 
-### Route-flap damping
-
-```
-registry.rib.damping = 0   # default (off); a duration enables it
-```
-
-On a node whose callee count for a procedure changes rapidly (churny
-registrations), each change would otherwise rewrite the summary cell.
-With a non-zero window, updates that change *only* the callee count are
-coalesced — at most one such write per window, with a trailing update carrying
-the final value. Reachability transitions (a procedure's first registration on
-the node, or its last one leaving) always propagate immediately, so damping
-never delays a node becoming, or ceasing to be, a route for a procedure. Enable
-it only if summary write volume is a measured problem.
-
 ## Observability
 
 The summary machinery is instrumented on the wait-free metrics lane and
@@ -83,7 +88,6 @@ surfaced on the Admin API `/metrics` endpoint:
 | `bondy_registry_rib_members` | live local entries feeding the summaries |
 | `bondy_registry_rib_stub_cells` | merged remote summary cells held for routing |
 | `bondy_registry_rib_divergences` | divergences found by the last sweep |
-| `bondy_registry_rib_damping_suppressions_total` | summary writes coalesced by damping |
 | `bondy_rpc_rib_completions_total` `{outcome}` | owner-side callee re-selections (`ok`/`miss`) |
 | `bondy_rpc_rib_retries_total` `{outcome}` | routing retries after a miss (`node`/`local`/`exhausted`) |
 

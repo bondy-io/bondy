@@ -70,7 +70,7 @@ starts_overlap() ->
     Ids = [mk_id() || _ <- lists:seq(1, ?INSTANCES)],
     _ = [
         spawn_link(fun() ->
-            Test ! {started, Id, bondy_oplog:start_instance(Id)}
+            Test ! {started, Id, bondy_oplog_test_projection:start_instance(Id)}
         end)
      || Id <- Ids
     ],
@@ -92,7 +92,7 @@ starts_overlap() ->
 
 restart_keeps_order() ->
     Id = mk_id(),
-    {ok, Sup} = bondy_oplog:start_instance(Id),
+    {ok, Sup} = bondy_oplog_test_projection:start_instance(Id),
     ?assertEqual(?START_ORDER, child_ids(Sup)),
     Old = bondy_oplog_instance:whereis(Id),
     exit(Old, kill),
@@ -116,7 +116,9 @@ failed_start() ->
             {shutdown,
                 {failed_to_start_child, bondy_oplog_applier,
                     {error, {invalid_opt, oldstate_cache, _}}}}},
-        bondy_oplog:start_instance(Id, #{applier => #{oldstate_cache => yes}})
+        bondy_oplog_test_projection:start_instance(Id, #{
+            applier => #{oldstate_cache => yes}
+        })
     ),
     ?assertEqual(
         Before, length(supervisor:which_children(bondy_oplog_instance_dyn_sup))

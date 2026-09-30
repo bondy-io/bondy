@@ -52,8 +52,7 @@ degraded_boot_test_() ->
             fun no_normal_listeners/0},
         {"a failed main store never enters configure_services",
             fun configure_services_skipped/0},
-        {"open and idle DO enter configure_services",
-            fun configure_services_entered/0}
+        {"open DOES enter configure_services", fun configure_services_entered/0}
     ]}.
 
 %% The whole point of surviving: the node stays inspectable through the
@@ -80,17 +79,9 @@ configure_services_skipped() ->
 
 %% The control. Without it, `start_services/1` returning `ok` for everything
 %% would pass every case above while having broken normal boot entirely.
-%% `idle` is a legitimate configuration, not a fault, so it takes the durable
-%% path exactly like `open`.
 configure_services_entered() ->
-    lists:foreach(
-        fun(Status) ->
-            ok = meck:reset(bondy_message_id),
-            ?assertError(
-                ?ENTERED_CONFIGURE_SERVICES,
-                bondy_app:start_services(Status)
-            ),
-            ?assert(meck:called(bondy_message_id, init, []))
-        end,
-        [open, idle]
-    ).
+    ok = meck:reset(bondy_message_id),
+    ?assertError(
+        ?ENTERED_CONFIGURE_SERVICES, bondy_app:start_services(open)
+    ),
+    ?assert(meck:called(bondy_message_id, init, [])).

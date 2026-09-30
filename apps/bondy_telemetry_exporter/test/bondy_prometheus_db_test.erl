@@ -394,7 +394,7 @@ hole_setup() ->
         "hole_gauge_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Id.
 
 hole_cleanup(Id) ->

@@ -25,8 +25,8 @@ is ignored here.
 | `security_group_grants` | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) + conflict alarm |
 | `security_group_members`| add/remove    | invalidate this node's cached RBAC contexts for the realm (§9.5) |
 | `security_sources`      | set/delete    | conflict alarm only (sources gate *new* connections; no live-session effect) |
-| `bondy_registration_rib`| set / clear   | record / remove the peer's registration RIB summary (`bondy_registry_rib`) |
-| `bondy_subscription_rib`| set / clear   | record / remove the peer's subscription RIB summary (`bondy_registry_rib`) |
+| `bondy_rib_registrations`| set / clear  | record / remove the peer's registration RIB summary (`bondy_registry_rib`) |
+| `bondy_rib_subscriptions`| set / clear  | record / remove the peer's subscription RIB summary (`bondy_registry_rib`) |
 
 The **conflict alarm** is the lww safety valve for the authorization tables
 (design §3): grants and sources deliberately stay last-writer-wins, so when a
@@ -242,12 +242,12 @@ reacted_tables() ->
         },
         #sub{
             table = ?BONDY_DB_REGISTRATION_RIB_TAB,
-            label = "bondy_registration_rib",
+            label = "bondy_rib_registrations",
             kind = rib
         },
         #sub{
             table = ?BONDY_DB_SUBSCRIPTION_RIB_TAB,
-            label = "bondy_subscription_rib",
+            label = "bondy_rib_subscriptions",
             kind = rib
         }
     ].

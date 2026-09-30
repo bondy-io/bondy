@@ -156,7 +156,9 @@ cache_returns_value_unchanged_when_set() ->
     %% must come back from cache (projection is empty so a slow path
     %% would return `undefined`). After §3.6 the cache stores values
     %% (not states).
-    ok = bondy_oplog_cache_ets:put(CH, ?B, <<"k">>, {<<"v">>, 99}),
+    ok = bondy_oplog_cache_ets:fill(
+        CH, ?B, <<"k">>, {<<"v">>, 99}, bondy_oplog_cache_ets:ticket(CH)
+    ),
     ?assertEqual(
         {<<"v">>, 99},
         bondy_oplog_core:read(NS, primary, <<"k">>)
@@ -170,7 +172,9 @@ write_through_invalidates_existing_cache_entry() ->
     %% Pre-populate the cache. After §3.6 the write-through path
     %% invalidates rather than folding (no fold currently exports
     %% `apply_value_delta/2`); the next read repopulates via HEAD.
-    ok = bondy_oplog_cache_ets:put(CH, ?B, <<"k">>, {<<"v1">>, 5}),
+    ok = bondy_oplog_cache_ets:fill(
+        CH, ?B, <<"k">>, {<<"v1">>, 5}, bondy_oplog_cache_ets:ticket(CH)
+    ),
     Event = mk_event(10, <<"o">>, 0, {set, 10, <<"v2">>}),
     ok = bondy_oplog_core:write_through(NS, primary, <<"k">>, Event),
     ?assertEqual(not_found, bondy_oplog_cache_ets:get(CH, ?B, <<"k">>)),

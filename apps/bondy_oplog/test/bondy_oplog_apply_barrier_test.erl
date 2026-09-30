@@ -71,7 +71,7 @@ apply_barrier_test_() ->
 
 own_event_not_whole_overlay() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     %% Three events that will never be applied: rows the applier does not
     %% know about, so nothing ever evicts them. This is the shard-level
     %% backlog the customer's single hot key produced.
@@ -87,7 +87,7 @@ own_event_not_whole_overlay() ->
 
 rejection_is_reported() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     ok = refuse_every_event(),
     ?assertEqual(
         {error, rejected},
@@ -100,7 +100,7 @@ rejection_is_reported() ->
 
 rejection_cannot_be_missed() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     ok = refuse_every_event(),
     Barrier = bondy_oplog:barrier(Id),
     _Key = bondy_oplog:append(Id, refused, undefined, Barrier),
@@ -115,7 +115,7 @@ rejection_cannot_be_missed() ->
 
 timeout_leaves_no_stray_answer() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Applier = bondy_oplog_registry:applier_pid(Id),
     true = is_pid(Applier),
     sys:suspend(Applier),
@@ -132,7 +132,9 @@ timeout_leaves_no_stray_answer() ->
 
 refused_append_sends_nothing() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{max_overlay_events => 1}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
+        max_overlay_events => 1
+    }),
     %% Fill the cap with a real pending event (admission reads the
     %% counters the append path maintains, not the table), then have the
     %% next append refused at admission.
@@ -150,7 +152,7 @@ refused_append_sends_nothing() ->
 
 batch_is_answered_per_event() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Barrier = bondy_oplog:barrier(Id),
     Items = [{{item, N}, undefined} || N <- lists:seq(1, 5)],
     Keys = bondy_oplog:append_many(Id, Items, Barrier),
@@ -161,7 +163,7 @@ batch_is_answered_per_event() ->
 
 batch_rejection_is_reported() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     ok = refuse_every_event(),
     Barrier = bondy_oplog:barrier(Id),
     Items = [{{item, N}, undefined} || N <- lists:seq(1, 3)],
@@ -175,8 +177,7 @@ batch_rejection_is_reported() ->
 
 fused_instance_answers() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         origin => bondy_oplog_origin:new(),
         fused => true
     }),
@@ -198,7 +199,7 @@ instance_death_answers_at_once() ->
     %% must learn that now, not at the 5 s deadline. Kill, not stop: the
     %% subtree's one_for_all restart is what production would see.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Instance = bondy_oplog_registry:instance_pid(Id),
     sys:suspend(Instance),
     Parent = self(),
@@ -228,7 +229,7 @@ batch_instance_death_answers_at_once() ->
     %% whose first event may already have been answered: the death still
     %% ends the wait at once.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Instance = bondy_oplog_registry:instance_pid(Id),
     sys:suspend(Instance),
     Parent = self(),

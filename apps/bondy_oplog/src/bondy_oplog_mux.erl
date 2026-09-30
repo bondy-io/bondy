@@ -23,11 +23,8 @@ The per-shard oplog instance routes cell-apply events by their entity-type
 shared worker multiplexes members keyed by a tag. Only the directory is shared —
 how a consumer extracts the key and applies the work stays with the consumer.
 
-`put/3` upgrades a seedless `{single, undefined}` to a `{dir, _}`, so a worker
-that may later gain siblings is started with one member and grows. A
-`{single, V}` that already holds a founding value but was never given a key
-cannot be keyed; adding a member to it is a programmer error — seed it in
-directory mode (`dir/1`) instead.
+A `{single, V}` has no key, so adding a member to it is a programmer error: a
+worker that may gain siblings is seeded in directory mode (`dir/1`).
 """).
 
 -type key() :: term().
@@ -70,16 +67,13 @@ dir(Members) when is_list(Members) ->
     {dir, maps:from_list(Members)}.
 
 -doc """
-Add `Key => Value`. Upgrades a seedless `{single, undefined}` to a directory; a
-`{single, V0}` holding a founding value but no key cannot be keyed and raises
-`put_requires_dir` (seed in directory mode instead).
+Add `Key => Value`. A `{single, V0}` holding a founding value but no key cannot
+be keyed and raises `put_requires_dir` (seed in directory mode instead).
 """.
 -spec put(Mux :: t(), Key :: key(), Value :: value()) -> t().
 
 put({dir, Map}, Key, Value) ->
     {dir, Map#{Key => Value}};
-put({single, undefined}, Key, Value) ->
-    {dir, #{Key => Value}};
 put({single, _V0}, _Key, _Value) ->
     error(put_requires_dir).
 

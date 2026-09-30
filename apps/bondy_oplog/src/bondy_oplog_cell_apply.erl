@@ -697,8 +697,7 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
 %% @private
 %% Walks the `{Key, Value}` pairs from the MST (or its diff) and
 %% dispatches every `cell_apply` op through the batched compute path.
-%% Non-cell ops are skipped here — the per-instance fold owns them and
-%% has already seen them via the WAL drain.
+%% Non-cell ops are skipped.
 %%
 %% Same collect-then-batch shape as `apply_cell_batch/3`. Per-key shadow
 %% map preserves in-batch read-your-own-writes when two pairs target the
@@ -1008,8 +1007,7 @@ run_bounds(N) when is_integer(N) -> {N, N}.
 %%       its own table's ctx (the per-shard-instance multiplexer).
 %%
 %% A bucket with no ctx under a `{dir, _}` source is logged and skipped (its
-%% cells re-apply on the next replay); `{single, undefined}` is the
-%% no-cell-apply instance and is a silent no-op.
+%% cells re-apply on the next replay).
 %%
 %% The batch's applied-frontier claim is made here, once, from what
 %% materialised. A group that fails to resolve contributes nothing, so the
@@ -1024,8 +1022,6 @@ run_bounds(N) when is_integer(N) -> {N, N}.
 %% and PRESENT by construction (there is nothing to fold) and so complete a
 %% burned origin's run. Passing only the cells would stall an origin's claim at
 %% the first burned seq for good.
-apply_cell_batch_mux({single, undefined}, _Id, _Events) ->
-    ok;
 apply_cell_batch_mux(Source, Id, Events) ->
     ok = detect_prefix_holes(Id, origin_seqs(Events, fun event_cell_key/1)),
     Materialised = lists:foldl(
@@ -1087,8 +1083,6 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin) ->
 %% Local-origin events are never held: they are delivered in seq order
 %% by the local WAL drain, and holding a replica's own echoes could only
 %% park them behind a burned seq of its own counter.
-apply_cell_pairs_mux({single, undefined}, _Id, _Pairs, _LocalOrigin, _Opts) ->
-    {0, 0};
 apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
     {Foldable, Held} =
         case maps:get(hold, Opts, false) of
@@ -1297,15 +1291,10 @@ in `Opts` (a `bondy_db`-provisioned table that may later share its shard
 instance) starts the source in `{dir, _}` mode keyed by that bucket, so
 `source_put/3` can add sibling tables. Without it — the single-table and
 raw-instance callers — the source stays `{single, Ctx}` (every bucket routes to
-the one ctx), byte-identical to the pre-mux behaviour. A `CellCtx` of `undefined`
-is the no-cell-apply instance.
+the one ctx).
 """.
--spec build_source(
-    CellCtx :: cell_apply_ctx() | undefined, Opts :: map()
-) -> ctx_source().
+-spec build_source(CellCtx :: cell_apply_ctx(), Opts :: map()) -> ctx_source().
 
-build_source(undefined, _Opts) ->
-    bondy_oplog_mux:single(undefined);
 build_source(CellCtx, Opts) ->
     case maps:get(cell_apply_bucket, Opts, undefined) of
         Bucket when is_binary(Bucket) ->

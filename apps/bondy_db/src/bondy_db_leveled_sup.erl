@@ -52,10 +52,11 @@ Through one supervisor per key they open concurrently: callers of
 
 ## Crash recovery (keyed Bookies)
 
-A **keyed** Bookie is `permanent` under its per-key supervisor: leveled
-acks a put only after the journal write, so a reopen replays the journal
-and recovers every acked write — restarting in place is safe and strictly
-better than leaving the shard dead. The restarted Bookie has a NEW pid, so
+A **keyed** Bookie is `transient` under its per-key supervisor: a crash
+restarts it, a `close_bookie/1` does not. leveled acks a put only after the
+journal write, so a reopen replays the journal and recovers every acked
+write — restarting in place is safe and strictly better than leaving the
+shard dead. The restarted Bookie has a NEW pid, so
 keyed children are started through `start_registered/3`, which publishes
 the pid under the `persistent_term` key `{bondy_db_bookie, Sup, Key}` on
 every (re)start. Routing handles carry `{pt, PTKey}` instead of the raw
@@ -85,9 +86,13 @@ state, so their crash policy stays with the owning topology.
 `start_link/0` spawns an unnamed supervisor. The caller (the topology
 module's `init/2`) gets the supervisor pid back and stashes it inside
 its own state. Topology `shutdown/1` calls `stop/1` here, which
-terminates every child Bookie (so leveled flushes), erases the
-registered `persistent_term` handles, and then brings the supervisor
-down.
+closes every Bookie, erases the registered `persistent_term` handles, and
+then brings the supervisor down.
+
+leveled traps no exits, so a Bookie terminated by its supervisor dies
+without running leveled's close: it exits `shutdown`, where a closed one
+exits `normal`. Every Bookie is therefore closed with `close_bookie/1`
+before its child is terminated (`bondy_db_leveled_sup_test`).
 """).
 
 -export([start_link/0]).
@@ -95,9 +100,11 @@ down.
 -export([start_bookie/2]).
 -export([get_or_start_bookie/3]).
 -export([stop_bookie/2]).
+-export([close_bookie/1]).
 -export([bookie_ref/2]).
 -export([bookie_count/1]).
 -export([bookies/1]).
+-export([bookie_roots/1]).
 
 %% Child start callback (keyed Bookies) — not part of the public API.
 -export([start_registered/3]).
@@ -123,16 +130,16 @@ start_link() ->
 Stop the supervisor and every Bookie it owns. Returns `ok` once every
 child has terminated.
 
-Children are terminated via `supervisor:terminate_child/2` so leveled's
-`terminate/2` runs and flushes the inker. After every child is gone,
-the supervisor itself is unlinked and killed — supervisors do not
+Every Bookie is closed with `close_bookie/1`, then every child is terminated
+via `supervisor:terminate_child/2`. After every child is gone, the
+supervisor itself is unlinked and killed — supervisors do not
 expose a clean self-stop API and `exit(Sup, shutdown)` is not honoured
 by an arbitrary caller.
 """.
 -spec stop(Sup :: pid()) -> ok.
 
 stop(Sup) when is_pid(Sup) ->
-    %% Terminate children first (by child id) so leveled flushes cleanly.
+    lists:foreach(fun close_bookie/1, bookies(Sup)),
     Ids = [
         Id
      || {Id, Pid, _Type, _Mods} <- supervisor:which_children(Sup),
@@ -187,18 +194,24 @@ Returns the Bookie pid on success.
 ) -> {ok, pid()} | {error, term()}.
 
 start_bookie(Sup, Opts) when is_pid(Sup), is_list(Opts) ->
-    Id = {anon, erlang:unique_integer([positive, monotonic])},
+    %% The id carries the root path: a `temporary` child's start arguments
+    %% are not kept by its supervisor, so `bookie_roots/1` reads it here.
+    Id = {
+        anon,
+        erlang:unique_integer([positive, monotonic]),
+        proplists:get_value(root_path, Opts)
+    },
     supervisor:start_child(Sup, child_spec(Id, Opts)).
 
 -doc """
-Terminate AND forget the keyed Bookie `Key` (child delete + registered
+Close, terminate AND forget the keyed Bookie `Key` (child delete + registered
 handle erase). Used by a topology rolling back a partially-started pool:
-a plain `book_close` would leave a `permanent` child behind for the
-supervisor to immediately restart.
+`close_bookie/1` alone would leave the child and its routing handle behind.
 """.
 -spec stop_bookie(Sup :: pid(), Key :: term()) -> ok.
 
 stop_bookie(Sup, Key) when is_pid(Sup) ->
+    ok = close_bookie(persistent_term:get(?PT_KEY(Sup, Key), undefined)),
     _ =
         try
             supervisor:terminate_child(Sup, Key)
@@ -212,6 +225,22 @@ stop_bookie(Sup, Key) when is_pid(Sup) ->
             _:_ -> ok
         end,
     _ = persistent_term:erase(?PT_KEY(Sup, Key)),
+    ok.
+
+-doc """
+Closes `Bookie` with `leveled_bookie:book_close/1`. An already-dead Bookie,
+or `undefined`, is `ok`. A closed Bookie exits `normal` and is not restarted
+(`bondy_db_leveled_sup_test`).
+""".
+-spec close_bookie(Bookie :: pid() | undefined) -> ok.
+
+close_bookie(Bookie) when is_pid(Bookie) ->
+    try
+        leveled_bookie:book_close(Bookie)
+    catch
+        exit:_ -> ok
+    end;
+close_bookie(undefined) ->
     ok.
 
 -doc """
@@ -315,9 +344,18 @@ per-key supervisors.
 -spec bookies(Sup :: pid()) -> [pid()].
 
 bookies(Sup) when is_pid(Sup) ->
+    [Pid || {Pid, _Root} <- bookie_roots(Sup)].
+
+-doc """
+`bookies/1`, each with the `root_path` it was opened on; `undefined` for a
+keyed Bookie whose child went away while being listed.
+""".
+-spec bookie_roots(Sup :: pid()) -> [{pid(), file:filename() | undefined}].
+
+bookie_roots(Sup) when is_pid(Sup) ->
     lists:append([
-        child_bookies(Pid, Type, Mods)
-     || {_Id, Pid, Type, Mods} <- supervisor:which_children(Sup),
+        child_bookies(Sup, Id, Pid, Type, Mods)
+     || {Id, Pid, Type, Mods} <- supervisor:which_children(Sup),
         is_pid(Pid)
     ]).
 
@@ -443,31 +481,45 @@ started({error, {already_started, Pid}}) -> {ok, Pid};
 started({error, _} = Err) -> Err.
 
 %% @private
-child_bookies(Pid, worker, [leveled_bookie]) ->
-    [Pid];
-child_bookies(KeySup, supervisor, [?MODULE]) ->
+child_bookies(_Sup, {anon, _, Root}, Pid, worker, [leveled_bookie]) ->
+    [{Pid, Root}];
+child_bookies(_Sup, _Key, KeySup, supervisor, [?MODULE]) ->
     %% A per-key supervisor can exit between being listed and being asked.
     try supervisor:which_children(KeySup) of
         Children ->
             [
-                Pid
-             || {_Id, Pid, worker, [leveled_bookie]} <- Children,
+                {Pid, root_path(KeySup, Id)}
+             || {Id, Pid, worker, [leveled_bookie]} <- Children,
                 is_pid(Pid)
             ]
     catch
         exit:_ -> []
     end;
-child_bookies(_Pid, _Type, _Mods) ->
+child_bookies(_Sup, _Id, _Pid, _Type, _Mods) ->
     [].
 
 %% @private
-%% Keyed child: permanent, started through `start_registered/3` so every
-%% (re)start publishes the current pid under the `{pt, _}` routing key.
+%% A keyed Bookie's options are the last argument of its start function
+%% (`keyed_child_spec/3`).
+root_path(KeySup, Key) ->
+    try supervisor:get_childspec(KeySup, Key) of
+        {ok, #{start := {_M, _F, Args}}} ->
+            proplists:get_value(root_path, lists:last(Args));
+        {error, not_found} ->
+            undefined
+    catch
+        exit:_ -> undefined
+    end.
+
+%% @private
+%% Keyed child: `transient` (see moduledoc), started through
+%% `start_registered/3` so every (re)start publishes the current pid under the
+%% `{pt, _}` routing key.
 keyed_child_spec(Sup, Key, Opts) ->
     #{
         id => Key,
         start => {?MODULE, start_registered, [Sup, Key, Opts]},
-        restart => permanent,
+        restart => transient,
         shutdown => 30_000,
         type => worker,
         modules => [leveled_bookie]

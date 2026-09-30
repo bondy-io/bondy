@@ -72,10 +72,8 @@ declare `order_independent() -> false`.
 ## Operation extraction
 
 Both paths read the operation from a `bondy_oplog_event`. A catalogue
-cell wraps the CRDT operation as `{cell_apply, Bucket, Key, Op}`; a
-monolithic single-CRDT instance carries the operation directly. `op_of/1`
-unwraps the former and passes the latter through, so the same helper
-serves both shapes.
+cell wraps the CRDT operation as `{cell_apply, Bucket, Key, Op}`; `op_of/1`
+unwraps it and passes any other operation through unchanged.
 
 ## Batched operations
 

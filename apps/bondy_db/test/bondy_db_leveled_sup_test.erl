@@ -30,7 +30,10 @@ leveled_sup_test_() ->
         gen("a crash-looping keyed Bookie fells the pool", fun crash_loop/1),
         gen("stop_bookie leaves the pool running", fun stop_bookie/1),
         gen("a failed shard open leaves the pool empty", fun failed_open/1),
-        gen("bookies/1 lists keyed and anonymous", fun bookies/1)
+        gen("bookies/1 lists keyed and anonymous", fun bookies/1),
+        gen("stop/1 closes every Bookie", fun stop_closes/1),
+        gen("stop_bookie/2 closes the Bookie", fun stop_bookie_closes/1),
+        gen("a closed keyed Bookie is not reopened", fun closed_stays_closed/1)
     ]}.
 
 gen(Title, Fn) ->
@@ -140,9 +143,51 @@ bookies({Sup, Dir}) ->
         lists:sort(bondy_db_leveled_sup:bookies(Sup))
     ).
 
+%% A Bookie terminated by its supervisor exits `shutdown`; only one that ran
+%% its close exits `normal`.
+stop_closes({Sup, Dir}) ->
+    {ok, Keyed} = start_keyed(Sup, Dir, {shard, 0}),
+    {ok, Anon} = bondy_db_leveled_sup:start_bookie(
+        Sup, book_opts(Dir, "anon")
+    ),
+    ok = leveled_bookie:book_mput(Keyed, [{add, ~"b", ~"k", null, ~"v"}]),
+    ?assertEqual(
+        [{Keyed, normal}, {Anon, normal}],
+        exits([Keyed, Anon], fun() -> bondy_db_leveled_sup:stop(Sup) end)
+    ).
+
+stop_bookie_closes({Sup, Dir}) ->
+    {ok, Keyed} = start_keyed(Sup, Dir, {shard, 0}),
+    ?assertEqual(
+        [{Keyed, normal}],
+        exits([Keyed], fun() ->
+            bondy_db_leveled_sup:stop_bookie(Sup, {shard, 0})
+        end)
+    ).
+
+closed_stays_closed({Sup, Dir}) ->
+    {ok, Keyed} = start_keyed(Sup, Dir, {shard, 0}),
+    ?assertEqual(
+        [{Keyed, normal}],
+        exits([Keyed], fun() -> bondy_db_leveled_sup:close_bookie(Keyed) end)
+    ),
+    ?assertEqual([], bondy_db_leveled_sup:bookies(Sup)).
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+%% Runs `Action` and returns how each of `Bookies` exited.
+exits(Bookies, Action) ->
+    Mons = [{B, erlang:monitor(process, B)} || B <- Bookies],
+    ok = Action(),
+    [
+        receive
+            {'DOWN', M, process, B, R} -> {B, R}
+        after 5000 -> {B, still_up}
+        end
+     || {B, M} <- Mons
+    ].
 
 start_keyed(Sup, Dir, {shard, I} = Key) ->
     bondy_db_leveled_sup:get_or_start_bookie(

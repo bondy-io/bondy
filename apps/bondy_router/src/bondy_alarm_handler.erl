@@ -64,8 +64,8 @@ signal that would otherwise survive: a handler crash is repaired by
 and the alarm set is empty either way. Answering NOT READY on an unreadable
 handler would therefore flap the node out of rotation without preserving any
 signal. Conditions that must survive a handler crash are not published as
-alarms at all — see `bondy_namespace_catalog:set_main_failed/1`, which records
-its state in `persistent_term` and only mirrors it as an alarm.
+alarms at all — see `bondy_namespace_catalog:main_status/0`, which is read from
+the published `main` handle and only mirrored as an alarm.
 
 **`affects_ready/0` does not call this handler.** `/ready` is polled per
 node per second by every load balancer in front of it, and a `gen_event:call`

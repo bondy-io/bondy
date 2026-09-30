@@ -55,7 +55,7 @@ install_local_batch_bumps_seq_atomic() ->
     %% it would see seq=1 and collide with the replayed event.
     Id = mk_id(),
     Origin = bondy_oplog_origin:default(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{origin => Origin}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{origin => Origin}),
     Pid = bondy_oplog_registry:instance_pid(Id),
 
     Events = [
@@ -67,7 +67,7 @@ install_local_batch_bumps_seq_atomic() ->
 
     %% New local append. Pre-fix this would allocate seq=1 (the
     %% SeqRef atomic stayed at 0). Post-fix it must allocate seq=6.
-    NewKey = bondy_oplog:append(Id, {custom, <<"new">>}),
+    NewKey = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(100)),
     ?assertEqual(6, bondy_oplog_event:key_seq(NewKey)),
 
     bondy_oplog:stop_instance(Id).
@@ -82,13 +82,13 @@ peer_loopback_local_origin_bumps_seq_atomic() ->
     %% local append must skip past the loopback seq.
     Id = mk_id(),
     Origin = bondy_oplog_origin:default(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{origin => Origin}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{origin => Origin}),
     Pid = bondy_oplog_registry:instance_pid(Id),
 
     Synthetic = synth_event(70, Origin, 7),
     ok = gen_server:call(Pid, {install_remote, Synthetic}),
 
-    NewKey = bondy_oplog:append(Id, {custom, <<"new">>}),
+    NewKey = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(100)),
     ?assert(bondy_oplog_event:key_seq(NewKey) > 7),
 
     bondy_oplog:stop_instance(Id).
@@ -100,7 +100,7 @@ peer_loopback_foreign_origin_does_not_bump_seq() ->
     %% peer's own counter, not ours).
     Id = mk_id(),
     Origin = bondy_oplog_origin:default(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{origin => Origin}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{origin => Origin}),
     Pid = bondy_oplog_registry:instance_pid(Id),
 
     %% Force a distinct origin so install_event takes the no-op branch.
@@ -111,7 +111,7 @@ peer_loopback_foreign_origin_does_not_bump_seq() ->
 
     %% Next local append must still be seq=1 — foreign-origin install
     %% did not advance our counter.
-    NewKey = bondy_oplog:append(Id, {custom, <<"new">>}),
+    NewKey = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(100)),
     ?assertEqual(1, bondy_oplog_event:key_seq(NewKey)),
     ?assertEqual(Origin, bondy_oplog_event:key_origin(NewKey)),
 
@@ -124,9 +124,9 @@ synthetic_replay_below_current_seq_is_noop() ->
     %% must still allocate seq=3.
     Id = mk_id(),
     Origin = bondy_oplog_origin:default(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{origin => Origin}),
-    _ = bondy_oplog:append(Id, {custom, <<"a">>}),
-    _ = bondy_oplog:append(Id, {custom, <<"b">>}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{origin => Origin}),
+    _ = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(101)),
+    _ = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(102)),
     ok = bondy_oplog:await_apply(Id),
 
     Pid = bondy_oplog_registry:instance_pid(Id),
@@ -137,7 +137,7 @@ synthetic_replay_below_current_seq_is_noop() ->
     ok = gen_server:cast(Pid, {install_local_batch, Events}),
     ok = bondy_oplog:await_apply(Id),
 
-    NewKey = bondy_oplog:append(Id, {custom, <<"c">>}),
+    NewKey = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(103)),
     ?assertEqual(3, bondy_oplog_event:key_seq(NewKey)),
 
     bondy_oplog:stop_instance(Id).
@@ -152,7 +152,7 @@ burned_range_is_backfilled_locally() ->
         bondy_oplog:append(Id, {cell_apply, <<>>, key_n(N), {set, N, val_n(N)}})
      || N <- lists:seq(1, 3)
     ],
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(3, maps:get(Origin, bondy_oplog_registry:frontier(Id))),
 
     %% Reserve the doomed range 4..5 exactly as a rejected batch would
@@ -225,7 +225,7 @@ fills_cross_sync_and_unpark_the_prefix_hold() ->
 
     %% B pulls A's whole tree; the fold enforces prefix closure.
     {ok, _} = bondy_oplog:sync(B, A),
-    _ = barrier(B),
+    ok = bondy_oplog_test_projection:drain(B),
     ?assertEqual(6, maps:get(OriginA, bondy_oplog_registry:frontier(B))),
     ?assertEqual({val_n(3), 3}, bondy_oplog_core:read(NsB, primary, key_n(3))),
     stop_cell_instance(A, NsA, CacheA, ProjA),
@@ -237,7 +237,7 @@ fills_cross_sync_and_unpark_the_prefix_hold() ->
 
 synth_event(Hlc, Origin, Seq) ->
     K = bondy_oplog_event:key(Hlc, Origin, Seq),
-    bondy_oplog_event:new(K, {custom, <<"synth">>}, #{}).
+    bondy_oplog_event:new(K, bondy_oplog_test_projection:cell_op(Seq), #{}).
 
 key_n(N) ->
     <<"k", (integer_to_binary(N))/binary>>.
@@ -265,7 +265,6 @@ start_cell_instance() ->
     }),
     {ok, _} = bondy_oplog:start_instance(Id, #{
         origin => Origin,
-        fold_module => lww_register,
         applier => #{cell_apply_target => {NS, primary, 0}}
     }),
     {Id, Origin, NS, Cache, Proj}.
@@ -276,11 +275,6 @@ stop_cell_instance(Id, NS, Cache, Proj) ->
     ok = bondy_oplog_projection_ets:close(Proj),
     ok = bondy_oplog_cache_ets:close(Cache),
     ok.
-
-%% Synchronous barrier through the applier mailbox (see the identical
-%% helper in `bondy_oplog_applier_cell_apply_test`).
-barrier(Id) ->
-    bondy_oplog:projection(Id).
 
 %% Polls `Fun` until true, 50ms steps, 5s deadline. The seq-fill
 %% pipeline is asynchronous end to end (cast -> WAL append -> applier

@@ -51,9 +51,7 @@ accordingly:
 - **`pre_bootstrap`** — pick a single peer (via the configured
   `bootstrap_peer_strategy`, see below) and dispatch one bootstrap
   session via
-  `bondy_oplog_sync_session:start_bootstrap_catalogue/3` (catalogue
-  mode, `crdt_module = undefined`) or
-  `bondy_oplog_sync_session:start_bootstrap/3` (single-CRDT mode).
+  `bondy_oplog_sync_session:start_bootstrap_catalogue/3`.
   Single-peer to avoid duplicate snapshot transfers — bootstrap is
   expensive (full projection ship) and multi-peer would not improve
   correctness.
@@ -322,7 +320,7 @@ retries.
 %% load. Those were the observable window of the WATERMARK DOOR —
 %% `integrate_peer_root` discarding a just-pulled never-applied peer
 %% event at or below the local watermark — which is CLOSED
-%% (`watermark_door/3` in `bondy_oplog_instance`: fused instances fold
+%% (`watermark_door/2` in `bondy_oplog_instance`: fused instances fold
 %% such events into the projection before truncating; applier-backed
 %% instances hold them for the applier's replay). With the door closed
 %% a gap verdict is deterministic evidence of compacted-past-me
@@ -1097,33 +1095,19 @@ maybe_dispatch_bootstrap_cap_check(InstanceId, Peers) ->
 
 %% @private
 dispatch_bootstrap(InstanceId, Peer, Strategy) ->
-    Mode =
-        case bondy_oplog_instance:crdt_module(InstanceId) of
-            undefined -> catalogue;
-            _ -> single_crdt
-        end,
     telemetry:execute(
         [bondy_oplog, sync_scheduler, dispatch_bootstrap],
         #{count => 1},
         #{
             instance_id => InstanceId,
             peer => Peer,
-            mode => Mode,
             strategy => Strategy
         }
     ),
     SessionOpts = session_opts(),
-    {ok, Pid} =
-        case Mode of
-            catalogue ->
-                bondy_oplog_sync_session:start_bootstrap_catalogue(
-                    InstanceId, Peer, SessionOpts
-                );
-            single_crdt ->
-                bondy_oplog_sync_session:start_bootstrap(
-                    InstanceId, Peer, SessionOpts
-                )
-        end,
+    {ok, Pid} = bondy_oplog_sync_session:start_bootstrap_catalogue(
+        InstanceId, Peer, SessionOpts
+    ),
     track_inflight(Pid, InstanceId),
     ok.
 

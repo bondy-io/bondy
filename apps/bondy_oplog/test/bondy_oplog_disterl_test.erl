@@ -64,16 +64,14 @@ two_nodes_converge_via_disterl() ->
         ),
         %% Local (initiator) node: holds B in our diagram. We'll PULL
         %% from the remote node (call it A).
-        {ok, _} = bondy_oplog:start_instance(Inst, #{
+        {ok, _} = bondy_oplog_test_projection:start_instance(Inst, #{
             origin => bondy_oplog_origin:new()
         }),
         %% Remote node: start the same instance with a different origin
         %% and append 5 events.
-        ok = remote_start_instance(
-            NodeB,
-            Inst,
-            bondy_oplog_origin:new()
-        ),
+        {ok, _} = bondy_oplog_test_projection:start_instance_on(NodeB, Inst, #{
+            origin => bondy_oplog_origin:new()
+        }),
         ok = remote_append_n(NodeB, Inst, 5),
         RootRemote = remote_root(NodeB, Inst),
         %% Sync local from remote via disterl transport.
@@ -103,10 +101,10 @@ disterl_request_routes_through_responder() ->
         ok = setup_peer(NodeB),
         Inst1 = list_to_binary("r1_" ++ unique()),
         Inst2 = list_to_binary("r2_" ++ unique()),
-        {ok, _} = bondy_oplog:start_instance(Inst1, #{
+        {ok, _} = bondy_oplog_test_projection:start_instance(Inst1, #{
             origin => bondy_oplog_origin:new()
         }),
-        {ok, _} = bondy_oplog:start_instance(Inst2, #{
+        {ok, _} = bondy_oplog_test_projection:start_instance(Inst2, #{
             origin => bondy_oplog_origin:new()
         }),
         %% Append events ONLY to Inst1 locally so its root is non-undef.
@@ -205,15 +203,6 @@ setup_peer(Node) ->
         bondy_oplog_gc_scheduler,
         set_trigger,
         [undefined]
-    ),
-    ok.
-
-remote_start_instance(Node, Instance, Origin) ->
-    {ok, _Pid} = erpc:call(
-        Node,
-        bondy_oplog,
-        start_instance,
-        [Instance, #{origin => Origin}]
     ),
     ok.
 

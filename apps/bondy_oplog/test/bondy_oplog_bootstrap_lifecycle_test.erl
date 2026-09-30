@@ -107,6 +107,71 @@ mark_live_persists_flag_test() ->
         rm_rf(Tmp)
     end.
 
+%% The flag's existence is the state, so the rename that creates it must be
+%% followed by a sync of its directory. Checks the calls on the seams.
+mark_live_syncs_the_flag_test() ->
+    Tmp = mk_tmp_dir(),
+    try
+        H = ?MODL:open(<<"p4s">>, #{
+            storage_path => Tmp,
+            path_layout => flat
+        }),
+        Path = ?MODL:flag_path(H),
+        Dir = filename:dirname(Path),
+        Calls = with_io_fault_lock(fun() ->
+            ok = ?MODL:mark_live(H),
+            [
+                {F, A}
+             || {_, {bondy_mst_io, F, A}, _} <- meck:history(bondy_mst_io),
+                lists:member(F, [datasync, rename, fsync_dir])
+            ]
+        end),
+        ?assertMatch(
+            [{datasync, [_]}, {rename, [_, Path]}, {fsync_dir, [Dir]}],
+            Calls
+        ),
+        ?assert(filelib:is_regular(Path))
+    after
+        rm_rf(Tmp)
+    end.
+
+%% An existing flag may be visible without being durable, so opening syncs
+%% its directory before reporting `live`.
+open_syncs_an_existing_flag_test() ->
+    Tmp = mk_tmp_dir(),
+    try
+        Opts = #{storage_path => Tmp, path_layout => flat},
+        ok = ?MODL:mark_live(?MODL:open(<<"p4o">>, Opts)),
+        {State, Calls} = with_io_fault_lock(fun() ->
+            H = ?MODL:open(<<"p4o">>, Opts),
+            {?MODL:state(H), [
+                {F, A}
+             || {_, {bondy_mst_io, F, A}, _} <- meck:history(bondy_mst_io)
+            ]}
+        end),
+        ?assertEqual(live, State),
+        ?assertMatch([{fsync_dir, [_]}], Calls)
+    after
+        rm_rf(Tmp)
+    end.
+
+%% A flag left by a `mark_live/1` whose directory fsync failed is present but
+%% not known to be durable, so marking live again syncs it rather than
+%% returning because the file exists.
+mark_live_again_syncs_an_existing_flag_test() ->
+    Tmp = mk_tmp_dir(),
+    try
+        H = ?MODL:open(<<"p4r">>, #{storage_path => Tmp, path_layout => flat}),
+        ok = ?MODL:mark_live(H),
+        Calls = with_io_fault_lock(fun() ->
+            ok = ?MODL:mark_live(H),
+            [F || {_, {bondy_mst_io, F, _}, _} <- meck:history(bondy_mst_io)]
+        end),
+        ?assertEqual([fsync_dir], Calls)
+    after
+        rm_rf(Tmp)
+    end.
+
 mark_live_idempotent_test() ->
     Tmp = mk_tmp_dir(),
     try
@@ -229,3 +294,19 @@ rm_rf(Dir0) ->
         false ->
             ok
     end.
+
+%% The node-wide lock every suite that mocks `bondy_mst_io` takes.
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
+    ).

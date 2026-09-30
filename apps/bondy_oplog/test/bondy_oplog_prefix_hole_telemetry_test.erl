@@ -109,7 +109,7 @@ fresh() ->
         "prefix_hole_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     {Id, bondy_oplog_origin:new()}.
 
 prefix(Id, Origin) ->

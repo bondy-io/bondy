@@ -63,17 +63,10 @@ The watermark is the slowest-evolving piece of WAL state — a few
 writes per minute at most — so the per-rewrite fsync cost is
 negligible.
 
-## Atomic write sequence
+## Durability
 
-Both files use the same four-step durability sequence:
-
-1. Write `<file>.tmp` with the new content.
-2. `datasync` the temp file.
-3. `rename(<file>.tmp, <file>)` — atomic on POSIX.
-4. `datasync` the enclosing directory — required on ext4/xfs.
-
-An interrupted rename leaves either the old or the new content on
-disk, never a partial mix.
+Both files are replaced with `bondy_mst_io:write_file_atomic/2`, and their
+writers have its error contract.
 """).
 
 -record(consumer_offset, {
@@ -160,21 +153,15 @@ read_consumer_offset(Dir) ->
             E
     end.
 
-?DOC("""
-Atomically writes `consumer_offset()` to `Dir`. Uses the four-step
-durability sequence (write tmp → datasync → rename → fsync dir).
-""").
+?DOC("Replaces the consumer offset in `Dir`; see the moduledoc.").
 -spec write_consumer_offset(file:filename_all(), consumer_offset()) ->
     ok | {error, term()}.
 
 write_consumer_offset(Dir, #consumer_offset{} = CO) ->
-    TmpPath = filename:join(
-        Dir, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_TMP_FILENAME
-    ),
-    FinalPath = filename:join(
-        Dir, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_FILENAME
-    ),
-    atomic_write(Dir, TmpPath, FinalPath, format_consumer_offset(CO)).
+    bondy_mst_io:write_file_atomic(
+        filename:join(Dir, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_FILENAME),
+        format_consumer_offset(CO)
+    ).
 
 ?DOC("Returns the committed segment id.").
 -spec committed_segment(consumer_offset()) -> non_neg_integer().
@@ -254,22 +241,15 @@ read_snapshot_watermark(Dir) ->
             end
     end.
 
-?DOC("""
-Atomically writes `Hlc` as the new watermark. Uses the same four-step
-durability sequence as `write_consumer_offset/2`. Errors at any step
-short-circuit and leave the prior on-disk watermark intact.
-""").
+?DOC("Replaces the watermark in `Dir` with `Hlc`; see the moduledoc.").
 -spec write_snapshot_watermark(file:filename_all(), bondy_oplog_hlc:hlc()) ->
     ok | {error, term()}.
 
 write_snapshot_watermark(Dir, Hlc) when is_integer(Hlc), Hlc >= 0 ->
-    TmpPath = filename:join(
-        Dir, ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_TMP_FILENAME
-    ),
-    FinalPath = filename:join(
-        Dir, ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_FILENAME
-    ),
-    atomic_write(Dir, TmpPath, FinalPath, format_snapshot_watermark(Hlc)).
+    bondy_mst_io:write_file_atomic(
+        filename:join(Dir, ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_FILENAME),
+        format_snapshot_watermark(Hlc)
+    ).
 
 %% =============================================================================
 %% PRIVATE — CONSUMER OFFSET
@@ -397,40 +377,3 @@ validate_hlc_or_undefined(V) ->
 %% @private
 validate_hlc(H) when is_integer(H), H >= 0 -> ok;
 validate_hlc(V) -> throw({invalid, {invalid_hlc, V}}).
-
-%% @private
-%% Shared atomic-write helper: tmp → datasync → rename → fsync dir.
-atomic_write(Dir, TmpPath, FinalPath, Bin) ->
-    case write_and_sync(TmpPath, Bin) of
-        ok ->
-            case bondy_mst_io:rename(TmpPath, FinalPath) of
-                ok ->
-                    bondy_mst_io:fsync_dir(Dir);
-                {error, _} = E ->
-                    _ = prim_file:delete(TmpPath),
-                    E
-            end;
-        {error, _} = E ->
-            _ = prim_file:delete(TmpPath),
-            E
-    end.
-
-%% @private
-write_and_sync(TmpPath, Bin) ->
-    case prim_file:open(TmpPath, [write, raw, binary]) of
-        {ok, Fd} ->
-            Res =
-                case prim_file:write(Fd, Bin) of
-                    ok ->
-                        case bondy_mst_io:datasync(Fd) of
-                            ok -> ok;
-                            {error, _} = E1 -> E1
-                        end;
-                    {error, _} = E2 ->
-                        E2
-                end,
-            ok = prim_file:close(Fd),
-            Res;
-        {error, _} = E ->
-            E
-    end.

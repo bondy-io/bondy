@@ -451,26 +451,13 @@ do_restore(Source, Target, #{files := Files}) ->
 %% =============================================================================
 
 %% @private
-%% Atomic write: tmp + datasync + rename + dir-fsync. Mirrors the
-%% pattern used by the pack manifest and compaction checkpoint.
 write_manifest(Target, Manifest) ->
-    Path = manifest_path(Target),
-    Tmp = <<Path/binary, ".tmp">>,
     Bin = erlang:term_to_binary(
         {?MANIFEST_TAG, Manifest}, [{minor_version, 2}]
     ),
-    case write_and_sync(Tmp, Bin) of
-        ok ->
-            case bondy_mst_io:rename(Tmp, Path) of
-                ok ->
-                    bondy_mst_io:fsync_dir(Target);
-                {error, _} = E ->
-                    _ = prim_file:delete(Tmp),
-                    throw(E)
-            end;
-        {error, _} = E ->
-            _ = prim_file:delete(Tmp),
-            throw(E)
+    case bondy_mst_io:write_file_atomic(manifest_path(Target), Bin) of
+        ok -> ok;
+        {error, _} = E -> throw(E)
     end.
 
 %% @private
@@ -493,22 +480,6 @@ read_manifest(Target) ->
 %% @private
 manifest_path(Target) ->
     iolist_to_binary(filename:join(Target, ?MANIFEST_FILE)).
-
-%% @private
-write_and_sync(TmpPath, Bin) ->
-    case prim_file:open(TmpPath, [write, raw, binary]) of
-        {ok, Fd} ->
-            try
-                case prim_file:write(Fd, Bin) of
-                    ok -> bondy_mst_io:datasync(Fd);
-                    {error, _} = E -> E
-                end
-            after
-                _ = prim_file:close(Fd)
-            end;
-        {error, _} = E ->
-            E
-    end.
 
 %% =============================================================================
 %% PRIVATE — small helpers

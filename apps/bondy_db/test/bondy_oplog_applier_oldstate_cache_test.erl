@@ -219,8 +219,7 @@ valid_oldstate_cache_accepted() ->
     Id = mk_id(),
     ?assertMatch(
         {ok, _},
-        bondy_oplog:start_instance(Id, #{
-            fold_module => lww_register,
+        bondy_oplog_test_projection:start_instance(Id, #{
             applier => #{oldstate_cache => true, oldstate_cache_max => 16}
         })
     ),
@@ -370,8 +369,7 @@ with_cache_counter(Fun) ->
     end.
 
 start_instance_with(ApplierOpts) ->
-    bondy_oplog:start_instance(mk_id(), #{
-        fold_module => lww_register,
+    bondy_oplog_test_projection:start_instance(mk_id(), #{
         applier => ApplierOpts
     }).
 
@@ -394,7 +392,6 @@ setup_cached_cell_instance() ->
         fold_module => lww_register
     }),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         seed => true,
         applier => #{
             cell_apply_target => {NS, primary, 0},

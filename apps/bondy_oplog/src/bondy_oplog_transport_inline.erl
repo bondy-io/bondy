@@ -91,13 +91,6 @@ do_request(PeerInstance, {get_pages, _} = Request) ->
 do_request(PeerInstance, {get_pages, _, _, _} = Request) ->
     %% Reciprocal form; the responder also schedules the reverse exchange.
     bondy_oplog_responder:dispatch(PeerInstance, Request);
-do_request(PeerInstance, get_snapshot) ->
-    %% Wire-protocol message name is preserved (transport ABI);
-    %% internally we route to the renamed compaction_checkpoint API.
-    case bondy_oplog_instance:compaction_checkpoint(PeerInstance) of
-        not_found -> {ok, no_snapshot};
-        {ok, W, S} -> {ok, W, S}
-    end;
 do_request(PeerInstance, get_catalogue_snapshot_init) ->
     %% Drain the peer's applier so the watermark and any cells already
     %% in the WAL are visible before we mint the cursor. Without this,

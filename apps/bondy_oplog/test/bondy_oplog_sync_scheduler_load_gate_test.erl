@@ -199,7 +199,7 @@ live_instance(Fence) ->
             true -> Opts0#{ae_targets => [{load_test_ns, load_test_idx, 0}]};
             false -> Opts0
         end,
-    {ok, _} = bondy_oplog:start_instance(Id, Opts),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
     ok = bondy_oplog_instance:mark_live(Id),
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Id)),
     Id.

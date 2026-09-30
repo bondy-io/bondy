@@ -134,7 +134,7 @@ init(DbName, Opts) when is_atom(DbName), is_map(Opts) ->
             {error, {missing_required_opt, sup}}
     end.
 
-open_table(EntityType, ShardCount, _TableOpts, State0) when
+open_table(EntityType, ShardCount, _TableOpts, #{dir := Dir} = State0) when
     is_atom(EntityType), is_integer(ShardCount), ShardCount > 0
 ->
     case ensure_shards(ShardCount, State0) of
@@ -142,7 +142,10 @@ open_table(EntityType, ShardCount, _TableOpts, State0) when
             TableState = #{
                 entity_type => EntityType,
                 shard_count => ShardCount,
-                shards => Shards
+                shards => Shards,
+                root_paths => maps:map(
+                    fun(I, _) -> shard_dir(Dir, I) end, Shards
+                )
             },
             {ok, TableState, State1};
         {error, _} = Err ->

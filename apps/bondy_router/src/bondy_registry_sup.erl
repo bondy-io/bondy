@@ -32,6 +32,7 @@ start_link() ->
 %% =============================================================================
 
 init([]) ->
+    ok = bondy_registry_rib:init(),
     SupFlags = #{
         %% TODO move to one_for_one
         %% We can only use one_for_one when each partition can rebuild the its

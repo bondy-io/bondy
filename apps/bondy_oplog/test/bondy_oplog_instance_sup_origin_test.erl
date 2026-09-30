@@ -30,7 +30,9 @@ origin_resolution_test_() ->
         fun explicit_origin_wins/0,
         fun storage_path_origin_persists/0,
         fun storage_path_origin_survives_restart/0,
-        fun no_storage_path_falls_back_to_default/0
+        fun no_storage_path_falls_back_to_default/0,
+        fun restarted_ephemeral_instance_mints_undominated_events/0,
+        fun crashed_ephemeral_instance_mints_undominated_events/0
     ]}.
 
 %% ---------------------------------------------------------------------------
@@ -45,7 +47,7 @@ explicit_origin_wins() ->
     Explicit = <<"explicit-orig-01">>,
     ?BONDY_OPLOG_ORIGIN_BYTES = byte_size(Explicit),
     try
-        {ok, _} = bondy_oplog:start_instance(Id, #{
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
             storage_path => unicode:characters_to_binary(Dir),
             path_layout => flat,
             seed => true,
@@ -72,7 +74,7 @@ storage_path_origin_persists() ->
     Dir = mktemp_dir("sup_origin_persist_"),
     Id = unique_id(<<"persist">>),
     try
-        {ok, _} = bondy_oplog:start_instance(Id, #{
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
             storage_path => unicode:characters_to_binary(Dir),
             path_layout => flat,
             seed => true
@@ -105,10 +107,10 @@ storage_path_origin_survives_restart() ->
         seed => true
     },
     try
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
         OriginBefore = bondy_oplog:origin(Id),
         ok = bondy_oplog:stop_instance(Id),
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
         OriginAfter = bondy_oplog:origin(Id),
         ?assertEqual(OriginBefore, OriginAfter)
     after
@@ -126,9 +128,67 @@ no_storage_path_falls_back_to_default() ->
     %% ephemeral default. Behaviour-preserving for tests.
     Id = unique_id(<<"ephemeral">>),
     try
-        {ok, _} = bondy_oplog:start_instance(Id, #{}),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{}),
         Origin = bondy_oplog:origin(Id),
         ?assertEqual(bondy_oplog_origin:default(), Origin)
+    after
+        try
+            bondy_oplog:stop_instance(Id)
+        catch
+            _:_ -> ok
+        end
+    end.
+
+%% A fused instance with an in-memory WAL and MST (the `registry` DB's opts)
+%% keeps nothing across a stop, so an instance started again under the same id
+%% must mint events that no replica holding the old incarnation's frontier
+%% treats as already applied: a key `(Origin, Seq)` with `Seq` at or below that
+%% frontier's entry for `Origin` is skipped as a duplicate.
+restarted_ephemeral_instance_mints_undominated_events() ->
+    Id = unique_id(<<"ephemeral">>),
+    try
+        {ok, _} = bondy_oplog_test_projection:start_instance(
+            Id, ephemeral_opts()
+        ),
+        Frontier = frontier([
+            bondy_oplog:append(Id, {custom, N})
+         || N <- [1, 2, 3]
+        ]),
+        ok = bondy_oplog:stop_instance(Id),
+        {ok, _} = bondy_oplog_test_projection:start_instance(
+            Id, ephemeral_opts()
+        ),
+        assert_undominated(bondy_oplog:append(Id, {custom, 4}), Frontier)
+    after
+        try
+            bondy_oplog:stop_instance(Id)
+        catch
+            _:_ -> ok
+        end
+    end.
+
+%% The same epoch boundary when the instance process is killed and its
+%% supervisor restarts it. The registry row outlives a subtree restart, so the
+%% new incarnation's origin must replace the old one there: it is what the node
+%% advertises, and an unadvertised live origin is dead to a peer's reap.
+crashed_ephemeral_instance_mints_undominated_events() ->
+    Id = unique_id(<<"crashed">>),
+    try
+        {ok, _} = bondy_oplog_test_projection:start_instance(
+            Id, ephemeral_opts()
+        ),
+        Frontier = frontier([
+            bondy_oplog:append(Id, {custom, N})
+         || N <- [1, 2, 3]
+        ]),
+        Old = bondy_oplog_registry:instance_pid(Id),
+        exit(Old, kill),
+        ok = await_restart(Id, Old, 100),
+        New = bondy_oplog:append(Id, {custom, 4}),
+        assert_undominated(New, Frontier),
+        Origin = bondy_oplog_event:key_origin(New),
+        ?assertEqual(Origin, bondy_oplog:origin(Id)),
+        ?assert(lists:member(Origin, bondy_oplog_registry:origins()))
     after
         try
             bondy_oplog:stop_instance(Id)
@@ -140,6 +200,39 @@ no_storage_path_falls_back_to_default() ->
 %% ---------------------------------------------------------------------------
 %% helpers
 %% ---------------------------------------------------------------------------
+
+ephemeral_opts() ->
+    #{
+        backend => ets,
+        wal_backend => mem,
+        durability => ephemeral,
+        fused => true
+    }.
+
+frontier(Keys) ->
+    lists:foldl(
+        fun(K, Acc) ->
+            O = bondy_oplog_event:key_origin(K),
+            Acc#{O => max(maps:get(O, Acc, 0), bondy_oplog_event:key_seq(K))}
+        end,
+        #{},
+        Keys
+    ).
+
+assert_undominated(Key, Frontier) ->
+    Origin = bondy_oplog_event:key_origin(Key),
+    ?assert(bondy_oplog_event:key_seq(Key) > maps:get(Origin, Frontier, 0)).
+
+await_restart(_Id, _Old, 0) ->
+    {error, not_restarted};
+await_restart(Id, Old, N) ->
+    case bondy_oplog_registry:instance_pid(Id) of
+        Pid when is_pid(Pid), Pid =/= Old ->
+            ok;
+        _ ->
+            timer:sleep(20),
+            await_restart(Id, Old, N - 1)
+    end.
 
 unique_id(Prefix) ->
     Suffix = integer_to_binary(erlang:unique_integer([positive])),

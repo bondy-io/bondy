@@ -35,8 +35,7 @@ Runs one compaction cycle for `InstanceId`. Returns:
 - `{ok, no_change}` if no progress is possible (no peers, no
   intersecting prefix, frontier ≤ current watermark).
 - `{ok, {compacted, NewWatermark, EventCount}}` on success.
-- `{error, Reason}` on failure — typically `no_crdt_module` if the
-  instance was started without `crdt_module` configured.
+- `{error, Reason}` on failure.
 """).
 -spec compact(instance_id()) ->
     {ok, no_change}

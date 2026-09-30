@@ -113,7 +113,6 @@ start_fused_instance(CrdtModule, CrdtOpts) ->
     NS = ns_of(Id),
     _ = register_shard(NS, primary, 0, CrdtModule, CrdtOpts),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         origin => bondy_oplog_origin:new(),
         fused => true,
         applier => #{

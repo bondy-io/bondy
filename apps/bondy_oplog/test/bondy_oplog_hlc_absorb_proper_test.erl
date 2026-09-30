@@ -127,7 +127,9 @@ prop_interleaved_deliveries_absorb() ->
 
 %% @private
 run_cmd(local, L, _P, #{max_delivered := Max, ok := Ok} = St) ->
-    K = bondy_oplog:append(L, {op, maps:get(seq, St)}),
+    K = bondy_oplog:append(
+        L, bondy_oplog_test_projection:cell_op(maps:get(seq, St))
+    ),
     Hlc = bondy_oplog_event:key_hlc(K),
     %% THE INVARIANT: a local mint strictly dominates every delivered HLC.
     St#{ok := Ok andalso (Max =:= 0 orelse Hlc > Max)};
@@ -228,13 +230,13 @@ far_hlc(OffsetMs) ->
 remote_event(Origin, Hlc, Seq) ->
     bondy_oplog_event:new(
         bondy_oplog_event:key(Hlc, Origin, Seq + 1),
-        {peer_op, Seq},
+        bondy_oplog_test_projection:cell_op(Seq),
         undefined
     ).
 
 start_plain(Prefix) ->
     Id = mk_id(Prefix),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         origin => bondy_oplog_origin:new()
     }),
     Id.
@@ -254,7 +256,6 @@ start_catalogue(Prefix) ->
         fold_module => lww_register
     }),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         origin => bondy_oplog_origin:new(),
         applier => #{cell_apply_target => {NS, primary, 0}}
     }),

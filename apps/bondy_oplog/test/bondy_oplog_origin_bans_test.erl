@@ -38,7 +38,10 @@ retirement_test_() ->
         fun merge_retired_is_a_union/0,
         fun retire_without_path_is_refused/0,
         fun a_failed_persist_enforces_nothing/0,
-        fun a_successful_write_restores_persistence/0
+        fun a_successful_write_restores_persistence/0,
+        fun a_retirement_not_known_durable_is_not_enforced/0,
+        fun a_retirement_keeps_a_set_it_could_not_load_at_start/0,
+        fun a_late_load_restores_what_a_boot_load_does/0
     ]}.
 
 %% PERSIST BEFORE ENFORCE. `proofs/tla/OriginRetirementSet.tla` with
@@ -83,6 +86,75 @@ a_successful_write_restores_persistence() ->
     ?assert(bondy_oplog_origin_bans:is_retired(O)),
     ?assert(bondy_oplog_origin_bans:is_persistent()).
 
+%% A failed directory fsync leaves the new set visible but not known durable:
+%% the retirement is refused and nothing is enforced, and a restarted server
+%% enforces the set only once its directory has been synced. Enforcing it
+%% earlier is `RetirementDurable = FALSE`.
+a_retirement_not_known_durable_is_not_enforced() ->
+    O = <<"orig-dir-sync">>,
+    _ = set_retirement_path(),
+    with_io_fault_lock(fun() ->
+        ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+        ?assertEqual(
+            {error, not_persistent},
+            bondy_oplog_origin_bans:retire(O, decommissioned)
+        ),
+        ?assertNot(bondy_oplog_origin_bans:is_retired(O)),
+        ok = restart_bans(),
+        ?assertNot(bondy_oplog_origin_bans:is_retired(O)),
+        ?assertNot(bondy_oplog_origin_bans:is_persistent())
+    end),
+    ok = restart_bans(),
+    ?assert(bondy_oplog_origin_bans:is_retired(O)),
+    ?assert(bondy_oplog_origin_bans:is_persistent()).
+
+%% A set that could not be loaded because its directory could not be synced
+%% is still on disk. A retirement refuses to rewrite the file while it cannot
+%% load it, and loads it first once it can, so the earlier retirement is
+%% never dropped from it.
+a_retirement_keeps_a_set_it_could_not_load_at_start() ->
+    Earlier = <<"orig-kept-earlier">>,
+    Later = <<"orig-kept-later">>,
+    _ = set_retirement_path(),
+    ok = bondy_oplog_origin_bans:retire(Earlier, decommissioned),
+    with_io_fault_lock(fun() ->
+        ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+        ok = restart_bans(),
+        ?assertNot(bondy_oplog_origin_bans:is_retired(Earlier)),
+        ?assertEqual(
+            {error, not_persistent},
+            bondy_oplog_origin_bans:retire(Later, decommissioned)
+        )
+    end),
+    ok = restart_bans(),
+    ?assert(bondy_oplog_origin_bans:is_retired(Earlier)),
+    ?assertNot(bondy_oplog_origin_bans:is_retired(Later)),
+    with_io_fault_lock(fun() ->
+        ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+        ok = restart_bans()
+    end),
+    ok = bondy_oplog_origin_bans:retire(Later, decommissioned),
+    ok = restart_bans(),
+    ?assert(bondy_oplog_origin_bans:is_retired(Earlier)),
+    ?assert(bondy_oplog_origin_bans:is_retired(Later)).
+
+%% A set loaded by a retirement, after the boot load could not sync it, must
+%% license what a boot load does, even when the retirement adds nothing.
+a_late_load_restores_what_a_boot_load_does() ->
+    O = <<"orig-late-load">>,
+    _ = set_retirement_path(),
+    ok = bondy_oplog_origin_bans:retire(O, decommissioned),
+    with_io_fault_lock(fun() ->
+        ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+        ok = restart_bans()
+    end),
+    ?assertNot(bondy_oplog_origin_bans:is_persistent()),
+    ?assertNot(bondy_oplog_origin_bans:has_retired()),
+    ok = bondy_oplog_origin_bans:retire(O, decommissioned),
+    ?assert(bondy_oplog_origin_bans:is_retired(O)),
+    ?assert(bondy_oplog_origin_bans:is_persistent()),
+    ?assert(bondy_oplog_origin_bans:has_retired()).
+
 ban_and_unban() ->
     O = <<"orig-test-1">>,
     ?assertEqual(false, bondy_oplog_origin_bans:is_banned(O)),
@@ -95,7 +167,7 @@ ban_and_unban() ->
 
 banned_origin_rejected_at_append_remote() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Origin = <<"orig-banned-aaaa">>,
     Event = bondy_oplog_event:new(
         bondy_oplog_event:key(1, Origin, 1), op, undefined
@@ -120,8 +192,8 @@ ban_applies_across_instances() ->
     %% point of the node-shared list.
     IdA = mk_id(),
     IdB = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(IdA),
-    {ok, _} = bondy_oplog:start_instance(IdB),
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdA),
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdB),
     Origin = <<"orig-everywhere-bb">>,
     EventA = bondy_oplog_event:new(
         bondy_oplog_event:key(1, Origin, 1), opA, undefined
@@ -247,4 +319,20 @@ mk_id() ->
             integer_to_list(
                 erlang:unique_integer([positive, monotonic])
             )
+    ).
+
+%% The node-wide lock every suite that mocks `bondy_mst_io` takes.
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
     ).

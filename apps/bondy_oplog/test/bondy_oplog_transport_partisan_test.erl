@@ -76,10 +76,12 @@ two_nodes_converge_via_partisan() ->
         Inst = list_to_binary(
             "px_" ++ integer_to_list(os:system_time(microsecond))
         ),
-        {ok, _} = bondy_oplog:start_instance(Inst, #{
+        {ok, _} = bondy_oplog_test_projection:start_instance(Inst, #{
             origin => bondy_oplog_origin:new()
         }),
-        ok = remote_start_instance(NodeB, Inst, bondy_oplog_origin:new()),
+        {ok, _} = bondy_oplog_test_projection:start_instance_on(NodeB, Inst, #{
+            origin => bondy_oplog_origin:new()
+        }),
         ok = remote_append_n(NodeB, Inst, 5),
         RootRemote = remote_root(NodeB, Inst),
         {ok, _} = bondy_oplog:sync(Inst, PeerName, #{
@@ -107,10 +109,10 @@ partisan_request_routes_through_responder() ->
         SelfPeerName = partisan:node(),
         Inst1 = list_to_binary("pr1_" ++ unique()),
         Inst2 = list_to_binary("pr2_" ++ unique()),
-        {ok, _} = bondy_oplog:start_instance(Inst1, #{
+        {ok, _} = bondy_oplog_test_projection:start_instance(Inst1, #{
             origin => bondy_oplog_origin:new()
         }),
-        {ok, _} = bondy_oplog:start_instance(Inst2, #{
+        {ok, _} = bondy_oplog_test_projection:start_instance(Inst2, #{
             origin => bondy_oplog_origin:new()
         }),
         [bondy_oplog:append(Inst1, X) || X <- lists:seq(1, 3)],
@@ -148,14 +150,16 @@ sync_survives_peer_node_failure() ->
     Inst = list_to_binary(
         "pf_" ++ integer_to_list(os:system_time(microsecond))
     ),
-    {ok, _} = bondy_oplog:start_instance(Inst, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst, #{
         origin => bondy_oplog_origin:new()
     }),
     try
         ok = setup_peer(NodeB),
         ok = join_partisan(NodeB),
         PeerNameB = erpc:call(NodeB, partisan, node, []),
-        ok = remote_start_instance(NodeB, Inst, bondy_oplog_origin:new()),
+        {ok, _} = bondy_oplog_test_projection:start_instance_on(NodeB, Inst, #{
+            origin => bondy_oplog_origin:new()
+        }),
         ok = remote_append_n(NodeB, Inst, 2000),
         Self = self(),
         _ = spawn(fun() ->
@@ -192,7 +196,9 @@ sync_survives_peer_node_failure() ->
         ok = setup_peer(NodeC),
         ok = join_partisan(NodeC),
         PeerNameC = erpc:call(NodeC, partisan, node, []),
-        ok = remote_start_instance(NodeC, Inst, bondy_oplog_origin:new()),
+        {ok, _} = bondy_oplog_test_projection:start_instance_on(NodeC, Inst, #{
+            origin => bondy_oplog_origin:new()
+        }),
         ok = remote_append_n(NodeC, Inst, 500),
         RootC = remote_root(NodeC, Inst),
         {ok, _} = bondy_oplog:sync(Inst, PeerNameC, #{
@@ -297,15 +303,6 @@ setup_peer(Node) ->
         bondy_oplog_gc_scheduler,
         set_trigger,
         [undefined]
-    ),
-    ok.
-
-remote_start_instance(Node, Instance, Origin) ->
-    {ok, _Pid} = erpc:call(
-        Node,
-        bondy_oplog,
-        start_instance,
-        [Instance, #{origin => Origin}]
     ),
     ok.
 

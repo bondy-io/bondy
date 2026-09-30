@@ -43,8 +43,9 @@ init([]) ->
         %% tables from, is started by `bondy_stdlib` (its supervisor), so
         %% it is up before this tree.
         %% bondy_db namespace catalogue: owns the durable `main` DB + its
-        %% leveled supervisor (gated off by default — see the module).
-        ?WORKER(bondy_namespace_catalog, [], permanent, 5000),
+        %% leveled supervisor. `infinity`: its `terminate/2` closes every
+        %% Bookie, and no close may be cut short (`bondy_degraded_boot_SUITE`).
+        ?WORKER(bondy_namespace_catalog, [], permanent, infinity),
         %% supervisor for event handlers
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
         %% gen_event managers

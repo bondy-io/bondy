@@ -109,7 +109,6 @@ disk_root(PackDir) ->
 start_opts(NS, Dir) ->
     #{
         origin => bondy_oplog_origin:new(),
-        fold_module => lww_register,
         backend => bondy_mst_pack_store,
         storage_path => unicode:characters_to_binary(Dir),
         seed => true,
@@ -151,7 +150,7 @@ append_batch(InstanceId, I, Batch) ->
             _ = bondy_oplog:append(
                 InstanceId, {cell_apply, ?B, Key, {set, Hlc, Key}}
             ),
-            _ = bondy_oplog:projection(InstanceId)
+            ok = bondy_oplog_test_projection:drain(InstanceId)
         end,
         lists:seq(1, Batch)
     ).

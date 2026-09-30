@@ -337,18 +337,14 @@ interval_bytes(#acc{interval_bytes = I}) -> I.
 %% =============================================================================
 
 ?DOC("""
-Atomically writes `Entries` to a `.qidx` file at `Path`.
+Writes `Entries` to a `.qidx` file at `Path` with
+`bondy_mst_io:write_file_atomic/2`. An empty entry list is valid — it writes a
+header with `EntryCount = 0`.
 
-Steps:
-
-1. Write `Path.tmp` with the header + entry stream.
-2. `datasync` the tmp fd.
-3. `rename(Path.tmp, Path)` — atomic on POSIX same-filesystem.
-4. `fsync_dir(dirname(Path))` — required on ext4/xfs.
-
-Returns `ok` or `{error, Reason}`. On any failure the tmp file is
-removed and the original `.qidx` (if any) is left untouched. An empty
-entry list is valid — it writes a header with `EntryCount = 0`.
+A failed directory fsync is returned as `{error, {dir_fsync_failed, Dir,
+Reason}}` rather than raised: recovery rebuilds a sealed segment's `.qidx`
+that is missing or does not load (`bondy_oplog_wal_recovery`), so a writer
+may carry on without it.
 
 Caller is responsible for choosing the path; typically:
 `filename:join(Dir, bondy_oplog_wal_idx:filename(SegId))`.
@@ -356,17 +352,11 @@ Caller is responsible for choosing the path; typically:
 -spec write_file(file:filename_all(), entries()) -> ok | {error, term()}.
 
 write_file(Path, Entries) when is_list(Entries) ->
-    EntryCount = length(Entries),
-    Header = encode_header(EntryCount),
-    Body = encode_entries(Entries),
-    TmpPath = tmp_path(Path),
-    case prim_file:open(TmpPath, [write, raw, binary]) of
-        {ok, Fd} ->
-            Res = write_and_sync(Fd, [Header | Body]),
-            ok = prim_file:close(Fd),
-            commit_or_cleanup(Res, TmpPath, Path);
-        {error, _} = E ->
-            E
+    Header = encode_header(length(Entries)),
+    try
+        bondy_mst_io:write_file_atomic(Path, [Header | encode_entries(Entries)])
+    catch
+        error:{dir_fsync_failed, _, _} = Reason -> {error, Reason}
     end.
 
 ?DOC("""
@@ -554,38 +544,6 @@ decode_entries_loop(
     Acc
 ) ->
     decode_entries_loop(?ENTRY_BYTES_V2, Rest, [{F, L, O} | Acc]).
-
-%% @private
-%% Writes the header+body to the open tmp fd then datasyncs. The close
-%% is the caller's responsibility so we can keep `commit_or_cleanup/3`
-%% out of the fd-life path.
-write_and_sync(Fd, Iolist) ->
-    case prim_file:write(Fd, Iolist) of
-        ok ->
-            case bondy_mst_io:datasync(Fd) of
-                ok -> ok;
-                {error, _} = E -> E
-            end;
-        {error, _} = E ->
-            E
-    end.
-
-%% @private
-commit_or_cleanup(ok, TmpPath, Path) ->
-    case bondy_mst_io:rename(TmpPath, Path) of
-        ok ->
-            bondy_mst_io:fsync_dir(filename:dirname(Path));
-        {error, _} = E ->
-            _ = prim_file:delete(TmpPath),
-            E
-    end;
-commit_or_cleanup({error, _} = E, TmpPath, _Path) ->
-    _ = prim_file:delete(TmpPath),
-    E.
-
-%% @private
-tmp_path(Path) ->
-    iolist_to_binary([Path, ".tmp"]).
 
 %% @private
 %% Binary search for the entry whose range contains `T`, falling back

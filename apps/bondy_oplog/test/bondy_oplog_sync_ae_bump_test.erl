@@ -55,8 +55,8 @@ no_ae_targets_does_not_bump() ->
     ok = register_shard(NS, primary, 0),
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, opts_for(NS, [])),
-    {ok, _} = bondy_oplog:start_instance(B, opts_for(NS, [])),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, opts_for(NS, [])),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, opts_for(NS, [])),
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 5)],
     Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
     {ok, _} = bondy_oplog:sync(A, B),
@@ -74,8 +74,10 @@ successful_sync_bumps_targets() ->
     Targets = [{NS, primary, 0}],
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, opts_for(NS, Targets)),
-    {ok, _} = bondy_oplog:start_instance(B, opts_for(NS, [])),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        A, opts_for(NS, Targets)
+    ),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, opts_for(NS, [])),
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 5)],
     Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
     ?assertEqual(sentinel(), Before),
@@ -91,8 +93,12 @@ bump_shares_now_across_targets() ->
     Targets = [{NS, primary, 0}, {NS, by_name, 0}],
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, opts_for(NS, Targets)),
-    {ok, _} = bondy_oplog:start_instance(B, opts_for(NS, Targets)),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        A, opts_for(NS, Targets)
+    ),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        B, opts_for(NS, Targets)
+    ),
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 3)],
     {ok, _} = bondy_oplog:sync(A, B),
     P = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
@@ -111,8 +117,12 @@ no_op_sync_against_empty_peer_still_bumps() ->
     Targets = [{NS, primary, 0}],
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, opts_for(NS, Targets)),
-    {ok, _} = bondy_oplog:start_instance(B, opts_for(NS, Targets)),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        A, opts_for(NS, Targets)
+    ),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        B, opts_for(NS, Targets)
+    ),
     [bondy_oplog:append(A, X) || X <- [a, b, c]],
     ok = bondy_oplog:await_apply(A),
     Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
@@ -136,7 +146,9 @@ failed_sync_does_not_bump() ->
     ok = register_shard(NS, primary, 0),
     Targets = [{NS, primary, 0}],
     A = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, opts_for(NS, Targets)),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        A, opts_for(NS, Targets)
+    ),
     Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
     %% Use an unstarted peer id so the inline transport raises.
     BogusPeer = <<"never_started_peer">>,
@@ -153,8 +165,12 @@ missing_target_is_tolerated() ->
     Targets = [{NS, primary, 0}, {missing_ns, primary, 0}],
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, opts_for(NS, Targets)),
-    {ok, _} = bondy_oplog:start_instance(B, opts_for(NS, Targets)),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        A, opts_for(NS, Targets)
+    ),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        B, opts_for(NS, Targets)
+    ),
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 3)],
     {ok, _} = bondy_oplog:sync(A, B),
     ?assert(bondy_oplog_core_registry:last_ae_at(NS, primary, 0) > sentinel()),
@@ -175,10 +191,14 @@ top_level_ae_targets_wires_applier_and_ae() ->
     Targets = [{NS, primary, 0}],
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, (opts_for(NS, Targets))#{
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, (opts_for(
+        NS, Targets
+    ))#{
         applier => #{commit_every => 1}
     }),
-    {ok, _} = bondy_oplog:start_instance(B, opts_for(NS, Targets)),
+    {ok, _} = bondy_oplog_test_projection:start_instance(
+        B, opts_for(NS, Targets)
+    ),
     ?assertEqual(
         sentinel(),
         bondy_oplog_core_registry:last_ae_at(NS, primary, 0)

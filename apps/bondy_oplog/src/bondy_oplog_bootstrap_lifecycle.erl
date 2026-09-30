@@ -15,7 +15,7 @@ Per-instance bootstrap lifecycle.
 
 The applier MUST NOT apply WAL events onto the per-cell projection
 until the instance has been bootstrapped — either by joining an
-existing cluster via `bondy_oplog_sync_session:bootstrap/3`, or by
+existing cluster via `bondy_oplog_sync_session:bootstrap_catalogue/3`, or by
 declaring itself a genesis (`seed: true`) peer at startup. Without
 this gate a fresh peer that receives a live event before bootstrap
 would apply it to bottom state and converge to wrong values. The
@@ -25,7 +25,7 @@ counters.
 ## State machine
 
 ```
-                bootstrap/3 success / seed: true
+        bootstrap_catalogue/3 success / seed: true
     pre_bootstrap ──────────────────────────────► live
 ```
 
@@ -37,13 +37,10 @@ no path returns to `pre_bootstrap` without operator intervention
 ## Storage
 
 The lifecycle bit lives in `<instance_dir>/lifecycle.live` — an empty
-flag file. Presence ⇒ `live`. Absence ⇒ `pre_bootstrap`. The
-transition is atomic via `file:rename/2`:
-
-```erlang
-ok = file:write_file(".lifecycle.live.tmp", <<>>),
-ok = file:rename(".lifecycle.live.tmp", "lifecycle.live").
-```
+flag file. Presence ⇒ `live`. Absence ⇒ `pre_bootstrap`. The flag is
+created with `bondy_mst_io:write_file_atomic/2`, which syncs the directory
+after the rename that makes the flag appear (`mark_live_syncs_the_flag_test`
+in `bondy_oplog_bootstrap_lifecycle_test`).
 
 No parsing, no checksum, no version handshake — recovery is "does
 the file exist or not."
@@ -72,12 +69,11 @@ still honoured for symmetry.
 
 A persistent instance whose flag file is absent and that was not
 seeded is presumed to be a fresh peer that must call
-`bondy_oplog_sync_session:bootstrap/3` against a live peer before it
+`bondy_oplog_sync_session:bootstrap_catalogue/3` against a live peer before it
 can serve fold-driven reads.
 """).
 
 -define(FLAG_FILENAME, "lifecycle.live").
--define(FLAG_TMPNAME, ".lifecycle.live.tmp").
 -define(ATOMIC_SLOT, 1).
 -define(ATOMIC_LIVE, 1).
 -define(ATOMIC_PRE_BOOTSTRAP, 0).
@@ -116,11 +112,10 @@ The handle is cheap to copy and safe to share between processes: the
 atomics ref is shared by reference; the flag-path binary is
 immutable.
 
-The function performs at most one filesystem stat (does the flag
-file exist?) and at most one `file:write_file`/`file:rename` pair
-(when seeding a persistent instance). On error reading the
-directory, the instance is considered `pre_bootstrap` and a warning
-is logged.
+The function checks whether the flag file exists; when it does, it syncs the
+flag's directory before trusting it, and raises `{dir_fsync_failed, Dir,
+Reason}` if it cannot. When seeding a persistent instance it writes the flag
+with `bondy_mst_io:write_file_atomic/2`.
 """).
 -spec open(instance_id(), map()) -> handle().
 
@@ -176,19 +171,19 @@ Flips the lifecycle to `live` durably and idempotently.
 
 Order of effects (matters for crash recovery):
 
-  1. Atomic rename of `.lifecycle.live.tmp` → `lifecycle.live`
-     (the durability barrier — until it succeeds, restart still sees
-     `pre_bootstrap`).
+  1. `lifecycle.live` is created with `bondy_mst_io:write_file_atomic/2`
+     (until it returns, a restart may still see `pre_bootstrap`).
   2. Boolean mirror set in `atomics`.
 
-Callers MUST invoke this *last* in the bootstrap completion sequence
-— after `load_snapshot` has installed the snapshot and after the
-watermark has been advanced. A crash between any earlier step and
-this call leaves no flag file; on restart the operator re-runs
-`bootstrap/3` and the earlier steps idempotently re-succeed.
+Callers MUST invoke this *last* in the bootstrap completion sequence.
+A crash between any earlier step and this call leaves no flag file, so
+on restart the instance is `pre_bootstrap` again and is bootstrapped
+anew.
 
-Re-marking an already-live instance is a no-op (both file:rename and
-atomic-set are idempotent).
+Re-marking an already-live instance does not rewrite the flag; it syncs the
+flag's directory, since the flag may have been left by a write whose directory
+sync failed (`mark_live_again_syncs_an_existing_flag_test`). The atomic-set
+is idempotent.
 """).
 -spec mark_live(handle()) -> ok.
 
@@ -254,6 +249,7 @@ resolve_initial_state(undefined, Opts) ->
 resolve_initial_state(Path, Opts) ->
     case filelib:is_regular(Path) of
         true ->
+            ok = sync_dir(filename:dirname(Path)),
             live;
         false ->
             case maps:get(seed, Opts, false) of
@@ -263,45 +259,33 @@ resolve_initial_state(Path, Opts) ->
     end.
 
 %% @private
-%% Idempotent flag-file write. Ensures the parent directory exists
-%% (the instance directory may not be present yet on the first open of
-%% a brand-new instance — `bondy_mst_pack_store` and other backends
-%% create their own subtree, but we don't depend on them having run
-%% first). Uses tmp+rename so a crash between write and rename leaves
-%% no half-flag.
+sync_dir(Dir) ->
+    case bondy_mst_io:fsync_dir(Dir) of
+        ok -> ok;
+        {error, Reason} -> error({dir_fsync_failed, Dir, Reason})
+    end.
+
+%% @private
+%% The instance directory may not exist yet on a brand-new instance's first
+%% open; no other backend is relied on to have created it.
 persist_flag_idempotent(Path, InstanceId) ->
-    Dir = filename:dirname(Path),
-    ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    ok = filelib:ensure_dir(Path),
     case filelib:is_regular(Path) of
         true ->
-            ok;
+            sync_dir(filename:dirname(Path));
         false ->
-            TmpPath = filename:join(Dir, ?FLAG_TMPNAME),
-            case file:write_file(TmpPath, <<>>) of
+            case bondy_mst_io:write_file_atomic(Path, <<>>) of
                 ok ->
-                    case file:rename(TmpPath, Path) of
-                        ok ->
-                            ok;
-                        {error, RenameErr} ->
-                            ?LOG_ERROR(#{
-                                description =>
-                                    "failed to durably mark instance "
-                                    "lifecycle as live; restart will "
-                                    "see pre_bootstrap",
-                                instance_id => InstanceId,
-                                path => Path,
-                                reason => RenameErr
-                            }),
-                            error({lifecycle_persist_failed, RenameErr})
-                    end;
-                {error, WriteErr} ->
+                    ok;
+                {error, Reason} ->
                     ?LOG_ERROR(#{
                         description =>
-                            "failed to write lifecycle.live tmp file",
+                            "failed to durably mark instance lifecycle as "
+                            "live; a restart may see pre_bootstrap",
                         instance_id => InstanceId,
-                        path => TmpPath,
-                        reason => WriteErr
+                        path => Path,
+                        reason => Reason
                     }),
-                    error({lifecycle_persist_failed, WriteErr})
+                    error({lifecycle_persist_failed, Reason})
             end
     end.

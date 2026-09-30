@@ -101,6 +101,39 @@ load_or_create_fails_when_not_persisted_test() ->
         rm_rf(Dir)
     end.
 
+%% A failed directory fsync comes after the rename, so the origin is already on
+%% disk: the start fails, and the retry reads that same origin back.
+load_or_create_after_failed_dir_sync_reads_it_back_test() ->
+    Dir = mktemp_dir("origin_lc8_"),
+    Path = filename:join(Dir, "origin"),
+    try
+        Failed = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            bondy_oplog_origin:load_or_create(Path)
+        end),
+        ?assertMatch({error, {dir_fsync_failed, _, eio}}, Failed),
+        {ok, Persisted} = file:read_file(Path),
+        ?assertEqual({ok, Persisted}, bondy_oplog_origin:load_or_create(Path))
+    after
+        rm_rf(Dir)
+    end.
+
+%% A persisted origin may be visible without being durable, so its directory
+%% is synced before the origin is returned.
+load_or_create_syncs_before_trusting_a_persisted_origin_test() ->
+    Dir = mktemp_dir("origin_lc9_"),
+    Path = filename:join(Dir, "origin"),
+    try
+        {ok, Origin} = bondy_oplog_origin:load_or_create(Path),
+        Calls = with_io_fault_lock(fun() ->
+            ?assertEqual({ok, Origin}, bondy_oplog_origin:load_or_create(Path)),
+            [F || {_, {bondy_mst_io, F, _}, _} <- meck:history(bondy_mst_io)]
+        end),
+        ?assertEqual([fsync_dir], Calls)
+    after
+        rm_rf(Dir)
+    end.
+
 load_or_create_survives_simulated_restart_test() ->
     %% This is the key behavioural invariant that motivated the change:
     %% if a caller wipes its in-memory state and re-runs `load_or_create`
@@ -196,3 +229,19 @@ mktemp_dir(Prefix) ->
 rm_rf(Dir) ->
     _ = os:cmd("rm -rf " ++ Dir),
     ok.
+
+%% The node-wide lock every suite that mocks `bondy_mst_io` takes.
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
+    ).

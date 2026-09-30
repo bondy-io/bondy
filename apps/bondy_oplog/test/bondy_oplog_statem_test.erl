@@ -2,12 +2,12 @@
 %%
 %% Models a pair of replicas A and B as a state machine:
 %%
-%%   - State tracks the expected counter value at each replica.
+%%   - State tracks the cells each replica's projection is expected to hold.
 %%   - Commands are append_a, append_b, sync_a_b, sync_b_a, compact_a,
 %%     compact_b, query_a, query_b.
 %%   - Postconditions verify that query commands return the model's
-%%     expected value — catches divergence the moment it appears,
-%%     not at the end of a long sequence.
+%%     expected cells — catches divergence the moment it appears,
+%%     not at the end of a long sequence. Compaction never changes them.
 %%
 %% On failure, PropEr shrinks the command list to a minimal trace.
 %% This is the diagnostic win over the stateless properties:
@@ -28,8 +28,8 @@
 -export([next_state/3]).
 
 %% Commands invoked symbolically by PropEr
--export([append_a/2]).
--export([append_b/2]).
+-export([append_a/3]).
+-export([append_b/3]).
 -export([sync_a_b/2]).
 -export([sync_b_a/2]).
 -export([compact_a/3]).
@@ -41,19 +41,17 @@
 %% MODEL STATE
 %% =============================================================================
 %%
-%% `events` :: #{event_id() => Inc :: integer()}.
+%% `events` :: #{event_id() => {Key, Side}}.
 %% `a_seen`, `b_seen` :: sets:set(event_id()).
 %%
-%% A's expected counter value = sum of Inc for ids in `a_seen`.
-%% Same for B.
-%%
-%% No HLC / event-key modeling — those are implementation details. The
-%% model only tracks "which appends each replica has observed".
+%% Each append writes cell `Key` with the event id as its HLC, so writes
+%% never tie and a replica's expected projection holds, per key, the write
+%% with the highest id among those it has observed (last writer wins).
 %% =============================================================================
 
 -record(model, {
     next_id = 1 :: pos_integer(),
-    events = #{} :: #{pos_integer() => integer()},
+    events = #{} :: #{pos_integer() => {pos_integer(), binary()}},
     a_seen = sets:new() :: sets:set(pos_integer()),
     b_seen = sets:new() :: sets:set(pos_integer()),
     a_compacted = false :: boolean(),
@@ -109,8 +107,8 @@ command(#model{a = A, b = B} = S) ->
 
 base_commands(S, A, B) ->
     Always = [
-        {call, ?MODULE, append_a, [A, integer(1, 100)]},
-        {call, ?MODULE, append_b, [B, integer(1, 100)]},
+        {call, ?MODULE, append_a, [A, integer(1, 5), S#model.next_id]},
+        {call, ?MODULE, append_b, [B, integer(1, 5), S#model.next_id]},
         {call, ?MODULE, sync_a_b, [A, B]},
         {call, ?MODULE, sync_b_a, [A, B]},
         {call, ?MODULE, query_a, [A]},
@@ -144,18 +142,16 @@ postcondition(#model{} = S, {call, _M, query_b, _}, ActualValue) ->
 postcondition(_S, _Call, _Result) ->
     true.
 
-next_state(#model{} = S, _Result, {call, _, append_a, [_A, V]}) ->
-    Id = S#model.next_id,
+next_state(#model{} = S, _Result, {call, _, append_a, [_A, Key, Id]}) ->
     S#model{
         next_id = Id + 1,
-        events = (S#model.events)#{Id => V},
+        events = (S#model.events)#{Id => {Key, ~"a"}},
         a_seen = sets:add_element(Id, S#model.a_seen)
     };
-next_state(#model{} = S, _Result, {call, _, append_b, [_B, V]}) ->
-    Id = S#model.next_id,
+next_state(#model{} = S, _Result, {call, _, append_b, [_B, Key, Id]}) ->
     S#model{
         next_id = Id + 1,
-        events = (S#model.events)#{Id => V},
+        events = (S#model.events)#{Id => {Key, ~"b"}},
         b_seen = sets:add_element(Id, S#model.b_seen)
     };
 next_state(#model{} = S, _Result, {call, _, sync_a_b, _}) ->
@@ -175,13 +171,16 @@ next_state(S, _Result, _Call) ->
 %% COMMANDS (executed against the live system)
 %% =============================================================================
 
-append_a(A, V) ->
-    _ = bondy_oplog:append(A, {inc, V}),
+append_a(A, Key, Hlc) ->
+    _ = bondy_oplog:append(A, cell_write_op(Key, Hlc, ~"a")),
     ok.
 
-append_b(B, V) ->
-    _ = bondy_oplog:append(B, {inc, V}),
+append_b(B, Key, Hlc) ->
+    _ = bondy_oplog:append(B, cell_write_op(Key, Hlc, ~"b")),
     ok.
+
+cell_write_op(Key, Hlc, Side) ->
+    {cell_apply, <<>>, integer_to_binary(Key), {set, Hlc, Side}}.
 
 sync_a_b(A, B) ->
     {ok, _} = bondy_oplog:sync(A, B),
@@ -225,26 +224,37 @@ compact_b(A, B, _S) ->
     end.
 
 query_a(A) ->
-    bondy_oplog:query(A, value).
+    bondy_oplog_test_projection:cells(A).
 
 query_b(B) ->
-    bondy_oplog:query(B, value).
+    bondy_oplog_test_projection:cells(B).
 
 %% =============================================================================
 %% MODEL HELPERS
 %% =============================================================================
 
 expected_value(#model{events = Events, a_seen = Seen}, a) ->
-    sum_seen(Events, Seen);
+    expected_cells(Events, Seen);
 expected_value(#model{events = Events, b_seen = Seen}, b) ->
-    sum_seen(Events, Seen).
+    expected_cells(Events, Seen).
 
-sum_seen(Events, Seen) ->
-    sets:fold(
-        fun(Id, Acc) -> Acc + maps:get(Id, Events) end,
-        0,
+%% The projection's rows, `{Key, Value, Hlc}` in key order.
+expected_cells(Events, Seen) ->
+    Winners = sets:fold(
+        fun(Id, Acc) ->
+            {Key, Side} = maps:get(Id, Events),
+            case Acc of
+                #{Key := {Prev, _}} when Prev > Id -> Acc;
+                _ -> Acc#{Key => {Id, Side}}
+            end
+        end,
+        #{},
         Seen
-    ).
+    ),
+    lists:sort([
+        {integer_to_binary(Key), Side, Id}
+     || Key := {Id, Side} <- Winners
+    ]).
 
 any_sync_recorded(#model{events = Events, a_seen = ASeen, b_seen = BSeen}) ->
     %% Heuristic: at least one event has been seen by both replicas.
@@ -298,8 +308,8 @@ cleanup_app(_) ->
 setup() ->
     A = mk_id("sa"),
     B = mk_id("sb"),
-    {ok, _} = bondy_oplog:start_instance(A, opts()),
-    {ok, _} = bondy_oplog:start_instance(B, opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, opts()),
     {A, B}.
 
 cleanup(A, B) ->
@@ -318,10 +328,7 @@ cleanup(A, B) ->
     ok.
 
 opts() ->
-    #{
-        crdt_module => bondy_oplog_test_counter,
-        origin => bondy_oplog_origin:new()
-    }.
+    #{origin => bondy_oplog_origin:new()}.
 
 mk_id(Prefix) ->
     list_to_binary(

@@ -1180,7 +1180,7 @@ wait_rib_cell(Node, Uri, Proc, Owner) ->
 
 %% @private
 do_has_rib_cell(Uri, Proc, Owner) ->
-    Table = bondy_namespace_catalog:table(bondy_registration_rib),
+    Table = bondy_namespace_catalog:table(bondy_rib_registrations),
     Key = term_to_binary({Uri, <<"exact">>, Proc, Owner}),
     case bondy_db:read(Table, Uri, Key) of
         {ok, _} -> true;

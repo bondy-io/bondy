@@ -21,13 +21,10 @@ the latest read-relevant state of every running instance:
 | Field          | Refreshed on |
 |---|---|
 | `instance_pid` | `init/terminate` of the instance gen_server |
-| `origin`       | `init` (immutable thereafter) |
+| `origin`       | `init` of the instance gen_server |
 | `mst`          | every state-mutating handle_call |
-| `watermark`    | compact / load_snapshot |
-| `snapshot`     | compact / load_snapshot |
-| `crdt_module`  | `init` (immutable thereafter) |
-| `fold_module`  | `init` (immutable thereafter) |
-| `fold_opts`    | `init` (immutable thereafter) |
+| `watermark`    | compact |
+| `snapshot`     | compact |
 | `live_size`    | every state-mutating handle_call |
 | `wal_pid`      | `bondy_oplog_wal:init/1` |
 | `applier_pid`  | `bondy_oplog_applier:init/1` |
@@ -69,16 +66,6 @@ table's lifecycle tied to a supervisor child.
     mst :: bondy_mst:t(),
     watermark :: undefined | bondy_oplog_event:event_key(),
     snapshot :: undefined | {bondy_oplog_event:event_key(), term()},
-    crdt_module :: module() | undefined,
-    %% Per-namespace fold strategy. `undefined` means no fold is
-    %% configured for the instance (legacy event-storage path).
-    %% Published once by the instance gen_server's `init/1` (and
-    %% kept fresh by `publish/1`, though in practice it is
-    %% immutable for the instance's lifetime).
-    fold_module :: module() | atom() | undefined,
-    %% Opaque fold-module-specific options. `#{}` when no fold is
-    %% configured.
-    fold_opts :: map(),
     live_size :: non_neg_integer(),
     %% Filled in by `bondy_oplog_wal:init/1` after the row exists.
     %% Stays `undefined` between an instance gen_server start and the
@@ -209,11 +196,6 @@ table's lifecycle tied to a supervisor child.
     %% ephemeral instances that have not opted in. Defaults to `false`
     %% for any row created by a caller that omits it.
     fused = false :: boolean(),
-    %% Retention-bounded MST history flag (`mst_retention` instance opt
-    %% present). Set at `init` (immutable thereafter), read by the sync
-    %% scheduler (join-time catalogue bootstrap seeding) and the sync
-    %% session (frontier-gap detection gates peer-frontier adoption).
-    mst_retention = false :: boolean(),
     %% Per-boot routing-directory readiness. `false` while the catalogue is
     %% still registering the tables this shard instance DECLARES; a peer
     %% snapshot SERVED before then silently omits the unregistered buckets
@@ -222,7 +204,8 @@ table's lifecycle tied to a supervisor child.
     %% installing half is `bondy_oplog_sync_session:adopt_frontier/3`, and
     %% neither subsumes the other (`MuxBucketSkip_Minus_ServeGate`,
     %% `_Minus_AdoptIfComplete`). Written by the applier at its `init/1` (from
-    %% `drain_gated`) and again when `open_drain_gate/1` releases the gate.
+    %% `drain_gated`), and set `true` by `bondy_oplog_instance:open_drain_gate/1`
+    %% and again by the applier when it handles that release.
     %% Defaults to `true`, so an instance that is never gated — single-table,
     %% memory topology, tests — behaves exactly as before. A gated instance
     %% reads `true` for the window between the instance publishing its row
@@ -258,9 +241,6 @@ table's lifecycle tied to a supervisor child.
     mst := bondy_mst:t(),
     watermark := undefined | bondy_oplog_event:event_key(),
     snapshot := undefined | {bondy_oplog_event:event_key(), term()},
-    crdt_module := module() | undefined,
-    fold_module := module() | atom() | undefined,
-    fold_opts := map(),
     live_size := non_neg_integer(),
     wal_pid => pid() | undefined,
     applier_pid => pid() | undefined,
@@ -269,7 +249,6 @@ table's lifecycle tied to a supervisor child.
     fast_path => undefined | fast_path(),
     ae_targets => [{atom(), atom(), non_neg_integer()}],
     fused => boolean(),
-    mst_retention => boolean(),
     db => atom() | undefined
 }.
 
@@ -292,9 +271,6 @@ table's lifecycle tied to a supervisor child.
 -export([origin/1]).
 -export([mst/1]).
 -export([watermark/1]).
--export([crdt_module/1]).
--export([fold_module/1]).
--export([fold_opts/1]).
 -export([live_size/1]).
 -export([wal_pid/1]).
 -export([wal_handle/1]).
@@ -307,7 +283,6 @@ table's lifecycle tied to a supervisor child.
 -export([pending/1]).
 -export([frontier_and_pending/1]).
 -export([fused/1]).
--export([mst_retention/1]).
 -export([tables_registered/1]).
 -export([db/1]).
 -export([install_in_flight/1]).
@@ -404,7 +379,7 @@ unregister(InstanceId) when is_binary(InstanceId) ->
 
 ?DOC("""
 Updates the mutable per-instance fields in place (`instance_pid`,
-`mst`, `watermark`, `snapshot`, `crdt_module`, `live_size`). Called
+`origin`, `mst`, `watermark`, `snapshot`, `live_size`). Called
 by the instance gen_server after every state-mutating handle_call.
 Leaves `wal_pid`, `applier_pid`, and `sup_pid` alone so a publish
 from the instance doesn't clobber a sibling's pid set independently
@@ -422,12 +397,10 @@ owned by other processes and updated via their dedicated setters.
 publish(#{instance_id := Id} = Entry) ->
     Updates = [
         {#entry.instance_pid, maps:get(instance_pid, Entry)},
+        {#entry.origin, maps:get(origin, Entry)},
         {#entry.mst, maps:get(mst, Entry)},
         {#entry.watermark, maps:get(watermark, Entry)},
         {#entry.snapshot, maps:get(snapshot, Entry)},
-        {#entry.crdt_module, maps:get(crdt_module, Entry)},
-        {#entry.fold_module, maps:get(fold_module, Entry, undefined)},
-        {#entry.fold_opts, maps:get(fold_opts, Entry, #{})},
         {#entry.live_size, maps:get(live_size, Entry)}
     ],
     case update_element_safe(Id, Updates) of
@@ -523,9 +496,9 @@ peer's reap-by-complement, where retiring it bans a running replica
 permanently and irreversibly. So this deliberately does not filter by
 liveness the way `list/0` does.
 
-`origin` is written when the row is created
-(`bondy_oplog_instance:init/1` -> `register/1`), so a registered instance
-always has one.
+`origin` is written by every `publish/1`, so a restarted instance replaces
+the origin of the incarnation before it
+(`bondy_oplog_instance_sup_origin_test`).
 """).
 -spec origins() -> [bondy_oplog_origin:t()].
 
@@ -560,21 +533,6 @@ mst(InstanceId) ->
 
 watermark(InstanceId) ->
     field(InstanceId, #entry.watermark).
-
--spec crdt_module(instance_id()) -> module() | undefined.
-
-crdt_module(InstanceId) ->
-    field(InstanceId, #entry.crdt_module).
-
--spec fold_module(instance_id()) -> module() | atom() | undefined.
-
-fold_module(InstanceId) ->
-    field(InstanceId, #entry.fold_module).
-
--spec fold_opts(instance_id()) -> map() | undefined.
-
-fold_opts(InstanceId) ->
-    field(InstanceId, #entry.fold_opts).
 
 -spec live_size(instance_id()) -> non_neg_integer() | undefined.
 
@@ -741,28 +699,13 @@ frontier_and_pending(InstanceId) when is_binary(InstanceId) ->
 ?DOC("""
 Returns the instance's ephemeral fused-writer flag. `true` only for
 ephemeral (ets projection) instances that opted into the fused
-single-process write path; `false` for every durable instance and
-for ephemeral instances that did not opt in. `undefined` when the row
-is absent (treated as `false` by readers).
+single-process write path; `false` for every other instance, and when
+the row is absent (a stopped or never-started instance).
 """).
--spec fused(instance_id()) -> boolean() | undefined.
+-spec fused(instance_id()) -> boolean().
 
 fused(InstanceId) ->
-    field(InstanceId, #entry.fused).
-
-?DOC("""
-Returns whether the instance is retention-bounded (`mst_retention`
-instance opt). `true` only for fused ephemeral catalogue instances whose
-MST history is truncated by local policy — the signal that peers of this
-instance ALSO truncate (uniform policy), so a sync session must not adopt
-a peer frontier it has not materially caught up to, and a fresh instance
-needs a join-time catalogue bootstrap (page-sync alone covers only the
-retention window).
-""").
--spec mst_retention(instance_id()) -> boolean() | undefined.
-
-mst_retention(InstanceId) ->
-    field(InstanceId, #entry.mst_retention).
+    field(InstanceId, #entry.fused) =:= true.
 
 ?DOC("""
 Whether every table this shard instance declares has registered its
@@ -961,7 +904,7 @@ The remaining callers, and the predicate each carries:
 A fourth caller used to merge `bondy_oplog_instance:frontier_from_mst/1` — the
 max `cell_apply` seq PRESENT IN THE LOG. The MST records receipt, not
 materialisation, so that over-claimed every cell received and skipped, and
-because `watermark_door/3` and `capped_truncation_point/2` judge "never
+because `watermark_door/2` and `capped_truncation_point/2` judge "never
 applied" against this same frontier, the over-claim also disarmed the repair.
 It is deleted; boot now re-folds instead (`replay_anchor/1`).
 """).
@@ -1311,8 +1254,9 @@ set_lifecycle(InstanceId, Handle) when is_binary(InstanceId) ->
 
 ?DOC("""
 Publishes the routing-directory readiness (see the `tables_registered` field
-note). Written by the applier: at `init/1` from its `drain_gated` opt, and
-again when `open_drain_gate/1` releases the gate.
+note). Written by the applier at `init/1` from its `drain_gated` opt, and set
+`true` by `bondy_oplog_instance:open_drain_gate/1` and again by the applier
+when it handles that release.
 """).
 -spec set_tables_registered(instance_id(), boolean()) -> ok.
 
@@ -1401,9 +1345,6 @@ to_record(#{instance_id := Id} = M) ->
         mst = maps:get(mst, M),
         watermark = maps:get(watermark, M),
         snapshot = maps:get(snapshot, M),
-        crdt_module = maps:get(crdt_module, M),
-        fold_module = maps:get(fold_module, M, undefined),
-        fold_opts = maps:get(fold_opts, M, #{}),
         live_size = maps:get(live_size, M),
         wal_pid = maps:get(wal_pid, M, undefined),
         applier_pid = maps:get(applier_pid, M, undefined),
@@ -1412,7 +1353,6 @@ to_record(#{instance_id := Id} = M) ->
         fast_path = maps:get(fast_path, M, undefined),
         ae_targets = maps:get(ae_targets, M, []),
         fused = maps:get(fused, M, false),
-        mst_retention = maps:get(mst_retention, M, false),
         tables_registered = maps:get(tables_registered, M, true),
         db = maps:get(db, M, undefined)
     }.
@@ -1425,9 +1365,6 @@ to_map(#entry{
     mst = M,
     watermark = W,
     snapshot = S,
-    crdt_module = C,
-    fold_module = FM,
-    fold_opts = FO,
     live_size = L,
     wal_pid = WalPid,
     applier_pid = ApplierPid,
@@ -1436,7 +1373,6 @@ to_map(#entry{
     fast_path = FastPath,
     ae_targets = AeTargets,
     fused = Fused,
-    mst_retention = MstRetention,
     db = Db
 }) ->
     #{
@@ -1446,9 +1382,6 @@ to_map(#entry{
         mst => M,
         watermark => W,
         snapshot => S,
-        crdt_module => C,
-        fold_module => FM,
-        fold_opts => FO,
         live_size => L,
         wal_pid => WalPid,
         applier_pid => ApplierPid,
@@ -1457,6 +1390,5 @@ to_map(#entry{
         fast_path => FastPath,
         ae_targets => AeTargets,
         fused => Fused,
-        mst_retention => MstRetention,
         db => Db
     }.

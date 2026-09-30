@@ -189,7 +189,7 @@ defaults are safe to run with unchanged.
 | `cluster.max_message_size` | Partisan inter-node frame size cap. |
 | `load_regulation.aae_reactor.pool.size` | Worker-pool size for anti-entropy merge reactions. |
 | `load_regulation.router.flow_pool.capacity` | Capacity of the per-flow relay ordering pool. |
-| `registry.rib.check_interval`, `registry.rib.damping` | Registry routing-summary consistency sweep and route-flap damping. |
+| `registry.rib.check_interval` | Registry routing-summary consistency sweep. |
 
 Everything in `bondy_bridge_relay.schema`, `bondy_broker_bridge.schema`
 and `oauth2.schema` — bridge relay, broker bridge, and OAuth2/OIDC

@@ -89,6 +89,9 @@ Writes (ban / unban) flow through the gen_server. Reads
     %% nothing, so the only thing left to do is let the next attempt retry
     %% it, and dropping the path would make a transient error permanent.
     path :: undefined | binary(),
+    %% Whether the set on disk has been loaded; a write replaces the whole
+    %% file, so it must start from what the file holds.
+    loaded = false :: boolean(),
     %% Alarm episode. `alarm_handler` does not dedupe, so set and clear must
     %% each happen once per episode or `get_alarms/0` fills with duplicates.
     alarmed = false :: boolean()
@@ -393,10 +396,7 @@ init([]) ->
     State =
         case load_retired(Path) of
             ok ->
-                ok = persistent_term:put(
-                    {?MODULE, persistent}, Path =/= undefined
-                ),
-                #state{path = Path};
+                loaded(#state{path = Path});
             {error, _Reason} ->
                 %% The set on disk could not be read, so this node holds
                 %% only part of it — or none. Reaping stays disabled until a
@@ -490,12 +490,41 @@ configured_path() ->
 %% So a failed write must leave NOTHING enforced, which it does here: the
 %% ETS insert is downstream of the persist
 %% (`bondy_oplog_origin_bans_test:a_failed_persist_enforces_nothing/0`).
-%% `persist/2` is tmp+datasync+rename+fsync_dir, so a failure also leaves
-%% the previous file intact — everything already durable stays durable,
-%% which is why a failure need not disable what was already reapable.
+%% A failed directory fsync after `persist/2`'s rename also leaves nothing
+%% enforced; `load_retired/1` syncs before it enforces what that write left.
 do_retire(_Pairs, #state{path = undefined} = State) ->
     {reply, {error, not_persistent}, State};
-do_retire(Pairs, #state{path = Path} = State) ->
+do_retire(Pairs, State0) ->
+    case ensure_loaded(State0) of
+        {ok, State} ->
+            do_retire_loaded(Pairs, State);
+        {error, Reason} ->
+            ok = persistent_term:put({?MODULE, persistent}, false),
+            {reply, {error, not_persistent}, raise_alarm(State0, Reason)}
+    end.
+
+%% @private
+%% A set that could not be decoded or read is replaced, which is what repairs
+%% it; one that is readable but could not be synced is still held on disk,
+%% and replacing it from what this server enforces would drop it.
+ensure_loaded(#state{loaded = true} = State) ->
+    {ok, State};
+ensure_loaded(#state{path = Path} = State) ->
+    case load_retired(Path) of
+        ok -> {ok, loaded(State)};
+        {error, {dir_fsync_failed, _, _}} = Error -> Error;
+        {error, _} -> {ok, State}
+    end.
+
+%% @private
+%% What holding the whole set on disk licenses, whenever it is first loaded.
+loaded(#state{path = Path} = State) ->
+    ok = persistent_term:put({?MODULE, persistent}, Path =/= undefined),
+    ok = publish_any_retired(),
+    clear_alarm(State#state{loaded = true}).
+
+%% @private
+do_retire_loaded(Pairs, #state{path = Path} = State) ->
     Retired = retired_set(),
     New = [{O, R} || {O, R} <- Pairs, not is_map_key(O, Retired)],
     case New of
@@ -529,7 +558,7 @@ do_retire(Pairs, #state{path = Path} = State) ->
                         origins => [O || {O, _} <- New],
                         retired_total => length(Wanted)
                     }),
-                    {reply, ok, clear_alarm(State)};
+                    {reply, ok, clear_alarm(State#state{loaded = true})};
                 {error, Reason} ->
                     %% Nothing was enforced, so there is no divergence to
                     %% recover from — only an operation that did not happen.
@@ -556,7 +585,7 @@ do_retire(Pairs, #state{path = Path} = State) ->
 load_retired(undefined) ->
     ok;
 load_retired(Path) ->
-    case prim_file:read_file(Path) of
+    case read_durable(Path) of
         {ok, Bin} ->
             case decode_retired(Bin, []) of
                 {ok, Origins} ->
@@ -596,6 +625,20 @@ load_retired(Path) ->
                 reason => Reason
             }),
             {error, Reason}
+    end.
+
+%% @private
+%% Enforcing a set before it is durable is `RetirementDurable = FALSE`.
+read_durable(Path) ->
+    case prim_file:read_file(Path) of
+        {ok, _} = Ok ->
+            Dir = filename:dirname(Path),
+            case bondy_mst_io:fsync_dir(Dir) of
+                ok -> Ok;
+                {error, Reason} -> {error, {dir_fsync_failed, Dir, Reason}}
+            end;
+        {error, _} = E ->
+            E
     end.
 
 %% @private
@@ -667,41 +710,15 @@ encode_retired(Origins) ->
     ]).
 
 %% @private
-%% tmp + datasync + rename + fsync_dir — the same durability sequence
-%% `bondy_oplog_origin:persist/2` uses for the origin file.
+%% The server owns the table every shard's `is_banned/1` reads, so a failed
+%% directory fsync is returned rather than crashing it.
 persist(Path, Origins) ->
-    Dir = filename:dirname(Path),
-    Tmp = <<Path/binary, ".tmp">>,
     case filelib:ensure_dir(Path) of
         ok ->
-            case write_and_sync(Tmp, encode_retired(Origins)) of
-                ok ->
-                    case bondy_mst_io:rename(Tmp, Path) of
-                        ok ->
-                            bondy_mst_io:fsync_dir(Dir);
-                        {error, _} = E ->
-                            _ = prim_file:delete(Tmp),
-                            E
-                    end;
-                {error, _} = E ->
-                    _ = prim_file:delete(Tmp),
-                    E
-            end;
-        {error, _} = E ->
-            E
-    end.
-
-%% @private
-write_and_sync(Tmp, Bin) ->
-    case prim_file:open(Tmp, [write, raw, binary]) of
-        {ok, Fd} ->
             try
-                case prim_file:write(Fd, Bin) of
-                    ok -> bondy_mst_io:datasync(Fd);
-                    {error, _} = E -> E
-                end
-            after
-                _ = prim_file:close(Fd)
+                bondy_mst_io:write_file_atomic(Path, encode_retired(Origins))
+            catch
+                error:{dir_fsync_failed, _, _} = Reason -> {error, Reason}
             end;
         {error, _} = E ->
             E

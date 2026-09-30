@@ -33,12 +33,15 @@ groups() ->
             registry_rib_dual_write,
             rib_completion_selects_local,
             rib_completion_no_local_fails_fast,
-            rib_self_heal_stale_cell,
+            rib_restate_stale_cell,
             rib_retry_local_win,
             rib_retry_next_node,
             rib_retry_exhausted,
             rib_retry_requires_marker,
-            rib_metrics_surface
+            rib_metrics_surface,
+            rib_restored_after_storage_owner_death,
+            rib_restored_after_instance_death,
+            rib_restored_after_catalogue_restart
         ]},
         {pubsub, [sequence], [
             sub_add_local_exact_1,
@@ -822,8 +825,8 @@ registry_rib_dual_write(Config) ->
         {RealmUri, ?EXACT_MATCH, SubUri, bondy_config:nodestring()}
     ),
 
-    %% Subscription is reachability-only: one counter, carried by
-    %% `bondy_oplog_crdt_owned_counter`, so the RAW projection is a plain
+    %% Subscription is reachability-only: one reading, carried by
+    %% `bondy_oplog_crdt_owned_reading`, so the RAW projection is a plain
     %% integer. `bondy_registry_rib:reshape_summary/2` derives the
     %% `#{count => N}` summary that consumers read.
     ?assert(
@@ -922,15 +925,11 @@ rib_completion_no_local_fails_fast(Config) ->
         error(no_response)
     end.
 
-%% A merged RIB cell naming THIS node is an echo of our own writes; when it
-%% does not match local truth — e.g. peers merging back a pre-restart cell —
-%% self_heal corrects `count` via a corrective delta (`LocalCount -
-%% ReplicatedCount`): a stale cell with no local members settles to
-%% count=0 (no explicit clear — see `bondy_registry_rib`'s moduledoc), a
-%% clobbered one is brought back down to the true local count. This closes
-%% the resurrection hole for a rebooted node whose peers still hold its old
-%% summaries.
-rib_self_heal_stale_cell(Config) ->
+%% A merged RIB cell naming THIS node is an echo of a reading it wrote,
+%% possibly before a restart, and the node answers it with its current
+%% reading: a stale cell with no local members settles to count=0, and a
+%% reading stamped earlier than the live one cannot override it.
+rib_restate_stale_cell(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
     Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     Table = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
@@ -938,13 +937,11 @@ rib_self_heal_stale_cell(Config) ->
         {RealmUri, ?EXACT_MATCH, Uri, bondy_config:nodestring()}
     ),
 
-    %% Plant a stale self cell via real per-field CRDT ops (the write shape
-    %% `bondy_registry_rib:apply_added/1` itself uses), as an AAE merge-back
-    %% would leave one, and simulate its merge event reaching the reactor.
-    %% There is no local registration for the URI, so self_heal's corrective
-    %% delta (0 - 1) must settle it to count=0.
+    %% Plant a stale self cell, as an AAE merge-back of a previous
+    %% incarnation's reading would leave one, and deliver its echo. There is
+    %% no local registration for the URI, so the restatement reads 0.
     ok = bondy_db:apply_batch(Table, RealmUri, Key, [
-        {apply, count, {inc, 1}},
+        {apply, count, {set, {1, 1}}},
         {apply, invoke, {set, ?INVOKE_SINGLE}},
         {apply, earliest, {set, 1}},
         {apply, latest, {set, 1}}
@@ -958,7 +955,6 @@ rib_self_heal_stale_cell(Config) ->
         "A stale self cell with no local members must settle to count=0"
     ),
 
-    %% With a live local registration the same echo re-asserts the truth.
     Ref = bondy_ref:new(internal),
     {ok, _} = bondy_dealer:register(
         Uri, #{invoke => ?INVOKE_SINGLE}, RealmUri, Ref
@@ -969,18 +965,18 @@ rib_self_heal_stale_cell(Config) ->
             (_) -> false
         end)
     ),
-    %% Clobber the replicated count to 7 with no matching local entries.
-    ok = bondy_db:apply_batch(Table, RealmUri, Key, [{apply, count, {inc, 6}}]),
+    ok = bondy_db:apply_batch(Table, RealmUri, Key, [
+        {apply, count, {set, {1, 7}}}
+    ]),
     ok = bondy_registry_rib:on_remote_set(registration, Key, #{}),
     ?assert(
         await_cell(Table, RealmUri, Key, fun
             ({ok, {#{count := 1}, _}}) -> true;
             (_) -> false
         end),
-        "A clobbered self cell must be re-asserted from local truth"
+        "An earlier-stamped reading must not override the live one"
     ),
 
-    %% Cleanup: leave the realm as we found it.
     Entries = bondy_registry:find_matches(registration, RealmUri, Uri),
     _ = [ok = bondy_registry:remove(E) || E <- Entries],
     ok.
@@ -1379,12 +1375,139 @@ kill_and_wait(Pid) ->
 %% Polls the RIB cell until `Pred(ReadResult)` or ~5s.
 %% Every RIB write this suite waits on is appended synchronously in the
 %% caller's process (`bondy_registry_partition:add/2` and `remove/2` run the
-%% `bondy_registry_rib` hooks inline; `self_heal/4` applies with a barrier),
+%% `bondy_registry_rib` hooks inline, and a restatement is written from the
+%% process that delivers the echo),
 %% only the projection apply is asynchronous. So the read-your-writes
 %% barrier `bondy_db:await/3` makes one read deterministic; a poll would
 %% only hide the applier's lag behind a budget, and reported nothing when
 %% the budget ran out. Returns `{false, Observed}` on a mismatch so the
 %% assertion shows what the cell held.
+%% The `registry` DB's ETS tables die with their storage owner. The cells this
+%% node wrote must come back from its members tables, with every registration
+%% field, and later writes must reach the reopened DB. Single node: no peer
+%% holds a copy to merge back, so a cell can only come from this node.
+rib_restored_after_storage_owner_death(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    T0 = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    ok = register_n(RealmUri, Uri, 2),
+    ?assertEqual(true, poll_summary(RealmUri, Uri, 2)),
+    #{table_state := #{owner := Owner}} = T0,
+    ok = kill_and_wait(Owner),
+    ?assertEqual(true, poll_summary(RealmUri, Uri, 2)),
+    ?assertNotEqual(
+        T0, bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB)
+    ),
+    ok = register_n(RealmUri, Uri, 1),
+    ?assertEqual(true, poll_summary(RealmUri, Uri, 3)),
+    ok = unregister_all(RealmUri, Uri).
+
+%% A registry shard's oplog instance dies while a RIB write for a new
+%% registration is in flight to it, so the write is lost with its in-memory
+%% WAL. The cell must still come to carry that registration.
+rib_restored_after_instance_death(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    ok = register_n(RealmUri, Uri, 1),
+    ?assertEqual(true, poll_summary(RealmUri, Uri, 1)),
+    T = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Key = rib_cell_key(RealmUri, Uri),
+    #{instance_ids := Ids} = T,
+    Id = maps:get(bondy_db:shard_for(T, RealmUri, Key), Ids),
+    Pid = bondy_oplog_registry:instance_pid(Id),
+    ok = sys:suspend(Pid),
+    _ = spawn(fun() -> register_n(RealmUri, Uri, 1) end),
+    ok = await_registrations(RealmUri, Uri, 2, 250),
+    ok = kill_and_wait(Pid),
+    ?assertEqual(true, poll_summary(RealmUri, Uri, 2)),
+    ok = unregister_all(RealmUri, Uri).
+
+%% The catalogue restarts, as it does when `main`'s leveled supervisor dies,
+%% and so closes and reopens the `registry` DB while the registry partitions
+%% keep their entries.
+rib_restored_after_catalogue_restart(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    ok = register_n(RealmUri, Uri, 2),
+    ?assertEqual(true, poll_summary(RealmUri, Uri, 2)),
+    Old = whereis(bondy_namespace_catalog),
+    ok = gen_server:stop(bondy_namespace_catalog),
+    ok = await_restarted(bondy_namespace_catalog, Old, 500),
+    ?assertEqual(true, poll_summary(RealmUri, Uri, 2)),
+    ok = unregister_all(RealmUri, Uri).
+
+register_n(_RealmUri, _Uri, 0) ->
+    ok;
+register_n(RealmUri, Uri, N) ->
+    %% A callee process per registration: a second REGISTER from the same
+    %% callee is not reliably a second entry.
+    Callee = spawn_link(fun() -> receive
+        after infinity -> ok
+        end end),
+    Ref = bondy_ref:new(internal, Callee),
+    Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
+    {ok, _} = bondy_dealer:register(Uri, Opts, RealmUri, Ref),
+    register_n(RealmUri, Uri, N - 1).
+
+unregister_all(RealmUri, Uri) ->
+    [
+        ok = bondy_registry:remove(E)
+     || E <- bondy_registry:find_matches(registration, RealmUri, Uri)
+    ],
+    ok.
+
+rib_cell_key(RealmUri, Uri) ->
+    term_to_binary({RealmUri, ?EXACT_MATCH, Uri, bondy_config:nodestring()}).
+
+%% Reads through the catalogue's current handle on every attempt, since a
+%% reopen replaces it; `true` once this node's cell carries `Count` with the
+%% registration's invoke policy and creation bounds.
+poll_summary(RealmUri, Uri, Count) ->
+    poll_summary(RealmUri, Uri, Count, 250, undefined).
+
+poll_summary(_RealmUri, _Uri, _Count, 0, Last) ->
+    {false, Last};
+poll_summary(RealmUri, Uri, Count, N, _Last) ->
+    Observed =
+        try
+            T = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+            bondy_db:read(T, RealmUri, rib_cell_key(RealmUri, Uri))
+        catch
+            Class:Reason -> {Class, Reason}
+        end,
+    case Observed of
+        {ok, {#{count := Count, invoke := ?INVOKE_ROUND_ROBIN} = V, _}} when
+            is_integer(map_get(earliest, V)),
+            map_get(earliest, V) =< map_get(latest, V)
+        ->
+            true;
+        _ ->
+            timer:sleep(20),
+            poll_summary(RealmUri, Uri, Count, N - 1, Observed)
+    end.
+
+await_registrations(_RealmUri, _Uri, _N, 0) ->
+    {error, timeout};
+await_registrations(RealmUri, Uri, N, Tries) ->
+    case bondy_registry:find_matches(registration, RealmUri, Uri) of
+        L when length(L) =:= N ->
+            ok;
+        _ ->
+            timer:sleep(20),
+            await_registrations(RealmUri, Uri, N, Tries - 1)
+    end.
+
+await_restarted(_Name, _Old, 0) ->
+    {error, not_restarted};
+await_restarted(Name, Old, N) ->
+    case whereis(Name) of
+        Pid when is_pid(Pid), Pid =/= Old ->
+            ok;
+        _ ->
+            timer:sleep(20),
+            await_restarted(Name, Old, N - 1)
+    end.
+
 await_cell(Table, RealmUri, Key, Pred) ->
     ok = bondy_db:await(Table, RealmUri, Key),
     Observed = bondy_db:read(Table, RealmUri, Key),

@@ -147,7 +147,7 @@ crdt_kernel_writes_projection() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?B, <<"alice">>, {set, 1, <<"v1">>}}
     ),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     {ok, Frame} = bondy_oplog_projection_ets:get(Proj, ?B, <<"alice">>),
     {Hlc, StateBytes, _ValueBytes} = bondy_oplog_cell_frame:decode_full(Frame),
     ?assertEqual({set, <<"v1">>, 1}, ?CRDT:decode_state(StateBytes)),
@@ -157,7 +157,7 @@ crdt_kernel_writes_projection() ->
 crdt_read_round_trips() ->
     {Id, NS, Cache, Proj} = setup_instance(),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"bob">>, {set, 42, <<"v">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual({<<"v">>, 42}, bondy_oplog_core:read(NS, primary, <<"bob">>)),
     teardown_instance(Id, NS, Cache, Proj).
 
@@ -169,7 +169,7 @@ later_hlc_wins() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?B, <<"k">>, {set, 2, <<"second">>}}
     ),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(
         {<<"second">>, 2}, bondy_oplog_core:read(NS, primary, <<"k">>)
     ),
@@ -186,7 +186,7 @@ earlier_hlc_is_absorbed() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?B, <<"k">>, {set, 3, <<"older">>}}
     ),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual({<<"newer">>, 5}, bondy_oplog_core:read(NS, primary, <<"k">>)),
     teardown_instance(Id, NS, Cache, Proj).
 
@@ -195,7 +195,7 @@ clear_then_resurrect() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k">>, {set, 1, <<"v1">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k">>, {clear, 2}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k">>, {set, 3, <<"v2">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual({<<"v2">>, 3}, bondy_oplog_core:read(NS, primary, <<"k">>)),
     teardown_instance(Id, NS, Cache, Proj).
 
@@ -242,7 +242,6 @@ setup_instance() ->
     NS = ns_of(Id),
     {Cache, Proj} = register_shard(NS, primary, 0),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }
@@ -255,9 +254,6 @@ teardown_instance(Id, NS, Cache, Proj) ->
     ok = bondy_oplog_projection_ets:close(Proj),
     ok = bondy_oplog_cache_ets:close(Cache),
     ok.
-
-barrier(Id) ->
-    bondy_oplog:projection(Id).
 
 %% --- overlay fixture (deterministic, no live instance) ---------------------
 

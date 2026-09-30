@@ -39,7 +39,7 @@ e2e_test_() ->
 %% Local append → WAL → applier → MST → readable.
 append_visible_via_get() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     K = bondy_oplog:append(Id, {hello, world}),
     {ok, Event} = bondy_oplog:get(Id, K),
     ?assertEqual(K, bondy_oplog_event:key(Event)),
@@ -50,7 +50,7 @@ append_visible_via_get() ->
 %% receives is observable via get.
 append_many_atomic_visible() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Items = [{op_a, undefined}, {op_b, undefined}, {op_c, undefined}],
     Keys = bondy_oplog:append_many(Id, Items),
     [?assertMatch({ok, _}, bondy_oplog:get(Id, K)) || K <- Keys],
@@ -63,7 +63,7 @@ append_many_atomic_visible() ->
 %% the kill remain observable.
 applier_crash_recovers() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Keys = [bondy_oplog:append(Id, {n, N}) || N <- lists:seq(1, 10)],
     ApplierPid = bondy_oplog_registry:applier_pid(Id),
     ?assert(is_pid(ApplierPid)),
@@ -87,7 +87,7 @@ applier_crash_recovers() ->
 %% the applier must replay from the consumer offset to repopulate it).
 wal_crash_restarts_subtree() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Keys = [bondy_oplog:append(Id, {n, N}) || N <- lists:seq(1, 10)],
     WalPid = bondy_oplog_registry:wal_pid(Id),
     ?assert(is_pid(WalPid)),

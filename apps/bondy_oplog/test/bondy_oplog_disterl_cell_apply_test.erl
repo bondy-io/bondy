@@ -20,7 +20,7 @@
 %% helpers via `erpc:call/4`.
 -export([peer_register_shard/3, peer_register_shard/4]).
 -export([peer_unregister_shard/3]).
--export([peer_open_instance/3, peer_open_instance/4]).
+-export([peer_open_instance/3]).
 -export([peer_append_cell/4]).
 -export([peer_do_replay/1]).
 -export([peer_read/3]).
@@ -312,12 +312,8 @@ close_shard(Cache, Proj) ->
     ok.
 
 open_instance(InstanceId, NS, Origin) ->
-    open_instance(InstanceId, NS, Origin, lww_register).
-
-open_instance(InstanceId, NS, Origin, FoldModule) ->
     bondy_oplog:start_instance(InstanceId, #{
         origin => Origin,
-        fold_module => FoldModule,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }
@@ -328,7 +324,7 @@ append_cell(InstanceId, Key, Hlc, Value) ->
         InstanceId,
         {cell_apply, ?B, Key, {set, Hlc, Value}}
     ),
-    _ = bondy_oplog:projection(InstanceId),
+    ok = bondy_oplog_test_projection:drain(InstanceId),
     ok.
 
 sync_opts() ->
@@ -552,12 +548,8 @@ owner_name(NS, Index, Shard) ->
     ).
 
 peer_open_instance(InstId, NS, Origin) ->
-    peer_open_instance(InstId, NS, Origin, lww_register).
-
-peer_open_instance(InstId, NS, Origin, FoldModule) ->
     {ok, _} = bondy_oplog:start_instance(InstId, #{
         origin => Origin,
-        fold_module => FoldModule,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }
@@ -569,7 +561,7 @@ peer_append_cell(InstId, Key, Hlc, Value) ->
         InstId,
         {cell_apply, <<>>, Key, {set, Hlc, Value}}
     ),
-    _ = bondy_oplog:projection(InstId),
+    ok = bondy_oplog_test_projection:drain(InstId),
     ok.
 
 peer_read(NS, Index, Key) ->

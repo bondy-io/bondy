@@ -19,8 +19,8 @@ fires it on a timer; the physical deletion is a TWO-step handoff —
 `bondy_mst:truncate/2` unlinks the stable prefix (rewriting only the
 O(log N) left spine) and `bondy_mst:gc/1` then sweeps the unlinked
 subtrees' pages out of the store (`truncate_below_or_equal/3`; ETS
-backend); `bondy_oplog_sync_session` (`bootstrap/3` /
-`bootstrap_catalogue/3`) carries the snapshot to new replicas.
+backend); `bondy_oplog_sync_session` (`bootstrap_catalogue/3`) carries
+the projection to new replicas.
 
 ## The intuition: the MST is not a log, it's a *window*
 
@@ -195,15 +195,16 @@ Key properties:
 - **Peer-confirmed first.** A confirmed frontier is strictly better —
   every peer already holds that prefix, so truncating it costs nobody a
   bootstrap. Retention fires only when the confirmed path yields
-  nothing (`retention_or_catchup/5` → `retention_frontier/3` in
+  nothing (`retention_or_catchup/4` → `retention_frontier/3` in
   `bondy_oplog_instance.erl`).
 - **Sound because ephemeral + projection-backed.** A restart wipes the
   instance anyway (no durability to protect) and the projection
   materializes all applied state, so truncation loses nothing locally.
-  Enforced twice: `mst_retention` requires `fused`
-  (`validate_retention/2`; `fused ⇒ ephemeral` per
-  `bondy_db:assert_fused_requires_ephemeral/2`) and never fires without
-  a projection (`retention_ctx/2`). Durable instances are untouched.
+  `mst_retention` requires `fused` (`validate_retention/2`;
+  `fused ⇒ ephemeral` per `bondy_db:assert_fused_requires_ephemeral/2`),
+  and an instance without a projection target is refused at start
+  (`bondy_oplog_instance_dyn_sup:start_instance/2`). Durable instances
+  are untouched.
 - **Uniform policy, not per-node heroics.** Every node bounds these
   instances by the same policy, so no peer's frontier computation is
   held hostage by another node's retained history. Solo nodes need no
@@ -284,7 +285,6 @@ sequenceDiagram
     participant Worker as per-instance worker
     participant Comp as oplog_compaction
     participant Inst as oplog_instance (gen_server)
-    participant Crdt as CRDT module
     participant CK as compaction_checkpoint
 
     Sched->>Worker: spawn (so the scheduler never blocks)
@@ -292,13 +292,8 @@ sequenceDiagram
     Comp->>Inst: compact(InstanceId, PeerWitnesses)  [gen_server:call]
     Note over Inst: runs SYNCHRONOUSLY inside the gen_server
     Inst->>Inst: compute_frontier_for(MST, PeerWitnesses)
-    alt catalogue (projection-backed) instance
-        Note over Inst: fast path — no re-fold.<br/>The projection IS the per-cell<br/>interpret_cog checkpoint,<br/>maintained eagerly on write.
-    else bare single-CRDT instance
-        Inst->>Crdt: interpret_cog(Events, BaseCheckpoint)
-        Crdt-->>Inst: NewCheckpoint
-        Inst->>CK: put_checkpoint(frontier, NewCheckpoint)
-    end
+    Note over Inst: no re-fold — the projection,<br/>maintained eagerly on write,<br/>is the materialised state
+    Inst->>CK: put_checkpoint(frontier, applied-frontier VV)
     Inst->>Inst: truncate MST + watermark advance + HLC bump
     Inst-->>Comp: {ok, {compacted, Frontier, N}}
     Comp-->>Worker: result
@@ -307,7 +302,7 @@ sequenceDiagram
 Three design choices worth noting:
 
 - **Compaction runs synchronously inside the instance gen_server.**
-  Frontier computation, `interpret_cog`, checkpoint persistence, and the
+  Frontier computation, checkpoint persistence, and the
   truncate/watermark/HLC commit all run in the gen_server's `compact`
   handler. The only off-process actor is the gc_scheduler's per-instance
   worker, which merely issues the call — so the *scheduler* never blocks.
@@ -463,15 +458,11 @@ records a classified report retrievable in-node via
 
 ## The compaction checkpoint
 
-For a **bare single-CRDT instance**, the checkpoint is the output of
-`CrdtMod:interpret_cog(Events, BaseState)` folded over every event in
-the stable prefix since the last compaction. For a **catalogue
-(projection-backed) instance** no separate fold is needed — the
-projection, maintained eagerly on write through the cell kernel, *is*
-the per-cell `interpret_cog` checkpoint; compaction only truncates
-the MST.
-
-The substrate stores the single-CRDT checkpoint via the
+Compaction folds nothing. The projection, maintained eagerly on write
+through the cell kernel, is the materialised state, so compaction only
+truncates the MST and records the new watermark, together with the
+applied-frontier vector (`{projection_managed, frontier, FrontierVV}`),
+in the compaction checkpoint. The substrate stores it via the
 `bondy_oplog_compaction_checkpoint` behaviour (named to disambiguate
 it from the *catalogue snapshot* used by bootstrap, below):
 
@@ -668,7 +659,7 @@ shared insert path, and only a local event folds before it installs. A
 peer-received event installs first and is folded afterwards by a
 best-effort cast, which a crash or a shutdown can lose. Counting such an
 event as applied claims data the projection does not hold, and it also
-disarms the repair — `watermark_door/3` and `capped_truncation_point/2`
+disarms the repair — `watermark_door/2` and `capped_truncation_point/2`
 judge "never applied" against this same frontier, so the over-claim lets
 the never-applied event be truncated. Releases up to `1.0.0-rc.lime`
 took the shortcut and lost user records across a rolling restart.
@@ -714,52 +705,10 @@ raises `bondy_oplog_frontier_receipt_derived`.
 The complement to truncation is **snapshot transfer**. A replica
 joining a cluster — or recovering from a long outage — has a stale
 or empty MST. Plain anti-entropy would have to ship the entire
-history; instead, the replica bootstraps from a peer:
+history; instead, the replica bootstraps from a peer.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant New as new replica
-    participant Peer as established peer
-    participant Local as local instance
-
-    New->>Peer: get_snapshot
-    alt peer has snapshot
-        Peer-->>New: {Watermark, Snapshot}
-        New->>Local: load_snapshot(Watermark, Snapshot)
-        Local->>Local: persist snapshot · truncate live MST below Watermark · advance HLC
-    else peer has no snapshot
-        Peer-->>New: no_snapshot
-        Note over New,Peer: Cluster is small / fresh.<br/>Fall through to plain AE.
-    end
-    New->>Peer: get_root + pull_until_complete
-    Peer-->>New: MST pages for live tail
-```
-
-The entrypoint is `bondy_oplog_sync_session:bootstrap/3`. After the
-snapshot is installed, normal AE picks up at the watermark and
-catches the live tail (typically a few seconds of events) — not the
-whole history.
-
-`bondy_oplog_instance:load_snapshot/3` enforces watermark monotonicity:
-
-- If the local watermark is `undefined`, install the snapshot.
-- If the peer's watermark is strictly greater, install and advance.
-- Otherwise refuse with `{error, watermark_not_advancing}` and fall
-  through to plain AE.
-
-> **Terminology.** The sequence above is the **single-CRDT** (bare
-> instance) bootstrap: what travels is the instance's *compaction
-> checkpoint* (the wire request is still named `get_snapshot`).
-> Catalogue instances — the `bondy_db` common case, where state is a
-> per-cell projection rather than one CRDT state — use the
-> **catalogue snapshot** protocol below. Same lifecycle gate, a
-> different payload.
-
-### Catalogue-mode bootstrap (multi-cell snapshot)
-
-A catalogue's state is millions of cells, not one term, so the
-transfer is a **cursor-paginated cell stream**
+The state is millions of cells, not one term, so the transfer is a
+**cursor-paginated cell stream**
 (`bondy_oplog_sync_session:bootstrap_catalogue/3`):
 
 ```mermaid
@@ -796,9 +745,9 @@ sequenceDiagram
 `install_catalogue_batch` writes cells in **replace** mode: each cell is
 written as-is, using the projection adapter's `head/3` fast path when
 exported. Bootstrap always streams into a fresh replica, so there is no
-surviving local state to merge against. The finalize step performs the
-same monotonic watermark advance and `mark_live/1` ordering as the
-single-CRDT path.
+surviving local state to merge against. The finalize step advances the
+watermark and calls `mark_live/1` last (see [Bootstrap completion
+ordering](#bootstrap-completion-ordering)).
 
 **A cell too large to frame arrives in parts.** A value whose serialized
 size alone exceeds the sync byte ceiling cannot be shipped whole, so the
@@ -872,7 +821,7 @@ instance:
 ```mermaid
 stateDiagram-v2
     [*] --> pre_bootstrap
-    pre_bootstrap --> live : bootstrap/3 success
+    pre_bootstrap --> live : catalogue bootstrap completes
     pre_bootstrap --> live : seed: true on first open
 ```
 
@@ -890,19 +839,22 @@ applier's hot-loop check syscall-free.
 
 ### Bootstrap completion ordering
 
-`bondy_oplog_sync_session:bootstrap/3` performs three durable effects.
-Order matters:
+`bondy_oplog_sync_session:bootstrap_catalogue/3` completes in this
+order (`bondy_oplog_instance:finalize_catalogue_bootstrap/5`):
 
-1. `load_snapshot` installs the snapshot and advances the watermark
-   to `H_boot` (idempotent under crash-replay).
-2. `mark_live/1` writes the durable flag file — **the marker that
-   "everything before me succeeded."**
-3. Plain AE picks up events past the new watermark.
+1. The streamed cells are installed into the projection.
+2. The watermark advances, the peer's applied frontier is max-merged
+   (when adopted), and `persist_frontier` makes it durable in the
+   compaction checkpoint while absorbing the highest installed HLC
+   into the clock.
+3. `mark_live/1` writes the durable flag file — **the marker that
+   "everything before me succeeded."** A replica that was already
+   `live` skips it.
+4. Plain AE picks up events past the new watermark.
 
-`mark_live/1` MUST run last. A crash between (1) and (2) leaves no
-flag file; on restart the lifecycle goes back to `pre_bootstrap` and
-the operator re-runs `bootstrap/3`, which idempotently re-installs
-the snapshot.
+`mark_live/1` MUST run after every other durable step. A crash before
+it leaves no flag file, so on restart the instance is `pre_bootstrap`
+again and the scheduler bootstraps it anew.
 
 ### Genesis: `seed: true`
 
@@ -938,11 +890,9 @@ atomic mirror), `bondy_oplog_instance.erl` (`mark_live/1`,
 
 The lifecycle gate above guarantees correctness — the applier does
 not drain until the snapshot is in place. But the gate alone is
-inert: someone has to call `bondy_oplog_sync_session:bootstrap/3`
-to flip a fresh persistent replica from `pre_bootstrap` to `live`.
-Before this layer, that someone was application code; consumers
-who forgot to call `bootstrap/3` ended up with replicas that
-silently never drained.
+inert: someone has to run a bootstrap session to flip a fresh
+persistent replica from `pre_bootstrap` to `live`, or it never
+drains.
 
 `bondy_oplog_sync_scheduler` closes the loop. The default tick
 inspects each running instance's lifecycle and routes
@@ -968,8 +918,7 @@ flowchart TD
 ```
 
 A `pre_bootstrap` instance is dispatched to **exactly one** peer
-per tick. Bootstrap ships a full projection (catalogue mode) or a
-full MST snapshot (single-CRDT mode), so multi-peer dispatch would
+per tick. Bootstrap ships a full projection, so multi-peer dispatch would
 duplicate I/O without improving correctness. A `live` instance
 fans out one pull-direction sync session per peer — but that fan-out
 is no longer unconditional: it is bounded by the node-wide AAE
@@ -1036,7 +985,7 @@ retry pressure without sampling logs:
 
 | Event | When | Meta |
 |---|---|---|
-| `[bondy_oplog, sync_scheduler, dispatch_bootstrap]` | A session was spawned. | `instance_id`, `peer`, `mode` (`catalogue \| single_crdt`), `strategy` |
+| `[bondy_oplog, sync_scheduler, dispatch_bootstrap]` | A session was spawned. | `instance_id`, `peer`, `strategy` |
 | `[bondy_oplog, sync_scheduler, bootstrap, started]` | Session pid was added to the in-flight set. | `instance_id`, `pid` |
 | `[bondy_oplog, sync_scheduler, bootstrap, ended]` | Session pid exited (any reason). | `instance_id`, `pid`, `reason` |
 | `[bondy_oplog, sync_scheduler, bootstrap_capped]` | Dispatch skipped because in-flight cap was hit. | `instance_id` |
@@ -1199,7 +1148,7 @@ MST2 = watermark_door(HasProjection, State, MST1),
 ```
 
 The peer's pages are merged in, then the **watermark door**
-(`watermark_door/3`) re-truncates against the local watermark,
+(`watermark_door/2`) re-truncates against the local watermark,
 dropping keys X has already compacted away — but it NEVER drops a
 never-applied event. The naive re-truncate's premise ("≤ watermark ⇒
 already folded here") is false for a peer event this replica never
@@ -1281,12 +1230,11 @@ snapshot.
 | Replica truncates a prefix the application still cares about. | `interpret_cog` must consume the prefix into the snapshot first. The compaction cycle is `frontier → events → interpret_cog → snapshot → truncate` — the snapshot is durable *before* the MST mutation. |
 | Two compactions race. | One-at-a-time guard in `bondy_oplog_instance`: a second `compact` request while one is in flight replies `{ok, no_change}`. |
 | A replica's OWN root loses pages (observed live: 2 pages absent from an ephemeral store, Fly s16). | Two-sided recovery. Peer side: the responder's `root_unservable` answer is benign per round, but the session enriches it to `root_unservable_behind` when the peer's applied frontier is strictly ahead; three consecutive strikes escalate to a catalogue re-bootstrap (the snapshot producer reads the peer's PROJECTION, servable even when its MST is not). Broken-node side: once the unservable streak passes the threshold AND every recency-live peer's recorded frontier dominates the local one, the compaction tick REBUILDS the MST (drops the tree, advances the watermark, keeps projection + frontier) — `mst_rebuilt` telemetry. Without both halves the pair deadlocks: every round errors, no round completes, the frontier-gap verdict never fires, and nothing on the shard can ever compact. |
-| Peer ships events the local replica has already truncated. | The watermark door (`watermark_door/3` on page sync; `append_remote_below_watermark/3` on the live single-event path) drops re-shipped `key ≤ watermark` events **only when the applied VV proves they were folded here**; a never-applied event at or below the watermark (in-flight write racing the frontier) is folded inline (fused) or held for the applier's replay — dropping it unapplied was the silent per-replica data-loss class found by the compaction cluster suite's forensics. |
+| Peer ships events the local replica has already truncated. | The watermark door (`watermark_door/2` on page sync; `append_remote_below_watermark/3` on the live single-event path) drops re-shipped `key ≤ watermark` events **only when the applied VV proves they were folded here**; a never-applied event at or below the watermark (in-flight write racing the frontier) is folded inline (fused) or held for the applier's replay — dropping it unapplied was the silent per-replica data-loss class found by the compaction cluster suite's forensics. |
 | A dangling root (transient truncate + page-GC race) is advertised over AAE and read as "peer's tree is empty", so the initiator runs a zero-pull "complete" round a few fresh events behind the peer's honest frontier — a false standing-gap verdict per round. | The responder's `get_root` distinguishes the two `undefined`s: the aae-root guard's refusal answers `{error, {root_unservable, _}}` (session fails benignly, retries next tick) while only a genuinely empty tree (`root_hash/1 = undefined`) answers `undefined` — the joiner / fully-compacted-shard path keeps its semantics. `chase_refreshed_root` propagates a failed root re-request instead of reading it as "root unmoved". |
 | The local page GC sweeps pages a sync session pulled but has not yet merged (they are unreachable from the LOCAL root until `integrate_peer_root/2`), and `bondy_mst:merge/3` silently treats the missing subtrees as empty — a completed, `confirm_root`-checkpointed round that silently lost events. | Sessions pin the root they pull (`bondy_oplog_instance:pin_peer_root/2`; consumed by a successful integrate, TTL-expired otherwise) and `truncate_below_or_equal/4` passes the pins to `bondy_mst:gc/2` as KeepRoots; independently, `integrate_peer_root/2` re-checks `missing_set` **atomically with the merge** (same process as the GC) and answers a retryable `{error, {peer_pages_missing, _}}` instead of merging partially. |
-| Bootstrap snapshot is older than local. | `load_snapshot/3` refuses with `watermark_not_advancing` and falls through to plain AE. |
 | `interpret_cog/2` is non-deterministic. | Convergence breaks silently. The behaviour documentation flags this as the invariant; PropEr suites for each CRDT verify it (`bondy_mst_crdt_SUITE.erl`). |
-| Fresh persistent replica never flips to `live` because nobody calls `bootstrap/3`. | The default scheduler dispatch is lifecycle-aware: `pre_bootstrap` instances are auto-bootstrapped from the first available peer on the next tick. |
+| Fresh persistent replica never flips to `live` because nobody runs a bootstrap. | The default scheduler dispatch is lifecycle-aware: `pre_bootstrap` instances are auto-bootstrapped from the first available peer on the next tick. |
 | Cluster cold-start fires N parallel snapshot transfers and saturates the peer pool. | `max_inflight_bootstraps` cap (default `4`) gates concurrent sessions. Over-cap dispatches are deferred to the next tick as in-flight sessions drain. |
 | A replica with an unreachable peer-pool retries every 500 ms forever. | Per-instance exponential backoff (`500 ms → 30 s` ceiling, optional ±50 % jitter) drops the steady-state retry rate to ~1/30 Hz after a few failures. |
 | Multiple replicas hammer the same first peer. | `bootstrap_peer_strategy` (`first` \| `random` \| `round_robin`) — switch to `round_robin` or `random` to spread load. |
@@ -1303,7 +1251,7 @@ because everything else relies on it. The relevant suites:
 - `test/bondy_oplog_compaction_fused_test.erl` — [retention-bounded
   truncation](#retention-bounded-truncation-for-ephemeral-catalogue-instances):
   size- and age-breach truncation, no-policy defers forever, retention
-  requires `fused`, never fires without a projection, the
+  requires `fused`, the
   truncate-vs-drain race loses no data, idempotence, the peer-confirmed
   and mux paths unchanged, the fused-to-fused catalogue-bootstrap
   roundtrip, the frontier-gap detect → non-adopt → bootstrap-remedy
@@ -1393,21 +1341,19 @@ Implementation:
 - `bondy_oplog_instance.erl`:
     - `compute_frontier_for/2` — frontier as longest common prefix
       confirmed by each peer's recorded root or applied frontier.
-    - `retention_or_catchup/5` + `retention_frontier/3` +
-      `retention_ctx/2` + `validate_retention/2` — [retention-bounded
+    - `retention_or_catchup/4` + `retention_frontier/3` +
+      `retention_ctx/1` + `validate_retention/2` — [retention-bounded
       truncation](#retention-bounded-truncation-for-ephemeral-catalogue-instances)
       for `mst_retention` instances.
     - `membership_class/1` — classifies `reclamation_members/0` into
       `solo | {clustered, Members} | error` for causal-stability
       reclamation's solo shortcut.
-    - `do_compact_sync/2` + `run_compaction/10` — the cycle, run
+    - `do_compact_sync/2` + `run_compaction/5` — the cycle, run
       synchronously in the instance gen_server.
     - `commit_compaction/3` — atomic truncate + watermark + HLC bump.
     - `truncate_below_or_equal/3` — drops keys ≤ watermark, then
       (ETS backend) sweeps the dropped subtrees' pages via
       `bondy_mst:gc/1` — truncate only unlinks them.
-    - `do_load_snapshot/3` + `apply_loaded_snapshot/3` — bootstrap
-      install with monotonicity guard.
     - `do_handle_call({integrate_peer_root, _}, _, _)` — merge +
       re-truncate on AE integration.
     - `below_or_equal_watermark/2` — append-side filter.
@@ -1417,12 +1363,8 @@ Implementation:
 - `bondy_oplog_compaction_checkpoint.erl` + `_ets.erl` + `_file.erl` —
   one-checkpoint-per-instance behaviour and implementations
   (context-sensitive default: file when `storage_path` is set).
-- `bondy_oplog_sync_session.erl:bootstrap/3` — fetch peer snapshot
-  then pull live tail; falls back to plain AE on `no_snapshot`.
-  Calls `mark_live/1` *after* the snapshot install succeeds — the
-  durable barrier that flips the lifecycle.
 - `bondy_oplog_sync_session.erl:bootstrap_catalogue/3` — the
-  catalogue (multi-cell) bootstrap: cursor-paginated cell stream
+  bootstrap: cursor-paginated cell stream
   (`get_catalogue_snapshot_init` / `..._next`),
   `install_catalogue_batch` (replace mode), finalize +
   `mark_live/1` last.
@@ -1452,9 +1394,8 @@ Implementation:
     - `info/0` — current configuration including
       `current_inflight_bootstraps`.
 - `bondy_oplog_sync_session.erl`:
-    - `start_bootstrap/3` — async single-CRDT bootstrap spawner.
-    - `start_bootstrap_catalogue/3` — async catalogue bootstrap
-      spawner. Both return `{ok, Pid}`; the scheduler monitors
+    - `start_bootstrap_catalogue/3` — async bootstrap spawner.
+      Returns `{ok, Pid}`; the scheduler monitors
       the pid and translates its exit reason into the backoff
       decision.
 - `bondy_oplog_crdt.erl` — `interpret_cog/2` callback.

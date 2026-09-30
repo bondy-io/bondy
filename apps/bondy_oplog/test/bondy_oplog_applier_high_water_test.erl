@@ -56,7 +56,7 @@ one_cell_apply_advances_watermark() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?B, <<"alice">>, {set, 42, <<"v1">>}}
     ),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(
         {ok, 42},
         bondy_oplog_core_registry:high_water_hlc(NS, primary, 0)
@@ -68,7 +68,7 @@ monotonic_cells_advance_each_time() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k1">>, {set, 1, <<"a">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k2">>, {set, 5, <<"b">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k3">>, {set, 17, <<"c">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(
         {ok, 17},
         bondy_oplog_core_registry:high_water_hlc(NS, primary, 0)
@@ -80,11 +80,11 @@ older_cell_does_not_regress_watermark() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?B, <<"k1">>, {set, 100, <<"new">>}}
     ),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     %% Older HLC on a different key: the new cell's frame HLC is 3, but
     %% the high-water atomic should NOT regress.
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k2">>, {set, 3, <<"old">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(
         {ok, 100},
         bondy_oplog_core_registry:high_water_hlc(NS, primary, 0)
@@ -97,7 +97,7 @@ watermark_is_per_shard() ->
     {Id, NS, _Cache0, _Proj0} = setup_instance(),
     {_Cache1, _Proj1} = register_shard(NS, primary, 1),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k">>, {set, 77, <<"v">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(
         {ok, 77}, bondy_oplog_core_registry:high_water_hlc(NS, primary, 0)
     ),
@@ -123,7 +123,6 @@ setup_instance() ->
     NS = ns_of(Id),
     {Cache, Proj} = register_shard(NS, primary, 0),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }
@@ -162,6 +161,3 @@ mk_id() ->
 
 ns_of(Id) when is_binary(Id) ->
     binary_to_atom(<<"ns_", Id/binary>>, utf8).
-
-barrier(Id) ->
-    bondy_oplog:projection(Id).

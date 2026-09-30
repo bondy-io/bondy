@@ -33,7 +33,9 @@ mv_register_e2e_test_() ->
             {"concurrent replicas converge to siblings",
                 {timeout, 30, fun concurrent_replicas_converge/0}},
             {"value survives compaction checkpoint",
-                {timeout, 30, fun survives_compaction/0}}
+                {timeout, 30, fun survives_compaction/0}},
+            {"write to a stopped instance is refused",
+                fun stopped_instance_refuses_write/0}
         ]
     end}.
 
@@ -143,6 +145,20 @@ survives_compaction() ->
     ?assertEqual([<<"v2">>], V),
     bondy_oplog_peer_state:forget_peer({peer, mvreg_dummy}),
     ok = bondy_db:close(Db).
+
+%% Stopping an instance drops its registry row, so the context read finds
+%% neither an applier nor a fused flag.
+stopped_instance_refuses_write() ->
+    {Db, _O} = open_db(mvreg_stopped),
+    {ok, T} = bondy_db:open_table(Db, items, #{}),
+    I = instance_of(T),
+    ok = bondy_oplog:stop_instance(I),
+    ?assertEqual(
+        {error, {instance_unavailable, I}},
+        bondy_db:apply(T, <<"r">>, <<"k">>, {set, <<"v">>})
+    ),
+    _ = bondy_db:close(Db),
+    ok.
 
 %% =============================================================================
 %% Helpers

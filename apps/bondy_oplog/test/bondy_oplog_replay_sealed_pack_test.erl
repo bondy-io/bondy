@@ -58,7 +58,6 @@ run_ephemeral_cell_directory() ->
     {C, P} = register_shard(NS),
     {ok, _} = bondy_oplog:start_instance(InstId, #{
         origin => bondy_oplog_origin:new(),
-        fold_module => lww_register,
         durability => ephemeral,
         seed => true,
         applier => #{cell_apply_target => {NS, primary, 0}}
@@ -399,7 +398,7 @@ root_persisted_midrun(Dir) ->
     {ok, _} = open_pack_instance(InstId, NS, Dir, Origin, 10),
     append_batch(InstId, 1, 100),
     _ = bondy_oplog_instance:await_apply(InstId),
-    _ = bondy_oplog:projection(InstId),
+    ok = bondy_oplog_test_projection:drain(InstId),
     ok = await_sealed_packs(Dir, 1, 15_000),
 
     InstDir = bondy_oplog_path:instance_dir(
@@ -555,7 +554,6 @@ open_pack_instance_noseal(InstanceId, NS, Dir, Origin) ->
 open_pack_instance(InstanceId, NS, Dir, Origin, SealEvery) ->
     bondy_oplog:start_instance(InstanceId, #{
         origin => Origin,
-        fold_module => lww_register,
         backend => bondy_mst_pack_store,
         storage_path => unicode:characters_to_binary(Dir),
         backend_options => #{auto_seal_records => SealEvery},
@@ -571,7 +569,7 @@ append_batch(InstanceId, I, Batch) ->
             _ = bondy_oplog:append(
                 InstanceId, {cell_apply, ?B, Key, {set, Hlc, Key}}
             ),
-            _ = bondy_oplog:projection(InstanceId)
+            ok = bondy_oplog_test_projection:drain(InstanceId)
         end,
         lists:seq(1, Batch)
     ).

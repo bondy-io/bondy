@@ -309,7 +309,7 @@ declare_message_families() ->
 %% @private
 %% Declares the registry RIB routing families, captured wait-free via
 %% `bondy_metrics` at their population sites: the dealer (retry and
-%% owner-side completion), `bondy_registry_rib` (occupancy and damping)
+%% owner-side completion), `bondy_registry_rib` (occupancy)
 %% and `bondy_registry` (presence and the divergence sweep).
 declare_rib_families() ->
     ok = bondy_metrics:declare(#{
@@ -340,13 +340,6 @@ declare_rib_families() ->
         help => <<
             "Remote routing summary stubs held by this node, by registry "
             "type."
-        >>
-    }),
-    ok = bondy_metrics:declare(#{
-        name => bondy_registry_rib_damping_suppressions_total,
-        help => <<
-            "Routing summary updates suppressed by the damping window "
-            "(count/latest-only changes coalesced into a trailing write)."
         >>
     }),
     ok = bondy_metrics:declare(#{

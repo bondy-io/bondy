@@ -58,7 +58,7 @@ get_after_append_hits_overlay() ->
     %% not after the applier promotes to the MST. `get/2` must see
     %% the event immediately via the overlay path.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Key = bondy_oplog:append(Id, hello),
     %% No await_apply here — we are testing the overlay path.
     {ok, Event} = bondy_oplog:get(Id, Key),
@@ -71,7 +71,7 @@ fold_range_merges_overlay_and_mst() ->
     %% staged events must appear in fold_range output in strict key
     %% order.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     PromotedKeys = [bondy_oplog:append(Id, {p, N}) || N <- lists:seq(1, 5)],
     ok = bondy_oplog:await_apply(Id),
     StagedKeys = [bondy_oplog:append(Id, {s, N}) || N <- lists:seq(6, 10)],
@@ -102,7 +102,7 @@ size_includes_overlay_rows() ->
     %% overlay count. The atomic in-handler eviction keeps these
     %% sets disjoint so there is no double-count.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     [bondy_oplog:append(Id, N) || N <- lists:seq(1, 10)],
     %% Read size repeatedly — it should be 10 from the very first
     %% read (overlay carries the events until applier catches up).
@@ -114,7 +114,7 @@ size_includes_overlay_rows() ->
 first_and_latest_merge_overlay() ->
     %% first_key/latest_key must consult both overlay and MST.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     %% Append two events; both end up in overlay before the applier
     %% catches up. first_key/latest_key should still return valid
     %% keys.
@@ -130,7 +130,7 @@ first_and_latest_merge_overlay() ->
 
 await_apply_drains_overlay() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     [bondy_oplog:append(Id, N) || N <- lists:seq(1, 20)],
     ok = bondy_oplog:await_apply(Id, 5000),
     %% After await, every overlay row has been evicted; size still
@@ -149,7 +149,7 @@ overlay_events_cap_returns_backpressure() ->
     %% fires deterministically by suspending the applier so the
     %% overlay does not drain between appends.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         max_overlay_events => 3
     }),
     %% Suspend the applier (not the instance) so events accumulate
@@ -183,7 +183,9 @@ rejected_events_release_the_cap() ->
     %% slot of the cap: two rejections here left the shard refusing every
     %% write with `backpressure`.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{max_overlay_events => 2}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
+        max_overlay_events => 2
+    }),
     ok = meck:new(bondy_oplog_validator_trust, [passthrough, no_link]),
     ok = meck:expect(bondy_oplog_validator_trust, verify_event, fun(_E, _S) ->
         {error, bad_signature}
@@ -215,7 +217,7 @@ overlay_value_round_trip() ->
     %% The Op + Meta written through the overlay path must round-trip
     %% intact through `get/2`.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Key = bondy_oplog:append(Id, {hello, world}, {meta, 42}),
     {ok, Event} = bondy_oplog:get(Id, Key),
     ?assertEqual({hello, world}, bondy_oplog_event:op(Event)),
@@ -232,7 +234,7 @@ overlay_evicts_after_apply() ->
     %% and the value is served from the MST. We assert the overlay
     %% drains; the read path stays valid throughout.
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Keys = [bondy_oplog:append(Id, N) || N <- lists:seq(1, 16)],
     %% Pre-apply: every key is reachable.
     [?assertMatch({ok, _}, bondy_oplog:get(Id, K)) || K <- Keys],

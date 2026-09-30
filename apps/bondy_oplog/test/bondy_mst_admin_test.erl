@@ -348,7 +348,6 @@ roundtrip_with_live_instance() ->
     Id = list_to_binary("e2e_" ++ Suffix),
     Origin = bondy_oplog_origin:new(),
     Opts = #{
-        crdt_module => bondy_oplog_test_counter,
         storage_path => Storage,
         seed => true,
         origin => Origin
@@ -357,8 +356,11 @@ roundtrip_with_live_instance() ->
         %% Phase 1: populate + compact. After compact, the live MST is
         %% truncated; durable state lives in the WAL + pack-store +
         %% checkpoint, which is what the backup must capture.
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 5)],
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 5)
+        ],
         ok = bondy_oplog:await_apply(Id),
         LocalRoot = bondy_oplog:root_hash(Id),
         bondy_oplog_peer_state:record_sync_complete(
@@ -394,7 +396,7 @@ roundtrip_with_live_instance() ->
         %% sound is the checkpoint round-trip: same watermark, same
         %% folded CRDT state. The HLC must seed from the restored
         %% watermark too, so further work is on a consistent timeline.
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
         {ok, W2, S2} = bondy_oplog:compaction_checkpoint(Id),
         ?assertEqual(W1, W2),
         ?assertEqual(S1, S2),

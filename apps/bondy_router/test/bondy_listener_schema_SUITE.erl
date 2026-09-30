@@ -476,7 +476,7 @@ no_listener_configured_renders_no_inventory_key(Config) ->
     %% least one of its mappings has a default or appears in the conf
     %% (:144-167), so with neither, `bondy_router.listeners' lands in
     %% `TranslationsToDrop'.
-    AppEnv = render(Config, ["registry.rib.damping = 0\n"]),
+    AppEnv = render(Config, ["registry.rib.check_interval = 5m\n"]),
     ?assertMatch(L when is_list(L), AppEnv),
     Router = proplists:get_value(bondy_router, AppEnv, []),
     ?assertNot(proplists:is_defined(listeners, Router)),

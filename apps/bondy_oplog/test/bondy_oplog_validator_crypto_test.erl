@@ -185,16 +185,15 @@ instance_with_crypto_validator_signs_events() ->
     {Pub, Priv} = generate_keypair(),
     Origin = origin_from_pubkey(Pub),
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         origin => Origin,
         validator => bondy_oplog_validator_crypto,
         validator_opts => #{
             keypair => {Pub, Priv},
             peer_pubkeys => #{Origin => Pub}
-        },
-        crdt_module => bondy_oplog_test_counter
+        }
     }),
-    K = bondy_oplog:append(Id, {inc, 7}),
+    K = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(7)),
     {ok, Stored} = bondy_oplog:get(Id, K),
     ?assert(is_binary(bondy_oplog_event:signature(Stored))),
     ?assert(is_binary(bondy_oplog_event:prev_hash(Stored))),
@@ -210,7 +209,7 @@ instance_rejects_tampered_remote_event() ->
     Pubkeys = #{OriginA => PubA, OriginB => PubB},
     IdA = mk_id(),
     IdB = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(IdA, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdA, #{
         origin => OriginA,
         validator => bondy_oplog_validator_crypto,
         validator_opts => #{
@@ -218,7 +217,7 @@ instance_rejects_tampered_remote_event() ->
             peer_pubkeys => Pubkeys
         }
     }),
-    {ok, _} = bondy_oplog:start_instance(IdB, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdB, #{
         origin => OriginB,
         validator => bondy_oplog_validator_crypto,
         validator_opts => #{
@@ -227,7 +226,7 @@ instance_rejects_tampered_remote_event() ->
         }
     }),
     %% B appends → has a signed event.
-    Key = bondy_oplog:append(IdB, {inc, 1}),
+    Key = bondy_oplog:append(IdB, bondy_oplog_test_projection:cell_op(1)),
     {ok, BEvent} = bondy_oplog:get(IdB, Key),
     %% Tamper: rewrite the op while keeping the signature.
     Tampered = bondy_oplog_event:new(
@@ -259,7 +258,7 @@ crypto_validator_refresh_adds_peer_pubkey() ->
     IdA = mk_id(),
     IdB = mk_id(),
     %% A starts knowing only itself. B has both keys so it can sign.
-    {ok, _} = bondy_oplog:start_instance(IdA, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdA, #{
         origin => OriginA,
         validator => bondy_oplog_validator_crypto,
         validator_opts => #{
@@ -267,7 +266,7 @@ crypto_validator_refresh_adds_peer_pubkey() ->
             peer_pubkeys => #{OriginA => PubA}
         }
     }),
-    {ok, _} = bondy_oplog:start_instance(IdB, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdB, #{
         origin => OriginB,
         validator => bondy_oplog_validator_crypto,
         validator_opts => #{
@@ -277,7 +276,7 @@ crypto_validator_refresh_adds_peer_pubkey() ->
     }),
     %% B signs a local event then forwards it to A — must be rejected
     %% because A doesn't know B's pubkey yet.
-    Key1 = bondy_oplog:append(IdB, {inc, 1}),
+    Key1 = bondy_oplog:append(IdB, bondy_oplog_test_projection:cell_op(1)),
     {ok, Signed1} = bondy_oplog:get(IdB, Key1),
     ?assertMatch(
         {error, {unknown_origin, _}},
@@ -298,7 +297,7 @@ crypto_validator_refresh_adds_peer_pubkey() ->
     _ = sys:get_state(ApplierPid),
     %% B signs a second event (the first was per-Origin chain head;
     %% reusing it would equivocate on prev_hash). A accepts it.
-    Key2 = bondy_oplog:append(IdB, {inc, 2}),
+    Key2 = bondy_oplog:append(IdB, bondy_oplog_test_projection:cell_op(2)),
     {ok, Signed2} = bondy_oplog:get(IdB, Key2),
     ?assertEqual(ok, bondy_oplog:append_remote(IdA, Signed2)),
     application:unset_env(bondy_oplog, {validator_crypto, IdA}),
@@ -315,7 +314,7 @@ crypto_validator_refresh_returns_error_without_env() ->
     OriginB = origin_from_pubkey(PubB),
     IdA = mk_id(),
     IdB = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(IdA, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdA, #{
         origin => OriginA,
         validator => bondy_oplog_validator_crypto,
         validator_opts => #{
@@ -323,7 +322,7 @@ crypto_validator_refresh_returns_error_without_env() ->
             peer_pubkeys => #{OriginA => PubA}
         }
     }),
-    {ok, _} = bondy_oplog:start_instance(IdB, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(IdB, #{
         origin => OriginB,
         validator => bondy_oplog_validator_crypto,
         validator_opts => #{
@@ -339,7 +338,7 @@ crypto_validator_refresh_returns_error_without_env() ->
     ApplierPid = bondy_oplog_registry:applier_pid(IdA),
     ?assert(is_pid(ApplierPid)),
     _ = sys:get_state(ApplierPid),
-    Key = bondy_oplog:append(IdB, {inc, 1}),
+    Key = bondy_oplog:append(IdB, bondy_oplog_test_projection:cell_op(1)),
     {ok, Signed} = bondy_oplog:get(IdB, Key),
     ?assertMatch(
         {error, {unknown_origin, _}},

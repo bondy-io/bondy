@@ -710,7 +710,7 @@ do_install_bootstrap_counter() ->
                     [bondy_oplog, compaction, ok],
                     [bondy_oplog, compaction, retention],
                     %% The unservable-root self-heal
-                    %% (`maybe_self_heal_unservable/2`) drops the tree and
+                    %% (`maybe_self_heal_unservable/1`) drops the tree and
                     %% advances the watermark past it. It runs inside
                     %% `do_compact_sync/2`, so it is a second way a
                     %% compaction tick sets a watermark, distinguishable
@@ -778,7 +778,7 @@ do_bootstrap_counts(InstId) ->
 %% The instance's watermark and the events its tree still holds at or below it.
 %%
 %% `do_integrate_peer_root/2` runs every merged tree through
-%% `watermark_door/3`, which re-truncates at or below the watermark and spares
+%% `watermark_door/2`, which re-truncates at or below the watermark and spares
 %% only entries the applied VV does not already cover. That VV is a per-origin
 %% MAXIMUM, so an event sitting inside a hole BELOW the maximum tests as
 %% already-applied and is truncated back out — silently, without an

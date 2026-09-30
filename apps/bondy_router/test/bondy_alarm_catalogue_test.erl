@@ -90,7 +90,7 @@ unresolvable_sites() ->
 scan_is_sound(#{errors := Errors, sites := Sites}) ->
     ?assertEqual([], Errors),
     Found = [{M, F, A} || {M, F, A, _Kind, _Id, _Keys, _Opts} <- Sites],
-    ?assert(lists:member({bondy_namespace_catalog, set_main_failed, 1}, Found)),
+    ?assert(lists:member({bondy_namespace_catalog, open_main_into, 1}, Found)),
     ?assert(
         lists:member({bondy_oplog_responder, set_oversized_alarm, 0}, Found)
     ),

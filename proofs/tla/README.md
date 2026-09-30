@@ -1180,6 +1180,11 @@ test buys nothing the cap has not already given.
 
 ## `RibCountReap.tla` — a RIB cell's count across an owner reboot
 
+This models a per-origin delta counter as the cell's count. The RIB does not
+use one: its cells carry the owner's latest reading
+(`bondy_oplog_crdt_owned_reading`), modelled by `RibAbs.tla` and
+`RibReading.tla` below. The counterexamples here are why.
+
 **Question.** A registry RIB cell (`{Realm, Policy, Uri, OwnerNode}`) is
 single-writer, and its `count` is a `bondy_oplog_crdt_pn_counter` field declared
 `force_reap => true`: the value is the sum of one net entry per origin, and the
@@ -1235,8 +1240,8 @@ departed-node RIB reclamation too: `force_reap` is modelled nowhere else.
   cell; `self_heal`'s corrective write is, as a side effect, what refreshes the
   peers' stubs. Established by reading the code, not modelled.
 - Not reproduced end to end on a cluster; six two-node CT runs did not reach it.
-- Subscriptions (`bondy_oplog_crdt_owned_counter`, same per-origin sum) are
-  covered by the same argument, not by this model.
+- Subscriptions (a bare counter, same per-origin sum) are covered by the same
+  argument, not by this model.
 
 **Fixes considered and rejected.** Each removes one symptom of the same root —
 a single-writer fact scoped to the owner's incarnation, replicated as a counter
@@ -1251,3 +1256,123 @@ of deltas across writer ids — and none is independent of durability:
 - *Put the owner's epoch in the cell key.* Old-epoch cells are reclaimed only
   because the registry's origin rotates per boot; in a durable DB they never
   would be.
+
+## `RibAbs.tla`, `RibReading.tla` — a RIB cell's reading across reboots, reopens and restarts
+
+**Question.** A registry RIB cell carries the owner's latest reading of its live
+local entries, `{Stamp, Count}` (`bondy_oplog_crdt_owned_reading`), and a
+replica's count is that of the highest-stamped reading it holds. Peers route by
+a stub refreshed only by a merge event. When the owner reboots, when its
+registry DB is reopened in a running VM, or when one oplog instance of that DB
+restarts, do every replica's cell and every peer's stub settle on the owner's
+live count?
+
+```
+java -Xmx8g -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers 4 -config RibAbs_Shipped.cfg     RibAbs.tla
+java -Xmx8g -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers 4 -config RibReading_WallAhead.cfg RibReading.tla
+```
+
+**What the shipped configuration encodes.** Each flag names the code it stands
+for:
+
+- `Durable = FALSE`: the registry DB is in memory and takes a fresh origin on
+  every open.
+- `HealAlways = TRUE`: the owner answers every echo of its own cell with its
+  current reading (`bondy_registry_rib`'s `restate/4`).
+- `ReopenEnabled`, `RestartReopens = TRUE`: the death of any process the
+  registry tables run on reopens the whole DB, and every open restores each
+  group's reading (`bondy_namespace_catalog`, `bondy_registry_rib:restore/0`).
+  An instance restart loses the events the instance had not shipped.
+- `SweepOnce = TRUE`: a swept origin is never rescanned (`reap_complement/4`).
+- `StubFollowsCell = FALSE`: the orphan-stub sweep acts only on departed
+  nodes, and the owner here stays a member.
+
+Properties hold on settled states (no action enabled); a run cut short by the
+stamp bound is excluded (`Truncated`). All configurations: `MaxOps = 2`,
+`MaxResets = 2`.
+
+| Configuration | What changes | Result |
+| --- | --- | --- |
+| `RibAbs_Shipped` | shipped; 2 peers, stamps ≤ 4 | exhaustive clean: 115,078,878 distinct states, depth 38 |
+| `RibAbs_Shipped_Stamp5_OnePeer` | shipped; 1 peer, stamps ≤ 5 | exhaustive clean: 15,538,045 distinct states, depth 37 |
+| `RibAbs_NoRestart_Stamp5` | no instance restarts; 2 peers, stamps ≤ 5 | exhaustive clean: 76,851,033 distinct states, depth 42 |
+| `RibAbs_RestartNoRestore` | a restart neither reopens nor restores | **`SettledCellIsTruth` violated at depth 8** |
+| `RibAbs_HealOnAbsent` | restate only when the owner's cell is empty | **`SettledStubIsTruth` violated at depth 20** |
+| `RibAbs_HealOnForeignTop` | restate only when the top reading is another origin's | **`SettledStubIsTruth` violated at depth 14** |
+| `RibAbs_ClockRegress` | a reboot may restart the clock at 0; 1 peer | **`SettledStubIsTruth` violated at depth 15** |
+| `RibReading_WallAhead` | HLC; the wall clock may step back, but not past a held stamp; 1 peer | exhaustive clean: 6,882,826 distinct states, depth 36 |
+| `RibReading_WallStepBack` | HLC; the wall clock may step back past a held stamp; 1 peer | **`SettledStubIsTruth` violated at depth 17** |
+
+**The counterexamples.**
+
+- `RestartNoRestore`: two registrations take their stamps, then the instance
+  restarts before either reading is written. Nothing reached a peer, so no echo
+  arrives to be answered, and the cell reads 0 against 2 live.
+- `HealOnAbsent`, `HealOnForeignTop`: the owner reaps its own copy of an echoed
+  reading before it restates, so the condition for restating is false, while
+  the peers' stubs still hold the old count. A reap fires no merge event, so
+  nothing refreshes them. What the owner's cell shows says nothing about what
+  its peers route by, which is why the owner answers every echo.
+- `ClockRegress`, `WallStepBack`: the new incarnation's restatement is stamped
+  no higher than the reading it must replace, so a peer keeps the old count in
+  its stub, and the reap later empties the cell without refreshing it.
+
+**The clock.** `RibAbs.tla` stamps with an integer counter; a reading is
+compared only by the order of its stamp, so the counter stands for any clock
+whose stamps strictly increase over the owner's lifetime. `RibReading.tla`
+models the HLC itself (`bondy_oplog_hlc:now/1`: a physical tick of `K` logical
+values, the wall clock moving on or back by up to `StepBack` across a reboot),
+with the same policy, to check that condition instead of assuming it. It holds
+when the wall clock does not go back past a stamp a replica holds, and fails
+when it does. That is the assumption `bondy_registry_rib`'s moduledoc states.
+An instance restart does not restart the clock: it lives in the VM
+(`bondy_registry_rib:init/0`), so `RibReading.tla` has no restart action.
+
+**Not established.**
+
+- `RibAbs_Shipped` with 2 peers and stamps ≤ 5 was stopped by the disk guard at
+  230M distinct states with no violation; it is not a proof.
+- Two writers, two operations, two resets. A third concurrent writer is covered
+  by `bondy_registry_rib_test`'s concurrent-writer test, not by the model.
+- The subscription cell (a bare reading) is covered by the same argument; only
+  the count is modelled.
+- End to end, the restores are exercised by `bondy_registry_SUITE`'s
+  `rib_restored_after_*` cases, one per way the DB can lose state.
+
+## `ReadCache.tla` — can a read-cache fill outlive the write it raced?
+
+**Question.** A reader that misses the per-shard read cache reads the
+projection and fills the cache; every projection write is followed by a
+delete of that key from the cache. If the write and its delete both land
+between the reader's projection read and its fill, the fill installs the older
+value and nothing removes it. `bondy_db_read_cache_race_test` forces this
+interleaving.
+
+**Protocol modelled** (`bondy_oplog_cache_ets`, `bondy_oplog_core`). An
+invalidation (`delete/3`, `invalidate_all/1`) advances a per-shard generation
+and then deletes. A reader takes the generation as a ticket before its
+projection read; `fill/5` inserts, re-reads the generation, and deletes its
+own row if the generation moved.
+
+**Model.** One key, readers that fill on a miss, writers that write the
+projection then invalidate, and eviction at any time. `SettledCoherent`: once
+every process is idle, the cache holds nothing or the projection's value.
+
+| Config | Readers / writers / writes | Result |
+|---|---|---|
+| `ReadCache_Ship` | 3 / 2 / 4 | holds; 6,367,393 distinct states, depth 29 |
+| `ReadCache_ShipU` (re-check deletes by key, not by object) | 3 / 2 / 4 | holds; same state count |
+| `ReadCache_Head` (no ticket) | 3 / 2 / 4 | violated in 9 steps |
+| `ReadCache_Swap` (delete, then advance) | 3 / 2 / 4 | violated in 10 steps |
+| `ReadCache_RAW` (`WritersIdleCoherent`) | 3 / 2 / 4 | violated in 9 steps |
+
+**Not established.**
+
+- `WritersIdleCoherent` fails by design: a cache hit that runs while a
+  raced fill is between its insert and its re-check returns the older value,
+  after the write has returned. The window closes when that `fill/5` returns.
+  Closing it would need hits to validate too.
+- Eviction is modelled as a delete at any time, not as the `max_entries` policy.
+- The swapped order (`ReadCache_Swap`) is caught by the model only; the
+  deterministic test cannot place a fill between the two steps of one
+  invalidation.

@@ -122,7 +122,7 @@ init(DbName, Opts) when is_atom(DbName), is_map(Opts) ->
             {error, {missing_required_opt, sup}}
     end.
 
-open_table(EntityType, ShardCount, _TableOpts, State) when
+open_table(EntityType, ShardCount, _TableOpts, #{dir := Dir} = State) when
     is_atom(EntityType), is_integer(ShardCount), ShardCount > 0
 ->
     case start_shards(EntityType, ShardCount, State) of
@@ -130,7 +130,10 @@ open_table(EntityType, ShardCount, _TableOpts, State) when
             TableState = #{
                 entity_type => EntityType,
                 shard_count => ShardCount,
-                shards => Shards
+                shards => Shards,
+                root_paths => maps:map(
+                    fun(I, _) -> shard_dir(Dir, EntityType, I) end, Shards
+                )
             },
             {ok, TableState, State};
         {error, _} = Err ->
@@ -173,10 +176,7 @@ close_table(#{shards := Shards}, State) ->
     %% T2 owns one Bookie per (EntityType, Shard); close_table stops
     %% them all. State is unchanged — this topology keeps no per-table
     %% bookkeeping at the DB level.
-    lists:foreach(
-        fun({_Shard, Bookie}) -> ?COMMON:stop_bookie_safe(Bookie) end,
-        maps:to_list(Shards)
-    ),
+    lists:foreach(fun bondy_db_leveled_sup:close_bookie/1, maps:values(Shards)),
     {ok, State}.
 
 shutdown(#{sup := Sup}) ->
@@ -218,11 +218,14 @@ start_shards(
                 {error, _} = Err ->
                     %% Best-effort: stop already-started shards so the
                     %% caller is not left with a partial table.
-                    [?COMMON:stop_bookie_safe(B) || B <- maps:values(Acc)],
+                    [
+                        bondy_db_leveled_sup:close_bookie(B)
+                     || B <- maps:values(Acc)
+                    ],
                     Err
             end;
         {error, _} = Err ->
-            [?COMMON:stop_bookie_safe(B) || B <- maps:values(Acc)],
+            [bondy_db_leveled_sup:close_bookie(B) || B <- maps:values(Acc)],
             Err
     end.
 

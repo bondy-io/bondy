@@ -102,7 +102,7 @@ flowchart TB
     READ["wal_reader:next/2<br/>(batch from WAL)"]
     EMPTY{"empty batch?"}
     VERIFY["verify_batch · re-check signatures"]
-    FOLD["apply_fold_batch · bare single-CRDT instances"]
+    FOLD["apply_fold_batch · non-cell events"]
     CELL["apply_cell_batch · kernel apply_op per cell,<br/>batched put + cache invalidate"]
     PUB["publish_batch · publish_fun + ae_targets"]
     INSTALL["reserve install slot<br/>cast install_local_batch"]
@@ -209,9 +209,9 @@ Four details worth pinning down:
   advance, and never leads the durable projection.
 
 The applier also keeps an in-memory `fold_state`
-(`apply_fold_batch/2`) for bare single-CRDT instances that have no
-projection at all — it folds the batch through the same
-`apply_op` step; the per-cell projection path is the common case.
+(`apply_fold_batch/2`): when the instance has a `fold_module`, it folds
+the batch's non-`cell_apply` events through the same `apply_op` step;
+the per-cell projection path is the common case.
 
 ### tier_2: the context stamp and the regression guard
 
@@ -278,9 +278,13 @@ chosen so that:
   retention, not correctness.
 - Per-cell `put_batch` writes go to Leveled with
   `sync_strategy = none` — the projection is deliberately **not**
-  fsynced per write. The WAL is the only locally-durable store;
-  anything the projection loses in a crash is reconstructed by
-  replay from the committed consumer offset.
+  fsynced per write. A write it loses to a power failure is refolded
+  from the oplog at boot, which happens whenever the oplog holds a cell
+  the restored applied frontier does not claim
+  (`bondy_oplog_instance:replay_anchor/1`). That needs both halves to
+  hold, so the instance syncs the projection before it truncates the
+  oplog and before it persists a frontier claim
+  (`bondy_oplog_projection_sync_test`).
 
 Idempotency in the CRDT is the linchpin. Without it, no crash path
 is safe.

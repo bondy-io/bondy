@@ -170,7 +170,6 @@ seeded_snapshot() ->
     Ns = binary_to_atom(<<"bootsrc_", Id/binary>>, utf8),
     _ = register_shard(Ns, Id, #{}),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {Ns, primary, 0},
             cell_apply_bucket => ?BUCKET
@@ -182,7 +181,7 @@ seeded_snapshot() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?BUCKET, <<"k2">>, {set, 6, <<"v2">>}}
     ),
-    _ = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     {Id, pull_snapshot(Id)}.
 
 %% @private
@@ -198,7 +197,6 @@ target(#{publish_ns_opt := WantPublish}) ->
         end,
     _ = register_shard(Ns, Id, Extra),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {Ns, primary, 0},
             cell_apply_bucket => ?BUCKET

@@ -67,13 +67,12 @@ setup:
 
 In line with the projection adapter behaviour, every data callback
 takes `Bucket` as an argument and forwards it to `leveled_bookie`.
-The handle is just the Bookie pid — one handle serves every Bucket
-inside the shard.
+One handle serves every Bucket inside the shard.
 
 ## Handle shape
 
 ```erlang
-#{bookie := pid() | {pt, PTKey :: term()}}
+#{bookie := pid() | {pt, PTKey :: term()}, root_path => file:filename()}
 ```
 
 A raw pid pins the Bookie for the handle's lifetime (the anonymous
@@ -84,11 +83,24 @@ supervisor restart of a crashed keyed Bookie is transparent to every
 handle already captured by readers and the applier. The lookup is a
 few nanoseconds — no measurable hot-path cost.
 
+`root_path` is the Bookie's directory. `sync/1` needs it: a handle without
+it cannot be synced.
+
+## Durability
+
+A Bookie acknowledges `put_batch/2` once the journal write returns, which under
+the default `db.leveled.sync_strategy = none` means the page cache, not the
+disk. `sync/1` fsyncs every file and directory of the Bookie's journal, meant
+to make the acknowledged writes survive a power loss. The substrate calls it
+before it truncates or checkpoints anything a write was claimed to cover
+(`bondy_oplog_projection_sync_test`).
+
 ## Required `Opts` for `open/4`
 
 | Key | Type | Meaning |
 |---|---|---|
 | `bookie` | `pid() | {pt, term()}` | The leveled Bookie this `(NS, Index, Shard)` writes to |
+| `root_path` | `file:filename()` | Optional: the Bookie's directory, for `sync/1` |
 
 Anything else in `Opts` is ignored.
 
@@ -106,7 +118,7 @@ value-present frames, exactly as `get/3` does).
 ## What this adapter does NOT do
 
 - Open, stop, or supervise the Bookie.
-- Path management, journal/ledger directory creation, recovery.
+- Journal/ledger directory creation, recovery.
 - Routing or topology decisions.
 - Register any custom leveled tag/extractor — head_only mode bypasses
   extractors entirely (HEAD bytes are written directly via `book_mput`).
@@ -124,6 +136,8 @@ value-present frames, exactly as `get/3` does).
     delete/3,
     clear/2,
     cell_keys/2,
+    sync/1,
+    sync_ledger/1,
     info/1
 ]).
 
@@ -133,7 +147,9 @@ value-present frames, exactly as `get/3` does).
 %% Lexicographically minimal/maximal SubKey sentinels for prefix scans
 %% over a single Key (encompasses ?SK_STATE and ?SK_VALUE).
 
--type handle() :: #{bookie := pid() | {pt, term()}}.
+-type handle() :: #{
+    bookie := pid() | {pt, term()}, root_path => file:filename()
+}.
 
 %% =============================================================================
 %% API
@@ -146,12 +162,46 @@ value-present frames, exactly as `get/3` does).
     Opts :: map()
 ) -> {ok, handle()} | {error, term()}.
 
-open(_NS, _Index, _Shard, #{bookie := B} = _Opts) when
+open(_NS, _Index, _Shard, #{bookie := B} = Opts) when
     is_pid(B) orelse (is_tuple(B) andalso element(1, B) =:= pt)
 ->
-    {ok, #{bookie => B}};
+    {ok, maps:with([bookie, root_path], Opts)};
 open(_NS, _Index, _Shard, Opts) when is_map(Opts) ->
     {error, {invalid_opts, Opts}}.
+
+-doc """
+Fsyncs every file of the Bookie's journal, then every journal directory, meant
+to make each write `put_batch/2` has acknowledged survive a power loss. Returns
+the first error.
+""".
+-spec sync(handle()) -> ok | {error, term()}.
+
+sync(#{root_path := Root} = Handle) ->
+    Dirs = dirs(filename:join(Root, "journal")),
+    Files = lists:filter(
+        fun filelib:is_regular/1, lists:flatmap(fun wildcard/1, Dirs)
+    ),
+    case sync_files(Files) of
+        {error, {enoent, _}} ->
+            %% leveled renamed the file (a journal roll) or deleted it since
+            %% the listing. A renamed file must still be synced; the next
+            %% listing finds it under its new name, or no longer at all.
+            sync(Handle);
+        {error, _} = Error ->
+            Error;
+        ok ->
+            sync_dirs(Dirs)
+    end.
+
+-doc """
+Fsyncs every directory of the Bookie's ledger under `RootPath`; returns the
+first error. `bondy_db_journal_trimmer` calls it after each trim, for the
+reason its moduledoc gives.
+""".
+-spec sync_ledger(RootPath :: file:filename()) -> ok | {error, term()}.
+
+sync_ledger(RootPath) ->
+    sync_dirs(dirs(filename:join(RootPath, "ledger"))).
 
 -spec close(handle()) -> ok.
 
@@ -598,6 +648,39 @@ clear_bucket(Pid, Bucket) ->
                 ok -> ok;
                 pause -> ok
             end
+    end.
+
+%% @private
+dirs(Top) ->
+    [Top | lists:filter(fun filelib:is_dir/1, wildcard(Top))].
+
+%% @private
+wildcard(Dir) ->
+    filelib:wildcard(filename:join(Dir, "*")).
+
+%% @private
+sync_files([]) ->
+    ok;
+sync_files([File | Rest]) ->
+    case file:open(File, [read, raw, binary]) of
+        {ok, Fd} ->
+            Result = file:sync(Fd),
+            _ = file:close(Fd),
+            case Result of
+                ok -> sync_files(Rest);
+                {error, Reason} -> {error, {Reason, File}}
+            end;
+        {error, Reason} ->
+            {error, {Reason, File}}
+    end.
+
+%% @private
+sync_dirs([]) ->
+    ok;
+sync_dirs([Dir | Rest]) ->
+    case bondy_mst_io:fsync_dir(Dir) of
+        ok -> sync_dirs(Rest);
+        {error, Reason} -> {error, {Reason, Dir}}
     end.
 
 %% Resolve the handle's Bookie to its CURRENT pid. A raw pid is returned

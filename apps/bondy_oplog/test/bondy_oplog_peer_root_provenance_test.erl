@@ -172,8 +172,8 @@ frontier_stops_below_events_peer_lacks() ->
 empty_peer_checkpoints_nothing() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
 
     %% A has data; B is empty.
     [bondy_oplog:append(A, {a, N}) || N <- lists:seq(1, 10)],
@@ -205,8 +205,8 @@ diverged_pair() ->
 two_instances() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     {A, B}.
 
 recorded_root_for(Instance) ->

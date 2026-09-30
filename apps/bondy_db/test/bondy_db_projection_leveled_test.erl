@@ -59,7 +59,9 @@ adapter_test_() ->
         fun clear_is_bucket_scoped/1,
         fun clear_is_entity_scoped/1,
         fun cell_keys_is_entity_scoped/1,
-        fun info_reports_backend_and_bookie/1
+        fun info_reports_backend_and_bookie/1,
+        fun sync_covers_the_journal_holding_a_write/1,
+        fun sync_ledger_covers_every_ledger_directory/1
     ]}.
 
 %% =============================================================================
@@ -90,6 +92,46 @@ cleanup({Pid, Dir}) ->
 %% =============================================================================
 %% Tests
 %% =============================================================================
+
+%% `sync/1` opens every journal file to fsync it and fsyncs every journal
+%% directory; the traced calls must cover the file and the directory holding
+%% an acknowledged write. Durability across a power loss is not tested.
+sync_covers_the_journal_holding_a_write({Pid, Dir}) ->
+    fun() ->
+        H = #{bookie => Pid, root_path => Dir},
+        ok = ?MOD:put_batch(H, [{?BUCKET, <<"k1">>, mk_frame(<<"v1">>)}]),
+        Files = filelib:wildcard(filename:join(Dir, "journal/*/*.pnd")),
+        ?assertMatch([_ | _], Files),
+        Calls = bondy_db_trace_helper:calls(
+            self(),
+            [{file, open, 2}, {bondy_mst_io, fsync_dir, 1}],
+            fun() -> ?assertEqual(ok, ?MOD:sync(H)) end
+        ),
+        Opened = [F || {file, open, [F, _]} <- Calls],
+        Synced = [D || {bondy_mst_io, fsync_dir, [D]} <- Calls],
+        ?assertEqual([], Files -- Opened),
+        ?assertEqual(
+            [],
+            lists:usort([filename:dirname(F) || F <- Files]) -- Synced
+        )
+    end.
+
+%% `sync_ledger/1` fsyncs each ledger directory leveled has created.
+sync_ledger_covers_every_ledger_directory({Pid, Dir}) ->
+    fun() ->
+        ok = ?MOD:put_batch(
+            #{bookie => Pid}, [{?BUCKET, <<"k1">>, mk_frame(<<"v1">>)}]
+        ),
+        Ledger = filename:join(Dir, "ledger"),
+        Dirs = [Ledger | filelib:wildcard(filename:join(Ledger, "*"))],
+        ?assert(length(Dirs) > 1),
+        Calls = bondy_db_trace_helper:calls(
+            self(),
+            [{bondy_mst_io, fsync_dir, 1}],
+            fun() -> ?assertEqual(ok, ?MOD:sync_ledger(Dir)) end
+        ),
+        ?assertEqual([], Dirs -- [D || {_, _, [D]} <- Calls])
+    end.
 
 open_with_valid_opts({Pid, _Dir}) ->
     fun() ->

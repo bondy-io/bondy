@@ -36,7 +36,7 @@ transport_test_() ->
         fun init_wire_envelope/0,
         fun next_batch_then_done_wire_envelope/0,
         fun init_for_unknown_instance_errors/0,
-        fun single_crdt_instance_returns_no_snapshot/0,
+        fun unregistered_shard_returns_no_snapshot/0,
         fun oversized_cell_ships_in_parts_and_reassembles/0,
         fun oversized_cell_is_never_advanced_past/0
     ]}.
@@ -44,7 +44,7 @@ transport_test_() ->
 init_wire_envelope() ->
     {Id, _NS, _, _} = setup_instance(),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"x">>, {set, 50, <<"v">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertMatch(
         {ok, {init, {50, Cursor}}} when is_binary(Cursor),
         ?T:request(Id, Id, get_catalogue_snapshot_init, #{})
@@ -55,7 +55,7 @@ next_batch_then_done_wire_envelope() ->
     {Id, _NS, _, _} = setup_instance(),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"a">>, {set, 1, <<"va">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"b">>, {set, 2, <<"vb">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     {ok, {init, {_W, Cursor}}} =
         ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
     %% First call returns a batch.
@@ -77,19 +77,14 @@ init_for_unknown_instance_errors() ->
         ?T:request(Bogus, Bogus, get_catalogue_snapshot_init, #{})
     ).
 
-single_crdt_instance_returns_no_snapshot() ->
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        crdt_module => bondy_oplog_crdt_lww_register
-    }),
-    try
-        ?assertEqual(
-            {ok, no_snapshot},
-            ?T:request(Id, Id, get_catalogue_snapshot_init, #{})
-        )
-    after
-        bondy_oplog:stop_instance(Id)
-    end.
+unregistered_shard_returns_no_snapshot() ->
+    {Id, NS, _, _} = setup_instance(),
+    ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+    ?assertEqual(
+        {ok, no_snapshot},
+        ?T:request(Id, Id, get_catalogue_snapshot_init, #{})
+    ),
+    teardown(Id).
 
 %% A cell whose frame alone exceeds the response ceiling used to be reported to
 %% metrics and ADVANCED PAST -- lost permanently, while the bootstrap still
@@ -102,7 +97,7 @@ oversized_cell_ships_in_parts_and_reassembles() ->
     {Id, _NS, _, _} = setup_instance(),
     Big = crypto:strong_rand_bytes(40000),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"big">>, {set, 1, Big}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     with_ceiling(4000, fun() ->
         {ok, {init, {_W, Cursor}}} =
             ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
@@ -127,7 +122,7 @@ oversized_cell_is_never_advanced_past() ->
     Big = crypto:strong_rand_bytes(30000),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"big">>, {set, 1, Big}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"zzz">>, {set, 2, <<"v">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     with_ceiling(4000, fun() ->
         {ok, {init, {_W, Cursor}}} =
             ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
@@ -189,7 +184,6 @@ setup_instance() ->
     NS = ns_of(Id),
     {Cache, Proj} = register_shard(NS, primary, 0),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }
@@ -227,6 +221,3 @@ mk_id() ->
 
 ns_of(Id) when is_binary(Id) ->
     binary_to_atom(<<"ns_", Id/binary>>, utf8).
-
-barrier(Id) ->
-    bondy_oplog:projection(Id).

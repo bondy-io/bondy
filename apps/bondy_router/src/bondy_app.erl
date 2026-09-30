@@ -65,8 +65,7 @@ Four independent conditions, each read from exactly one source:
    it: the status is `persistent_term`-backed and survives an
    `alarm_handler` crash, the alarm set does not (`bondy_event_handler_watcher`
    re-installs the handler with `[]` and `bondy_alarm_handler:init/1` then
-   starts empty). Only `failed` disqualifies; `idle` means there was nothing
-   to provision, a legitimate configuration.
+   starts empty).
 3. **Every kept shard instance is running.**
    `bondy_oplog_instance_keeper:not_running/0` is empty. An instance whose
    subtree has stopped leaves its tables unavailable on this node until the
@@ -446,8 +445,7 @@ configure_services() ->
 
     %% Every step below reads and writes the durable realm tables, so it is
     %% gated on the `main` DB actually being open. When the catalogue stood
-    %% up with main idle after a storage-open failure (see
-    %% `bondy_namespace_catalog:open_main_into/1`) a raise here would return
+    %% up without main after a storage-open failure a raise here would return
     %% `{error, _}` from `bondy_app:start/2` and HALT THE VM — turning the
     %% catalogue's documented degraded posture (alarm raised, readiness
     %% probe NOT READY, ephemeral registry alive for inspection) into a

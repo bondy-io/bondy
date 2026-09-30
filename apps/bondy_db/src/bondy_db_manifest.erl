@@ -46,8 +46,8 @@ and are deliberately absent from the frozen set.
 The manifest is a single human-readable Erlang term (a map) with a schema
 `version`, an informational `created_at`, a `checksum` over the frozen keying
 map (to detect hand-edits / bit-rot), and the `frozen` map itself. It is
-written atomically (temp file + rename). Ephemeral databases (the `registry`,
-wiped on restart) have no manifest.
+written with `bondy_mst_io:write_file_atomic/2`. Ephemeral databases (the
+`registry`, wiped on restart) have no manifest.
 
 Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
 """).
@@ -179,7 +179,7 @@ reconcile(Dir, Configured0, OnMismatch) when
     is_map(Configured0) andalso (OnMismatch == warn orelse OnMismatch == stop)
 ->
     Configured = finalize(Configured0),
-    case read(Dir) of
+    case read_durable(Dir) of
         {error, not_found} ->
             case write(Dir, build(Configured)) of
                 ok ->
@@ -217,6 +217,15 @@ reconcile(Dir, Configured0, OnMismatch) when
                             )
                     end
             end;
+        {error, {dir_fsync_failed, _, _} = Reason} = Err ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Could not sync the data directory before reading the "
+                    "topology manifest; refusing to read the keying layout",
+                path => path(Dir),
+                reason => Reason
+            }),
+            Err;
         {error, Reason} = Err ->
             ?LOG_ERROR(#{
                 description =>
@@ -344,15 +353,19 @@ read(Dir) ->
     end.
 
 -doc """
-Atomically write `Manifest` under `Dir` (temp file + rename), as a single
-Erlang term on one line, preceded by a do-not-edit banner.
+Durably replace the manifest under `Dir` with `Manifest`, as a single Erlang
+term on one line, preceded by a do-not-edit banner, with
+`bondy_mst_io:write_file_atomic/2`. Its raise on a failed directory fsync is
+returned as `{error, {dir_fsync_failed, Dir, Reason}}`, with the new manifest
+already in place (`bondy_db_manifest_test`). It is written while
+`bondy_namespace_catalog` opens `main` from its `init/1`, through
+`reconcile/3`; an error there degrades the boot, and a raise would stop the
+node.
 """.
 -spec write(Dir :: file:filename_all(), Manifest :: manifest()) ->
     ok | {error, term()}.
 
 write(Dir, Manifest) when is_map(Manifest) ->
-    Path = path(Dir),
-    Tmp = unicode:characters_to_list([Path, ".tmp"]),
     %% `bondy_consult:encode/1` owns the byte encoding of the term (UTF-8,
     %% one line), which is what `file:consult/1` in `read/1` decodes. The
     %% frozen map carries caller-supplied atoms (`db`, `topology_module`,
@@ -366,17 +379,18 @@ write(Dir, Manifest) when is_map(Manifest) ->
         "%% Migration: export -> wipe data dir -> reimport (bondy_export).\n",
         bondy_consult:encode([Manifest])
     ],
-    case file:write_file(Tmp, IOData) of
-        ok ->
-            case file:rename(Tmp, Path) of
-                ok ->
-                    ok;
-                {error, _} = Err ->
-                    _ = file:delete(Tmp),
-                    Err
-            end;
-        {error, _} = Err ->
-            Err
+    try
+        bondy_mst_io:write_file_atomic(path(Dir), IOData)
+    catch
+        error:{dir_fsync_failed, _, _} = Reason -> {error, Reason}
+    end.
+
+%% @private
+%% Synced before it is read, as the node keys its data by it.
+read_durable(Dir) ->
+    case bondy_mst_io:fsync_dir(Dir) of
+        ok -> read(Dir);
+        {error, Reason} -> {error, {dir_fsync_failed, Dir, Reason}}
     end.
 
 %% =============================================================================

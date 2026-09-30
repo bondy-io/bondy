@@ -53,7 +53,7 @@ trigger_invokes_callback() ->
         fun(I) -> Self ! {Ref, I} end
     ),
     Inst = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(Inst),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     bondy_oplog_gc_scheduler:trigger(),
     receive
         {Ref, Inst} -> ok
@@ -70,8 +70,8 @@ trigger_per_running_instance() ->
     ),
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A),
-    {ok, _} = bondy_oplog:start_instance(B),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B),
     bondy_oplog_gc_scheduler:trigger(),
     Got = collect(Ref, 2, 1000),
     ?assertEqual(lists:sort([A, B]), lists:sort(Got)),
@@ -86,8 +86,8 @@ trigger_for_single_instance() ->
     ),
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A),
-    {ok, _} = bondy_oplog:start_instance(B),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B),
     bondy_oplog_gc_scheduler:trigger_for(A),
     receive
         {Ref, A} -> ok
@@ -105,7 +105,7 @@ trigger_for_single_instance() ->
 
 no_trigger_when_unset() ->
     Inst = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(Inst),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
     bondy_oplog_gc_scheduler:trigger(),
     timer:sleep(50),
@@ -121,7 +121,7 @@ trigger_error_does_not_crash() ->
         end
     ),
     Inst = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(Inst),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     bondy_oplog_gc_scheduler:trigger(),
     receive
         {Ref, fired} -> ok
@@ -150,7 +150,7 @@ named_second_scheduler_is_independent() ->
         trigger => fun(I) -> Self ! {RefN, I} end
     }),
     Inst = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(Inst),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     try
         %% Distinct registrations and distinct child ids — two children under
         %% one supervisor must not collide.
@@ -224,7 +224,7 @@ capped_ticks_rotate_across_all_instances() ->
         trigger => fun(I) -> Self ! {Ref, I} end
     }),
     Instances = [mk_inst() || _ <- lists:seq(1, 6)],
-    [{ok, _} = bondy_oplog:start_instance(I) || I <- Instances],
+    [{ok, _} = bondy_oplog_test_projection:start_instance(I) || I <- Instances],
     try
         %% Each trigger is one tick; the sleep lets the (instant)
         %% workers exit so every tick starts with zero in flight —

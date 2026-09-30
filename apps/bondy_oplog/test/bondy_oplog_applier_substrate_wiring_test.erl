@@ -56,11 +56,9 @@ publish_default_is_noop() ->
     Id = mk_id(),
     NS = ns_of(Id),
     {ok, SubRef} = bondy_oplog_core:subscribe(NS, all),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register
-    }),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
-    {ok, {set, <<"v">>, 1}} = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(no_message, recv_one(50)),
     ok = bondy_oplog_core:unsubscribe(SubRef),
     ok = bondy_oplog:stop_instance(Id).
@@ -73,8 +71,7 @@ publish_forwards_events_to_subscribers() ->
         Op = bondy_oplog_event:op(E),
         {derived_key_of(Op), Op}
     end,
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         applier => #{
             publish_ns => NS,
             publish_fun => Fun
@@ -82,9 +79,9 @@ publish_forwards_events_to_subscribers() ->
     }),
     _ = bondy_oplog:append(Id, {set, 1, <<"alpha">>}),
     _ = bondy_oplog:append(Id, {set, 2, <<"beta">>}),
-    %% Drain to make the projection visible — also forces apply_batch
-    %% to have run for both events and therefore publish to have fired.
-    {ok, {set, <<"beta">>, 2}} = bondy_oplog:projection(Id),
+    %% Drain so `apply_batch` has run for both events and therefore
+    %% publish has fired.
+    ok = bondy_oplog_test_projection:drain(Id),
     Msgs = collect_messages(2, 1000),
     [{NS_A, K_A, _Hlc_A, Op_A}, {NS_B, K_B, _Hlc_B, Op_B}] = Msgs,
     ?assertEqual(NS, NS_A),
@@ -107,8 +104,7 @@ publish_skip_suppresses_delivery() ->
             {clear, _} -> skip
         end
     end,
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         applier => #{
             publish_ns => NS,
             publish_fun => Fun
@@ -117,7 +113,7 @@ publish_skip_suppresses_delivery() ->
     _ = bondy_oplog:append(Id, {set, 1, <<"a">>}),
     _ = bondy_oplog:append(Id, {clear, 2}),
     _ = bondy_oplog:append(Id, {set, 3, <<"b">>}),
-    {ok, _} = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     Msgs = collect_messages(2, 1000),
     Ops = [Op || {_NS, _K, _H, Op} <- Msgs],
     ?assertEqual([{set, 1, <<"a">>}, {set, 3, <<"b">>}], Ops),
@@ -135,8 +131,7 @@ publish_fun_raise_is_tolerated() ->
             Op -> {<<"k">>, Op}
         end
     end,
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         applier => #{
             publish_ns => NS,
             publish_fun => Fun
@@ -145,8 +140,8 @@ publish_fun_raise_is_tolerated() ->
     _ = bondy_oplog:append(Id, {set, 1, <<"a">>}),
     _ = bondy_oplog:append(Id, {set, 2, <<"b">>}),
     _ = bondy_oplog:append(Id, {set, 3, <<"c">>}),
-    %% Projection still works — the fold side is untouched.
-    {ok, {set, <<"c">>, 3}} = bondy_oplog:projection(Id),
+    %% The applier keeps draining past the raise.
+    ok = bondy_oplog_test_projection:drain(Id),
     Msgs = collect_messages(2, 1000),
     Ops = [Op || {_NS, _K, _H, Op} <- Msgs],
     ?assertEqual([{set, 1, <<"a">>}, {set, 3, <<"c">>}], Ops),
@@ -157,8 +152,7 @@ publish_partial_opts_are_rejected() ->
     %% `publish_ns` without `publish_fun` is rejected at applier init.
     Id = mk_id(),
     NS = ns_of(Id),
-    Result = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    Result = bondy_oplog_test_projection:start_instance(Id, #{
         applier => #{publish_ns => NS}
     }),
     %% The dynamic supervisor returns the start_link error; here we
@@ -181,11 +175,9 @@ ae_default_is_noop() ->
     NS = ns_of(Id),
     ok = register_shard(NS, 0),
     Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register
-    }),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
-    {ok, _} = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     %% Allow a commit boundary; default `commit_every = 64` means a
     %% single append doesn't auto-commit, but `stop_instance` drains
     %% via `end_of_log` → `commit_now`.
@@ -199,8 +191,7 @@ ae_targets_bump_after_commit() ->
     NS = ns_of(Id),
     ok = register_shard(NS, 0),
     Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         applier => #{
             ae_targets => [{NS, primary, 0}],
             %% Force a commit per event so the bump fires inside the
@@ -209,7 +200,7 @@ ae_targets_bump_after_commit() ->
         }
     }),
     _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
-    {ok, _} = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     After = wait_for_ae_advance(NS, primary, 0, Before, 1000),
     ?assert(After > Before),
     ok = bondy_oplog:stop_instance(Id),
@@ -222,15 +213,14 @@ ae_targets_share_now_across_one_commit() ->
     NS = ns_of(Id),
     ok = register_shard(NS, primary, 0),
     ok = register_shard(NS, by_name, 0),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         applier => #{
             ae_targets => [{NS, primary, 0}, {NS, by_name, 0}],
             commit_every => 1
         }
     }),
     _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
-    {ok, _} = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     _ = wait_for_ae_advance(NS, primary, 0, sentinel(), 1000),
     A = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
     B = bondy_oplog_core_registry:last_ae_at(NS, by_name, 0),
@@ -248,8 +238,7 @@ ae_targets_not_found_is_tolerated() ->
     %% counted as `not_found` in telemetry but otherwise leave the
     %% commit path intact.
     ok = register_shard(NS, primary, 0),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         applier => #{
             ae_targets =>
                 [
@@ -260,7 +249,7 @@ ae_targets_not_found_is_tolerated() ->
         }
     }),
     _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
-    {ok, _} = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     _ = wait_for_ae_advance(NS, primary, 0, sentinel(), 1000),
     ?assert(bondy_oplog_core_registry:last_ae_at(NS, primary, 0) > sentinel()),
     ?assertEqual(

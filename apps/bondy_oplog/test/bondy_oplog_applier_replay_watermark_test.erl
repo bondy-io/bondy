@@ -55,7 +55,7 @@ cold_replay_full_fold() ->
     SubRef = attach_telemetry(),
     try
         ok = append_n(Id, <<"k">>, 3),
-        ok = barrier(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         %% Force a fresh replay: commit_now/1 already advanced the
         %% watermark to the post-install root, so we have to bypass
         %% that by clobbering it via a dummy MST root - but since the
@@ -65,11 +65,11 @@ cold_replay_full_fold() ->
         %% wired in this test harness, so we exercise the cold-replay
         %% path through a different lens: by triggering an explicit
         %% replay BEFORE any commit has advanced the watermark. The
-        %% `barrier(Id)` above ensures the cast queue is drained but
-        %% leaves the instance free to apply more events; the explicit
+        %% drain above empties the cast queue but leaves the instance
+        %% free to apply more events; the explicit
         %% replay observes whatever root is live.
         ok = bondy_oplog_applier:replay_cell_events(Applier),
-        ok = barrier(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         Events = drain_telemetry(SubRef),
         %% At least one replay event fired and the projection holds
         %% the latest write.
@@ -87,7 +87,7 @@ second_replay_short_circuits_when_root_unchanged() ->
     %% and short-circuits with `outcome => no_change` and zero pairs.
     {Id, NS, Cache, Proj, Applier} = setup_instance(),
     ok = append_n(Id, <<"alice">>, 2),
-    ok = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     %% Drain any startup telemetry first so we only see replay events
     %% emitted from now on.
     SubRef = attach_telemetry(),
@@ -98,9 +98,9 @@ second_replay_short_circuits_when_root_unchanged() ->
         %% to be a no_change because no MST mutation happened between
         %% the two casts.
         ok = bondy_oplog_applier:replay_cell_events(Applier),
-        ok = barrier(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         ok = bondy_oplog_applier:replay_cell_events(Applier),
-        ok = barrier(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         Events = drain_telemetry(SubRef),
         %% At least one of the captured replay events must report
         %% `outcome => no_change` — the no-mutation case.
@@ -135,19 +135,19 @@ incremental_replay_skips_already_folded_events() ->
     %% mailbox), then run an explicit replay so `last_replayed_root`
     %% is anchored at the post-batch MST root.
     ok = append_n(Id, <<"k">>, 3),
-    ok = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ok = bondy_oplog_applier:replay_cell_events(Applier),
-    ok = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     SubRef = attach_telemetry(),
     try
         %% Second batch (2 more events). These shift the MST root.
         ok = append_one(Id, <<"k">>, 4, <<"v4">>),
         ok = append_one(Id, <<"k">>, 5, <<"v5">>),
-        ok = barrier(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         %% Replay — should fold at most 2 new pairs (the just-appended
         %% events) in the diff, NOT all 5.
         ok = bondy_oplog_applier:replay_cell_events(Applier),
-        ok = barrier(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         Events = drain_telemetry(SubRef),
         Applied = [
             E
@@ -190,7 +190,7 @@ sync_replay_blocks_until_projection_updated() ->
     {Id, NS, Cache, Proj, Applier} = setup_instance(),
     try
         ok = append_n(Id, <<"k">>, 4),
-        ok = barrier(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         ok = bondy_oplog_applier:replay_cell_events_sync(Applier),
         %% No `barrier/1` here — the sync call is the barrier.
         {<<"v4">>, 4} =
@@ -231,7 +231,6 @@ setup_instance() ->
     NS = ns_of(Id),
     {Cache, Proj} = register_shard(NS, primary, 0),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }
@@ -245,13 +244,6 @@ teardown_instance(Id, NS, Cache, Proj) ->
     ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
     ok = bondy_oplog_projection_ets:close(Proj),
     ok = bondy_oplog_cache_ets:close(Cache),
-    ok.
-
-barrier(Id) ->
-    %% Sync barrier through the applier mailbox so prior casts have
-    %% been processed before the next assertion. The projection value
-    %% is ignored — we care only about the synchronisation effect.
-    _ = bondy_oplog:projection(Id),
     ok.
 
 append_n(_Id, _Key, 0) ->

@@ -53,7 +53,6 @@ load_regulation.router.flow_pool.capacity   = 100000
 ## --- registry RIB: write-only architecture, no mode ladder --------------------
 ## Routing is unconditional on summary stubs; full entries never replicate.
 registry.rib.check_interval                 = 5m
-## registry.rib.damping left at default (0 = write-through).
 
 ## workload (clients must also announce the features in HELLO) ------------------
 

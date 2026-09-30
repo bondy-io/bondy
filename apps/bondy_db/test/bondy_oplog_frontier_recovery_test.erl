@@ -28,7 +28,7 @@
 %% event in the MST applied. That reconstructs the number and loses the data:
 %% the MST records receipt, so an event received and never materialised is
 %% claimed,
-%% and the claim is what `watermark_door/3` and `capped_truncation_point/2`
+%% and the claim is what `watermark_door/2` and `capped_truncation_point/2`
 %% check before truncating it. See `_design/applied_frontier.md` and
 %% `bondy_oplog_frontier_fold_gap_test`.
 %% =============================================================================

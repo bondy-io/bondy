@@ -41,25 +41,12 @@ line, for human debuggability:
 The format mirrors the WAL manifest (`bondy_oplog_wal_manifest`).
 Forward-compat: unknown fields parsed from disk are tolerated
 and dropped; missing required fields produce a typed parse
-error. The fault-injection seam (`bondy_mst_io:rename/2`,
-`bondy_mst_io:fsync_dir/1`) is reused so crash tests can
-inject failure at the rename / dir-sync steps without re-mocking
-`prim_file`.
+error.
 
-## Durability sequence (write/2)
+## Durability (write/2)
 
-Identical to the WAL manifest:
-
-1. Encode the manifest to a binary.
-2. Write to `manifest.tmp`, then `prim_file:datasync` the fd.
-3. `bondy_mst_io:rename(\"manifest.tmp\", \"manifest\")` —
-   atomic on POSIX same-filesystem.
-4. `bondy_mst_io:fsync_dir/1` so the dirent change
-   survives a power loss on ext4 / xfs.
-
-A failure at any step leaves the prior manifest intact; the
-caller's pack-store gen_server holds the manifest in memory and
-will retry on the next state transition.
+`write/2` replaces the manifest with `bondy_mst_io:write_file_atomic/2` and
+has its error contract.
 
 ## Field semantics
 
@@ -142,7 +129,6 @@ read / write functions touch the filesystem.
 
 %% File paths
 -export([path/1]).
--export([tmp_path/1]).
 
 %% =============================================================================
 %% API — lifecycle
@@ -220,34 +206,12 @@ read(Dir) ->
 unreadable(Path, Reason) ->
     {error, {unreadable, Path, Reason}}.
 
-?DOC("""
-Atomically writes `Manifest` to `Dir`.
-
-Implements the four-step durability sequence from the module
-docstring. Returns `ok` or `{error, Reason}`; on error the prior
-on-disk manifest (if any) is left intact and the tmp file is
-cleaned up.
-""").
+?DOC("Replaces the manifest in `Dir` with `Manifest`; see the moduledoc.").
 -spec write(Dir :: file:filename_all(), t()) ->
     ok | {error, term()}.
 
 write(Dir, #?MODULE{} = Manifest) ->
-    TmpPath = tmp_path(Dir),
-    FinalPath = path(Dir),
-    Bin = encode(Manifest),
-    case write_and_sync(TmpPath, Bin) of
-        ok ->
-            case bondy_mst_io:rename(TmpPath, FinalPath) of
-                ok ->
-                    bondy_mst_io:fsync_dir(Dir);
-                {error, _} = E ->
-                    _ = prim_file:delete(TmpPath),
-                    E
-            end;
-        {error, _} = E ->
-            _ = prim_file:delete(TmpPath),
-            E
-    end.
+    bondy_mst_io:write_file_atomic(path(Dir), encode(Manifest)).
 
 %% =============================================================================
 %% API — pure codec
@@ -467,10 +431,6 @@ with_last_compacted_at(#?MODULE{} = M, T) when is_integer(T), T >= 0 ->
 path(Dir) ->
     filename:join(Dir, ?BONDY_MST_PACK_MANIFEST_FILENAME).
 
--spec tmp_path(file:filename_all()) -> file:filename_all().
-tmp_path(Dir) ->
-    filename:join(Dir, ?BONDY_MST_PACK_MANIFEST_TMP_FILENAME).
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -556,24 +516,3 @@ validate_deleted_through(V) -> throw({error, {bad_deleted_through, V}}).
 validate_incoming_pack(present) -> ok;
 validate_incoming_pack(absent) -> ok;
 validate_incoming_pack(V) -> throw({error, {bad_incoming_pack, V}}).
-
-%% @private
-%% Mirror of `bondy_oplog_wal_manifest:write_and_sync/2`: open in
-%% raw binary write mode, write the body, datasync via the
-%% shared seam, close.
-write_and_sync(TmpPath, Bin) ->
-    case prim_file:open(TmpPath, [write, raw, binary]) of
-        {ok, Fd} ->
-            try
-                case prim_file:write(Fd, Bin) of
-                    ok ->
-                        bondy_mst_io:datasync(Fd);
-                    {error, _} = E ->
-                        E
-                end
-            after
-                _ = prim_file:close(Fd)
-            end;
-        {error, _} = E ->
-            E
-    end.

@@ -41,8 +41,8 @@ sync_test_() ->
 pull_converges_two_replicas() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     %% Distinct events on each side
     [bondy_oplog:append(A, {a, N}) || N <- lists:seq(1, 10)],
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 5)],
@@ -63,8 +63,8 @@ pull_converges_two_replicas() ->
 pull_is_idempotent() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 20)],
     {ok, R1} = bondy_oplog:sync(A, B),
     {ok, R2} = bondy_oplog:sync(A, B),
@@ -74,8 +74,8 @@ pull_is_idempotent() ->
 bidirectional_sync_full_convergence() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     [bondy_oplog:append(A, {a, N}) || N <- lists:seq(1, 10)],
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 10)],
     {ok, _} = bondy_oplog:sync(A, B),
@@ -91,8 +91,8 @@ bidirectional_sync_full_convergence() ->
 asymmetric_loads_converge() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     [bondy_oplog:append(A, {a, N}) || N <- lists:seq(1, 100)],
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 200)],
     {ok, _} = bondy_oplog:sync(A, B),
@@ -107,8 +107,8 @@ asymmetric_loads_converge() ->
 sync_records_peer_state() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 5)],
     {ok, FinalRoot} = bondy_oplog:sync(A, B),
     bondy_oplog_peer_state:sync(),
@@ -129,7 +129,9 @@ multi_instance_independence() ->
     B1 = mk_inst(),
     B2 = mk_inst(),
     [
-        {ok, _} = bondy_oplog:start_instance(I, originated_opts())
+        {ok, _} = bondy_oplog_test_projection:start_instance(
+            I, originated_opts()
+        )
      || I <- [A1, A2, B1, B2]
     ],
     [bondy_oplog:append(B1, {b1, N}) || N <- lists:seq(1, 5)],
@@ -142,8 +144,8 @@ multi_instance_independence() ->
 pull_when_peer_empty_is_noop() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     [bondy_oplog:append(A, X) || X <- [a, b, c]],
     ok = bondy_oplog:await_apply(A),
     R0 = bondy_oplog:root_hash(A),
@@ -154,8 +156,8 @@ pull_when_peer_empty_is_noop() ->
 pull_when_local_empty_pulls_everything() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 50)],
     {ok, _} = bondy_oplog:sync(A, B),
     ?assertEqual(50, bondy_oplog:size(A)),
@@ -169,8 +171,8 @@ pull_when_local_empty_pulls_everything() ->
 missing_set_excludes_locally_present_pages() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     [bondy_oplog:append(B, X) || X <- lists:seq(1, 30)],
     ok = bondy_oplog:await_apply(B),
     RootB = bondy_oplog:root_hash(B),

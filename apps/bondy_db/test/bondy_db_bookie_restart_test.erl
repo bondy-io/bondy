@@ -6,7 +6,7 @@
 %% Crash recovery for the shared (keyed) leveled Bookies — the plum_db
 %% partition-store model adopted for bondy_db:
 %%
-%%   1. A keyed Bookie is a `permanent` child of its key's supervisor under
+%%   1. A keyed Bookie is a `transient` child of its key's supervisor under
 %%      `bondy_db_leveled_sup`: a kill is followed by an in-place restart
 %%      (leveled replays its journal, so every acked write survives).
 %%   2. Handles route by `{pt, PTKey}` REFERENCE, resolved per call through
@@ -175,7 +175,7 @@ restart_transparent({Db, Sup, _Dir}) ->
     ?assert(is_process_alive(OldPid)),
     exit(OldPid, kill),
 
-    %% The supervisor restarts it (permanent child); the restart re-registers
+    %% A kill is a crash, so the supervisor restarts it; the restart re-registers
     %% the NEW pid under the SAME persistent_term key.
     NewPid = await_new_registration(PTKey, OldPid, 200),
     ?assert(is_process_alive(NewPid)),
@@ -302,14 +302,20 @@ fused_restart_keeps_ae_targets({Db, _Sup, _Dir}) ->
     ?assertEqual(Id, maps:get(0, maps:get(instance_ids, T2))),
     ?assert(bondy_oplog_registry:fused(Id)),
     Writer = bondy_oplog_instance:whereis(Id),
+    OldWal = bondy_oplog_registry:wal_pid(Id),
     exit(Writer, kill),
+    %% The instance restarts before its WAL writer, and a write while the WAL
+    %% is mid-restart is refused with `wal_unavailable`.
     ok = wait_until(
         fun() ->
             P = bondy_oplog_instance:whereis(Id),
-            is_pid(P) andalso P =/= Writer andalso is_process_alive(P)
+            W = bondy_oplog_registry:wal_pid(Id),
+            is_pid(P) andalso P =/= Writer andalso is_process_alive(P) andalso
+                is_pid(W) andalso W =/= OldWal andalso is_process_alive(W)
         end,
         200
     ),
+    _ = sys:get_state(bondy_oplog_registry:wal_pid(Id)),
     assert_ae_targets_kept(T1, T2, Id).
 
 %% =============================================================================

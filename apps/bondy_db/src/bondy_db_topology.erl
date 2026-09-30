@@ -298,11 +298,20 @@ instances.
 """.
 -callback instances_strategy() -> per_table_shard | per_shard.
 
+-doc """
+**Optional.** The process whose exit destroys a table's projection, for a
+topology whose tables are held by a process it owns
+(`bondy_db_topology_memory`). A topology that omits it keeps projections that
+outlive any one of its processes.
+""".
+-callback storage_owner(TableState :: table_state()) -> pid().
+
 -optional_callbacks([
-    provision_cache/5, release_cache/2, instances_strategy/0
+    provision_cache/5, release_cache/2, instances_strategy/0, storage_owner/1
 ]).
 
 -export([instances_strategy/1]).
+-export([storage_owner/2]).
 -export([start_shards/2]).
 
 %% =============================================================================
@@ -322,6 +331,18 @@ instances_strategy(Module) when is_atom(Module) ->
     case erlang:function_exported(Module, instances_strategy, 0) of
         true -> Module:instances_strategy();
         false -> per_table_shard
+    end.
+
+-doc """
+`Module:storage_owner/1`, or `undefined` for a topology that omits the
+optional callback.
+""".
+-spec storage_owner(module(), table_state()) -> pid() | undefined.
+
+storage_owner(Module, TableState) when is_atom(Module) ->
+    case erlang:function_exported(Module, storage_owner, 1) of
+        true -> Module:storage_owner(TableState);
+        false -> undefined
     end.
 
 -doc """

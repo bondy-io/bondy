@@ -112,7 +112,6 @@ ephemeral instances and covered by anti-entropy in normal operation.
 
 -record(state, {
     instance_id :: binary(),
-    origin :: bondy_oplog_origin:t(),
     tab :: ets:tid(),
     atomics :: atomics:atomics_ref(),
     max_live_events :: pos_integer(),
@@ -246,7 +245,6 @@ init({InstanceId, Opts}) ->
     ]),
     ARef = atomics:new(?A_SLOTS, [{signed, false}]),
     MaxLive = maps:get(max_live_events, Opts, ?DEFAULT_MAX_LIVE_EVENTS),
-    Origin = maps:get(origin, Opts, bondy_oplog_origin:default()),
     %% Publish our pid (disk-WAL parity: `ensure_wal_pid/1`, the idle-waiter's
     %% `await_durable`, and the fused reader all resolve this process) AND the
     %% caller-side append handle the fast path uses.
@@ -261,7 +259,6 @@ init({InstanceId, Opts}) ->
     }),
     {ok, #state{
         instance_id = InstanceId,
-        origin = Origin,
         tab = Tab,
         atomics = ARef,
         max_live_events = MaxLive

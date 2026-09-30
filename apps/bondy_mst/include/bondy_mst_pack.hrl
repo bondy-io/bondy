@@ -67,7 +67,6 @@
 
 -define(BONDY_MST_PACK_MANIFEST_VERSION, 1).
 -define(BONDY_MST_PACK_MANIFEST_FILENAME, "manifest").
--define(BONDY_MST_PACK_MANIFEST_TMP_FILENAME, "manifest.tmp").
 
 %% -----------------------------------------------------------------------------
 %% Per-instance directory layout filenames (§2 of MST_PAGE_STORE_DESIGN.md)
@@ -86,7 +85,6 @@
 -define(BONDY_MST_PACK_TOMBSTONES_HEADER_BYTES, 16).
 -define(BONDY_MST_PACK_TOMBSTONES_TRAILER_BYTES, 32).
 -define(BONDY_MST_PACK_TOMBSTONES_FILENAME, "tombstones").
--define(BONDY_MST_PACK_TOMBSTONES_TMP_FILENAME, "tombstones.tmp").
 
 %% -----------------------------------------------------------------------------
 %% Production defaults for open-time options

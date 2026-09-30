@@ -51,7 +51,11 @@ manifest_test_() ->
         fun diff_table_attr_change/1,
         fun diff_table_added_removed/1,
         fun hash_probe_skipped_when_absent_on_disk/1,
-        fun hash_probe_divergence_detected/1
+        fun hash_probe_divergence_detected/1,
+        fun write_is_durable_before_it_is_visible/1,
+        fun failed_sync_keeps_the_prior_manifest/1,
+        fun failed_dir_sync_reports_a_visible_manifest/1,
+        fun reconcile_refuses_an_unsyncable_directory/1
     ]}.
 
 setup() ->
@@ -104,6 +108,74 @@ write_read_survives_non_ascii_atoms_test_() ->
         end}
      || {Label, Override} <- Cases
     ].
+
+%% The order a power loss after `write/2` depends on: bytes synced, then the
+%% rename, then the directory synced. Checks only the calls on the seams.
+write_is_durable_before_it_is_visible(Dir) ->
+    fun() ->
+        Manifest = bondy_db_manifest:build(configured()),
+        Path = bondy_db_manifest:path(Dir),
+        Calls = with_io_fault_lock(fun() ->
+            ok = bondy_db_manifest:write(Dir, Manifest),
+            [
+                {F, A}
+             || {_, {bondy_mst_io, F, A}, _} <- meck:history(bondy_mst_io)
+            ]
+        end),
+        ?assertMatch(
+            [{datasync, [_]}, {rename, [_, Path]}, {fsync_dir, [Dir]}],
+            [
+                C
+             || {F, _} = C <- Calls,
+                lists:member(F, [datasync, rename, fsync_dir])
+            ]
+        ),
+        ?assertEqual({ok, Manifest}, bondy_db_manifest:read(Dir))
+    end.
+
+failed_sync_keeps_the_prior_manifest(Dir) ->
+    fun() ->
+        Old = bondy_db_manifest:build(configured()),
+        ok = bondy_db_manifest:write(Dir, Old),
+        New = bondy_db_manifest:build((configured())#{shard_count => 32}),
+        Result = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, datasync, fun(_) -> {error, eio} end),
+            bondy_db_manifest:write(Dir, New)
+        end),
+        ?assertEqual({error, eio}, Result),
+        ?assertEqual({ok, Old}, bondy_db_manifest:read(Dir)),
+        ?assertEqual([], filelib:wildcard(filename:join(Dir, "*.tmp")))
+    end.
+
+%% The directory fsync comes after the rename, so its failure is reported while
+%% the new manifest is already the one on disk.
+failed_dir_sync_reports_a_visible_manifest(Dir) ->
+    fun() ->
+        Old = bondy_db_manifest:build(configured()),
+        ok = bondy_db_manifest:write(Dir, Old),
+        New = bondy_db_manifest:build((configured())#{shard_count => 32}),
+        Result = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            bondy_db_manifest:write(Dir, New)
+        end),
+        ?assertEqual({error, {dir_fsync_failed, Dir, eio}}, Result),
+        ?assertEqual({ok, New}, bondy_db_manifest:read(Dir)),
+        ?assertEqual([], filelib:wildcard(filename:join(Dir, "*.tmp")))
+    end.
+
+%% The node keys its data by the manifest it reads, so an existing manifest
+%% is read only once its directory has been synced.
+reconcile_refuses_an_unsyncable_directory(Dir) ->
+    fun() ->
+        ok = bondy_db_manifest:write(
+            Dir, bondy_db_manifest:build(configured())
+        ),
+        Result = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            bondy_db_manifest:reconcile(Dir, configured(), warn)
+        end),
+        ?assertMatch({error, {dir_fsync_failed, _, eio}}, Result)
+    end.
 
 genesis_writes_and_freezes(Dir) ->
     fun() ->
@@ -404,3 +476,19 @@ table_removal_is_never_adopted(Dir) ->
         {ok, #{frozen := Frozen}} = bondy_db_manifest:read(Dir),
         ?assert(maps:is_key(bondy_realm, maps:get(tables, Frozen)))
     end.
+
+%% The node-wide lock every suite that mocks `bondy_mst_io` takes.
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
+    ).

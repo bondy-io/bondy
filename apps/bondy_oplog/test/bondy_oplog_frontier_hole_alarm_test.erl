@@ -156,7 +156,7 @@ fresh() ->
         "hole_alarm_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     {Id, bondy_oplog_origin:new()}.
 
 %% SASL's own `alarm_handler` answers `get_alarms/0` with the raw term the

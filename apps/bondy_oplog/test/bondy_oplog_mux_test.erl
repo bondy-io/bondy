@@ -27,14 +27,6 @@ dir_routes_by_key_test() ->
 empty_dir_resolves_undefined_test() ->
     ?assertEqual(undefined, bondy_oplog_mux:resolve(bondy_oplog_mux:dir(), k)).
 
-put_upgrades_seedless_single_test() ->
-    %% A seedless single grows into a directory on the first put.
-    M0 = bondy_oplog_mux:single(undefined),
-    M1 = bondy_oplog_mux:put(M0, <<"a">>, 1),
-    M2 = bondy_oplog_mux:put(M1, <<"b">>, 2),
-    ?assertEqual(1, bondy_oplog_mux:resolve(M2, <<"a">>)),
-    ?assertEqual(2, bondy_oplog_mux:resolve(M2, <<"b">>)).
-
 put_into_dir_test() ->
     M = bondy_oplog_mux:put(bondy_oplog_mux:dir([{<<"a">>, 1}]), <<"b">>, 2),
     ?assertEqual(1, bondy_oplog_mux:resolve(M, <<"a">>)),

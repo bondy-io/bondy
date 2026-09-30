@@ -118,7 +118,6 @@ setup_instance() ->
         fold_module => lww_register
     }),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }

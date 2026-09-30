@@ -46,6 +46,7 @@
 %% REGISTRY
 %% The RIB (Routing Information Base) summary tables — the replicated
 %% routing cells: one cell per (Realm, MatchPolicy, Uri, Node), written
-%% only by Node. Maintained by bondy_registry_rib.
--define(BONDY_DB_REGISTRATION_RIB_TAB, bondy_registration_rib).
--define(BONDY_DB_SUBSCRIPTION_RIB_TAB, bondy_subscription_rib).
+%% only by Node. Maintained by bondy_registry_rib. A cell holds Node's latest
+%% reading of its live local count.
+-define(BONDY_DB_REGISTRATION_RIB_TAB, bondy_rib_registrations).
+-define(BONDY_DB_SUBSCRIPTION_RIB_TAB, bondy_rib_subscriptions).

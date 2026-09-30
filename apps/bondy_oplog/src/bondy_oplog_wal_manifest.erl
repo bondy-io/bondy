@@ -40,15 +40,8 @@ the integrity scrubber. Defaults to `[]`. Entries are added by
 `bondy_oplog_wal:clear_segment_alert/2`. The list is read as
 `[]` if the term is absent from the manifest (forward-compat).
 
-Writes follow the tmp-then-rename pattern:
-
-1. Write `manifest.tmp` with the new content.
-2. `datasync` the temp file.
-3. `rename(manifest.tmp, manifest)` — atomic on POSIX same-filesystem.
-4. `datasync` the enclosing directory — required on ext4/xfs.
-
-An interrupted rename leaves either the old or the new manifest; never
-a partial mix.
+`write/2` replaces the manifest with `bondy_mst_io:write_file_atomic/2` and
+has its error contract.
 """).
 
 -record(?MODULE, {
@@ -160,36 +153,14 @@ read(Dir) ->
             E
     end.
 
-?DOC("""
-Atomically writes `Manifest` to `Dir`.
-
-Implements the four-step durability sequence described in the module
-docstring. Returns `ok` or `{error, Reason}`.
-
-Errors at any step short-circuit the sequence and leave the prior
-on-disk manifest intact (because the rename has not yet happened).
-""").
+?DOC("Replaces the manifest in `Dir` with `Manifest`; see the moduledoc.").
 -spec write(Dir :: file:filename_all(), t()) -> ok | {error, term()}.
 
 write(Dir, #?MODULE{} = Manifest) ->
-    TmpPath = filename:join(Dir, ?BONDY_OPLOG_WAL_MANIFEST_TMP_FILENAME),
-    FinalPath = filename:join(Dir, ?BONDY_OPLOG_WAL_MANIFEST_FILENAME),
-    Bin = format(Manifest),
-    case write_and_sync(TmpPath, Bin) of
-        ok ->
-            case bondy_mst_io:rename(TmpPath, FinalPath) of
-                ok ->
-                    bondy_mst_io:fsync_dir(Dir);
-                {error, _} = E ->
-                    %% Leave the old manifest intact; remove the tmp
-                    %% file so retries don't see a stale dangling tmp.
-                    _ = prim_file:delete(TmpPath),
-                    E
-            end;
-        {error, _} = E ->
-            _ = prim_file:delete(TmpPath),
-            E
-    end.
+    bondy_mst_io:write_file_atomic(
+        filename:join(Dir, ?BONDY_OPLOG_WAL_MANIFEST_FILENAME),
+        format(Manifest)
+    ).
 
 ?DOC("Returns the InstanceId of `Manifest`.").
 -spec instance_id(t()) -> instance_id().
@@ -464,23 +435,3 @@ format(#?MODULE{
         {created_at, CreatedAt},
         {last_rotated_at, LastRotatedAt}
     ]).
-
-%% @private
-write_and_sync(TmpPath, Bin) ->
-    case prim_file:open(TmpPath, [write, raw, binary]) of
-        {ok, Fd} ->
-            Res =
-                case prim_file:write(Fd, Bin) of
-                    ok ->
-                        case bondy_mst_io:datasync(Fd) of
-                            ok -> ok;
-                            {error, _} = E1 -> E1
-                        end;
-                    {error, _} = E2 ->
-                        E2
-                end,
-            ok = prim_file:close(Fd),
-            Res;
-        {error, _} = E ->
-            E
-    end.

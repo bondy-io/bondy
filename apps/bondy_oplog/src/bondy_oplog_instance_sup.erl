@@ -88,7 +88,8 @@ stay under `SupPid`; the caller stops it. The error is
 
 start_children(SupPid, InstanceId, Opts0) when is_pid(SupPid), is_map(Opts0) ->
     maybe
-        {ok, Opts} ?= resolve_origin_opt(InstanceId, Opts0),
+        Opts1 = Opts0#{wal_backend => wal_backend(Opts0)},
+        {ok, Opts} ?= resolve_origin_opt(InstanceId, Opts1),
         start_children(SupPid, child_specs(InstanceId, Opts))
     end.
 
@@ -288,8 +289,8 @@ wal_opts(InstanceId, Opts) ->
     ),
     %% `origin` is pre-populated by `resolve_origin_opt/2` in
     %% `start_children/3` so the WAL writer and the instance gen_server see
-    %% the same value. The `default/0` fallback here only covers callers that
-    %% bypass the supervisor (tests building wal_opts directly).
+    %% the same value. The `default/0` fallback covers callers that bypass the
+    %% supervisor, and the in-memory WAL, which does not read it.
     Origin = maps:get(origin, Opts, bondy_oplog_origin:default()),
     Dir = wal_base_dir(InstanceId, Opts),
     Base0#{dir => Dir, origin => Origin}.
@@ -371,7 +372,11 @@ scrubber_opts(InstanceId, Opts) ->
 %%   1. Caller-provided `origin` wins.
 %%   2. Otherwise, if `storage_path` is set, load (or create + persist)
 %%      the origin under that path so it survives BEAM restarts.
-%%   3. Otherwise, fall back to the per-VM ephemeral default.
+%%   3. Otherwise, with an in-memory WAL, none: the instance gen_server is
+%%      then the only minter and its state begins at its `init/1`, so it
+%%      takes a fresh origin there, on every start and every restart
+%%      (`bondy_oplog_instance_sup_origin_test`).
+%%   4. Otherwise, the per-VM default, which the disk WAL's segments carry.
 %%
 %% The on-disk path is `<storage_path-for-instance>/origin` (i.e.,
 %% alongside the `wal/` subdir, not inside it), so the WAL recovery's
@@ -382,6 +387,8 @@ resolve_origin_opt(InstanceId, Opts) ->
             {ok, Opts};
         false ->
             case origin_persist_path(InstanceId, Opts) of
+                undefined when map_get(wal_backend, Opts) =:= mem ->
+                    {ok, Opts};
                 undefined ->
                     {ok, Opts#{origin => bondy_oplog_origin:default()}};
                 Path ->

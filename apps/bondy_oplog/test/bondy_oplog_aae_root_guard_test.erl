@@ -160,7 +160,7 @@ dangling_root_not_advertised(Dir) ->
 %% only once the gap fills.
 %%
 %% This is what keeps the applied frontier an honest witness. The frontier is
-%% a per-origin MAXIMUM, and `bondy_oplog_instance:watermark_door/3` uses it
+%% a per-origin MAXIMUM, and `bondy_oplog_instance:watermark_door/2` uses it
 %% to decide which merged tree entries the projection has already folded and
 %% may therefore be truncated. A maximum cannot represent a hole, so a
 %% frontier that ran ahead of an unseen seq would license the door to drop
@@ -235,7 +235,6 @@ hold_keeps_frontier_off_an_unseen_prefix(Dir) ->
 start_opts(NS, Dir) ->
     #{
         origin => bondy_oplog_origin:new(),
-        fold_module => lww_register,
         backend => bondy_mst_pack_store,
         storage_path => unicode:characters_to_binary(Dir),
         seed => true,
@@ -292,7 +291,7 @@ append_batch(InstanceId, I, Batch) ->
             _ = bondy_oplog:append(
                 InstanceId, {cell_apply, ?B, Key, {set, Hlc, Key}}
             ),
-            _ = bondy_oplog:projection(InstanceId)
+            ok = bondy_oplog_test_projection:drain(InstanceId)
         end,
         lists:seq(1, Batch)
     ).

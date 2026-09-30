@@ -4,8 +4,8 @@
 %% =============================================================================
 
 %% Whitebox eunit for `bondy_registry_rib`'s entry-add/remove write path — the
-%% per-field CRDT deltas `on_entry_added/3`/`on_entry_removed/3` apply
-%% directly from the caller, with no partition dispatch or recompute step.
+%% readings `on_entry_added/3`/`on_entry_removed/3` write directly from the
+%% caller, with no partition dispatch or recompute step.
 %% Driven with real `bondy_registry_entry:t()` records against a provisioned
 %% catalogue. The hook-driven end-to-end path (register/unregister → cell) is
 %% covered in `bondy_registry_SUITE`.
@@ -36,15 +36,25 @@ write_path_test_() ->
                 {"a redundant removal does not decrement twice", fun() ->
                     redundant_removal(Tab)
                 end}},
+            {timeout, 60,
+                {"a redundant add counts the entry once", fun() ->
+                    redundant_add(Tab)
+                end}},
+            {timeout, 60,
+                {"concurrent writers leave the count after the last row op",
+                    fun() -> concurrent_writers(Tab) end}},
             {timeout, 60, {"remote stub lifecycle", fun stubs/0}},
+            {timeout, 60,
+                {"a merge of a gone peer cell drops its stub",
+                    fun merge_of_gone_cell/0}},
             {timeout, 60,
                 {"orphan stub pruning deletes only cell-less departed rows",
                     fun orphan_stub_pruning/0}},
             {timeout, 60, {"subscriber node discovery", fun sub_nodes/0}},
             {timeout, 60, {"reshape_summary/2", fun reshape_summary/0}},
             {timeout, 60,
-                {"self_heal skips when local truth is unreadable", fun() ->
-                    self_heal_unreadable(Tab)
+                {"restate skips when local truth is unreadable", fun() ->
+                    restate_unreadable(Tab)
                 end}},
             {timeout, 60,
                 {"rebuild/1 restores peer stubs from the projection",
@@ -73,7 +83,7 @@ rebuild_restores_stubs() ->
     Uri = <<"com.example.rib.rebuild.restore">>,
     Key = cell_key(?EXACT_MATCH, Uri, Peer),
 
-    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {inc, 3}}),
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {set, {1, 3}}}),
     ok = flush(Table, Key),
     true = ets:delete_all_objects(bondy_registry_rib_stubs),
     ?assertEqual(
@@ -103,7 +113,7 @@ rebuild_idempotent() ->
     Uri = <<"com.example.rib.rebuild.idem">>,
     Key = cell_key(?EXACT_MATCH, Uri, Peer),
 
-    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {inc, 2}}),
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {set, {1, 2}}}),
     ok = flush(Table, Key),
 
     ok = bondy_registry_rib:rebuild(?BONDY_DB_REGISTRATION_RIB_TAB),
@@ -134,9 +144,9 @@ rebuild_skips_emptied() ->
     Uri = <<"com.example.rib.rebuild.emptied">>,
     Key = cell_key(?EXACT_MATCH, Uri, Peer),
 
-    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {inc, 1}}),
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {set, {1, 1}}}),
     ok = flush(Table, Key),
-    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {inc, -1}}),
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {set, {2, 0}}}),
     ok = flush(Table, Key),
 
     ok = bondy_registry_rib:rebuild(?BONDY_DB_REGISTRATION_RIB_TAB),
@@ -149,33 +159,20 @@ rebuild_skips_emptied() ->
     ).
 
 %% An own-node cell merged back in while the local truth is UNREADABLE must
-%% leave the cell alone.
-%%
-%% `self_heal/4` turns `local_count/4` into a corrective delta and writes it
-%% through `bondy_db:apply/4` — a REPLICATED write. `local_count/4` used to
-%% report an unreadable partition store (unprovisioned, or the registry gproc
-%% pool not up) as `0`, which is indistinguishable from "this node genuinely
-%% owns nothing". The two demand opposite actions, and guessing wrong is not
-%% a missed repair: it broadcasts `-ReplicatedCount` for every cell it walks,
-%% erasing this node's own live registrations cluster-wide.
-%%
-%% FALSIFICATION: this asserts the cell is UNCHANGED. On the pre-fix code the
-%% count is driven to 0 by a corrective delta, so this test fails there — it
-%% is not a happy-path restatement.
-%%
-%% The eunit fixture has no registry partition pool, which is exactly the
-%% unreadable case, so no mocking is needed to reach it.
-self_heal_unreadable(_Tab) ->
+%% leave the cell alone. `restate/4` writes a REPLICATED reading of the local
+%% count; an unreadable partition store (unprovisioned, or the registry gproc
+%% pool not up) is not "this node owns nothing", and writing 0 would advertise
+%% the erasure of this node's live registrations. The fixture has no registry
+%% partition pool, which is exactly the unreadable case.
+restate_unreadable(_Tab) ->
     ok = ensure_stubs_tab(),
     Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
-    Uri = <<"com.example.rib.self_heal_unreadable">>,
+    Uri = <<"com.example.rib.restate_unreadable">>,
     Key = cell_key(?EXACT_MATCH, Uri),
 
     %% Seed an own-node cell with a non-zero count, as a bootstrap or a peer
     %% merge would restore it after a restart.
-    ok = bondy_db:apply(
-        Table, ?REALM, Key, {apply, count, {inc, 2}}
-    ),
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {set, {1, 2}}}),
     ok = flush(Table, Key),
     ?assertMatch(
         #{count := 2},
@@ -190,7 +187,7 @@ self_heal_unreadable(_Tab) ->
     ?assertMatch(
         #{count := 2},
         summary(Table, Key),
-        "self_heal must SKIP when the local count is unknown; treating "
+        "restate must SKIP when the local count is unknown; treating "
         "unknown as 0 writes a replicated erasure of this node's own cells"
     ).
 
@@ -237,7 +234,9 @@ orphan_stub_pruning() ->
     %% (b) departed node, cell still present -> must SURVIVE. This is the
     %% blackhole guard: the cell has not stabilized away yet.
     BackedKey = cell_key(?EXACT_MATCH, Backed, Gone),
-    ok = bondy_db:apply(Table, ?REALM, BackedKey, {apply, count, {inc, 1}}),
+    ok = bondy_db:apply(
+        Table, ?REALM, BackedKey, {apply, count, {set, {1, 1}}}
+    ),
     ok = flush(Table, BackedKey),
     ok = bondy_registry_rib:on_remote_set(
         registration, BackedKey, #{count => 1}
@@ -245,7 +244,7 @@ orphan_stub_pruning() ->
     %% (c) LIVE member, no backing cell -> must survive; membership scopes
     %% the sweep, so a live node's rows are never even candidates.
     %% A node never stubs ITSELF (`on_remote_set/3` routes our own
-    %% nodestring to `self_heal/4`), so the live case needs a real peer in
+    %% nodestring to `restate/4`), so the live case needs a real peer in
     %% the membership. Seed one and restore the set afterwards.
     PrevMembers = partisan_membership:members(),
     ok = partisan_membership:set(
@@ -378,8 +377,8 @@ subs(Tab) ->
     Table = ?CAT:table(?BONDY_DB_SUBSCRIPTION_RIB_TAB),
     Key = cell_key(?EXACT_MATCH, ?URI),
 
-    %% Subscription cells are reachability-only: one counter, carried by
-    %% `bondy_oplog_crdt_owned_counter`, so the RAW read is a plain integer.
+    %% Subscription cells are reachability-only: one reading, carried by
+    %% `bondy_oplog_crdt_owned_reading`, so the RAW read is a plain integer.
     %% `bondy_registry_rib:reshape_summary/2` is what turns it into the
     %% `#{count => N}` summary shape consumers see, and it is called at every
     %% read call site — so asserting the raw integer here is deliberate: it
@@ -403,15 +402,9 @@ subs(Tab) ->
 
 %% A removal that finds no members row must not touch the replicated count.
 %%
-%% Removing one entry twice is reachable, not hypothetical:
-%% `bondy_realm:teardown/1' casts the realm's session closes -- each of which
-%% flushes its own session's entries -- and then traverses the same realm
-%% removing everything it finds, so one entry can be removed down both paths.
-%% The members row is this node's ground truth for whether the entry is still
-%% counted, and `on_entry_added/3' writes the row and the `{inc, 1}' together;
-%% the matching `{inc, -1}' must therefore be gated on the row exactly as the
-%% occupancy gauge is. Ungated, the summary this node advertises to its peers
-%% goes NEGATIVE, and no later removal can bring it back.
+%% Removing one entry twice is reachable: `bondy_realm:teardown/1' casts the
+%% realm's session closes, each flushing its own entries, and then removes
+%% everything in the realm itself.
 redundant_removal(Tab) ->
     Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
     Uri = <<"com.example.rib.redundant">>,
@@ -431,6 +424,87 @@ redundant_removal(Tab) ->
         Count,
         "the second removal found no members row, so it must not decrement"
     ).
+
+%% Adding one entry twice must count it once, or the group's reading stays
+%% one high after its last entry leaves.
+redundant_add(Tab) ->
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Uri = <<"com.example.rib.redundant_add">>,
+    Key = cell_key(?EXACT_MATCH, Uri),
+    E = entry(registration, ?EXACT_MATCH, ?INVOKE_SINGLE, Uri),
+
+    ok = bondy_registry_rib:on_entry_added(self(), Tab, E),
+    ok = bondy_registry_rib:on_entry_added(self(), Tab, E),
+    ok = flush(Table, Key),
+    ?assertMatch({ok, {#{count := 1}, _}}, bondy_db:read(Table, ?REALM, Key)),
+
+    ok = bondy_registry_rib:on_entry_removed(self(), Tab, E),
+    ok = flush(Table, Key),
+    ?assertMatch({ok, {#{count := 0}, _}}, bondy_db:read(Table, ?REALM, Key)),
+    ?assertEqual(
+        [],
+        ets:lookup(Tab, {registration, ?REALM, ?EXACT_MATCH, Uri}),
+        "an emptied group must not keep its counter row"
+    ).
+
+%% The interleaving the stamp order exists for. Writer A adds an entry and is
+%% held at its stamp; writer B adds a second entry and finishes; then A
+%% resumes. A stamps after B, so A's reading wins, and it must carry B's row
+%% op too: the count is read after the stamp. Reading before the stamp would
+%% leave the cell at 1 with two live entries.
+concurrent_writers(Tab) ->
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Uri = <<"com.example.rib.concurrent">>,
+    Key = cell_key(?EXACT_MATCH, Uri),
+    EA = entry(registration, ?EXACT_MATCH, ?INVOKE_SINGLE, Uri),
+    EB = entry(registration, ?EXACT_MATCH, ?INVOKE_SINGLE, Uri),
+    Self = self(),
+    ok = meck:new(bondy_oplog_hlc, [passthrough, no_link]),
+    try
+        ok = meck:expect(bondy_oplog_hlc, now, fun(Clock) ->
+            case get(hold_at_stamp) of
+                undefined ->
+                    ok;
+                Test ->
+                    erase(hold_at_stamp),
+                    Test ! {held, self()},
+                    receive
+                        release -> ok
+                    end
+            end,
+            meck:passthrough([Clock])
+        end),
+        A = spawn_link(fun() ->
+            put(hold_at_stamp, Self),
+            ok = bondy_registry_rib:on_entry_added(self(), Tab, EA),
+            Self ! {done, self()}
+        end),
+        receive
+            {held, A} -> ok
+        after 5000 -> error(writer_a_not_held)
+        end,
+        ok = bondy_registry_rib:on_entry_added(self(), Tab, EB),
+        ok = flush(Table, Key),
+        A ! release,
+        receive
+            {done, A} -> ok
+        after 5000 -> error(writer_a_not_done)
+        end,
+        ok = flush(Table, Key),
+        ?assertMatch(
+            {ok, {#{count := 2}, _}}, bondy_db:read(Table, ?REALM, Key)
+        )
+    after
+        meck:unload(bondy_oplog_hlc),
+        _ = bondy_registry_rib:on_entry_removed(self(), Tab, EA),
+        _ = bondy_registry_rib:on_entry_removed(self(), Tab, EB)
+    end.
+
+init_keeps_the_existing_clock_test() ->
+    ok = bondy_registry_rib:init(),
+    Clock = persistent_term:get({bondy_registry_rib, clock}),
+    ok = bondy_registry_rib:init(),
+    ?assertEqual(Clock, persistent_term:get({bondy_registry_rib, clock})).
 
 %% Unit-tests the read-path reshape in isolation: registration passes
 %% the ratchet registers through (normalising never-written fields to
@@ -526,6 +600,25 @@ stubs() ->
         )
     ).
 
+%% A merge event is handled when the reactor gets to it, by which time the
+%% cell may be gone (reaped, or discarded by `stabilize/2`). A gone cell is
+%% what licenses dropping its stub, so the stub must not outlive it.
+merge_of_gone_cell() ->
+    ok = ensure_stubs_tab(),
+    Peer = <<"peer_gone@127.0.0.1">>,
+    Uri = <<"com.example.rib.merge_gone">>,
+    PeerKey = cell_key(?EXACT_MATCH, Uri, Peer),
+    ok = bondy_registry_rib:on_remote_set(registration, PeerKey, #{count => 1}),
+    ?assertMatch(
+        [{Peer, _}],
+        bondy_registry_rib:stub_nodes(registration, ?REALM, ?EXACT_MATCH, Uri)
+    ),
+    ok = bondy_registry_rib:on_remote_merge(registration, PeerKey),
+    ?assertEqual(
+        [],
+        bondy_registry_rib:stub_nodes(registration, ?REALM, ?EXACT_MATCH, Uri)
+    ).
+
 %% `subscription_nodes/3` — the broker's forwarding set: every remote node
 %% with a subscription matching the topic, across policies, deduped, as
 %% node atoms.
@@ -612,6 +705,7 @@ setup_catalog() ->
     Tmp = make_tmpdir(),
     ok = bondy_db_config:set([databases, main, oplog, shard_count], 1),
     application:set_env(bondy_router, platform_data_dir, Tmp),
+    ok = bondy_registry_rib:init(),
     {ok, Pid} = ?CAT:start_link(),
     Tab = ets:new(rib_members, [ordered_set, public]),
     timer:sleep(500),
@@ -638,7 +732,7 @@ teardown_catalog({Pid, Tmp, Tab}) ->
 %% write goes through `apply_with_context/4`'s extra applier-context
 %% round-trip, which registers slightly after the plain WAL/instance front
 %% the tier_0 subscription table would exercise) with a genuine, harmless
-%% op (`{apply, count, {inc, 0}}`).
+%% op (a reading stamped 0, which every real reading outranks).
 await_ready(Table, RealmUri) ->
     Key = cell_key(?EXACT_MATCH, ?URI),
     await_ready(Table, RealmUri, Key, 250).
@@ -646,7 +740,7 @@ await_ready(Table, RealmUri) ->
 await_ready(_Table, _RealmUri, _Key, 0) ->
     error(rib_test_db_not_ready);
 await_ready(Table, RealmUri, Key, N) ->
-    case bondy_db:apply(Table, RealmUri, Key, {apply, count, {inc, 0}}) of
+    case bondy_db:apply(Table, RealmUri, Key, {apply, count, {set, {0, 0}}}) of
         ok ->
             ok;
         {error, {instance_unavailable, _}} ->

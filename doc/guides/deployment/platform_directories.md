@@ -29,6 +29,24 @@ start hook fixes all of them and ignores the corresponding `BONDY_*_DIR`
 environment variables, so a container relocates a directory through
 `bondy.conf`, not through the environment.
 
+## `platform_data_dir`
+
+The durable stores make a write crash-safe by writing a temporary file, syncing
+it, renaming it into place and then syncing the directory, so that the rename
+itself survives a power loss. `platform_data_dir` must therefore be on a
+filesystem that accepts `fsync` on a directory. APFS does, and so do the
+overlay and tmpfs mounts of a Linux container.
+
+A store also syncs its directory when it opens, before it reads anything
+there. When a directory cannot be synced:
+
+- `main` fails to open if its topology manifest's directory cannot be synced,
+  and the node reports NOT READY with the `bondy_db_main_unavailable` alarm.
+- A storage shard whose directories cannot be synced when it starts, or whose
+  sync after replacing a manifest, offset or checkpoint fails, is restarted.
+  If it keeps failing, it is stopped and started again with a backoff, and
+  the node reports NOT READY while it is stopped.
+
 ## `platform_runtime_dir`
 
 This directory holds objects that exist only while the node is running and that

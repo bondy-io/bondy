@@ -35,59 +35,50 @@ the broker discovers remote subscriber nodes via `subscription_nodes/3`.
 `check/1` compares the summary view against the ground truth per realm and
 reports any divergence.
 
-A merged cell that names THIS node is an echo of our own past writes (no
-peer ever writes our cells). After an ungraceful restart the echo can be
-stale — peers still hold cells for registrations that died with the
-previous incarnation and never got an `on_entry_removed` — so a boot-time
-step (not a merge-event reaction; see `bondy_registry_rib_boot`) corrects
-each cell this node owns back to reality.
+A merged cell that names THIS node is an echo of a reading this node wrote,
+possibly in an earlier incarnation whose sessions are gone. The node answers
+every echo with its current reading (`restate/4`), so the readings its peers
+hold are replaced rather than corrected. It answers every echo, not only one
+its own cell disagrees with: the peers route by stubs its cell says nothing
+about (`proofs/tla/RibAbs.tla`; `RibAbs_Shipped` holds, `RibAbs_HealOnAbsent`
+and `RibAbs_HealOnForeignTop` do not).
 
-### Concurrency model
+### Readings
 
-The registry write path runs in the **caller's** process (the partition
-pid only locates the store slice) — the same is true of RIB maintenance.
-The two types use different carriers, and the difference is
-deliberate. A registration cell is four fields, so it is a
-`bondy_oplog_crdt_struct` registered with its schema as `crdt_opts` (see
-`bondy_namespace_catalog`'s `?RIB_REGISTRATION_SCHEMA`). A subscription
-cell is one field, so it is a bare `bondy_oplog_crdt_owned_counter` and
-carries no schema at all. Either way the cell is per-field CRDTs rather
-than one opaque summary blob, so an
-entry add/remove writes a small, targeted, **lock-free** delta directly
-from the caller — `{inc, 1}` /`{inc, -1}` on `count`, `{set, Created}`
-on the `earliest`/`latest` min/max ratchets (adds only: removals never
-shrink the lifetime watermarks, which is what keeps the cell a scalar
-per field) — with no
-read-modify-write, no per-realm dispatch, and no serialisation point:
-concurrent writers to the same cell simply converge, the same way the
-entry/ptrie writes they accompany already do. The atomic row op on the
-partition's members table (an `ordered_set` holding one row per live
-local entry, keyed `{Type, Realm, Policy, Uri, Created, EntryId}`) is
-kept only as `check/1`'s ground truth — it is no longer read to derive
-anything written to the cell.
+A cell's count is the owner's latest READING of its live local entries,
+`{Stamp, Count}`, carried by `bondy_oplog_crdt_owned_reading`: the reading
+with the highest stamp wins, whichever origin wrote it, so nothing is ever
+corrected by arithmetic. A registration cell is a `bondy_oplog_crdt_struct`
+(`bondy_namespace_catalog`'s `?RIB_REGISTRATION_SCHEMA`) whose `count` is a
+reading beside the `invoke`, `earliest` and `latest` registers; a
+subscription cell is a bare reading.
 
-There is no explicit cell clear when the local group empties: `count`
-settling to `0` is the only signal (read-side consumers treat
-`count =:= 0` as not routable), and a `count = 0` cell is later
-physically reclaimed by `stabilize/2` (registration:
-`bondy_oplog_crdt_struct`'s generic `stabilize_zero`-policy discard on
-`count`; subscription: `bondy_oplog_crdt_owned_counter`'s inherited
-unconditional discard-at-zero) once causally stable — mirroring how
-`bondy_oplog_crdt_dw_flag` already reclaims a permanently-disabled flag
-cell.
+The registry write path runs in the caller's process, and so does RIB
+maintenance, with no serialisation point. The partition's members table (an
+`ordered_set`) holds one row per live local entry and one counter row per
+`(Type, Realm, Policy, Uri)` group. A writer changes both rows, then takes a
+stamp from this node's RIB clock (a `bondy_oplog_hlc`, created by `init/0`),
+then reads the group's counter, and writes that reading asynchronously.
+Because the stamp follows the writer's own row op and precedes its read, the
+highest-stamped reading carries the count after every row op stamped before
+it, however concurrent writers interleave
+(`bondy_registry_rib_test`'s concurrent-writer test). A later incarnation's
+readings outrank an earlier one's as long as the node's wall clock has not
+gone back, across the restart, past the last stamp it issued
+(`proofs/tla/RibReading.tla`: `RibReading_WallAhead` holds,
+`RibReading_WallStepBack` does not).
+
+There is no explicit cell clear when the local group empties: a reading of
+`0` is the signal (read-side consumers treat `count =:= 0` as not routable),
+and the cell is discarded by `stabilize/2` once causally stable.
 
 Remote entries never touch this module: their owner maintains their cells and
 they reach this node via AAE merge.
 
 ### Departure: reclaiming a node's cells and stubs
 
-Single-writer keying is what makes `lww` resolution exact, and it is also
-what would leave a departed node's routing state immortal if nothing acted:
-`cell_key/3` stamps `bondy_config:nodestring()` into every key, and the only
-writes this module performs are `apply_added/1`'s `{inc, 1}` and
-`apply_removed/1`'s `{inc, -1}`. There is no cell `clear` at all, so the only
-physical reclamation is `stabilize/2`'s discard once `count` reaches `0` —
-and only the owner's own decrements can produce that. The owner is gone.
+Single-writer keying would leave a departed node's routing state immortal if
+nothing acted: only the owner writes its cells, and the owner is gone.
 
 So reclamation hangs off **retirement**, not plain membership loss.
 Membership removal alone is reversible and
@@ -101,22 +92,13 @@ rather than by hope.
 
 **The cell.** `m:bondy_oplog_origin_retirement` computes the dead-origin
 complement and `bondy_oplog_cell_utils:reap/4` reaps them from every bucket
-whose carrier exports `reap_origins/2`. Both RIB carriers do, by different
-routes: the registration struct through a per-field `force_reap` policy
-declared on EVERY field of `?RIB_REGISTRATION_SCHEMA`, and the subscription
-counter through `m:bondy_oplog_crdt_owned_counter`, whose licence is the
-table declaration itself. Reaping does not delete anything directly —
-`reap_one_cell/6` re-encodes a VALUE-PRESERVING frame — it drives the
-state's `count` to zero so the discard described above finally fires. Pinned
-end to end by `bondy_rib_reclamation_cluster_SUITE`.
-
-Why the subscription cell is a bare counter and not a one-field struct: it
-was briefly the latter, purely so it could carry `force_reap`. That moved
-the highest-write-rate cell in the system from tier_0 to tier_2, where
-add-wins state accrues one dot per unstabilized write and `apply_op` becomes
-quadratic. Measured on the Fly fleet: subscribe latency 198ms -> 6-23s,
-`all_subscribed_ok` 100% -> 66.7%. The size law that now forbids it lives in
-`bondy_oplog_crdt_owned_counter_proper_test`.
+whose carrier exports `reap_origins/2`. Both RIB carriers do: the
+registration struct through a `force_reap` policy on every field of
+`?RIB_REGISTRATION_SCHEMA`, and the subscription reading through its own
+licence. Reaping leaves no reading, the count reads `0`, and the discard
+described above removes the cell (`bondy_rib_reclamation_cluster_SUITE`).
+The reap writes a value-preserving frame, so until the discard the stored
+value still shows the last count.
 
 **The stub.** A `stabilize/2` discard is not an apply, so it fires no merge
 event, and `stub_delete/1` is otherwise reachable only from
@@ -156,11 +138,15 @@ so the two views agree and report no divergence.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_db_tables.hrl").
 
-%% One row per live local entry; the summary for a `(Type, Realm, Policy,
-%% Uri)` is derived by an ordered prefix scan over these rows.
+%% The members table holds one row per live local entry and one row per
+%% group counting them; the two key shapes differ in size, so a pattern on
+%% either never matches the other.
 -define(MEMBER_KEY(Type, RealmUri, Policy, Uri, Created, EntryId),
     {Type, RealmUri, Policy, Uri, Created, EntryId}
 ).
+-define(GROUP_KEY(Type, RealmUri, Policy, Uri), {Type, RealmUri, Policy, Uri}).
+
+-define(CLOCK, {?MODULE, clock}).
 
 %% One row per remote RIB cell this node has merged, keyed
 %% {Type, Realm, Policy, Uri, Nodestring} with the summary as value. A
@@ -179,6 +165,7 @@ so the two views agree and report no divergence.
 
 %% API
 -export([check/1]).
+-export([init/0]).
 -export([ensure_stubs_table/0]).
 -export([match_stubs/2]).
 -export([match_summaries/3]).
@@ -189,6 +176,7 @@ so the two views agree and report no divergence.
 -export([on_remote_merge/2]).
 -export([on_remote_set/3]).
 -export([rebuild/1]).
+-export([restore/0]).
 -export([realms/0]).
 -export([reap_orphan_stubs/1]).
 -export([stub_nodes/4]).
@@ -210,23 +198,36 @@ so the two views agree and report no divergence.
 %% =============================================================================
 
 -doc """
+Creates this node's RIB stamp clock, once per VM; a later call keeps the
+clock that exists. Called by `bondy_registry_sup` before the registry
+partitions start, so every writer stamps from the same clock.
+""".
+-spec init() -> ok.
+
+init() ->
+    case persistent_term:get(?CLOCK, undefined) of
+        undefined -> persistent_term:put(?CLOCK, bondy_oplog_hlc:new());
+        _ -> ok
+    end.
+
+-doc """
 Hook called by `bondy_registry_partition` after an entry has been successfully
-added to the store. A no-op unless the RIB is enabled and `Entry` is local.
-Inserts the entry's members row (atomic, kept only as `check/1`'s ground
-truth) and applies a small, targeted, lock-free CRDT delta directly —
-no partition dispatch, no serialisation point.
+added to the store. A no-op unless the RIB is enabled and `Entry` is local, or
+when the entry is already counted. Inserts the entry's members row, counts it
+in its group, and writes the group's reading.
 """.
 -spec on_entry_added(Partition :: pid(), Tab :: ets:tab(), Entry :: entry()) ->
     ok.
 
 on_entry_added(_Partition, Tab, Entry) ->
-    case is_active(Entry) of
+    case is_active(Entry) andalso ets:insert_new(Tab, {member_key(Entry)}) of
         true ->
-            true = ets:insert(Tab, member(Entry)),
             ok = safe_metric(gauge, #{
                 name => bondy_registry_rib_members, delta => 1
             }),
-            apply_added(Entry);
+            Group = group_key(Entry),
+            _ = ets:update_counter(Tab, Group, {2, 1}, {Group, 0}),
+            apply_added(Tab, Entry);
         false ->
             ok
     end.
@@ -234,136 +235,101 @@ on_entry_added(_Partition, Tab, Entry) ->
 -doc """
 Hook called by `bondy_registry_partition` after an entry has been successfully
 removed from the store. A no-op unless the RIB is enabled and `Entry` is
-local. Takes the entry's members row (atomic, and `check/1`'s ground truth)
-and, only if that row was still there, applies a small, targeted, lock-free
-CRDT delta directly — no partition dispatch, no serialisation point.
+local, or when its members row is already gone, so removing one entry twice
+counts it once (`bondy_registry_rib_test`'s "a redundant removal does not
+decrement twice"). Otherwise uncounts it and writes the group's reading.
 """.
 -spec on_entry_removed(
     Partition :: pid(), Tab :: ets:tab(), Entry :: entry()
 ) -> ok.
 
 on_entry_removed(_Partition, Tab, Entry) ->
-    case is_active(Entry) of
-        true ->
-            {Key, _} = member(Entry),
-            %% The members row is this node's ground truth for whether the
-            %% entry is still counted, and `on_entry_added/3` writes the row
-            %% and the `{inc, 1}` together — so `take` returning a row is
-            %% exactly the condition under which the matching `{inc, -1}` is
-            %% owed. Gating both on it makes a redundant removal a no-op
-            %% instead of a decrement the count can never recover from:
-            %% removing one entry twice is reachable (`bondy_realm:teardown/1`
-            %% casts the realm's session closes, each flushing its own
-            %% entries, and then removes everything in the realm itself), and
-            %% a pn_counter has no floor. Pinned by
-            %% `bondy_registry_rib_test`'s "a redundant removal does not
-            %% decrement twice".
-            case ets:take(Tab, Key) of
-                [] ->
-                    ok;
-                [_] ->
-                    ok = safe_metric(gauge, #{
-                        name => bondy_registry_rib_members, delta => -1
-                    }),
-                    apply_removed(Entry)
-            end;
-        false ->
+    case is_active(Entry) andalso ets:take(Tab, member_key(Entry)) of
+        [_] ->
+            ok = safe_metric(gauge, #{
+                name => bondy_registry_rib_members, delta => -1
+            }),
+            ok = uncount(Tab, group_key(Entry)),
+            write_reading(Tab, Entry, remove);
+        _ ->
             ok
     end.
 
--doc """
-Applies the CRDT delta for a newly-added local entry directly from the
-caller's process: `count` `{inc, 1}`, `invoke` `{set, Invoke}` and the
-`earliest`/`latest` ratchets `{set, Created}` for a registration;
-a bare `{inc, 1}` for a subscription (whose carrier has no
-`invoke`/`earliest`/`latest` — reachability needs none of them). MUST
-be total: any
-failure is logged, never raised — a RIB write failing must not fail the
-entry add/remove it accompanies.
-""".
--spec apply_added(Entry :: entry()) -> ok.
+%% @private
+%% Total, like every write here: a RIB write failing is logged and must not
+%% fail the entry add or remove it accompanies.
 
-apply_added(Entry) ->
+apply_added(Tab, Entry) ->
+    case bondy_registry_entry:type(Entry) of
+        registration ->
+            Created = bondy_registry_entry:created(Entry),
+            Invoke = bondy_registry_entry:get_option(
+                invoke, Entry, ?INVOKE_SINGLE
+            ),
+            write(Tab, Entry, add, [
+                {apply, invoke, {set, Invoke}},
+                {apply, earliest, {set, Created}},
+                {apply, latest, {set, Created}}
+            ]);
+        subscription ->
+            write_reading(Tab, Entry, add)
+    end.
+
+%% @private
+write_reading(Tab, Entry, Action) ->
+    write(Tab, Entry, Action, []).
+
+%% @private
+%% The stamp is taken after the caller's row op and before the count is read,
+%% so the highest-stamped reading carries the count after every row op that
+%% preceded it (`bondy_registry_rib_test`'s concurrent-writer test).
+write(Tab, Entry, Action, Extra) ->
     Type = bondy_registry_entry:type(Entry),
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Policy = bondy_registry_entry:match_policy(Entry),
     Uri = bondy_registry_entry:uri(Entry),
+    write_cell(Tab, Type, RealmUri, Policy, Uri, Action, Extra).
 
+%% @private
+%% Async (no read-your-writes barrier): nothing on the entry path reads the
+%% cell, and a barrier would make every REGISTER/SUBSCRIBE wait for the
+%% registry drain's backlog.
+write_cell(Tab, Type, RealmUri, Policy, Uri, Action, Extra) ->
     try
+        Stamp = bondy_oplog_hlc:now(persistent_term:get(?CLOCK)),
+        Count = ets:lookup_element(
+            Tab, ?GROUP_KEY(Type, RealmUri, Policy, Uri), 2, 0
+        ),
         Table = db_table(Type),
         Key = cell_key(RealmUri, Policy, Uri),
-
         Result =
-            case Type of
-                registration ->
-                    Created = bondy_registry_entry:created(Entry),
-                    Invoke = bondy_registry_entry:get_option(
-                        invoke, Entry, ?INVOKE_SINGLE
-                    ),
-                    %% Async (no read-your-writes barrier): nothing reads
-                    %% the cell on the entry-add path — local routing
-                    %% truth is the trie/members table, written above,
-                    %% and the replicated summary view is eventually
-                    %% consistent via AE by design. The synchronous
-                    %% barrier made every REGISTER/SUBSCRIBE pay the
-                    %% registry drain's whole backlog under load (the
-                    %% fleet-scale subscribe-latency collapse).
-                    bondy_db:apply_batch_async(Table, RealmUri, Key, [
-                        {apply, count, {inc, 1}},
-                        {apply, invoke, {set, Invoke}},
-                        {apply, earliest, {set, Created}},
-                        {apply, latest, {set, Created}}
-                    ]);
-                subscription ->
-                    bondy_db:apply_async(Table, RealmUri, Key, {inc, 1})
+            case {Type, Extra} of
+                {registration, _} ->
+                    Ops = [{apply, count, {set, {Stamp, Count}}} | Extra],
+                    bondy_db:apply_batch_async(Table, RealmUri, Key, Ops);
+                {subscription, []} ->
+                    bondy_db:apply_async(
+                        Table, RealmUri, Key, {set, {Stamp, Count}}
+                    )
             end,
-        log_rib_error(Result, add, Type, RealmUri, Policy, Uri)
+        log_rib_error(Result, Action, Type, RealmUri, Policy, Uri)
     catch
         Class:Reason:Stacktrace ->
             log_rib_exception(
-                Class, Reason, Stacktrace, add, Type, RealmUri, Policy, Uri
+                Class, Reason, Stacktrace, Action, Type, RealmUri, Policy, Uri
             )
     end.
 
--doc """
-Applies the CRDT delta for a removed local entry — the causal dual of
-`apply_added/1`: `count` `{inc, -1}` for a registration (`invoke` is
-untouched — a stable per-group value, it self-corrects on the group's
-next add if it ever changes; `earliest`/`latest` are untouched by
-design — they are monotone ratchets recording the group's lifetime
-creation-time watermarks, so removals never shrink them, which is what
-bounds the cell to a scalar per field instead of one element plus one
-tombstone per entry ever added); a bare `{inc, -1}` for a
-subscription. MUST be total, same contract as `apply_added/1`.
-""".
--spec apply_removed(Entry :: entry()) -> ok.
-
-apply_removed(Entry) ->
-    Type = bondy_registry_entry:type(Entry),
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    Policy = bondy_registry_entry:match_policy(Entry),
-    Uri = bondy_registry_entry:uri(Entry),
-
-    try
-        Table = db_table(Type),
-        Key = cell_key(RealmUri, Policy, Uri),
-
-        Result =
-            case Type of
-                registration ->
-                    %% Async — same rationale as `apply_added/1`.
-                    bondy_db:apply_async(
-                        Table, RealmUri, Key, {apply, count, {inc, -1}}
-                    );
-                subscription ->
-                    bondy_db:apply_async(Table, RealmUri, Key, {inc, -1})
-            end,
-        log_rib_error(Result, remove, Type, RealmUri, Policy, Uri)
-    catch
-        Class:Reason:Stacktrace ->
-            log_rib_exception(
-                Class, Reason, Stacktrace, remove, Type, RealmUri, Policy, Uri
-            )
+%% @private
+%% A group whose count reaches 0 loses its row; `match_delete` leaves a row a
+%% concurrent add has already counted again.
+uncount(Tab, Group) ->
+    case ets:update_counter(Tab, Group, {2, -1, 0, 0}, {Group, 0}) of
+        0 ->
+            true = ets:match_delete(Tab, {Group, 0}),
+            ok;
+        _ ->
+            ok
     end.
 
 %% @private
@@ -371,7 +337,7 @@ log_rib_error(ok, _Action, _Type, _RealmUri, _Policy, _Uri) ->
     ok;
 log_rib_error({error, Reason}, Action, Type, RealmUri, Policy, Uri) ->
     ?LOG_ERROR(#{
-        description => "Failed to apply registry RIB delta",
+        description => "Failed to write a registry RIB reading",
         action => Action,
         type => Type,
         realm_uri => RealmUri,
@@ -386,7 +352,7 @@ log_rib_exception(
     Class, Reason, Stacktrace, Action, Type, RealmUri, Policy, Uri
 ) ->
     ?LOG_ERROR(#{
-        description => "Failed to apply registry RIB delta",
+        description => "Failed to write a registry RIB reading",
         action => Action,
         type => Type,
         realm_uri => RealmUri,
@@ -417,17 +383,11 @@ ensure_stubs_table() ->
     Tab.
 
 -doc """
-Reaction to a peer's RIB cell merge (`{set, Summary}`): upserts the stub for
-the remote `(Type, Realm, Policy, Uri, Node)` — unless `Summary`'s `count`
-is `0`, treated exactly like an explicit `clear` (drops any existing
-stub instead). There is no explicit whole-cell clear any more (see the
-migration plan's "Cell removal" note): `count` settling to `0` is the
-only signal an emptied group ever sends, so the stub store has to
-recognise it as equivalent to removal itself, at the single write point,
-so every stub-store reader (`stub_nodes/4`, `match_stubs/2`,
-`subscription_nodes/3`) stays free of needing this check itself. Cells
-naming this node are ignored (an owner never stubs itself). MUST be
-total — called from the AAE merge reactor.
+Reaction to a merged RIB cell (`{set, Summary}`). A peer's cell upserts its
+stub, or drops it when `Summary`'s `count` is `0`, the only signal an emptied
+group sends; every stub reader (`stub_nodes/4`, `match_stubs/2`,
+`subscription_nodes/3`) relies on that. A cell naming this node is restated
+(`restate/4`). MUST be total — called from the AAE merge reactor.
 """.
 -spec on_remote_set(
     Type :: entry_type(), Key :: binary(), Summary :: map()
@@ -438,7 +398,7 @@ on_remote_set(Type, Key, Summary) when is_map(Summary) ->
         {ok, {RealmUri, Policy, Uri, Node}} ->
             case bondy_config:nodestring() of
                 Node ->
-                    self_heal(Type, RealmUri, Policy, Uri);
+                    restate(Type, RealmUri, Policy, Uri);
                 _ ->
                     case maps:get(count, Summary, 0) of
                         0 ->
@@ -456,9 +416,10 @@ on_remote_set(_, _, _) ->
     ok.
 
 -doc """
-Reaction to a peer's RIB cell removal (`clear`): drops the stub. The key is
-self-contained (realm included), so no tombstone resolution is needed. MUST
-be total — called from the AAE merge reactor.
+Reaction to a RIB cell removal (`clear`): drops a peer's stub, or restates a
+cell naming this node. The key is self-contained (realm included), so no
+tombstone resolution is needed. MUST be total — called from the AAE merge
+reactor.
 """.
 -spec on_remote_clear(Type :: entry_type(), Key :: binary()) -> ok.
 
@@ -467,7 +428,7 @@ on_remote_clear(Type, Key) ->
         {ok, {RealmUri, Policy, Uri, Node}} ->
             case bondy_config:nodestring() of
                 Node ->
-                    self_heal(Type, RealmUri, Policy, Uri);
+                    restate(Type, RealmUri, Policy, Uri);
                 _ ->
                     stub_delete({Type, RealmUri, Policy, Uri, Node})
             end;
@@ -488,21 +449,17 @@ both of this module's repair paths hang off those events alone:
   `match_stubs/2` — the cross-node PUBLISH forwarding set and the remote
   callee resolution — actually read. A node that bootstraps without it does
   not forward to its peers at all;
-- `self_heal/4` is reachable only from those same two functions, and a
-  bootstrapping node's OWN cells are the summaries of its PREVIOUS
-  incarnation's registrations and subscriptions. Those sessions and sockets
-  died with the node. Until their `count` is driven back to the (now zero)
-  local truth, every peer keeps routing to this node for URIs it no longer
-  serves — so correcting them is the load-bearing half, not a tidy-up.
+- a bootstrapping node's OWN cells hold readings of its previous
+  incarnation's registrations and subscriptions, which died with it; the
+  node restates each one with its current reading, which outranks them.
 
 Implemented by replaying each installed cell through `on_remote_set/3`, which
-already routes an own-node cell to `self_heal/4` and a peer cell to
-`stub_insert`/`stub_delete` under the `count = 0`-means-removed rule. No new
-convention, and one write point stays one write point.
+restates an own-node cell and upserts or drops a peer cell's stub under the
+`count = 0`-means-removed rule.
 
-Idempotent: a streamed snapshot notifies a table once per batch, `stub_insert`
-is an upsert, and `self_heal/4` is a no-op once the counts agree. MUST be
-total — called from the AAE reactor.
+Idempotent in effect: a streamed snapshot notifies a table once per batch;
+`stub_insert` is an upsert, and a repeated restatement writes the same count
+under a later stamp. MUST be total — called from the AAE reactor.
 
 Covers every realm with cells in the table, including realms this node has no
 realm record for. It folds the TABLE (`bondy_db:fold_all/4`) rather than
@@ -605,21 +562,16 @@ table_type(?BONDY_DB_SUBSCRIPTION_RIB_TAB) -> subscription.
 
 -doc """
 Reaction to ANY peer merge event for a RIB cell (`bondy_aae_reactor`'s only
-entry point for `kind = rib`). The per-field CRDT write path emits many
-small ops (`{apply, count, {inc, _}}`, `{set, _}` on a ratchet, ...), none of
-which alone represents "the current summary" — unlike the pre-migration
-whole-blob `lww_register` cell, where the merge op directly carried the
-new value. Reads the cell's CURRENT converged value instead, reshapes it
+entry point for `kind = rib`). A merged op is one field's write, not the
+summary, so this reads the cell's CURRENT converged value, reshapes it
 (`reshape_summary/2` — the generic CRDT modules' raw `to_value/1` is not
 quite the summary shape read-side consumers expect: registration's raw
 struct value may omit never-written `earliest`/`latest` fields), and
-dispatches exactly as `on_remote_set/3` already
-does (`count = 0` there is already equivalent to a clear, so this needs
-no separate clear case — the write path never emits an explicit
-clear op either, see the moduledoc's "Concurrency model"). A cell that
-does not exist (never written, or fully
-reclaimed by `stabilize/2`) is a no-op: there is nothing for the stub
-store to reflect. MUST be total — called from the AAE merge reactor.
+dispatches exactly as `on_remote_set/3` does (`count = 0` there is
+equivalent to a clear). A cell that is gone by the time it is read
+(reaped, or discarded by `stabilize/2`) is handled as `on_remote_clear/2`:
+this node restates its own cell, and drops a peer's stub, whose licence is
+the cell being gone. MUST be total — called from the AAE merge reactor.
 """.
 -spec on_remote_merge(Type :: entry_type(), Key :: binary()) -> ok.
 
@@ -640,7 +592,7 @@ on_remote_merge(Type, Key) ->
                     {ok, {Value, _Hlc}} ->
                         on_remote_set(Type, Key, reshape_summary(Type, Value));
                     {error, not_found} ->
-                        ok
+                        on_remote_clear(Type, Key)
                 end;
             error ->
                 ok
@@ -976,30 +928,24 @@ is_active(Entry) ->
     bondy_registry_entry:is_local(Entry).
 
 %% @private
-%% The members row for an entry. `Invoke` is carried on registration rows so
-%% the summary needs no further lookups (all live rows for a URI share one
-%% policy — the registry rejects a mismatching invoke at registration time);
-%% `undefined` for subscriptions.
-member(Entry) ->
-    Type = bondy_registry_entry:type(Entry),
-    Key = ?MEMBER_KEY(
-        Type,
+member_key(Entry) ->
+    ?MEMBER_KEY(
+        bondy_registry_entry:type(Entry),
         bondy_registry_entry:realm_uri(Entry),
         bondy_registry_entry:match_policy(Entry),
         bondy_registry_entry:uri(Entry),
         bondy_registry_entry:created(Entry),
         bondy_registry_entry:id(Entry)
-    ),
-    Invoke =
-        case Type of
-            registration ->
-                bondy_registry_entry:get_option(
-                    invoke, Entry, ?INVOKE_SINGLE
-                );
-            subscription ->
-                undefined
-        end,
-    {Key, Invoke}.
+    ).
+
+%% @private
+group_key(Entry) ->
+    ?GROUP_KEY(
+        bondy_registry_entry:type(Entry),
+        bondy_registry_entry:realm_uri(Entry),
+        bondy_registry_entry:match_policy(Entry),
+        bondy_registry_entry:uri(Entry)
+    ).
 
 %% @private
 %% The cell key. Carries this node's nodestring — the single-writer
@@ -1088,135 +1034,108 @@ stub_delete(StubKey) ->
     end.
 
 %% @private
-%% A cell naming THIS node merged in from a peer — necessarily an echo of
-%% our own past writes (no peer ever writes our cells). This only happens
-%% in practice when our local copy is behind what a peer holds, which —
-%% since no other node ever writes our cells — means we are freshly
-%% booted and re-syncing from peers who still hold our pre-restart data.
-%%
-%% Corrects `count` back to the true local count via one corrective
-%% delta; needs nothing else, since a fresh write dominates by HLC and
-%% replicates back out regardless of how many origins contributed to the
-%% stale value historically.
-%%
-%% `earliest`/`latest` need no restart handling at all: they are
-%% monotone ratchet registers over the group's lifetime creation times
-%% (per-value, not per-origin state), so pre-restart values simply
-%% remain as valid watermarks of the group's history — exactly the
-%% ratchet semantics the removals path already relies on.
+%% A merged cell naming this node is an echo of a reading it wrote, possibly
+%% in an earlier incarnation, so it answers with its current reading, which
+%% outranks every reading stamped before it. Skipped while the partition
+%% store is unreadable: the live count is then unknown, and writing 0 would
+%% advertise the erasure of this node's live entries.
 %%
 %% MUST be total — called from the AAE merge reactor.
-self_heal(Type, RealmUri, Policy, Uri) ->
-    try
-        Table = db_table(Type),
-        case local_count(Type, RealmUri, Policy, Uri) of
-            unknown ->
-                %% The partition store is not readable yet (boot, or a
-                %% realm whose partition has not been provisioned). We
-                %% cannot tell "this node owns nothing here" from "we
-                %% cannot see what this node owns", and the two demand
-                %% OPPOSITE actions: the first wants `count` driven to 0,
-                %% the second wants no write at all. Treating unknown as 0
-                %% — which this did before — writes a corrective delta of
-                %% `-ReplicatedCount` for every cell it walks, and that
-                %% delta REPLICATES: a live instance would broadcast the
-                %% erasure of its own live registrations cluster-wide.
-                %% Skipping is always safe: the next merge event, or the
-                %% next bootstrap rebuild, re-runs this with a readable
-                %% store.
-                ok;
-            {ok, LocalCount} ->
-                do_self_heal(
-                    Type, Table, RealmUri, Policy, Uri, LocalCount
-                )
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            log_rib_exception(
-                Class,
-                Reason,
-                Stacktrace,
-                self_heal,
-                Type,
-                RealmUri,
-                Policy,
-                Uri
-            )
-    end.
-
-%% @private
-%% The corrective write, once the local count is KNOWN. Split out so the
-%% unknown-store case above can be read at a glance.
-do_self_heal(Type, Table, RealmUri, Policy, Uri, LocalCount) ->
-    Key = cell_key(RealmUri, Policy, Uri),
-    case bondy_db:read(Table, RealmUri, Key) of
-        {error, not_found} ->
-            ok;
-        {ok, {Value, _Hlc}} ->
-            #{count := ReplicatedCount} = reshape_summary(Type, Value),
-            case LocalCount - ReplicatedCount of
-                0 ->
-                    ok;
-                Delta ->
-                    %% The op is the CARRIER's language, and the two tables
-                    %% differ: registration's struct takes the field-scoped
-                    %% `{apply, count, {inc, _}}`, subscription's
-                    %% `bondy_oplog_crdt_owned_counter` takes `{inc, _}`
-                    %% directly. Sending the wrong one does not crash here —
-                    %% it fails asynchronously and shows up only as a
-                    %% persistent `rib_divergence`, which is how the
-                    %% previous carrier change slipped past eunit and was
-                    %% caught by `bondy_registry_rib_restart_SUITE`.
-                    Op =
-                        case Type of
-                            registration -> {apply, count, {inc, Delta}};
-                            subscription -> {inc, Delta}
-                        end,
-                    log_rib_error(
-                        bondy_db:apply(Table, RealmUri, Key, Op),
-                        self_heal,
-                        Type,
-                        RealmUri,
-                        Policy,
-                        Uri
-                    )
-            end
-    end.
-
-%% @private
-%% The count of live local rows for `(Type, RealmUri, Policy, Uri)` in the
-%% partition's members table (`check/1`'s ground truth, kept purely for
-%% that purpose since the write path stopped deriving anything from it —
-%% see the moduledoc's "Concurrency model").
-%%
-%% Returns `unknown` — NOT 0 — when the realm's partition store is not
-%% readable. `self_heal/4` turns this count into a REPLICATED corrective
-%% delta, so reporting an unreadable store as "owns nothing" is the
-%% difference between a no-op and broadcasting the erasure of every
-%% registration this node owns. The two callers must decide, so the
-%% ambiguity is returned rather than resolved here.
-local_count(Type, RealmUri, Policy, Uri) ->
-    %% `store/1` resolves the realm through the registry's gproc pool, which
-    %% RAISES when the pool is not up (early boot) rather than returning
-    %% `undefined`. Both mean the same thing here — the local truth is not
-    %% readable — so both must yield `unknown`. Letting the raise escape
-    %% would reach `self_heal/4`'s catch-all and log a full exception report
-    %% PER CELL, which `rebuild/1` turns into one report per cell in the
-    %% projection.
+restate(Type, RealmUri, Policy, Uri) ->
     case store(RealmUri) of
         undefined ->
-            unknown;
+            ok;
         Store ->
             Tab = bondy_registry_store:rib_members_tab(Store),
-            MS = [
-                {
-                    {?MEMBER_KEY(Type, RealmUri, Policy, Uri, '_', '_'), '_'},
-                    [],
-                    [true]
-                }
-            ],
-            {ok, ets:select_count(Tab, MS)}
+            write_cell(Tab, Type, RealmUri, Policy, Uri, restate, [])
     end.
+
+-doc """
+Writes this node's current RIB cell for every group it holds live entries
+for: the group's reading and, for a registration, its invoke policy and the
+creation times of its first and last entries. Called by
+`bondy_namespace_catalog` after every open of the `registry` DB, which starts
+empty. MUST be total.
+""".
+-spec restore() -> ok.
+
+restore() ->
+    try
+        lists:foreach(
+            fun({_, Partition}) ->
+                case bondy_registry_partition:store(Partition) of
+                    undefined ->
+                        ok;
+                    Store ->
+                        restore(
+                            Store, bondy_registry_store:rib_members_tab(Store)
+                        )
+                end
+            end,
+            bondy_registry:partitions()
+        )
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Failed to restore this node's registry RIB cells",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end.
+
+%% @private
+restore(Store, Tab) ->
+    Groups = ets:select(Tab, [
+        {{?GROUP_KEY('$1', '$2', '$3', '$4'), '_'}, [], [
+            {{'$1', '$2', '$3', '$4'}}
+        ]}
+    ]),
+    lists:foreach(
+        fun({Type, RealmUri, Policy, Uri}) ->
+            Extra = registration_fields(
+                Store, Tab, Type, RealmUri, Policy, Uri
+            ),
+            write_cell(Tab, Type, RealmUri, Policy, Uri, restore, Extra)
+        end,
+        Groups
+    ).
+
+%% @private
+%% Members rows sort by creation time within a group, so its first and last
+%% rows bound it.
+registration_fields(Store, Tab, registration, RealmUri, Policy, Uri) ->
+    MS = [
+        {{?MEMBER_KEY(registration, RealmUri, Policy, Uri, '$1', '$2')}, [], [
+            {{'$1', '$2'}}
+        ]}
+    ],
+    case ets:select(Tab, MS, 1) of
+        {[{Earliest, Id}], _} ->
+            {[{Latest, _}], _} = ets:select_reverse(Tab, MS, 1),
+            Bounds = [
+                {apply, earliest, {set, Earliest}},
+                {apply, latest, {set, Latest}}
+            ],
+            case
+                bondy_registry_store:lookup(
+                    Store, registration, RealmUri, Id, #{}
+                )
+            of
+                {ok, Entry} ->
+                    Invoke = bondy_registry_entry:get_option(
+                        invoke, Entry, ?INVOKE_SINGLE
+                    ),
+                    [{apply, invoke, {set, Invoke}} | Bounds];
+                {error, not_found} ->
+                    Bounds
+            end;
+        '$end_of_table' ->
+            []
+    end;
+registration_fields(_Store, _Tab, subscription, _RealmUri, _Policy, _Uri) ->
+    [].
 
 %% @private
 %% `bondy_registry_partition:store/1`, with an unreadable pool reported the
@@ -1279,7 +1198,7 @@ match_pattern_stubs(Type, RealmUri, Uri, Policy) ->
 %% The realm's members all live in one partition slice (partitions hash on
 %% the realm).
 member_nodes(RealmUri) ->
-    %% Same pool-may-raise caveat as `local_count/4`; see `store/1`.
+    %% See `store/1` for why an unreadable pool yields `undefined`.
     %% NOTE (not changed here, deliberately): an unreadable store still
     %% yields `#{}`, so `check/1` reports every cell as divergent rather than
     %% reporting "cannot tell". That inflates
@@ -1294,7 +1213,7 @@ member_nodes(RealmUri) ->
             Self = bondy_config:nodestring(),
             MS = [
                 {
-                    {?MEMBER_KEY('$1', RealmUri, '$2', '$3', '_', '_'), '_'},
+                    {?MEMBER_KEY('$1', RealmUri, '$2', '$3', '_', '_')},
                     [],
                     [{{'$1', '$2', '$3'}}]
                 }
@@ -1394,8 +1313,8 @@ safe_metric(Type, Spec) ->
 %% registration's raw `bondy_oplog_crdt_struct` value already has the
 %% schema fields as top-level keys but may omit never-written
 %% `earliest`/`latest` registers (normalised to `undefined` here).
-%% Subscription's carrier is a bare counter
-%% (`bondy_oplog_crdt_owned_counter`), so its raw value is an INTEGER, not a
+%% Subscription's carrier is a bare reading
+%% (`bondy_oplog_crdt_owned_reading`), so its raw value is an INTEGER, not a
 %% map at all. Called immediately after every raw read/list, before any
 %% `#{count := _}`-shaped pattern match.
 -spec reshape_summary(entry_type(), term()) -> map().

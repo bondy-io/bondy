@@ -13,7 +13,7 @@
 %%   - Multiple `next/2` calls cover the full keyspace and terminate
 %%     in `{ok, {done, []}}`.
 %%   - A new bucket has no cells (single-bucket assumption holds).
-%%   - Single-CRDT instances (with `crdt_module` set) report no_snapshot.
+%%   - An instance without a `cell_apply_target` reports no_snapshot.
 %%   - An expired/unknown cursor reports `cursor_expired`.
 %% =============================================================================
 -module(bondy_oplog_catalogue_snapshot_test).
@@ -41,7 +41,8 @@ catalogue_snapshot_test_() ->
         fun init_returns_watermark_after_cells/0,
         fun next_returns_batch_then_done/0,
         fun next_paginates_with_small_batch_size/0,
-        fun single_crdt_instance_returns_no_snapshot/0,
+        fun unregistered_shard_returns_no_snapshot/0,
+        fun unknown_instance_returns_no_snapshot/0,
         fun unknown_cursor_returns_expired/0,
         fun cursor_for_other_instance_returns_expired/0
     ]}.
@@ -64,7 +65,7 @@ init_returns_watermark_after_cells() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"a">>, {set, 10, <<"va">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"b">>, {set, 25, <<"vb">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"c">>, {set, 17, <<"vc">>}}),
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     {ok, {W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
     ?assertEqual(25, W),
     ?assert(is_binary(Cursor)),
@@ -77,7 +78,7 @@ next_returns_batch_then_done() ->
         bondy_oplog:append(Id, {cell_apply, ?B, K, {set, 10 + I, <<I>>}})
      || {I, K} <- lists:zip(lists:seq(1, length(Keys)), Keys)
     ],
-    _ = barrier(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
     {ok, {batch, {Cursor, Cells}}} =
         bondy_oplog_catalogue_snapshot:next(Id, Cursor),
@@ -105,7 +106,7 @@ next_paginates_with_small_batch_size() ->
             bondy_oplog:append(Id, {cell_apply, ?B, K, {set, 10 + I, <<I>>}})
          || {I, K} <- lists:zip(lists:seq(1, length(Keys)), Keys)
         ],
-        _ = barrier(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
         AllCells = pull_all(Id, Cursor, []),
         ReturnedKeys = [K || {_B, K, _F} <- AllCells],
@@ -115,19 +116,16 @@ next_paginates_with_small_batch_size() ->
         application:unset_env(bondy_oplog, catalogue_snapshot_batch_size)
     end.
 
-single_crdt_instance_returns_no_snapshot() ->
+unregistered_shard_returns_no_snapshot() ->
+    {Id, NS, _, _} = setup_instance(),
+    ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+    ?assertEqual({ok, no_snapshot}, bondy_oplog_catalogue_snapshot:init(Id)),
+    teardown(Id).
+
+unknown_instance_returns_no_snapshot() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        crdt_module => bondy_oplog_crdt_lww_register
-    }),
-    try
-        ?assertEqual(
-            {ok, no_snapshot},
-            bondy_oplog_catalogue_snapshot:init(Id)
-        )
-    after
-        bondy_oplog:stop_instance(Id)
-    end.
+    ?assertEqual(false, bondy_oplog_registry:fused(Id)),
+    ?assertEqual({ok, no_snapshot}, bondy_oplog_catalogue_snapshot:init(Id)).
 
 unknown_cursor_returns_expired() ->
     {Id, _NS, _, _} = setup_instance(),
@@ -159,7 +157,6 @@ setup_instance() ->
     NS = ns_of(Id),
     {Cache, Proj} = register_shard(NS, primary, 0),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }
@@ -197,9 +194,6 @@ mk_id() ->
 
 ns_of(Id) when is_binary(Id) ->
     binary_to_atom(<<"ns_", Id/binary>>, utf8).
-
-barrier(Id) ->
-    bondy_oplog:projection(Id).
 
 pull_all(Id, Cursor, Acc) ->
     case bondy_oplog_catalogue_snapshot:next(Id, Cursor) of

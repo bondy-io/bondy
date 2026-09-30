@@ -26,7 +26,9 @@
 %% `bondy_config:get/2` reads it through `app_config:get/3`, itself a
 %% `persistent_term:get/2`. Erasing the key is how a test restores "not set".
 -define(PT_STATUS, {bondy_router, status}).
--define(PT_MAIN_FAILED, {bondy_namespace_catalog, main_failed}).
+%% What `bondy_namespace_catalog:main_status/0` reads: `open` while a handle is
+%% published under it, `failed` otherwise.
+-define(PT_MAIN_DB, {bondy_namespace_catalog, db, main}).
 
 -define(BLOCKING, {test_blocking_alarm, <<"drain this node">>}).
 -define(NOISY, {test_noisy_alarm, <<"an upstream is unreachable">>}).
@@ -35,7 +37,6 @@ is_ready_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
         fun not_ready_before_boot_completes/0,
         fun ready_once_booted_with_nothing_wrong/0,
-        fun idle_main_db_is_ready/0,
         fun failed_main_db_is_not_ready/0,
         fun a_blocking_alarm_makes_the_node_not_ready/0,
         fun clearing_the_blocking_alarm_restores_readiness/0,
@@ -49,6 +50,7 @@ kept_instance_test_() ->
     {setup,
         fun() ->
             _ = persistent_term:erase(?PT_STATUS),
+            ok = persistent_term:put(?PT_MAIN_DB, test_main_db),
             {ok, _} = application:ensure_all_started(bondy_db),
             gen_event:add_handler(alarm_handler, bondy_alarm_handler, [])
         end,
@@ -57,6 +59,7 @@ kept_instance_test_() ->
                 alarm_handler, bondy_alarm_handler, []
             ),
             _ = persistent_term:erase(?PT_STATUS),
+            _ = persistent_term:erase(?PT_MAIN_DB),
             ok
         end,
         {timeout, 30, fun a_kept_instance_not_running_is_not_ready/0}}.
@@ -167,7 +170,7 @@ calls(_) ->
 
 setup() ->
     _ = persistent_term:erase(?PT_STATUS),
-    _ = persistent_term:erase(?PT_MAIN_FAILED),
+    ok = persistent_term:put(?PT_MAIN_DB, test_main_db),
     Owned =
         case whereis(alarm_handler) of
             undefined ->
@@ -185,7 +188,7 @@ cleanup(Owned) ->
     _ = gen_event:delete_handler(alarm_handler, bondy_alarm_handler, []),
     Owned andalso gen_event:stop(alarm_handler),
     _ = persistent_term:erase(?PT_STATUS),
-    _ = persistent_term:erase(?PT_MAIN_FAILED),
+    _ = persistent_term:erase(?PT_MAIN_DB),
     ok.
 
 %% `bondy_app:start/2` sets the status only once the listeners are up. Until
@@ -200,21 +203,13 @@ ready_once_booted_with_nothing_wrong() ->
     ok = bondy_config:set(status, ready),
     ?assert(bondy_app:is_ready()).
 
-%% Only `failed` disqualifies. In a bare eunit VM nothing is provisioned, so
-%% `main_status/0` is `idle` — the legitimate "nothing to open" case, and this
-%% test is what keeps a node with no durable tables in the load balancer.
-idle_main_db_is_ready() ->
-    ok = bondy_config:set(status, ready),
-    ?assertEqual(idle, bondy_namespace_catalog:main_status()),
-    ?assert(bondy_app:is_ready()).
-
 %% The condition read from `persistent_term` rather than from the alarm that
 %% mirrors it: this must hold after an `alarm_handler` crash, which
 %% `bondy_event_handler_watcher` repairs by re-installing with `[]` — an empty
 %% alarm set.
 failed_main_db_is_not_ready() ->
     ok = bondy_config:set(status, ready),
-    _ = persistent_term:put(?PT_MAIN_FAILED, {shutdown, some_reason}),
+    _ = persistent_term:erase(?PT_MAIN_DB),
     ?assertEqual(failed, bondy_namespace_catalog:main_status()),
     ?assertNot(bondy_app:is_ready()),
     %% Still not ready with the handler gone — the signal does not depend on it.
@@ -229,7 +224,7 @@ a_kept_instance_not_running_is_not_ready() ->
     Id = iolist_to_binary([
         "readiness_", integer_to_list(erlang:unique_integer([positive]))
     ]),
-    {ok, Sup} = bondy_oplog:start_instance(Id),
+    {ok, Sup} = bondy_oplog_test_projection:start_instance(Id),
     ok = meck:new(bondy_oplog_instance_dyn_sup, [passthrough, no_link]),
     try
         ok = meck:expect(

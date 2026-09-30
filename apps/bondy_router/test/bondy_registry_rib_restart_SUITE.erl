@@ -37,7 +37,7 @@
 %%
 %% Both RIB tables are `durability => ephemeral', so a restart empties the
 %% projection completely and the cells are re-acquired from the peer. Both
-%% repair paths — the stub store and `self_heal/4' — are driven by AAE merge
+%% repair paths — the stub store and `restate/4' — are driven by AAE merge
 %% events alone, and the catalogue-snapshot bootstrap a fresh replica takes
 %% emits none. That is the defect this suite exists to falsify. It is not
 %% RIB-specific: the same install path serves every `publish => true' table,
@@ -48,7 +48,7 @@
 %% ON FAILURE the divergence terms are reported verbatim as
 %% `{{Type, Policy, Uri}, #{full_entries := E, rib := A}}'; `A' names the
 %% mechanism — the PEER's nodestring means the stub store was never rebuilt,
-%% THIS node's means `self_heal/4' never ran on its own resurrected cells.
+%% THIS node's means `restate/4' never ran on its own resurrected cells.
 
 -define(REALM, <<"com.bondy.rib_restart">>).
 -define(PROC_1, <<"com.bondy.rib_restart.proc.one">>).
@@ -278,7 +278,7 @@ rib_consistent_after_plain_restart(Config) ->
 %% `rib_consistent_after_node_rebuild/1' above shows the consequence on an
 %% EPHEMERAL table. This asserts the CAUSE directly, and does so for a durable
 %% `publish => true' table (`bondy_realm', `db => main') alongside an ephemeral
-%% one (`bondy_registration_rib') — so a RIB-only patch cannot turn it green.
+%% one (`bondy_rib_registrations') — so a RIB-only patch cannot turn it green.
 %%
 %% It asserts the OBLIGATION (`publish => true' means subscribers get told),
 %% never a particular message — see `probe_loop/2'.
@@ -509,7 +509,7 @@ wait_rib_clean_loop(Node, Realm, Deadline, Force) ->
                         "#{full_entries := Truth, rib := Summaries}}.~n"
                         "`rib` naming the PEER  => stub store not rebuilt at "
                         "boot.~n"
-                        "`rib` naming THIS node => self_heal/4 never ran.~n"
+                        "`rib` naming THIS node => restate/4 never ran.~n"
                         "~p",
                         [Node, Other]
                     ),

@@ -150,11 +150,6 @@ flowchart LR
       IC["Mod:interpret_cog/2"]
       R --> IC
     end
-    subgraph compaction [compaction — stable prefix]
-      C["instance compaction"]
-      IC2["Mod:interpret_cog/2<br/>(single-CRDT mode)"]
-      C --> IC2
-    end
 ```
 
 - **Write** (the eager-materialised projection): the applier — or the
@@ -165,11 +160,8 @@ flowchart LR
   `kernel:interpret_overlay/4` to interpret the cell's *live group*
   of pending overlay events on top of the projection state — the
   CRDT's own `interpret_cog/2`, never a per-event state fold.
-- **Compaction**: a catalogue (projection-backed) instance needs no
-  re-fold at compaction — the projection *is* the per-cell
-  `interpret_cog` checkpoint, maintained eagerly on write. A bare
-  single-CRDT instance folds its stable prefix through
-  `interpret_cog/2` into the compaction checkpoint
+- **Compaction** needs no re-fold: the projection, maintained eagerly
+  on write, is the materialised state
   ([chapter 06](06_compaction_and_bootstrap.md)).
 
 ### The agreement obligation

@@ -637,6 +637,137 @@ live_writer(Pid, Opts) ->
             New
     end.
 
+%% A rotation whose manifest write fails at the directory fsync has already
+%% put a manifest naming the new segment in place, so the writer must not
+%% delete that segment. Only the fsync after the manifest's rename fails. The
+%% log must reopen with its frames.
+rotation_manifest_dir_sync_failure_keeps_the_log_openable_test() ->
+    HLC = bondy_oplog_hlc:new(),
+    Dir = mktemp_dir(),
+    Opts = #{dir => Dir, origin => origin(), max_segment_bytes => 200},
+    OldFlag = process_flag(trap_exit, true),
+    try
+        {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        {Hlc1, _, _} = append_one(P1, HLC, 1),
+        Renamed = atomics:new(1, []),
+        with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, rename, fun(From, To) ->
+                case filename:basename(To) of
+                    <<"manifest">> -> atomics:put(Renamed, 1, 1);
+                    "manifest" -> atomics:put(Renamed, 1, 1);
+                    _ -> ok
+                end,
+                meck:passthrough([From, To])
+            end),
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(D) ->
+                case atomics:exchange(Renamed, 1, 0) of
+                    1 -> {error, eio};
+                    0 -> meck:passthrough([D])
+                end
+            end),
+            _ =
+                try
+                    append_one(P1, HLC, 2)
+                catch
+                    _:_ -> writer_failed
+                end,
+            receive
+                {'EXIT', P1, _} -> ok
+            after 5000 -> error(writer_did_not_stop)
+            end
+        end),
+        {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        try
+            Hlcs = [
+                bondy_oplog_event:key_hlc(bondy_oplog_event:key(E))
+             || E <- read_all(P2)
+            ],
+            ?assert(lists:member(Hlc1, Hlcs))
+        after
+            ok = bondy_oplog_wal:close(P2)
+        end
+    after
+        process_flag(trap_exit, OldFlag),
+        rmrf(Dir)
+    end.
+
+%% A reopened log appends to its head segment, whose directory entry may not
+%% be durable yet, so recovery refuses to start until the directory is synced.
+reopen_refuses_an_unsyncable_directory_test() ->
+    Dir = mktemp_dir(),
+    Opts = #{dir => Dir, origin => origin()},
+    OldFlag = process_flag(trap_exit, true),
+    try
+        {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        ok = bondy_oplog_wal:close(P1),
+        Result = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            bondy_oplog_wal:start_link(instance_id(), Opts)
+        end),
+        ?assertMatch({error, _}, Result),
+        ?assertNotEqual(
+            nomatch,
+            string:find(io_lib:format("~p", [Result]), "dir_fsync_failed")
+        )
+    after
+        process_flag(trap_exit, OldFlag),
+        rmrf(Dir)
+    end.
+
+%% A first start whose segment create fails must leave nothing behind: the
+%% next start bootstraps again, and its exclusive create of the same segment
+%% would otherwise fail with `eexist` on every attempt.
+failed_first_segment_create_does_not_wedge_the_log_test() ->
+    Dir = mktemp_dir(),
+    Opts = #{dir => Dir, origin => origin()},
+    OldFlag = process_flag(trap_exit, true),
+    try
+        First = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            bondy_oplog_wal:start_link(instance_id(), Opts)
+        end),
+        ?assertMatch({error, _}, First),
+        {ok, P} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        ok = bondy_oplog_wal:close(P)
+    after
+        process_flag(trap_exit, OldFlag),
+        rmrf(Dir)
+    end.
+
+%% A crash between the first segment's create and the manifest's rename leaves
+%% a header-only segment and no manifest. The next start must bootstrap over it,
+%% but a segment long enough to hold a frame is never deleted to make room.
+segment_without_manifest_does_not_wedge_the_log_test() ->
+    Dir = mktemp_dir(),
+    Opts = #{dir => Dir, origin => origin()},
+    try
+        {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        ok = bondy_oplog_wal:close(P1),
+        [Manifest] = filelib:wildcard(
+            filename:join([Dir, "**", "manifest"])
+        ),
+        ok = file:delete(Manifest),
+        {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
+        ok = bondy_oplog_wal:close(P2),
+        [Segment] = filelib:wildcard(filename:join([Dir, "**", "*.qdata"])),
+        ok = file:delete(Manifest),
+        {ok, Fd} = file:open(Segment, [append, raw, binary]),
+        ok = file:write(Fd, <<0>>),
+        ok = file:close(Fd),
+        Size = filelib:file_size(Segment),
+        OldFlag = process_flag(trap_exit, true),
+        try
+            ?assertMatch(
+                {error, _}, bondy_oplog_wal:start_link(instance_id(), Opts)
+            ),
+            ?assertEqual(Size, filelib:file_size(Segment))
+        after
+            process_flag(trap_exit, OldFlag)
+        end
+    after
+        rmrf(Dir)
+    end.
+
 read_all(Pid) ->
     {ok, It} = bondy_oplog_wal_reader:open(Pid, beginning, [{follow, false}]),
     read_all(It, []).

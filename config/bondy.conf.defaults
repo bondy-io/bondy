@@ -169,7 +169,6 @@ platform_tmp_dir = {{platform_tmp_dir}}
 registry.partition_spawn_opts.message_queue_data = off_heap
 registry.partitions = 32
 registry.rib.check_interval = 5m
-registry.rib.damping = 0
 request_timeout = 20s
 router.forward.ack = off
 router.forward.retransmission = off

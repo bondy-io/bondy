@@ -53,7 +53,6 @@ compaction_fused_test_() ->
         {timeout, 30, fun retention_age_breach_truncates/0},
         {timeout, 30, fun retention_below_thresholds_defers/0},
         {timeout, 30, fun retention_requires_fused_rejected/0},
-        {timeout, 30, fun retention_without_projection_never_fires/0},
         {timeout, 30, fun retention_truncate_vs_drain_race/0},
         {timeout, 30, fun retention_compaction_is_idempotent/0},
         {timeout, 30, fun self_root_confirms_ephemeral_fused_compacts/0},
@@ -175,37 +174,11 @@ retention_requires_fused_rejected() ->
     Id = mk_id(),
     ?assertMatch(
         {error, _},
-        bondy_oplog:start_instance(Id, #{
-            fold_module => lww_register,
+        bondy_oplog_test_projection:start_instance(Id, #{
             origin => bondy_oplog_origin:new(),
             mst_retention => #{max_age_ms => 1000, max_events => 10}
         })
     ).
-
-%% A fused bare-CRDT instance (no `cell_apply_target` → no projection)
-%% accepts the retention opt at start but the policy NEVER fires: without
-%% a projection nothing holds the state, so truncation would lose it.
-%% Pins `retention_ctx/2`'s `HasProjection` gate.
-retention_without_projection_never_fires() ->
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
-        crdt_module => bondy_oplog_test_counter,
-        origin => bondy_oplog_origin:new(),
-        fused => true,
-        mst_retention => #{max_age_ms => 1, max_events => 1}
-    }),
-    try
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 5)],
-        ok = bondy_oplog_instance:await_apply(Id),
-        SizeBefore = bondy_oplog:size(Id),
-        ?assert(SizeBefore >= 5),
-        timer:sleep(30),
-
-        ?assertEqual({ok, no_change}, bondy_oplog_instance:compact(Id, [])),
-        ?assertEqual(SizeBefore, bondy_oplog:size(Id))
-    after
-        ok = bondy_oplog:stop_instance(Id)
-    end.
 
 %% The truncate-vs-drain race: a burst is appended and compaction invoked
 %% IMMEDIATELY, with no await barrier. The invariant under test — the
@@ -295,14 +268,12 @@ self_root_confirms_ephemeral_fused_compacts() ->
 
 %% Regression-lock for the real registry mux shape: one fused instance
 %% multiplexing TWO tables with heterogeneous CRDT kernels, distinguished by
-%% `Bucket` (`bondy_oplog_crdt_pn_counter` founding the instance —
-%% `?BUCKET_SUB`, mirroring `bondy_subscription_rib` — with
-%% `bondy_oplog_crdt_struct` joining at runtime via `register_table/4` as
-%% `?BUCKET_REG`, mirroring `bondy_registration_rib`'s
-%% `?RIB_REGISTRATION_SCHEMA` shape). The core compaction mechanism
-%% operates purely on the MST as a flat key/value tree — mux-agnostic by
-%% construction; self-root-confirms and asserts combined size returns to 0
-%% across both tables.
+%% `Bucket` (`bondy_oplog_crdt_pn_counter` founding the instance as
+%% `?BUCKET_SUB`, with `bondy_oplog_crdt_struct` joining at runtime via
+%% `register_table/4` as `?BUCKET_REG`), as the registry's two RIB tables do.
+%% The core compaction mechanism operates purely on the MST as a flat key/value
+%% tree — mux-agnostic by construction; self-root-confirms and asserts combined
+%% size returns to 0 across both tables.
 mux_shard_both_tables_compact_together() ->
     Id = mk_id(),
     NsSub = ns_of(Id),
@@ -312,7 +283,6 @@ mux_shard_both_tables_compact_together() ->
         NsSub, Id, ?BUCKET_SUB, bondy_oplog_crdt_pn_counter, #{}
     ),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         origin => bondy_oplog_origin:new(),
         fused => true,
         applier => #{
@@ -378,7 +348,6 @@ fused_catalogue_bootstrap_roundtrip() ->
         SrcNsSub, SrcId, ?BUCKET_SUB, bondy_oplog_crdt_pn_counter, #{}
     ),
     {ok, _} = bondy_oplog:start_instance(SrcId, #{
-        fold_module => lww_register,
         origin => bondy_oplog_origin:new(),
         fused => true,
         mst_retention => #{max_age_ms => 0, max_events => 1},
@@ -423,7 +392,6 @@ fused_catalogue_bootstrap_roundtrip() ->
         TgtNsSub, TgtId, ?BUCKET_SUB, bondy_oplog_crdt_pn_counter, #{}
     ),
     {ok, _} = bondy_oplog:start_instance(TgtId, #{
-        fold_module => lww_register,
         origin => bondy_oplog_origin:new(),
         fused => true,
         applier => #{
@@ -1424,7 +1392,6 @@ start_fused_instance(CrdtModule, CrdtOpts, Retention) ->
     NS = ns_of(Id),
     _ = register_shard(NS, primary, 0, CrdtModule, CrdtOpts),
     Opts0 = #{
-        fold_module => lww_register,
         origin => bondy_oplog_origin:new(),
         fused => true,
         applier => #{
@@ -1444,7 +1411,6 @@ start_applier_instance() ->
     NS = ns_of(Id),
     _ = register_shard(NS, primary, 0, bondy_oplog_crdt_pn_counter, #{}),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         origin => bondy_oplog_origin:new(),
         applier => #{
             cell_apply_target => {NS, primary, 0}

@@ -574,7 +574,6 @@ dedupe_samples(Samples) ->
 open_registry_like_instance(InstId, NS, Cfg) ->
     Base = #{
         origin => bondy_oplog_origin:new(),
-        fold_module => lww_register,
         backend => ets,
         wal_backend => mem,
         durability => ephemeral,

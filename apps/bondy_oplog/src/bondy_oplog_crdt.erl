@@ -151,8 +151,8 @@ as the sole convergence kernel.
   context into the event `meta`, so `interpret_cog/2` can later resolve
   concurrency. tier_0 CRDTs do not export it.
 
-- `reap_origins(State, RetiredOrigins) -> {NewState, Reaped}` — **tier_2
-  only.** Garbage-collect the per-cell causal context entries of
+- `reap_origins(State, RetiredOrigins) -> {NewState, Reaped}` — for a
+  tier_2 CRDT: garbage-collect the per-cell causal context entries of
   permanently-retired origins. A tier_2 CRDT carries one version-vector
   entry per origin that ever wrote the cell; an origin whose node is
   decommissioned leaves that entry behind forever (the one cost that grows
@@ -166,8 +166,11 @@ as the sole convergence kernel.
   is delegated to the consumer); the *operator* supplies `RetiredOrigins`
   and the obligation that they are permanently gone and causally stable
   cluster-wide, exactly as it owns origin-uniqueness. This callback only
-  enforces the local value-preserving gate. tier_0 CRDTs (whose per-origin
-  entries are value, not bookkeeping) do not export it.
+  enforces the local value-preserving gate. A tier_0 CRDT's per-origin
+  entries are value, not bookkeeping, so a tier_0 module exports it only
+  when naming it as a table's carrier declares the cells single-writer and
+  scoped to their owner: `bondy_oplog_crdt_owned_reading` drops a retired
+  origin's readings outright, changing the value.
 
 ## Determinism invariant
 

@@ -44,20 +44,10 @@ Trailer (32 bytes):
   integrity_mismatch}` on read.
 ```
 
-## Durability sequence
+## Durability
 
-`write/2` mirrors the manifest's tmp-write + datasync + rename +
-fsync-dir sequence:
-
-1. Encode the set to the binary form above.
-2. Write to `tombstones.tmp`, datasync the fd, close.
-3. `bondy_mst_io:rename("tombstones.tmp", "tombstones")` —
-   atomic.
-4. `bondy_mst_io:fsync_dir/1` so the dirent change is
-   durable.
-
-Failure at any step leaves the prior on-disk tombstones intact
-and removes the tmp file.
+`write/2` replaces the file with `bondy_mst_io:write_file_atomic/2` and has
+its error contract.
 
 ## Recovery
 
@@ -69,7 +59,6 @@ mode).
 """).
 
 -export([path/1]).
--export([tmp_path/1]).
 -export([read/1]).
 -export([write/2]).
 -export([delete/1]).
@@ -103,10 +92,6 @@ mode).
 path(Dir) ->
     filename:join(Dir, ?BONDY_MST_PACK_TOMBSTONES_FILENAME).
 
--spec tmp_path(file:filename_all()) -> file:filename_all().
-tmp_path(Dir) ->
-    filename:join(Dir, ?BONDY_MST_PACK_TOMBSTONES_TMP_FILENAME).
-
 %% =============================================================================
 %% API — read / write
 %% =============================================================================
@@ -132,33 +117,12 @@ read(Dir) ->
             E
     end.
 
-?DOC("""
-Atomically writes `Set` (a `sets:set/0`) to `Dir`.
-
-Returns `ok` on success, `{error, Reason}` on any I/O failure.
-On error the prior on-disk file is intact and the tmp file is
-removed.
-""").
+?DOC("Replaces the tombstones in `Dir` with `Set`; see the moduledoc.").
 -spec write(Dir :: file:filename_all(), sets:set(binary())) ->
     ok | {error, term()}.
 
 write(Dir, Set) ->
-    TmpPath = tmp_path(Dir),
-    FinalPath = path(Dir),
-    Bin = encode(Set),
-    case write_and_sync(TmpPath, Bin) of
-        ok ->
-            case bondy_mst_io:rename(TmpPath, FinalPath) of
-                ok ->
-                    bondy_mst_io:fsync_dir(Dir);
-                {error, _} = E ->
-                    _ = prim_file:delete(TmpPath),
-                    E
-            end;
-        {error, _} = E ->
-            _ = prim_file:delete(TmpPath),
-            E
-    end.
+    bondy_mst_io:write_file_atomic(path(Dir), encode(Set)).
 
 ?DOC("""
 Removes the tombstones file from `Dir`. Idempotent — a missing
@@ -253,22 +217,3 @@ decode_hashes(Count, HashLen, Body) when byte_size(Body) =:= Count * HashLen ->
     {ok, sets:from_list(Hashes, [{version, 2}])};
 decode_hashes(Count, _HashLen, _Body) ->
     {error, {bad_count, Count}}.
-
-%% @private
-%% Mirror of `bondy_mst_pack_manifest:write_and_sync/2`.
-write_and_sync(TmpPath, Bin) ->
-    case prim_file:open(TmpPath, [write, raw, binary]) of
-        {ok, Fd} ->
-            try
-                case prim_file:write(Fd, Bin) of
-                    ok ->
-                        bondy_mst_io:datasync(Fd);
-                    {error, _} = E ->
-                        E
-                end
-            after
-                _ = prim_file:close(Fd)
-            end;
-        {error, _} = E ->
-            E
-    end.

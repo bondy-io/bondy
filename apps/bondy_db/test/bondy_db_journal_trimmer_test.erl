@@ -26,6 +26,55 @@
 trim_reclaims_journal_files_test_() ->
     {timeout, 120, fun trim_reclaims_journal_files/0}.
 
+trim_syncs_each_ledger_after_its_trim_test_() ->
+    {timeout, 60, fun trim_syncs_each_ledger_after_its_trim/0}.
+
+%% Each Bookie's trim is followed, before the next Bookie's, by a sync of that
+%% Bookie's ledger directories, for an anonymous and a keyed Bookie alike.
+trim_syncs_each_ledger_after_its_trim() ->
+    Dir = test_dir(),
+    {ok, Sup} = bondy_db_leveled_sup:start_link(),
+    try
+        [Anon, Keyed] = Dirs = [filename:join(Dir, N) || N <- ["anon", "k"]],
+        _ = [ok = filelib:ensure_path(D) || D <- Dirs],
+        {ok, A} = bondy_db_leveled_sup:start_bookie(Sup, book_opts(Anon)),
+        {ok, K} = bondy_db_leveled_sup:get_or_start_bookie(
+            Sup, {shard, 0}, book_opts(Keyed)
+        ),
+        Trimmer = trimmer_pid(Sup),
+        Calls = bondy_db_trace_helper:calls(
+            Trimmer,
+            [
+                {leveled_bookie, book_trimjournal, 1},
+                {bondy_db_projection_leveled, sync_ledger, 1}
+            ],
+            fun() -> {ok, 2} = bondy_db_journal_trimmer:trim_now(Trimmer) end
+        ),
+        ?assertEqual(
+            lists:sort([[A, Anon], [K, Keyed]]),
+            lists:sort(pairs(Calls))
+        )
+    after
+        try
+            bondy_db_leveled_sup:stop(Sup)
+        catch
+            _:_ -> ok
+        end,
+        os:cmd("rm -rf " ++ Dir)
+    end.
+
+%% Consecutive trim and ledger-sync calls as `[Bookie, RootPath]`.
+pairs([
+    {leveled_bookie, book_trimjournal, [B]},
+    {bondy_db_projection_leveled, sync_ledger, [Root]}
+    | Rest
+]) ->
+    [[B, Root] | pairs(Rest)];
+pairs([]) ->
+    [];
+pairs(Unpaired) ->
+    [{unpaired, Unpaired}].
+
 trim_reclaims_journal_files() ->
     Dir = test_dir(),
     ok = filelib:ensure_dir(filename:join(Dir, ".keep")),

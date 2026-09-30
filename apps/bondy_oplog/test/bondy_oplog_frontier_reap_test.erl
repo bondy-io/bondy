@@ -83,7 +83,7 @@ unreachable_member_still_learns_from_the_rest() ->
 %% lose and report it.
 reap_is_atomic_against_a_concurrent_merge() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     O = <<"reap-cas">>,
     Other = <<"reap-cas-other">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{O => 4, Other => 1}),
@@ -127,7 +127,7 @@ reap_is_atomic_against_a_concurrent_merge() ->
 %% left `bondy_regulator_load_test` sampling a busy node in the shared VM.
 a_stale_frontier_compare_loses_no_origin() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     A = <<"cas-stale-a">>,
     B = <<"cas-stale-b">>,
     C = <<"cas-stale-c">>,
@@ -178,7 +178,7 @@ retired_set_is_total_without_the_table() ->
 %% would call a LIVE origin dead and retiring it would ban a running replica.
 retire_dead_refuses_while_an_instance_is_down() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Pid = bondy_oplog_instance:whereis(Id),
     ?assert(is_pid(Pid)),
     suspend_supervisor(),
@@ -201,7 +201,7 @@ retire_dead_refuses_while_an_instance_is_down() ->
 %% the only way to name them.
 retire_dead_retires_the_complement() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Gone = <<"reap-complement">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{Gone => 8}),
     {ok, Retired} = bondy_oplog_origin_retirement:retire_dead(),
@@ -219,7 +219,7 @@ retire_dead_retires_the_complement() ->
 %% at NODE level so the instance id only routes the request.
 get_retired_answers_the_retirement_set() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     O = <<"reap-verb">>,
     ok = bondy_oplog_origin_bans:retire(O, decommissioned),
     ?assertEqual(
@@ -261,8 +261,8 @@ universal_is_the_intersection_of_member_sets() ->
 member_pass_reaps_only_retired_origins() ->
     Peer = mk_id(),
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Peer),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Peer),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Gone = <<"reap-member-gone">>,
     Live = <<"reap-member-live">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{Gone => 4, Live => 6}),
@@ -283,8 +283,8 @@ member_pass_reaps_only_retired_origins() ->
 unreachable_member_reaps_nothing() ->
     Peer = mk_id(),
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Peer),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Peer),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     O = <<"reap-unreachable">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{O => 3}),
     ok = bondy_oplog_origin_bans:retire(O, decommissioned),
@@ -300,7 +300,7 @@ unreachable_member_reaps_nothing() ->
 
 reap_frontier_removes_only_named_origins() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     A = <<"reap-a">>,
     B = <<"reap-b">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{A => 3, B => 7}),
@@ -312,7 +312,7 @@ reap_frontier_removes_only_named_origins() ->
 
 reap_frontier_is_idempotent() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     A = <<"reap-idem">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{A => 1}),
     ?assertEqual([A], bondy_oplog_registry:reap_frontier(Id, [A])),
@@ -330,7 +330,7 @@ reap_frontier_ignores_unknown_instance() ->
 %% or the next round undoes every reap.
 retired_origin_never_re_enters_the_frontier() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     O = <<"reap-retired">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{O => 5}),
     ?assertEqual(5, maps:get(O, bondy_oplog_instance:frontier(Id), 0)),
@@ -347,7 +347,7 @@ retired_origin_never_re_enters_the_frontier() ->
 %% grows again meets a peer still advertising the entry.
 solo_reaps_no_frontier() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     O = <<"reap-solo">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{O => 2}),
     ok = bondy_oplog_origin_bans:retire(O, decommissioned),

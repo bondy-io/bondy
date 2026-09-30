@@ -63,7 +63,7 @@ cleanup(_) ->
 
 killed_subtree_restarts() ->
     Id = mk_id(),
-    {ok, Sup} = bondy_oplog:start_instance(Id),
+    {ok, Sup} = bondy_oplog_test_projection:start_instance(Id),
     exit(Sup, kill),
     assert_heals(Id, Sup),
     ok = bondy_oplog:stop_instance(Id),
@@ -71,14 +71,14 @@ killed_subtree_restarts() ->
 
 exhausted_subtree_restarts() ->
     Id = mk_id(),
-    {ok, Sup} = bondy_oplog:start_instance(Id),
+    {ok, Sup} = bondy_oplog_test_projection:start_instance(Id),
     Ref = monitor(process, Sup),
     ok = kill_instance_until_down(Id, Ref),
     assert_heals(Id, Sup).
 
 stop_during_backoff_is_final() ->
     Id = mk_id(),
-    {ok, Sup} = bondy_oplog:start_instance(Id),
+    {ok, Sup} = bondy_oplog_test_projection:start_instance(Id),
     Ref = monitor(process, Sup),
     exit(Sup, kill),
     receive
@@ -91,7 +91,7 @@ stop_during_backoff_is_final() ->
 %% pending restart falls due while that start is still filling its subtree.
 start_during_backoff_starts_one() ->
     Id = mk_id(),
-    {ok, Sup} = bondy_oplog:start_instance(Id),
+    {ok, Sup} = bondy_oplog_test_projection:start_instance(Id),
     Before = subtrees(),
     Ref = monitor(process, Sup),
     exit(Sup, kill),
@@ -110,7 +110,7 @@ start_during_backoff_starts_one() ->
             meck:passthrough([SupPid, I, Opts])
         end
     ),
-    {ok, NewSup} = bondy_oplog:start_instance(Id),
+    {ok, NewSup} = bondy_oplog_test_projection:start_instance(Id),
     ?assertNotEqual(Sup, NewSup),
     timer:sleep(3000),
     ?assertEqual(Before, subtrees()),
@@ -119,7 +119,7 @@ start_during_backoff_starts_one() ->
 
 restarted_keeper_still_watches() ->
     Id = mk_id(),
-    {ok, Sup} = bondy_oplog:start_instance(Id),
+    {ok, Sup} = bondy_oplog_test_projection:start_instance(Id),
     Keeper = whereis(?KEEPER),
     exit(Keeper, kill),
     ok = wait_until(
@@ -134,7 +134,7 @@ restarted_keeper_still_watches() ->
 
 failed_restart_is_retried() ->
     Id = mk_id(),
-    {ok, Sup} = bondy_oplog:start_instance(Id),
+    {ok, Sup} = bondy_oplog_test_projection:start_instance(Id),
     Test = self(),
     Attempts = counters:new(1, []),
     ok = meck:new(bondy_oplog_instance_dyn_sup, [passthrough, no_link]),
@@ -172,7 +172,7 @@ unreadable_origin_heals() ->
         seed => true
     },
     try
-        {ok, Sup} = bondy_oplog:start_instance(Id, Opts),
+        {ok, Sup} = bondy_oplog_test_projection:start_instance(Id, Opts),
         Origin = bondy_oplog:origin(Id),
         K = bondy_oplog:append(Id, before_restart),
         [File] = filelib:wildcard(Dir ++ "/**/origin"),

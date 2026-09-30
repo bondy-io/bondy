@@ -325,7 +325,6 @@ start_instance() ->
     NS = ns_of(Id),
     _ = register_shard(NS, primary, 0),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         origin => bondy_oplog_origin:new(),
         applier => #{
             cell_apply_target => {NS, primary, 0}

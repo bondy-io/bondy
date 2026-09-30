@@ -44,7 +44,6 @@ transport delivers them to the peer's responder which calls back into
 | `get_origins`                          | `{ok, [origin()]}`                                                     |
 | `get_retired`                          | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                     | `{ok, #{hash() => page()}}`                                            |
-| `get_snapshot`                         | `{ok, event_key(), term()}` \| `{ok, no_snapshot}`                     |
 | `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor()}}}` \| `{ok, no_snapshot}` \| `{error, {tables_not_registered, instance_id()}}` |
 | `{get_catalogue_snapshot_next, Cursor}`| `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {chunked_batch, {cursor(), [cell()], [cell_chunk()]}}}` \| `{ok, {done, [cell()]}}` \| `{error, cursor_expired}` |
 
@@ -118,7 +117,6 @@ the `Opts` argument.
     %% what makes the stability frontier a shared object rather than two
     %% unilateral observations. See BONDY_DB_DELETE_DESIGN.md §4.2.
     | {confirm_root, Peer :: peer_id(), Root :: bondy_mst:hash()}
-    | get_snapshot
     | get_catalogue_snapshot_init
     | {get_catalogue_snapshot_next, bondy_oplog_catalogue_cursor:cursor()}.
 

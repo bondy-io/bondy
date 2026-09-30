@@ -21,40 +21,24 @@ cleanup(_) ->
 
 compaction_test_() ->
     %% Each test gets a 30s per-test timeout. The eunit default is 5s,
-    %% which is too tight for tests that call `bondy_oplog:query/2` or
-    %% `await_apply/1` — those wait for the applier to drain the WAL
+    %% which is too tight for tests that call `await_apply/1`, which
+    %% waits for the applier to drain the WAL
     %% and under whole-suite load that occasionally takes longer than
     %% 5s, racing the eunit watchdog into a `*timed out*` cancellation
     %% even though the substrate is functioning correctly.
     {setup, fun setup/0, fun cleanup/1, [
-        {timeout, 30, fun no_crdt_module_returns_error/0},
         {timeout, 30, fun compact_with_no_peers_is_no_change/0},
         {timeout, 30, fun compact_after_sync_advances_watermark/0},
         {timeout, 30, fun compaction_truncates_mst/0},
-        {timeout, 30, fun snapshot_state_is_correct/0},
-        {timeout, 30, fun query_after_compact_returns_consistent_value/0},
-        {timeout, 30, fun query_stable_returns_snapshot_only/0},
-        {timeout, 30, fun query_hot_includes_live_events/0},
         {timeout, 30, fun watermark_filter_drops_old_remote_events/0},
-        {timeout, 30, fun deterministic_snapshot_across_replicas/0},
-        {timeout, 30, fun idempotent_compact/0},
-        {timeout, 30, fun query_with_no_events_yet/0}
+        {timeout, 30, fun deterministic_watermark_across_replicas/0},
+        {timeout, 30, fun idempotent_compact/0}
     ]}.
-
-no_crdt_module_returns_error() ->
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
-    %% No crdt_module configured.
-    ?assertEqual(
-        {error, no_crdt_module},
-        bondy_oplog:compact(Id)
-    ),
-    ok = bondy_oplog:stop_instance(Id).
 
 compact_with_no_peers_is_no_change() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, counter_opts()),
-    [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 5)],
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
+    ok = append_cells(Id, 1, 5),
     %% No peer state recorded ⇒ no stability frontier ⇒ no compaction.
     ?assertEqual({ok, no_change}, bondy_oplog:compact(Id)),
     ?assertEqual(undefined, bondy_oplog:current_watermark(Id)),
@@ -62,9 +46,9 @@ compact_with_no_peers_is_no_change() ->
     ok = bondy_oplog:stop_instance(Id).
 
 compact_after_sync_advances_watermark() ->
-    {A, B} = mk_pair(counter_opts()),
-    [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 10)],
-    [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 10)],
+    {A, B} = mk_pair(),
+    ok = append_cells(A, 1, 10),
+    ok = append_cells(B, 11, 20),
     ok = converge(A, B),
     ?assertMatch(
         {ok, {compacted, _, 20}},
@@ -74,99 +58,55 @@ compact_after_sync_advances_watermark() ->
     ok.
 
 compaction_truncates_mst() ->
-    {A, B} = mk_pair(counter_opts()),
-    [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 5)],
-    [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 5)],
+    {A, B} = mk_pair(),
+    ok = append_cells(A, 1, 5),
+    ok = append_cells(B, 6, 10),
     ok = converge(A, B),
     SizeBefore = bondy_oplog:size(A),
     ?assertEqual(10, SizeBefore),
     ?assertMatch({ok, {compacted, _, _}}, bondy_oplog:compact(A)),
     ?assertEqual(0, bondy_oplog:size(A)).
 
-snapshot_state_is_correct() ->
-    {A, B} = mk_pair(counter_opts()),
-    [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 7)],
-    [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 3)],
-    ok = converge(A, B),
-    {ok, {compacted, _, _}} = bondy_oplog:compact(A),
-    {ok, _W, S} = bondy_oplog:compaction_checkpoint(A),
-    ?assertEqual(10, S).
-
-query_after_compact_returns_consistent_value() ->
-    {A, B} = mk_pair(counter_opts()),
-    [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 5)],
-    [bondy_oplog:append(B, {inc, 2}) || _ <- lists:seq(1, 3)],
-    ok = converge(A, B),
-    {ok, {compacted, _, _}} = bondy_oplog:compact(A),
-    %% 5*1 + 3*2 = 11
-    ?assertEqual(11, bondy_oplog:query(A, value)).
-
-query_stable_returns_snapshot_only() ->
-    {A, B} = mk_pair(counter_opts()),
-    [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 4)],
-    [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 4)],
-    ok = converge(A, B),
-    {ok, {compacted, _, _}} = bondy_oplog:compact(A),
-    %% Add a *new* event after compaction; stable query should NOT see it.
-    bondy_oplog:append(A, {inc, 100}),
-    ?assertEqual(8, bondy_oplog:query_stable(A, value)),
-    ?assertEqual(108, bondy_oplog:query(A, value)).
-
-query_hot_includes_live_events() ->
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, counter_opts()),
-    [bondy_oplog:append(Id, {inc, N}) || N <- lists:seq(1, 5)],
-    %% Hot query: no compaction yet, all events are live.
-    %% 1+2+3+4+5 = 15
-    ?assertEqual(15, bondy_oplog:query(Id, value)),
-    ok = bondy_oplog:stop_instance(Id).
-
 %% After A compacts and B re-sends the same (now-stable) events to A
 %% via sync, A's MST should NOT regrow — the watermark filter drops
 %% them on receipt and on post-merge re-truncation.
 watermark_filter_drops_old_remote_events() ->
-    {A, B} = mk_pair(counter_opts()),
-    [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 5)],
-    [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 5)],
+    {A, B} = mk_pair(),
+    ok = append_cells(A, 1, 5),
+    ok = append_cells(B, 6, 10),
     ok = converge(A, B),
     {ok, {compacted, _, _}} = bondy_oplog:compact(A),
     ?assertEqual(0, bondy_oplog:size(A)),
+    Cells = bondy_oplog_test_projection:cells(A),
+    ?assertEqual(10, length(Cells)),
     %% B has not compacted, so it still has all 10 events.
     %% A pulls from B again; the filter must drop the old events.
     {ok, _} = bondy_oplog:sync(A, B),
     ?assertEqual(0, bondy_oplog:size(A)),
-    %% Snapshot value unchanged.
-    {ok, _, S} = bondy_oplog:compaction_checkpoint(A),
-    ?assertEqual(10, S).
+    ?assertEqual(Cells, bondy_oplog_test_projection:cells(A)).
 
-deterministic_snapshot_across_replicas() ->
-    {A, B} = mk_pair(counter_opts()),
-    [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 8)],
-    [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 8)],
+deterministic_watermark_across_replicas() ->
+    {A, B} = mk_pair(),
+    ok = append_cells(A, 1, 8),
+    ok = append_cells(B, 9, 16),
     ok = converge(A, B),
-    {ok, {compacted, _, _}} = bondy_oplog:compact(A),
-    {ok, {compacted, _, _}} = bondy_oplog:compact(B),
-    {ok, WA, SA} = bondy_oplog:compaction_checkpoint(A),
-    {ok, WB, SB} = bondy_oplog:compaction_checkpoint(B),
+    {ok, {compacted, WA, _}} = bondy_oplog:compact(A),
+    {ok, {compacted, WB, _}} = bondy_oplog:compact(B),
     ?assertEqual(WA, WB),
-    ?assertEqual(SA, SB).
+    ?assertEqual(
+        bondy_oplog_test_projection:cells(A),
+        bondy_oplog_test_projection:cells(B)
+    ).
 
 idempotent_compact() ->
-    {A, B} = mk_pair(counter_opts()),
-    [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 4)],
-    [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 4)],
+    {A, B} = mk_pair(),
+    ok = append_cells(A, 1, 4),
+    ok = append_cells(B, 5, 8),
     ok = converge(A, B),
     {ok, {compacted, W1, _}} = bondy_oplog:compact(A),
     %% Second compact with no new events ⇒ no_change.
     ?assertEqual({ok, no_change}, bondy_oplog:compact(A)),
     ?assertEqual(W1, bondy_oplog:current_watermark(A)).
-
-query_with_no_events_yet() ->
-    Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id, counter_opts()),
-    ?assertEqual(0, bondy_oplog:query(Id, value)),
-    ?assertEqual(0, bondy_oplog:query_stable(Id, value)),
-    ok = bondy_oplog:stop_instance(Id).
 
 %% Helpers
 
@@ -178,22 +118,25 @@ mk_id() ->
             )
     ).
 
-counter_opts() ->
-    #{
-        crdt_module => bondy_oplog_test_counter,
-        origin => bondy_oplog_origin:new()
-    }.
-
-%% Two replicas of the same logical CRDT, with distinct origins so the
-%% sync layer doesn't reject one as "remote with local origin".
-mk_pair(Opts) ->
+%% Two replicas with distinct origins, so the sync layer doesn't reject one as
+%% "remote with local origin".
+mk_pair() ->
     A = mk_id(),
     B = mk_id(),
-    OptsA = Opts#{origin => bondy_oplog_origin:new()},
-    OptsB = Opts#{origin => bondy_oplog_origin:new()},
-    {ok, _} = bondy_oplog:start_instance(A, OptsA),
-    {ok, _} = bondy_oplog:start_instance(B, OptsB),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, #{
+        origin => bondy_oplog_origin:new()
+    }),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, #{
+        origin => bondy_oplog_origin:new()
+    }),
     {A, B}.
+
+append_cells(Id, From, To) ->
+    _ = [
+        bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(N))
+     || N <- lists:seq(From, To)
+    ],
+    ok.
 
 %% @private
 %% Converges A and B and leaves BOTH with a checkpointed peer root covering the

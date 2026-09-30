@@ -55,12 +55,36 @@ Verified against leveled directly (`openriak-4.0`): with `persisted_sqn`
 at 209 and seven rolled journal files, one `book_trimjournal/1` took the
 store to a single file within ~10s.
 
+## Ledger durability
+
+The persisted SQN a trim reads moves only once the L0 file holding it is
+written (`leveled_penciller`, `levelzero_complete`). leveled fsyncs each
+ledger file but not the directory holding its name
+(`leveled_util:safe_rename/4`), so a power loss could keep a journal file's
+deletion and lose the ledger file that made it redundant. After each trim the
+trimmer fsyncs the Bookie's ledger directories
+(`bondy_db_projection_leveled:sync_ledger/1`, ordering pinned by
+`bondy_db_journal_trimmer_test`). That fsync is meant to finish before the
+journal deletes, which wait for leveled's 10 s `delete_pending` poll; it is
+not otherwise guaranteed. A failed fsync is logged as an error.
+
+Two windows stay open, both inside leveled:
+
+- A ledger merge writes its output files and manifest through the same
+  `safe_rename/4`, then deletes the files they replace, so a deletion can
+  reach disk before the names that replace it.
+- Closing a Bookie deletes its `delete_pending` journal files at once,
+  without waiting for the poll (`leveled_cdb`, `cdb_close`).
+
+Both close if `safe_rename/4` fsyncs the directory after its rename, a change
+to leveled itself; with it, `sync_ledger/1` is redundant.
+
 ## Scheduling
 
 One trimmer per `bondy_db_leveled_sup`, started as that supervisor's
 first child, so every topology that provisions Bookies gets one without
 threading anything through the topology modules. Each tick enumerates
-the pool's live Bookies with `bondy_db_leveled_sup:bookies/1` and trims
+the pool's live Bookies with `bondy_db_leveled_sup:bookie_roots/1` and trims
 each one. `db.journal_trim_interval` sets the cadence; `0` disables the
 timer entirely and this process then idles.
 
@@ -149,7 +173,7 @@ interval_ms() ->
 
 %% @private
 trim_all(Sup) ->
-    Bookies = bondy_db_leveled_sup:bookies(Sup),
+    Bookies = bondy_db_leveled_sup:bookie_roots(Sup),
     Trimmed = lists:foldl(fun trim_one/2, 0, Bookies),
     Trimmed > 0 andalso
         telemetry:execute(
@@ -160,9 +184,29 @@ trim_all(Sup) ->
     Trimmed.
 
 %% @private
-trim_one(Pid, Acc) ->
+sync_ledger(_Pid, undefined) ->
+    ok;
+sync_ledger(Pid, Root) ->
+    case bondy_db_projection_leveled:sync_ledger(Root) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Could not fsync a Bookie's ledger directories after a "
+                    "journal trim; a power loss before they reach disk may "
+                    "lose writes the trimmed journal held",
+                bookie => Pid,
+                root_path => Root,
+                reason => Reason
+            })
+    end.
+
+%% @private
+trim_one({Pid, Root}, Acc) ->
     try leveled_bookie:book_trimjournal(Pid) of
         ok ->
+            ok = sync_ledger(Pid, Root),
             Acc + 1;
         Other ->
             ?LOG_DEBUG(#{

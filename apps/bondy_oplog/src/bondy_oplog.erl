@@ -13,9 +13,10 @@
 Public façade for the operation-log replication framework.
 
 Each replicated value is an **instance**: an append-only operation log
-keyed by `{HLC, Origin, Seq}`, stored in a Merkle Search Tree. Stable
-prefixes of the log collapse into snapshots through a
-consumer-defined `interpret_cog/2` function.
+keyed by `{HLC, Origin, Seq}`, stored in a Merkle Search Tree. Its
+events are applied to a projection, and compaction truncates a stable
+prefix of the log only once the projection has applied it
+(`bondy_oplog_catalogue_compaction_test`).
 
 ## Attribution
 
@@ -28,7 +29,7 @@ section of this library's README for full references.
 
 ## API surface
 
-Lifecycle primitives are intentionally minimal: `start_instance/1,2`,
+Lifecycle primitives are intentionally minimal: `start_instance/2`,
 `stop_instance/1,2` and `list_instances/0`. The library does not impose
 lifecycle policy — *when* and *how often* to call these is the
 consumer's choice. Lazy loading, LRU eviction,
@@ -67,7 +68,6 @@ Per-instance event operations pass through to
 """).
 
 %% Lifecycle
--export([start_instance/1]).
 -export([start_instance/2]).
 -export([stop_instance/1]).
 -export([stop_instance/2]).
@@ -97,20 +97,15 @@ Per-instance event operations pass through to
 -export([latest_key/1]).
 -export([origin/1]).
 -export([info/1]).
--export([projection/1]).
 
 %% Sync
 -export([sync/2]).
 -export([sync/3]).
--export([bootstrap/2]).
--export([bootstrap/3]).
 
 %% GC / queries
 -export([compact/1]).
 -export([current_watermark/1]).
 -export([compaction_checkpoint/1]).
--export([query/2]).
--export([query_stable/2]).
 -export([retention_advice/1, retention_advice/2]).
 -export([retention_decision/1]).
 
@@ -166,17 +161,13 @@ Per-instance event operations pass through to
 %% =============================================================================
 
 ?DOC("""
-Starts an instance with default options.
-""").
--spec start_instance(instance_id()) -> {ok, pid()} | {error, term()}.
-
-start_instance(InstanceId) when is_binary(InstanceId) ->
-    start_instance(InstanceId, #{}).
-
-?DOC("""
 Starts an instance. Returns the pid of the per-instance supervisor.
 Idempotent: re-starting a running instance returns its existing
 supervisor pid.
+
+`Opts` must carry `applier.cell_apply_target`, the projection shard that
+materialises the instance's state; without it the start returns
+`{error, {missing_required_opt, cell_apply_target}}`.
 """).
 -spec start_instance(
     instance_id(),
@@ -534,13 +525,9 @@ later with HLC `=< Watermark` are rejected by the receive-side filter
 instead of being re-installed. Without this, a peer that has not yet
 seen the truncate would keep re-shipping the events we just dropped.
 
-**No snapshot is written.** Events between the previous snapshot's
-watermark and the new truncate watermark are *unrecoverable* by a
-bootstrapping peer — that peer would receive the older snapshot and
-then be rejected for every event in the gap. Use this only when the
-operator has out-of-band evidence that the dropped events are safe to
-lose cluster-wide. For coordinated retention with a snapshot, use
-`compact/1` instead.
+**No checkpoint is written.** Use this only when the operator has
+out-of-band evidence that the dropped events are safe to lose
+cluster-wide. For coordinated retention, use `compact/1` instead.
 
 Returns the number of MST rows removed.
 """).
@@ -583,47 +570,6 @@ origin(InstanceId) ->
 
 info(InstanceId) ->
     bondy_oplog_instance:info(InstanceId).
-
-?DOC("""
-Returns the current per-instance fold projection.
-
-Drains the applier first so the returned projection reflects every
-event the caller has already `append/2`-ed (read-your-writes).
-
-Returns:
-- `{ok, State}` — the current fold projection.
-- `{error, no_fold_configured}` — the instance was started without
-  `fold_module` set.
-- `{error, instance_unavailable}` — applier pid not yet published
-  (subtree restart in progress) or already gone.
-
-**Scope:** single-cell-per-instance. Per-cell projections and
-remote-event folding are not yet implemented.
-""").
--spec projection(instance_id()) ->
-    {ok, term()}
-    | {error, no_fold_configured}
-    | {error, instance_unavailable}.
-
-projection(InstanceId) when is_binary(InstanceId) ->
-    case bondy_oplog_instance:await_apply(InstanceId) of
-        ok ->
-            case bondy_oplog_registry:applier_pid(InstanceId) of
-                undefined ->
-                    {error, instance_unavailable};
-                Pid when is_pid(Pid) ->
-                    try
-                        bondy_oplog_applier:projection(Pid)
-                    catch
-                        exit:{noproc, _} -> {error, instance_unavailable};
-                        exit:noproc -> {error, instance_unavailable};
-                        exit:{normal, _} -> {error, instance_unavailable};
-                        exit:{shutdown, _} -> {error, instance_unavailable}
-                    end
-            end;
-        {error, _} ->
-            {error, instance_unavailable}
-    end.
 
 -doc """
 The `bondy_db` DB an oplog instance belongs to, or `undefined` when the
@@ -710,35 +656,8 @@ sync(InstanceId, Peer, Opts) ->
     _ = bondy_oplog_instance:await_apply(InstanceId),
     bondy_oplog_sync_session:run(InstanceId, Peer, Opts).
 
-?DOC("""
-Bootstraps `InstanceId` from `Peer` — fetches the peer's snapshot,
-installs it locally, then runs a regular sync for events past the
-watermark. Suitable for fresh or far-behind replicas joining a
-long-running cluster.
-
-Falls back to plain `sync/2,3` semantics if the peer reports no
-snapshot.
-""").
--spec bootstrap(instance_id(), peer_id()) ->
-    {ok, bondy_mst:hash() | undefined} | {error, term()}.
-
-bootstrap(InstanceId, Peer) ->
-    bootstrap(InstanceId, Peer, #{}).
-
--spec bootstrap(
-    instance_id(),
-    peer_id(),
-    bondy_oplog_sync_session:opts()
-) -> {ok, bondy_mst:hash() | undefined} | {error, term()}.
-
-bootstrap(InstanceId, Peer, Opts) ->
-    %% Drain the local applier so bootstrap operates on the
-    %% up-to-date MST (same rationale as `sync/3`).
-    _ = bondy_oplog_instance:await_apply(InstanceId),
-    bondy_oplog_sync_session:bootstrap(InstanceId, Peer, Opts).
-
 %% =============================================================================
-%% GC / QUERIES
+%% GC
 %% =============================================================================
 
 ?DOC("""
@@ -776,33 +695,6 @@ current_watermark(InstanceId) ->
 
 compaction_checkpoint(InstanceId) ->
     bondy_oplog_instance:compaction_checkpoint(InstanceId).
-
-?DOC("""
-Hot query: snapshot + live events. See
-`bondy_oplog_query:query/2`.
-""").
--spec query(instance_id(), Query :: term()) -> term().
-
-query(InstanceId, Query) ->
-    %% Hot query reads the MST (and snapshot). Drain so overlay-
-    %% pending events are included.
-    _ = bondy_oplog_instance:await_apply(InstanceId),
-    bondy_oplog_query:query(InstanceId, Query).
-
-?DOC("""
-Stable query: snapshot only. See
-`bondy_oplog_query:query_stable/2`.
-""").
--spec query_stable(instance_id(), Query :: term()) -> term().
-
-query_stable(InstanceId, Query) ->
-    %% query_stable reads the snapshot store only (no live MST), but
-    %% the underlying compaction/load_snapshot operations must have
-    %% drained the applier first. We drain defensively here so a
-    %% stale read between an append and the next compaction doesn't
-    %% surprise callers.
-    _ = bondy_oplog_instance:await_apply(InstanceId),
-    bondy_oplog_query:query_stable(InstanceId, Query).
 
 %% =============================================================================
 %% RETENTION ADVICE

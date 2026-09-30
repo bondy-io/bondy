@@ -218,7 +218,6 @@ events() ->
         [bondy_oplog, wal, scrub, run],
         %% Applier (batch pipeline stages + outcomes)
         [bondy_oplog, applier, batch_verify],
-        [bondy_oplog, applier, batch_fold],
         [bondy_oplog, applier, batch_cell_apply],
         [bondy_oplog, applier, batch_cell_put],
         [bondy_oplog, applier, batch_publish],
@@ -706,7 +705,6 @@ do_handle_event([bondy_oplog, wal, scrub, run], Meas, Meta) ->
     );
 do_handle_event([bondy_oplog, applier, Stage], Meas, Meta) when
     Stage == batch_verify orelse
-        Stage == batch_fold orelse
         Stage == batch_cell_apply orelse
         Stage == batch_cell_put orelse
         Stage == batch_publish orelse

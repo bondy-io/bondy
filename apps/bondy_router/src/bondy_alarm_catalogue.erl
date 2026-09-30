@@ -396,8 +396,9 @@ list() ->
             tasks => [],
             config_keys => []
         },
-        %% `bondy_namespace_catalog:777`. The one condition here that stops
-        %% the node serving — every durable table raises `*_not_provisioned`.
+        %% Raised by the namespace catalogue when `main` fails to open, cleared
+        %% when it opens. The one condition here that stops the node serving —
+        %% every durable table raises `*_not_provisioned`.
         %%
         %% `affects_ready => false` is deliberate and is NOT a claim that the
         %% node stays in rotation. The readiness signal for this condition is

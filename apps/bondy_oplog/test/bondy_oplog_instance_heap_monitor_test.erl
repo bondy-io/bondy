@@ -105,7 +105,7 @@ functional_across_hibernations() ->
     application:set_env(bondy_oplog, instance_gc_heap_delta_bytes, 1024),
 
     Id = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(Id, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, originated_opts()),
     Pid = bondy_oplog_registry:instance_pid(Id),
 
     [bondy_oplog:append(Id, {before, N}) || N <- lists:seq(1, 50)],

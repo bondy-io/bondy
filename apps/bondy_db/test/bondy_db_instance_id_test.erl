@@ -114,11 +114,13 @@ provisioned_db({_Db, Users, _Sup, _Dir}) ->
 %%      fingerprint is compared and refused, silently halting anti-entropy.
 lookup_not_parse() ->
     Carried = <<"free-form-id">>,
-    {ok, _} = bondy_oplog:start_instance(Carried, #{db => somedb}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Carried, #{
+        db => somedb
+    }),
     ?assertEqual(somedb, bondy_oplog:db_of(Carried)),
 
     Lookalike = <<"main-0">>,
-    {ok, _} = bondy_oplog:start_instance(Lookalike, #{}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Lookalike, #{}),
     ?assertEqual(undefined, bondy_oplog:db_of(Lookalike)),
 
     ok = bondy_oplog:stop_instance(Carried),

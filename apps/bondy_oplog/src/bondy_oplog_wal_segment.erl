@@ -120,7 +120,10 @@ Steps:
 The fd is opened read/write up front and returned as-is, so the caller
 can append frames without re-opening.
 
-Returns `{ok, Fd, Header}` on success or `{error, Reason}` on failure.
+Returns `{ok, Fd, Header}` on success or `{error, Reason}` on failure. A
+failure removes the file: no manifest names a segment before this returns,
+and a file left behind would make every later exclusive create of the same
+segment fail (`bondy_oplog_wal_durability_test`).
 """).
 -spec create(
     Path :: file:filename_all(),
@@ -156,6 +159,7 @@ create(Path, SegmentId, InstanceId, Origin) when
                     {ok, Fd, Header};
                 {error, _} = E ->
                     ok = prim_file:close(Fd),
+                    _ = prim_file:delete(Path),
                     E
             end;
         {error, _} = E ->

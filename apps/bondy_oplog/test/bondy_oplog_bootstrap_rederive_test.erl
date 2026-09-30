@@ -112,7 +112,6 @@ setup_counter_instance(CrdtMod) ->
         end,
     ok = bondy_oplog_core_registry:register(NS, primary, 0, RegConfig),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => pn_counter,
         %% Distinct per-replica origin: a counter accumulates per Origin, so
         %% two replicas sharing an Origin would collide on `{Origin, Seq}`
         %% and dedup each other's increments (the #11 hazard). The default
@@ -125,7 +124,7 @@ setup_counter_instance(CrdtMod) ->
 
 inc(Id, Delta) ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, ?K, {inc, Delta}}),
-    _ = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ok.
 
 counter_value(Entry) ->

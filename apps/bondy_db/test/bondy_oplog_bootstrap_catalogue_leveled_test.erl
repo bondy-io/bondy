@@ -75,7 +75,7 @@ fresh_replica_bootstraps_via_leveled() ->
             bondy_oplog:append(Peer, {cell_apply, ?B, K, {set, Hlc, V}})
          || {K, Hlc, V} <- Cells
         ],
-        _ = bondy_oplog:projection(Peer),
+        ok = bondy_oplog_test_projection:drain(Peer),
 
         %% Pre-bootstrap state.
         ?assertMatch({ok, 33}, high_water_for(PeerEntry)),
@@ -129,7 +129,6 @@ setup_instance_with_leveled(BookiePid) ->
         fold_module => lww_register
     }),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NS, primary, 0}
         }

@@ -46,9 +46,20 @@ catalogue process owns the `main` DB's `bondy_db_leveled_sup` for its lifetime:
   their tables, and publishes the DB / table handles via `persistent_term` for
   lock-free access. The two DBs are opened independently; an open failure logs
   loudly and leaves that DB idle rather than bricking boot.
+- after every open of the `registry` DB, `bondy_registry_rib:restore/0` writes
+  this node's RIB cells from the registry's entries: the DB starts empty, and
+  peers can merge back only what they hold.
+- the `registry` DB lives entirely in memory, so the death of any process its
+  tables run on (`bondy_db:table_pids/1`) loses part of it — a projection with
+  its owner, a shard's log and in-flight writes with its oplog instance. Any
+  such death closes and reopens the whole DB, so every loss is repaired the
+  same way: fresh origins, then the restore (`bondy_registry_SUITE`'s
+  `rib_restored_after_*` cases; `proofs/tla/RibAbs.tla`'s `RibAbs_Shipped`,
+  against `RibAbs_RestartNoRestore`). A reopen that fails leaves the registry
+  idle, as a failed open at boot does.
 - `terminate/2` — closes each open table, the DB, and the leveled sup.
 
-Accessors (`main_db/0`, `table/1`, `is_open/0`, `info/0`) read `persistent_term`
+Accessors (`main_db/0`, `table/1`, `main_status/0`, `info/0`) read `persistent_term`
 and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 `registry_db_spec/0`) are pure.
 """.
@@ -57,7 +68,6 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 
 -include("bondy_db_tables.hrl").
 
--define(PT_MAIN_FAILED, {?MODULE, main_failed}).
 -define(PT_DB(Name), {?MODULE, db, Name}).
 -define(PT_TABLE(Name), {?MODULE, table, Name}).
 
@@ -69,67 +79,28 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 -define(AW_CRDT, bondy_oplog_crdt_aw_map).
 -define(EW_CRDT, bondy_oplog_crdt_ew_flag).
 
-%% The subscription RIB cell's carrier: a `bondy_oplog_crdt_pn_counter` whose
-%% per-origin entries are reclaimable because the cell key names its sole
-%% writer. Naming it here IS the declaration that this table's cells are
-%% node-owned — see its moduledoc for why that licence belongs to the table
-%% rather than to the counter.
--define(OWNED_COUNTER_CRDT, bondy_oplog_crdt_owned_counter).
+%% The RIB cells' count carrier: the owner's latest reading of its live local
+%% count. Naming it declares that these tables' cells are single-writer and
+%% scoped to the owner, which is what licenses reaping a retired origin's
+%% readings (see `bondy_oplog_crdt_owned_reading`).
+-define(OWNED_READING_CRDT, bondy_oplog_crdt_owned_reading).
 
 %% The registration RIB cell's `bondy_oplog_crdt_struct` schema, passed as
-%% `crdt_opts` (the struct has no schema of its own — see
-%% `bondy_oplog_crdt_struct`'s moduledoc). `count`'s `stabilize_zero => 0`
-%% is the RIB-specific policy: the local group's cell is reclaimable once
-%% it empties. `earliest`/`latest` are monotone ratchets over the group's
-%% entry-creation times — a scalar per field regardless of how many
-%% entries ever existed (the former `created_times` two_p_set grew one
-%% element per add and one tombstone per remove, forever), at the
-%% documented cost that removals never shrink them: they are lifetime
-%% watermarks of the group, which WAMP dealer semantics permit.
+%% `crdt_opts`. `earliest`/`latest` are ratchets over the group's
+%% entry-creation times, so removals never shrink them.
 %%
-%% `count`'s `force_reap => true` is what makes a DEPARTED node's cell
-%% reclaimable. A RIB cell is single-writer — its key carries the owner's
-%% nodestring, so every contribution is minted by one origin — and the count
-%% is live local entries on that node, which cannot outlive it. That is
-%% exactly `bondy_oplog_crdt_struct:force_reap_field/3`'s licensing condition
-%% ("a field whose own domain semantics make a retired origin's contributions
-%% unconditionally, permanently invalid"). Without it a departed node's cell
-%% is immortal: only the owner's own `{inc, -1}`s can reach `stabilize_zero`,
-%% and the owner is gone. With it, the membership-driven cell reap zeroes the
-%% count and the `stabilize_zero` discard reclaims the cell outright — which
-%% matters because `bondy_oplog_cell_utils:reap_one_cell/6` re-encodes a
-%% VALUE-PRESERVING frame, so reclamation rests on `stabilize/2` reading the
-%% shrunk state, not on the value column. That chain is pinned by
-%% `bondy_oplog_crdt_struct_test`'s
-%% `force_reap_zeroes_the_field_and_discards_the_cell_test/0`, with
-%% `reap_without_force_reap_preserves_the_value_test/0` as the control.
+%% Every field declares `force_reap`, so a departed node's cell is
+%% reclaimable: the reap drops the retired origins' dots from every field,
+%% `count` reads 0, and the `stabilize_zero` discard removes the cell.
+%% `bondy_oplog_crdt_struct:reap_origins/2` keeps an origin live while any
+%% field holds one of its dots, so a field without `force_reap` would keep the
+%% cell forever (`bondy_rib_reclamation_cluster_SUITE`).
 %%
-%% EVERY field declares it, not just `count`, and that is load-bearing rather
-%% than tidy. `bondy_oplog_crdt_struct:reap_origins/2` only reaps an origin's
-%% CC entry once it has no live dot in ANY field's dot-store
-%% (`live_origins/1` folds over all of them), and
-%% `bondy_oplog_cell_utils:reap_one_cell/6` SKIPS the write when nothing was
-%% reaped — discarding the force-reaped fields with it. So one un-declared
-%% field (`invoke`, say) keeps the departed writer live and silently defeats
-%% the whole mechanism. Measured: with `count` alone declared,
-%% `bondy_rib_reclamation_cluster_SUITE` scanned the cell and reaped nothing.
-%% That suite is what pins this; a single-field unit test cannot see it.
-%% See `m:bondy_registry_rib`'s "Departure" section.
-%%
-%% This applies to the REGISTRATION cell only. The subscription cell has a
-%% single field and therefore no schema at all: it is a bare
-%% `?OWNED_COUNTER_CRDT`, whose reap licence is the table declaration rather
-%% than a per-field policy. Wrapping it in a one-field struct to gain
-%% `force_reap` bought nothing and cost a causal tier — tier_2 state grows one
-%% dot per unstabilized write, making `apply_op` quadratic. Measured on the
-%% Fly fleet: subscribe latency 198ms -> 6-23s, `all_subscribed_ok` 100% ->
-%% 66.7%. Registrations keep the struct because they genuinely have four
-%% fields and are orders of magnitude lower in write rate.
+%% The subscription cell has one field, so it is a bare `?OWNED_READING_CRDT`
+%% and stays tier_0: a struct is tier_2, whose state grows with every
+%% unstabilized write.
 -define(RIB_REGISTRATION_SCHEMA, #{
-    count =>
-        {bondy_oplog_crdt_pn_counter, #{
-            stabilize_zero => 0, force_reap => true
-        }},
+    count => {?OWNED_READING_CRDT, #{stabilize_zero => 0, force_reap => true}},
     invoke => {bondy_oplog_crdt_lww_register, #{force_reap => true}},
     earliest => {bondy_oplog_crdt_min_register, #{force_reap => true}},
     latest => {bondy_oplog_crdt_max_register, #{force_reap => true}}
@@ -141,7 +112,9 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
     dir :: file:filename_all() | undefined,
     %% The ephemeral `registry` DB (memory topology — no leveled sup / dir),
     %% provisioned alongside `main`.
-    registry_db :: bondy_db:db() | undefined
+    registry_db :: bondy_db:db() | undefined,
+    %% Monitors on every process the `registry` DB's tables run on.
+    registry_mons = [] :: [reference()]
 }).
 
 -type fold_class() ::
@@ -176,7 +149,6 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 %% API
 -export([fold_opts/1]).
 -export([info/0]).
--export([is_open/0]).
 -export([main_status/0]).
 -export([main_db/0]).
 -export([main_db_name/0]).
@@ -485,26 +457,13 @@ tables() ->
             fold => lww
         },
 
-        %% registry RIB — ephemeral (ETS projection, mem WAL, memory topology —
-        %% NO durable or disk-backed storage), the replicated routing summary
-        %% cells: one cell per (Realm, MatchPolicy, Uri, Node) carrying
-        %% `#{invoke, count, earliest, latest}` (registrations) or `#{count}`
-        %% (subscriptions). Only the node named in the key ever writes the
-        %% cell — single-writer by construction. `count`/`invoke`/`earliest`/
-        %% `latest` are backed by per-field CRDTs (`fold =>
-        %% rib_registration` resolves to `bondy_oplog_crdt_struct` with schema
-        %% `?RIB_REGISTRATION_SCHEMA`; `fold => rib_subscription` resolves to
-        %% `?OWNED_COUNTER_CRDT`, which needs no schema because the cell is a
-        %% single counter) rather than one opaque
-        %% LWW blob, so `bondy_registry_rib`'s entry-add/remove hooks write
-        %% small, lock-free, targeted deltas directly — no per-realm
-        %% recompute/serialisation point. `publish => true` wires the
-        %% merge-side hook: `bondy_aae_reactor` delegates merged peer cells to
-        %% `bondy_registry_rib`, which maintains the local stub view routing
-        %% consumes. These cells are the ONLY replicated registry state — full
-        %% `#entry{}` records never enter `bondy_db`; they live in
-        %% `bondy_registry_store`'s partition-local ETS. Maintained by
-        %% `bondy_registry_rib`.
+        %% registry RIB — ephemeral (ETS projection, mem WAL, memory topology;
+        %% nothing on disk): one routing cell per (Realm, MatchPolicy, Uri,
+        %% Node), written only by Node (`bondy_registry_rib`). These cells are
+        %% the only replicated registry state; full `#entry{}` records stay in
+        %% `bondy_registry_store`'s partition-local ETS. `publish => true`
+        %% feeds merged peer cells to `bondy_aae_reactor`, which hands them to
+        %% `bondy_registry_rib` for the stub view routing reads.
         #{
             name => ?BONDY_DB_REGISTRATION_RIB_TAB,
             db => registry,
@@ -620,11 +579,11 @@ native CRDT — the per-table "WAMP fold module" selection. These map what
 - `rib_registration` / `rib_subscription` → `lww_register` carrier +
   `bondy_oplog_crdt_struct` (schema `?RIB_REGISTRATION_SCHEMA`, passed as
   `crdt_opts` — the struct has no schema of its own) /
-  `bondy_oplog_crdt_owned_counter` (no schema — one field needs none): the
+  `bondy_oplog_crdt_owned_reading` (no schema — one field needs none): the
   registry RIB tables (see `tables/0`). Both carriers are reapable, which
   is what lets a departed node's cells be reclaimed, but they earn it
   differently — the struct through a per-field `force_reap` policy, the
-  owned counter through this declaration itself. The registration cell's
+  reading through this declaration itself. The registration cell's
   raw projected value is NOT the external `#{invoke, count, earliest,
   latest}` summary shape read-side consumers expect, and the subscription
   cell's is a bare integer, not `#{count => N}` —
@@ -659,7 +618,7 @@ fold_opts(rib_registration) ->
 fold_opts(rib_subscription) ->
     #{
         fold_module => lww_register,
-        crdt_module => ?OWNED_COUNTER_CRDT
+        crdt_module => ?OWNED_READING_CRDT
     };
 fold_opts(presence) ->
     %% Reserved presence-FSM fold — no current table uses it (the registry
@@ -724,32 +683,26 @@ table(Name) when is_atom(Name) ->
 table_names(DbName) ->
     [maps:get(name, S) || S <- tables(), maps:get(db, S) =:= DbName].
 
--doc "Whether the `main` DB has been provisioned and published.".
--spec is_open() -> boolean().
-
-is_open() ->
-    main_db() =/= undefined.
-
 -doc """
-Whether the durable `main` DB is usable, distinguishing the two ways it can be
-absent.
+Whether the durable `main` DB is usable.
 
-`idle` means there was nothing to provision — a legitimate configuration, and
-NOT a fault. `failed` means opening it raised: every durable table will reject
-use, so the node must not report itself ready. Keeping these apart is the whole
-point; `is_open/0` returns `false` for both and so cannot drive a health probe.
+`open` when its handle is published, which happens once the DB and every main
+table are open and the drain gates are released. `failed` otherwise: the
+latest open failed, or the catalogue is closing or reopening it. Every durable
+table then rejects use, so the node must not report itself ready.
+
+The handle is withdrawn before `main` closes and when a catalogue starts, so
+no earlier open outlives the process that made it. `bondy_degraded_boot_SUITE`
+checks each of these: `main_is_not_open_while_it_closes_or_opens/1`,
+`a_leftover_handle_is_not_open/1`, `a_reopened_main_is_no_longer_failed/1` and
+`a_serving_node_is_not_ready_until_main_reopens/1`.
 """.
--spec main_status() -> open | idle | failed.
+-spec main_status() -> open | failed.
 
 main_status() ->
-    case persistent_term:get(?PT_MAIN_FAILED, undefined) of
-        undefined ->
-            case main_db() of
-                undefined -> idle;
-                _ -> open
-            end;
-        _Reason ->
-            failed
+    case main_db() of
+        undefined -> failed;
+        _ -> open
     end.
 
 -doc """
@@ -788,63 +741,38 @@ init([]) ->
 
 %% @private
 open_main_into(State) ->
-    case main_specs_to_open() of
-        [] ->
-            %% Nothing to provision — reachable only if `tables/0` is
-            %% emptied of main specs.
-            ?LOG_NOTICE(#{
+    _ = unpublish(main),
+    Specs = main_specs_to_open(),
+    case do_open_main(Specs) of
+        {ok, Db, Sup, Dir} ->
+            %% Every main table is now open, so every shared per-shard
+            %% instance has its full set of cell-apply buckets registered.
+            %% Release the founding instances' WAL-drain gates (set via
+            %% `drain_gated => true` in `maybe_ephemeral_opts/2`) so each
+            %% shared WAL replays with a complete routing directory — no
+            %% non-founding table's cells are skipped. A no-op unless the main
+            %% topology is `per_shard`. See `bondy_db:start_draining/1`.
+            ok = bondy_db:start_draining(Db),
+            %% Now that the gates are open, run the secondary-index cold-start
+            %% that `open_table/3` deferred for the gated tables: each
+            %% barriers its (now ungated) primary drain and trust-or-rebuilds
+            %% from a fully-replayed primary.
+            ok = cold_start_main_indexes(Specs),
+            ok = put_db(main, Db),
+            ok = alarm_handler:clear_alarm(bondy_db_main_unavailable),
+            State#state{db = Db, leveled_sup = Sup, dir = Dir};
+        {error, Reason} ->
+            %% Don't brick the node over a storage-open failure — the process
+            %% keeps running so an operator can inspect it and the ephemeral
+            %% registry still works.
+            ?LOG_ERROR(#{
                 description =>
-                    "bondy_db namespace catalogue idle; no main tables to "
-                    "provision"
+                    "Failed to provision bondy_db main tables; catalogue "
+                    "starting without main. The node will report NOT READY "
+                    "until this is resolved.",
+                reason => Reason
             }),
-            State;
-        Specs ->
-            case do_open_main(Specs) of
-                {ok, Db, Sup, Dir} ->
-                    %% Every main table is now open, so every shared per-shard
-                    %% instance has its full set of cell-apply buckets
-                    %% registered. Release the founding instances' WAL-drain
-                    %% gates (set via `drain_gated => true` in
-                    %% `maybe_ephemeral_opts/2`) so each shared WAL replays with
-                    %% a complete routing directory — no non-founding table's
-                    %% cells are skipped. A no-op unless the main topology is
-                    %% `per_shard`. See `bondy_db:start_draining/1`.
-                    ok = bondy_db:start_draining(Db),
-                    %% Now that the gates are open, run the secondary-index
-                    %% cold-start that `open_table/3` deferred for the gated
-                    %% tables: each barriers its (now ungated) primary drain and
-                    %% trust-or-rebuilds from a fully-replayed primary.
-                    ok = cold_start_main_indexes(Specs),
-                    State#state{db = Db, leveled_sup = Sup, dir = Dir};
-                {error, Reason} ->
-                    %% Don't brick the node over a storage-open failure — the
-                    %% process keeps running so an operator can inspect it and
-                    %% the ephemeral registry still works. But the node MUST
-                    %% NOT present itself as healthy: every durable table will
-                    %% raise `*_not_provisioned` on use, so a readiness probe
-                    %% that passes here just routes traffic at a node that can
-                    %% serve none of it. Record the failure, raise an alarm,
-                    %% and let `main_status/0` fail readiness.
-                    ?LOG_ERROR(#{
-                        description =>
-                            "Failed to provision bondy_db main tables; "
-                            "catalogue starting with main idle. The node will "
-                            "report NOT READY until this is resolved.",
-                        reason => Reason
-                    }),
-                    ok = set_main_failed(Reason),
-                    State
-            end
-    end.
-
-%% @private
-%% Published through `persistent_term` (read on every readiness probe, written
-%% once) and mirrored as an alarm so it surfaces wherever alarms already go.
-set_main_failed(Reason) ->
-    _ = persistent_term:put(?PT_MAIN_FAILED, Reason),
-    _ =
-        try
-            alarm_handler:set_alarm(
+            ok = alarm_handler:set_alarm(
                 {
                     bondy_db_main_unavailable,
                     <<
@@ -853,11 +781,9 @@ set_main_failed(Reason) ->
                         "NOT READY."
                     >>
                 }
-            )
-        catch
-            _:_ -> ok
-        end,
-    ok.
+            ),
+            State
+    end.
 
 %% @private
 %% Run the deferred secondary-index cold-start for every opened main table. Called
@@ -886,7 +812,9 @@ open_registry_into(State) ->
         Specs ->
             case do_open_registry(Specs) of
                 {ok, Db} ->
-                    State#state{registry_db = Db};
+                    Mons = monitor_registry(),
+                    ok = bondy_registry_rib:restore(),
+                    State#state{registry_db = Db, registry_mons = Mons};
                 {error, Reason} ->
                     ?LOG_ERROR(#{
                         description =>
@@ -911,12 +839,19 @@ handle_info({'EXIT', Sup, Reason}, #state{leveled_sup = Sup} = State) ->
         reason => Reason
     }),
     {stop, {leveled_sup_died, Reason}, State#state{leveled_sup = undefined}};
+handle_info({'DOWN', Ref, process, Pid, Reason}, State) ->
+    case lists:member(Ref, State#state.registry_mons) of
+        true ->
+            {noreply, reopen_registry(Pid, Reason, State)};
+        false ->
+            {noreply, State}
+    end;
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #state{db = Db, leveled_sup = Sup, registry_db = RegistryDb}) ->
     _ = close_main(Db, Sup),
-    _ = close_registry(RegistryDb),
+    _ = close_db(registry, RegistryDb),
     ok.
 
 %% =============================================================================
@@ -990,7 +925,6 @@ do_open_main(Specs, Dir, Effective) ->
             },
             case bondy_db:open(main, DbOpts) of
                 {ok, Db} ->
-                    ok = put_db(main, Db),
                     %% Publish this node's keying-topology fingerprint (over the
                     %% EFFECTIVE on-disk topology) so anti-entropy peers can
                     %% verify they key data the same way before syncing per-shard
@@ -1023,6 +957,30 @@ do_open_main(Specs, Dir, Effective) ->
     end.
 
 %% @private
+monitor_registry() ->
+    Pids = lists:usort(
+        lists:append([
+            bondy_db:table_pids(T)
+         || #{name := Name, db := registry} <- tables(),
+            T <- [table(Name)],
+            T =/= undefined
+        ])
+    ),
+    [erlang:monitor(process, P) || P <- Pids].
+
+%% @private
+reopen_registry(Pid, Reason, #state{registry_db = Db} = State) ->
+    ?LOG_ERROR(#{
+        description =>
+            "A process of the bondy_db registry DB died; reopening the DB",
+        pid => Pid,
+        reason => Reason
+    }),
+    _ = [erlang:demonitor(M, [flush]) || M <- State#state.registry_mons],
+    ok = close_db(registry, Db),
+    open_registry_into(State#state{registry_db = undefined, registry_mons = []}).
+
+%% @private
 %% Provision the ephemeral `registry` DB (memory topology — no leveled sup or
 %% on-disk dir) and its tables. The per-table ephemeral knobs
 %% (projection_backend / oplog_instance_opts / fused) ride in via `table_opts/1`
@@ -1053,7 +1011,7 @@ do_open_registry(Specs) ->
                     }),
                     {ok, Db};
                 {error, _} = Err ->
-                    _ = close_registry(Db),
+                    _ = close_db(registry, Db),
                     Err
             end;
         {error, _} = Err ->
@@ -1093,79 +1051,38 @@ open_tables(Db, [#{name := Name} = Spec | Rest], EffTables) ->
     end.
 
 %% @private
-%% Closes every open main table, the DB, and the leveled sup; clears the
-%% published handles. Tolerant of partial state (any of Db / Sup undefined).
 close_main(Db, Sup) ->
-    _ = [
-        begin
-            _ =
-                try
-                    bondy_db:close_table(T)
-                catch
-                    _:_ -> ok
-                end,
-            _ = persistent_term:erase(?PT_TABLE(Name))
-        end
-     || #{name := Name, db := main} <- tables(),
-        T <- [table(Name)],
-        T =/= undefined
-    ],
-    _ =
-        case Db of
-            undefined ->
-                ok;
-            _ ->
-                _ =
-                    try
-                        bondy_db:close(Db)
-                    catch
-                        _:_ -> ok
-                    end,
-                persistent_term:erase(?PT_DB(main))
-        end,
-    _ = stop_sup(Sup),
+    ok = close_db(main, Db),
+    stop_sup(Sup).
+
+%% @private
+close_db(DbName, Db) ->
+    _ = [best_effort(fun bondy_db:close_table/1, T) || T <- unpublish(DbName)],
+    _ = [best_effort(fun bondy_db:close/1, Db) || Db =/= undefined],
     ok.
 
 %% @private
-%% Closes every open registry table and the registry DB; clears the published
-%% handles. The memory topology owns no leveled sup / on-disk dir, so this is
-%% simpler than close_main/2. Tolerant of `undefined` (registry idle).
-close_registry(undefined) ->
-    ok;
-close_registry(Db) ->
-    _ = [
-        begin
-            _ =
-                try
-                    bondy_db:close_table(T)
-                catch
-                    _:_ -> ok
-                end,
-            _ = persistent_term:erase(?PT_TABLE(Name))
-        end
-     || #{name := Name, db := registry} <- tables(),
-        T <- [table(Name)],
-        T =/= undefined
-    ],
-    _ =
-        try
-            bondy_db:close(Db)
-        catch
-            _:_ -> ok
-        end,
-    _ = persistent_term:erase(?PT_DB(registry)),
+%% Withdraws the handles of `DbName` and of its tables, returning the table
+%% handles that were published.
+unpublish(DbName) ->
+    _ = persistent_term:erase(?PT_DB(DbName)),
+    Names = table_names(DbName),
+    Tables = [T || Name <- Names, T <- [table(Name)], T =/= undefined],
+    _ = [persistent_term:erase(?PT_TABLE(Name)) || Name <- Names],
+    Tables.
+
+%% @private
+stop_sup(Sup) ->
+    _ = [best_effort(fun bondy_db_leveled_sup:stop/1, Sup) || is_pid(Sup)],
     ok.
 
 %% @private
-stop_sup(undefined) ->
-    ok;
-stop_sup(Sup) when is_pid(Sup) ->
+best_effort(Fun, Arg) ->
     try
-        bondy_db_leveled_sup:stop(Sup)
+        Fun(Arg)
     catch
         _:_ -> ok
-    end,
-    ok.
+    end.
 
 %% @private
 %% Maps a table spec to its `bondy_db:open_table/3` opts: the fold→CRDT wiring

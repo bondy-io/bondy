@@ -222,7 +222,7 @@ pre_bootstrap_instance() ->
         binary_to_list(Id)
     ]),
     ok = filelib:ensure_path(Dir),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         storage_path => list_to_binary(Dir)
     }),
     ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Id)),

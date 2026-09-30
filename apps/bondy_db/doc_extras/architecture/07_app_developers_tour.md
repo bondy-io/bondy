@@ -259,21 +259,22 @@ the fused, mem-WAL stack:
     topology    => bondy_db_topology_memory,
     fold_module => lww_register
 }).
-{ok, RegsRib} = bondy_db:open_table(Registry, bondy_registration_rib, #{
+{ok, RegsRib} = bondy_db:open_table(Registry, bondy_rib_registrations, #{
     crdt_module => bondy_oplog_crdt_struct,
     crdt_opts   => ?RIB_REGISTRATION_SCHEMA
 }).
-{ok, SubsRib} = bondy_db:open_table(Registry, bondy_subscription_rib, #{
-    crdt_module => bondy_oplog_crdt_pn_counter
+{ok, SubsRib} = bondy_db:open_table(Registry, bondy_rib_subscriptions, #{
+    crdt_module => bondy_oplog_crdt_owned_reading
 }).
 ```
 
 Only the node named in a cell's key ever writes it — single-writer by
 construction — so `count`/`invoke`/`earliest`/`latest` (registrations) or
 a bare `count` (subscriptions) are backed by per-field CRDTs rather than
-one opaque LWW blob: `bondy_registry_rib`'s add/remove hooks write small,
-lock-free, targeted deltas directly, with no per-realm
-recompute-from-scratch write. Both tables are **ephemeral** — RAM
+one opaque LWW blob. `count` is the owner's latest stamped reading of its
+live local entries (`bondy_oplog_crdt_owned_reading`), so
+`bondy_registry_rib`'s add/remove hooks write it from the caller's process
+with no serialisation point. Both tables are **ephemeral** — RAM
 projection, in-memory WAL, no disk anywhere
 ([chapter 03](03_bondy_db.md#projection-backend-durable-vs-ephemeral))
 — and both are `publish => true`: a cell merged in from a peer via
@@ -607,8 +608,8 @@ concurrent multi-writer is enabled.
 
 | Table | CRDT (ships) | Design target | DB | Notes |
 |---|---|---|---|---|
-| `bondy_registration_rib` | `bondy_oplog_crdt_struct` | — | registry (ephemeral) | RIB summary cell; single-writer by key; no secondary index |
-| `bondy_subscription_rib` | `bondy_oplog_crdt_pn_counter` | — | registry (ephemeral) | RIB summary cell; single-writer by key; no secondary index |
+| `bondy_rib_registrations` | `bondy_oplog_crdt_struct` | — | registry (ephemeral) | RIB summary cell; single-writer by key; no secondary index |
+| `bondy_rib_subscriptions` | `bondy_oplog_crdt_owned_reading` | — | registry (ephemeral) | RIB summary cell; single-writer by key; no secondary index |
 | `bondy_realm` | `lww_register` | — | main | global registry; `publish` |
 | `bondy_realm_keys` | `aw_map` | — | main | realm signing/encryption key material, split out of the realm cell so key bytes never enter the realm's convergence identity; global registry, `kid => key bundle` |
 | `security_users` | `lww_register` | — | main | `publish`; no secondary index (membership is its own relation) |

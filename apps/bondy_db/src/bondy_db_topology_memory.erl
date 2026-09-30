@@ -98,6 +98,7 @@ shared per shard.
 -export([shutdown/1]).
 -export([provision_cache/5]).
 -export([release_cache/2]).
+-export([storage_owner/1]).
 
 -define(PROJECTION_ADAPTER, bondy_oplog_projection_ets).
 -define(CACHE_ADAPTER, bondy_oplog_cache_ets).
@@ -197,6 +198,13 @@ close_table(#{shards := Shards, owner := Owner}, State) ->
 
 shutdown(#{owner := Owner}) ->
     bondy_db_topology_memory_owner:stop(Owner).
+
+-doc """
+The owner process: every projection table of the DB is an ETS table it owns,
+so its exit deletes them all.
+""".
+storage_owner(#{owner := Owner}) ->
+    Owner.
 
 -doc """
 Host the per-shard read cache in the DB-scoped owner (the same process

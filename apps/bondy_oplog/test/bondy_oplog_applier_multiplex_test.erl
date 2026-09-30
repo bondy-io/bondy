@@ -29,6 +29,8 @@ multiplex_test_() ->
         fun unregister_table_stops_routing/0,
         fun siblings_self_heal_from_registry/0,
         fun gated_drain_defers_until_siblings_register/0,
+        fun release_after_applier_reads_the_gate_opens_it/0,
+        fun release_before_it_reads_the_pid_opens_the_gate/0,
         fun install_catalogue_batch_routes_by_bucket/0,
         fun install_names_the_buckets_it_could_not_route/0,
         fun partial_install_does_not_adopt_the_peer_frontier/0,
@@ -69,7 +71,7 @@ two_tables_one_instance_project_independently() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?BUCKET_B, <<"shared">>, {set, 2, <<"b2">>}}
     ),
-    _ = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
 
     %% Each table's cells materialise in its OWN projection.
     ?assertEqual(
@@ -110,7 +112,7 @@ unregister_table_stops_routing() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?BUCKET_B, <<"x">>, {set, 1, <<"b">>}}
     ),
-    _ = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
 
     ?assertEqual(
         {<<"a">>, 1}, bondy_oplog_core:read(NsA, primary, ?BUCKET_A, <<"x">>)
@@ -137,7 +139,6 @@ siblings_self_heal_from_registry() ->
     %% Founding table A seeds via `cell_apply_bucket`; table B is NOT registered
     %% at runtime — it is recovered from its registry entry by the init rebuild.
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NsA, primary, 0},
             cell_apply_bucket => ?BUCKET_A
@@ -149,7 +150,7 @@ siblings_self_heal_from_registry() ->
     _ = bondy_oplog:append(
         Id, {cell_apply, ?BUCKET_B, <<"k">>, {set, 1, <<"vb">>}}
     ),
-    _ = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(
         {<<"va">>, 1}, bondy_oplog_core:read(NsA, primary, ?BUCKET_A, <<"k">>)
     ),
@@ -185,7 +186,6 @@ gated_drain_defers_until_siblings_register() ->
     %% window where the sibling has not provisioned yet.
     HA = register_shard(NsA, Id, ?BUCKET_A),
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NsA, primary, 0},
             cell_apply_bucket => ?BUCKET_A,
@@ -219,7 +219,7 @@ gated_drain_defers_until_siblings_register() ->
     %% Release the gate; the deferred drain replays the whole WAL now that the
     %% routing directory is complete.
     ok = bondy_oplog:open_drain_gate(Id),
-    _ = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
 
     %% Both cells projected — B's cell was held across the gate, not skipped.
     ?assertEqual(
@@ -234,6 +234,76 @@ gated_drain_defers_until_siblings_register() ->
     ok = bondy_oplog_core_registry:unregister(NsB, primary, 0),
     teardown_handles(HA),
     teardown_handles(HB).
+
+%% A release and an applier restart race: the release records the gate, then
+%% reads the applier pid; the restarted applier publishes its pid, then reads
+%% the gate. Each test holds one side between its two steps and runs the other
+%% side whole, so each kills a reordering of the side it holds. Neither covers
+%% a release that completes before the restart, which is the plain restart.
+release_after_applier_reads_the_gate_opens_it() ->
+    {Id, Ns, H} = start_gated_with_a_cell(),
+    Test = self(),
+    ok = meck:new(bondy_oplog_instance_keeper, [passthrough, no_link]),
+    Held = spawn_hold(),
+    try
+        ok = meck:expect(
+            bondy_oplog_instance_keeper,
+            drain_released,
+            fun
+                (I) when I =:= Id ->
+                    Released = meck:passthrough([I]),
+                    Test ! {gate_read, self()},
+                    hold(Held),
+                    Released;
+                (I) ->
+                    meck:passthrough([I])
+            end
+        ),
+        exit(bondy_oplog_registry:applier_pid(Id), kill),
+        receive
+            {gate_read, _} -> ok
+        after 10000 -> error(no_restart)
+        end,
+        _ = bondy_oplog:open_drain_gate(Id),
+        Held ! release,
+        assert_gate_opened(Id, Ns)
+    after
+        Held ! release,
+        _ = meck:unload(bondy_oplog_instance_keeper)
+    end,
+    stop_gated(Id, Ns, H).
+
+release_before_it_reads_the_pid_opens_the_gate() ->
+    {Id, Ns, H} = start_gated_with_a_cell(),
+    Test = self(),
+    ok = meck:new(bondy_oplog_instance_keeper, [passthrough, no_link]),
+    Held = spawn_hold(),
+    try
+        ok = meck:expect(
+            bondy_oplog_instance_keeper,
+            release_drain_gate,
+            fun(I) ->
+                Test ! {releasing, self()},
+                hold(Held),
+                meck:passthrough([I])
+            end
+        ),
+        _ = spawn(fun() -> bondy_oplog:open_drain_gate(Id) end),
+        receive
+            {releasing, _} -> ok
+        after 10000 -> error(no_release)
+        end,
+        Old = bondy_oplog_registry:applier_pid(Id),
+        exit(Old, kill),
+        New = await_new_applier(Id, Old, 10000),
+        _ = sys:get_state(New),
+        Held ! release,
+        assert_gate_opened(Id, Ns)
+    after
+        Held ! release,
+        _ = meck:unload(bondy_oplog_instance_keeper)
+    end,
+    stop_gated(Id, Ns, H).
 
 %% End-to-end catalogue-snapshot bootstrap across a collapsed per-shard instance:
 %% the PRODUCTION side (`init/1`) must stream EVERY table on the shard in one
@@ -259,7 +329,7 @@ install_catalogue_batch_routes_by_bucket() ->
     _ = bondy_oplog:append(
         SrcId, {cell_apply, ?BUCKET_B, <<"shared">>, {set, 9, <<"b_shared">>}}
     ),
-    _ = bondy_oplog:projection(SrcId),
+    ok = bondy_oplog_test_projection:drain(SrcId),
 
     %% The whole-shard snapshot (`init/1`) genuinely spans BOTH tables' buckets.
     Cells = pull_snapshot(SrcId),
@@ -371,7 +441,7 @@ adoption_holds({PeerId, _, _, _, _}, {TgtId, _, _, _, _}, Plan, Skew) ->
         )
      || {I, B} <- lists:enumerate(Plan)
     ],
-    _ = bondy_oplog:projection(PeerId),
+    ok = bondy_oplog_test_projection:drain(PeerId),
     PeerFrontier = bondy_oplog_instance:frontier(PeerId),
 
     ok =
@@ -471,7 +541,6 @@ setup_two_tables() ->
     %% Founding table A seeds the cell-apply directory (dir-mode via
     %% `cell_apply_bucket`).
     {ok, _} = bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
         applier => #{
             cell_apply_target => {NsA, primary, 0},
             cell_apply_bucket => ?BUCKET_A
@@ -507,7 +576,7 @@ partial_install_does_not_adopt_the_peer_frontier() ->
     _ = bondy_oplog:append(
         PeerId, {cell_apply, ?BUCKET_B, <<"kb">>, {set, 7, <<"vb">>}}
     ),
-    _ = bondy_oplog:projection(PeerId),
+    ok = bondy_oplog_test_projection:drain(PeerId),
     PeerFrontier = bondy_oplog_instance:frontier(PeerId),
     %% Guard the guard: a peer with an empty frontier would make the
     %% withheld-frontier assertion below pass for the wrong reason.
@@ -579,7 +648,7 @@ install_names_the_buckets_it_could_not_route() ->
     _ = bondy_oplog:append(
         SrcId, {cell_apply, ?BUCKET_B, <<"kb">>, {set, 7, <<"vb">>}}
     ),
-    _ = bondy_oplog:projection(SrcId),
+    ok = bondy_oplog_test_projection:drain(SrcId),
     Cells = pull_snapshot(SrcId),
 
     {TgtId, TgtNsA, TgtNsB, TgtHA, TgtHB} = setup_two_tables(),
@@ -655,6 +724,80 @@ teardown_two_tables(Id, NsA, NsB, {CA, PA}, {CB, PB}) ->
     ok = bondy_oplog_projection_ets:close(PB),
     ok = bondy_oplog_cache_ets:close(CB),
     ok.
+
+start_gated_with_a_cell() ->
+    Id = mk_id(),
+    Ns = binary_to_atom(<<"race_", Id/binary>>, utf8),
+    H = register_shard(Ns, Id, ?BUCKET_A),
+    {ok, _} = bondy_oplog:start_instance(Id, #{
+        applier => #{
+            cell_apply_target => {Ns, primary, 0},
+            cell_apply_bucket => ?BUCKET_A,
+            drain_gated => true
+        }
+    }),
+    _ = bondy_oplog:append(
+        Id, {cell_apply, ?BUCKET_A, <<"k">>, {set, 1, <<"v">>}}
+    ),
+    {Id, Ns, H}.
+
+stop_gated(Id, Ns, H) ->
+    ok = bondy_oplog:stop_instance(Id),
+    ok = bondy_oplog_core_registry:unregister(Ns, primary, 0),
+    teardown_handles(H).
+
+assert_gate_opened(Id, Ns) ->
+    ?assertEqual({<<"v">>, 1}, await_read(Ns, ?BUCKET_A, <<"k">>, 2000)),
+    ?assert(bondy_oplog_registry:tables_registered(Id)).
+
+%% A latch: `hold/1` blocks until the latch is sent `release`, and returns at
+%% once after that. Each test's `after` sends it.
+spawn_hold() ->
+    spawn(fun() ->
+        receive
+            release -> hold_released()
+        end
+    end).
+
+hold_released() ->
+    receive
+        {wait, From} ->
+            From ! released,
+            hold_released();
+        release ->
+            hold_released()
+    after 30000 -> ok
+    end.
+
+hold(Latch) ->
+    Ref = erlang:monitor(process, Latch),
+    Latch ! {wait, self()},
+    receive
+        released -> ok;
+        {'DOWN', Ref, process, Latch, _} -> ok
+    end,
+    erlang:demonitor(Ref, [flush]),
+    ok.
+
+await_new_applier(Id, Old, Timeout) ->
+    case bondy_oplog_registry:applier_pid(Id) of
+        Pid when is_pid(Pid), Pid =/= Old ->
+            Pid;
+        _ when Timeout > 0 ->
+            timer:sleep(20),
+            await_new_applier(Id, Old, Timeout - 20);
+        _ ->
+            error(no_restart)
+    end.
+
+await_read(Ns, Bucket, Key, Timeout) ->
+    case bondy_oplog_core:read(Ns, primary, Bucket, Key) of
+        undefined when Timeout > 0 ->
+            timer:sleep(20),
+            await_read(Ns, Bucket, Key, Timeout - 20);
+        Result ->
+            Result
+    end.
 
 mk_id() ->
     list_to_binary(

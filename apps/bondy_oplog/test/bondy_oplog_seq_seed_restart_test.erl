@@ -446,7 +446,6 @@ open_pack_instance(InstanceId, NS, Dir, Origin) ->
 open_pack_instance(InstanceId, NS, Dir, Origin, ApplierOpts) ->
     bondy_oplog:start_instance(InstanceId, #{
         origin => Origin,
-        fold_module => lww_register,
         backend => bondy_mst_pack_store,
         storage_path => unicode:characters_to_binary(Dir),
         %% A `storage_path` instance starts in `pre_bootstrap`; `seed` makes
@@ -464,7 +463,7 @@ append_batch(InstanceId, I, Batch) ->
             EvKey = bondy_oplog:append(
                 InstanceId, {cell_apply, ?B, Key, {set, Hlc, Key}}
             ),
-            _ = bondy_oplog:projection(InstanceId),
+            ok = bondy_oplog_test_projection:drain(InstanceId),
             EvKey
         end,
         lists:seq(1, Batch)

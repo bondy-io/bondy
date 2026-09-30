@@ -173,6 +173,7 @@ it).
 -export([reconcile/4]).
 -export([shard_count/1]).
 -export([shard_for/3]).
+-export([table_pids/1]).
 -export([start_draining/1]).
 -export([tick/1]).
 
@@ -1373,10 +1374,8 @@ probe_dispatch(InstanceId, Mod, Op) ->
 %% @private
 %% The instance's effective CRDT module — resolved exactly as the applier
 %% does: from its shard's `bondy_oplog_core_registry` entry via
-%% `from_modules/2` (`crdt_module` wins, else the `fold_module` twin). The
-%% per-instance `bondy_oplog_registry` `crdt_module` field is NOT
-%% authoritative (it can be `undefined` even for a configured CRDT), so we
-%% go through the applier's `cell_apply_target` like the write path does.
+%% `from_modules/2` (`crdt_module` wins, else the `fold_module` twin), reached
+%% through the applier's `cell_apply_target` like the write path.
 %% `undefined` when the instance has no projection target (not probeable).
 probe_module(InstanceId) ->
     case cell_apply_target_for(InstanceId) of
@@ -2729,7 +2728,6 @@ register_shard(
                                     InstanceId,
                                     Shard,
                                     EntityType,
-                                    FoldModule,
                                     OplogOpts,
                                     SecIndexes
                                 )
@@ -2856,16 +2854,6 @@ release_cache(Topology, TableState, CacheHandle) ->
             ok
     end.
 
-%% NOTE (oplog opts merge): `OplogOpts` is merged into the per-shard
-%% instance opts. `fold_module` and the applier's *routing* keys
-%% (`cell_apply_target`, `secondary_indexes`) are pinned — they carry
-%% per-shard routing the caller cannot meaningfully provide — and
-%% override any caller value. Caller-provided applier *tuning* (e.g.
-%% `apply_batch_max_events`, `oldstate_cache`) is merged in *under* the
-%% pinned routing keys, so it reaches the applier instead of being
-%% dropped. Everything else (`backend`, `storage_path`, `fsync_mode`,
-%% `max_install_in_flight`, etc.) is forwarded verbatim.
-
 %% @private
 %% Context-sensitive default for the applier's OldValue frame-cache:
 %% ON for durable (leveled) projections, OFF for ephemeral (ets). A
@@ -2904,10 +2892,10 @@ maybe_enable_publish(OplogOpts, NS, Merged) ->
     end.
 
 %% @private
-%% `OplogOpts` is merged into the per-shard instance opts. `fold_module`
-%% and the applier's *routing* keys (`cell_apply_target`,
-%% `secondary_indexes`) are pinned — they carry per-shard routing the
-%% caller cannot meaningfully provide — and override any caller value.
+%% `OplogOpts` is merged into the per-shard instance opts. The applier's
+%% *routing* keys (`cell_apply_target`, `secondary_indexes`) are pinned —
+%% they carry per-shard routing the caller cannot meaningfully provide — and
+%% override any caller value.
 %% Caller-provided applier *tuning* (e.g. `apply_batch_max_events`,
 %% `oldstate_cache`) is merged in *under* the pinned routing keys, so it
 %% reaches the applier instead of being dropped. Everything else
@@ -2917,7 +2905,6 @@ start_shard_instance(
     NS,
     InstanceId,
     Shard,
-    FoldModule,
     OplogOpts,
     SecIndexes,
     MaybeBucket
@@ -2934,7 +2921,6 @@ start_shard_instance(
             Bucket -> CallerApplier0#{cell_apply_bucket => Bucket}
         end,
     Pinned = #{
-        fold_module => FoldModule,
         %% This shard's read-side AE freshness target: the applier bumps it on
         %% each commit and the AE heartbeat (`bondy_oplog_sync_session`) on each
         %% successful round, so an idle primary shard still stays fresh — which
@@ -2985,7 +2971,6 @@ start_or_join_shard_instance(
     InstanceId,
     Shard,
     EntityType,
-    FoldModule,
     OplogOpts,
     SecIndexes
 ) ->
@@ -2998,7 +2983,6 @@ start_or_join_shard_instance(
                 NS,
                 InstanceId,
                 Shard,
-                FoldModule,
                 OplogOpts,
                 SecIndexes,
                 Bucket
@@ -3030,12 +3014,11 @@ start_or_join_shard_instance(
     InstanceId,
     Shard,
     _EntityType,
-    FoldModule,
     OplogOpts,
     SecIndexes
 ) ->
     start_shard_instance(
-        NS, InstanceId, Shard, FoldModule, OplogOpts, SecIndexes, undefined
+        NS, InstanceId, Shard, OplogOpts, SecIndexes, undefined
     ).
 
 %% @private
@@ -3965,6 +3948,26 @@ index_rows(Topology, Realm, Rows) ->
 %% @private
 instance_for_shard(#{instance_ids := Ids}, Shard) ->
     maps:get(Shard, Ids).
+
+-doc """
+The processes `Table`'s primary shards run on: the owner of its projection,
+when its topology names one (`bondy_db_topology:storage_owner/2`), and the
+running oplog instance of each shard. Secondary indexes are not included.
+""".
+-spec table_pids(Table :: table()) -> [pid()].
+
+table_pids(#{db_topology := Topology, table_state := TS, instance_ids := Ids}) ->
+    Owner = [
+        P
+     || P <- [bondy_db_topology:storage_owner(Topology, TS)], is_pid(P)
+    ],
+    Instances = [
+        P
+     || Id <- lists:usort(maps:values(Ids)),
+        P <- [bondy_oplog_registry:instance_pid(Id)],
+        is_pid(P)
+    ],
+    Owner ++ Instances.
 
 -doc """
 The shard index a `(Realm, Key)` cell routes to under `Table`'s

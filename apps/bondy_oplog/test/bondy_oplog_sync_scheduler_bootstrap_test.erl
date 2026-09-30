@@ -8,8 +8,6 @@
 %% Validates:
 %%   - A pre_bootstrap catalogue instance auto-bootstraps from the
 %%     first configured peer (bootstrap_catalogue path).
-%%   - A pre_bootstrap single-CRDT instance auto-bootstraps via the
-%%     existing bootstrap path.
 %%   - A live instance fans out per-peer pull-direction syncs.
 %%   - An empty peer list is a no-op.
 %% =============================================================================
@@ -50,7 +48,6 @@ scheduler_bootstrap_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {timeout, 10,
             fun pre_bootstrap_catalogue_auto_bootstraps_from_first_peer/0},
-        {timeout, 10, fun pre_bootstrap_single_crdt_auto_bootstraps/0},
         {timeout, 10, fun live_instance_fans_out_per_peer_syncs/0},
         fun empty_peers_is_a_noop/0,
         {timeout, 20, fun a_gated_instance_neither_bootstraps_nor_serves/0}
@@ -61,7 +58,7 @@ pre_bootstrap_catalogue_auto_bootstraps_from_first_peer() ->
     {Peer, _, _, _} = setup_persistent(BaseDir, #{seed => true}),
     {Local, _, _, _} = setup_persistent(BaseDir, #{}),
     _ = bondy_oplog:append(Peer, {cell_apply, ?B, <<"k">>, {set, 5, <<"v">>}}),
-    _ = barrier(Peer),
+    ok = bondy_oplog_test_projection:drain(Peer),
 
     %% Pre-conditions.
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Peer)),
@@ -104,7 +101,7 @@ a_gated_instance_neither_bootstraps_nor_serves() ->
         BaseDir, #{applier => #{drain_gated => true}}
     ),
     _ = bondy_oplog:append(Peer, {cell_apply, ?B, <<"k">>, {set, 5, <<"v">>}}),
-    _ = barrier(Peer),
+    ok = bondy_oplog_test_projection:drain(Peer),
 
     ?assertEqual(false, bondy_oplog_registry:tables_registered(Local)),
     ?assertEqual(true, bondy_oplog_registry:tables_registered(Peer)),
@@ -117,10 +114,10 @@ a_gated_instance_neither_bootstraps_nor_serves() ->
         bondy_oplog_responder:dispatch(Local, get_catalogue_snapshot_init)
     ),
 
-    %% Initiator half. The ROUTING DECISION is asserted directly, as in
-    %% `pre_bootstrap_single_crdt_auto_bootstraps/0`: driving it through a
-    %% tick would leave the load gate and the concurrency caps free to make
-    %% this pass for reasons that have nothing to do with the gate.
+    %% Initiator half. The ROUTING DECISION is asserted directly: driving
+    %% it through a tick would leave the load gate and the concurrency caps
+    %% free to make this pass for reasons that have nothing to do with the
+    %% gate.
     ?assertEqual(
         ok, bondy_oplog_sync_scheduler:default_dispatch(Local, [Peer])
     ),
@@ -145,52 +142,6 @@ a_gated_instance_neither_bootstraps_nor_serves() ->
     teardown(Local),
     file:del_dir_r(BaseDir).
 
-pre_bootstrap_single_crdt_auto_bootstraps() ->
-    %% Asserts the *routing* decision rather than a full E2E bootstrap
-    %% of a single-CRDT instance (the latter needs a working
-    %% `crdt_module` snapshot path, which is orthogonal to PR-D3 — and
-    %% is covered separately by the existing `bootstrap/3` tests). We
-    %% attach a telemetry handler and verify the scheduler emits
-    %% `[bondy_oplog, sync_scheduler, dispatch_bootstrap]` with
-    %% `mode => single_crdt` for a pre_bootstrap instance whose
-    %% `crdt_module` is set.
-    BaseDir = test_dir(),
-    Local = mk_id(),
-    LocalPath = make_path(BaseDir, Local),
-    {ok, _} = bondy_oplog:start_instance(Local, #{
-        crdt_module => bondy_oplog_test_counter,
-        storage_path => list_to_binary(LocalPath)
-    }),
-    ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Local)),
-
-    Self = self(),
-    HandlerId = {?MODULE, ?FUNCTION_NAME},
-    ok = telemetry:attach(
-        HandlerId,
-        [bondy_oplog, sync_scheduler, dispatch_bootstrap],
-        fun(_, M, Meta, _) -> Self ! {bootstrap_dispatched, M, Meta} end,
-        []
-    ),
-    try
-        ok = bondy_oplog_sync_scheduler:set_peer_source(
-            bondy_oplog_peer_source_static, #{peers => [<<"some-peer">>]}
-        ),
-        bondy_oplog_sync_scheduler:trigger(),
-        receive
-            {bootstrap_dispatched, _M, #{
-                instance_id := Local,
-                mode := single_crdt
-            }} ->
-                ok
-        after 2000 ->
-            error(no_single_crdt_dispatch)
-        end
-    after
-        telemetry:detach(HandlerId)
-    end,
-    bondy_oplog:stop_instance(Local),
-    file:del_dir_r(BaseDir).
-
 live_instance_fans_out_per_peer_syncs() ->
     %% A `live` instance with multiple configured peers should result
     %% in multiple sync sessions (one per peer). Use a custom dispatch
@@ -200,7 +151,7 @@ live_instance_fans_out_per_peer_syncs() ->
     Ref = make_ref(),
     Inst = mk_id(),
     %% Ephemeral instances default to `live`.
-    {ok, _} = bondy_oplog:start_instance(Inst, #{}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Inst)),
 
     %% We want to verify the SCHEDULER's default fan-out path runs.
@@ -232,7 +183,7 @@ empty_peers_is_a_noop() ->
     %% Empty peer list — default_dispatch must return ok without any
     %% spawn / crash. Use the default dispatch (don't override).
     Inst = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Inst, #{}),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     ok = bondy_oplog_sync_scheduler:set_peer_source(
         bondy_oplog_peer_source_static, #{peers => []}
     ),
@@ -258,10 +209,7 @@ setup_persistent(BaseDir, ExtraOpts) ->
         maps:get(applier, ExtraOpts, #{})
     ),
     Opts = maps:merge(
-        #{
-            fold_module => lww_register,
-            storage_path => list_to_binary(Path)
-        },
+        #{storage_path => list_to_binary(Path)},
         ExtraOpts#{applier => Applier}
     ),
     {ok, _} = bondy_oplog:start_instance(Id, Opts),
@@ -305,9 +253,6 @@ mk_id() ->
 
 ns_of(Id) when is_binary(Id) ->
     binary_to_atom(<<"ns_", Id/binary>>, utf8).
-
-barrier(Id) ->
-    bondy_oplog:projection(Id).
 
 test_dir() ->
     Base = filename:join([

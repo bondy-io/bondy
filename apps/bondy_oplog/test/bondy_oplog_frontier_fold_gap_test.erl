@@ -8,7 +8,7 @@
 %%
 %% The frontier is a `#{Origin => Seq}` map whose per-origin maximum asserts
 %% an applied PREFIX. Four readers respond to an over-claim by discarding or
-%% refusing data — `bondy_oplog_instance:watermark_door/3`,
+%% refusing data — `bondy_oplog_instance:watermark_door/2`,
 %% `capped_truncation_point/2`, `append_remote_below_watermark/3` and
 %% `bondy_oplog_sync_session:frontier_deficit/2` — so an over-claim is user
 %% loss, and it is invisible to the convergence oracle
@@ -189,7 +189,7 @@ split_batch(Dir) ->
         ),
         ok = bondy_oplog:open_drain_gate(Id),
         _ = bondy_oplog_instance:await_apply(Id),
-        _ = bondy_oplog:projection(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         ?assertEqual(1, bondy_oplog_event:key_seq(K1)),
         %% The failure is now in the PAST, and out of reach of every later
         %% batch's cap.
@@ -201,7 +201,7 @@ split_batch(Dir) ->
             Id, {cell_apply, ?BUCKET_A, <<"ka">>, {set, 2, <<"va">>}}
         ),
         _ = bondy_oplog_instance:await_apply(Id),
-        _ = bondy_oplog:projection(Id),
+        ok = bondy_oplog_test_projection:drain(Id),
         ?assertEqual(2, bondy_oplog_event:key_seq(K2)),
 
         %% Premise, as in `live_path/1`: seq 2 folded and seq 1 did not, so
@@ -218,7 +218,7 @@ split_batch(Dir) ->
 
         %% The only sound claim is 0: claiming 2 asserts the prefix `{1, 2}`
         %% and seq 1 was never folded. Claiming 2 also DISARMS the repair —
-        %% `bondy_oplog_instance:watermark_door/3` and
+        %% `bondy_oplog_instance:watermark_door/2` and
         %% `capped_truncation_point/2` judge "never applied" against this same
         %% frontier, so they would release seq 1 for truncation.
         ?assertEqual(0, claimed(Id, Origin))
@@ -325,7 +325,7 @@ append_the_gap(Id) ->
     ),
     ok = bondy_oplog:open_drain_gate(Id),
     _ = bondy_oplog_instance:await_apply(Id),
-    _ = bondy_oplog:projection(Id),
+    ok = bondy_oplog_test_projection:drain(Id),
     {bondy_oplog_event:key_seq(K1), bondy_oplog_event:key_seq(K2)}.
 
 %% What the frontier asserts this replica has APPLIED for `Origin`. Absent
@@ -347,7 +347,6 @@ open(Dir, Id) ->
 start(Id, NS, Dir, Origin) ->
     bondy_oplog:start_instance(Id, #{
         origin => Origin,
-        fold_module => lww_register,
         backend => bondy_mst_pack_store,
         storage_path => unicode:characters_to_binary(Dir),
         %% A `storage_path` instance starts in `pre_bootstrap`; `seed` makes

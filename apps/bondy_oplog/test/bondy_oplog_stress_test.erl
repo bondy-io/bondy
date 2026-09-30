@@ -31,7 +31,6 @@ stress_test_() ->
     %% real regression.
     {setup, fun setup/0, fun cleanup/1, [
         {timeout, 180, fun convergence_under_random_interleaving/0},
-        {timeout, 180, fun convergence_with_file_compaction_checkpoint/0},
         {timeout, 180, fun hlc_seeds_from_persisted_watermark/0}
     ]}.
 
@@ -48,18 +47,22 @@ convergence_under_random_interleaving() ->
 run_one(N) ->
     A = list_to_binary("st_a_" ++ integer_to_list(N)),
     B = list_to_binary("st_b_" ++ integer_to_list(N)),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     Steps = 30 + rand:uniform(50),
     Counts =
         lists:foldl(
             fun(_, {Ka, Kb}) ->
                 case rand:uniform(4) of
                     1 ->
-                        bondy_oplog:append(A, {a, Ka}),
+                        bondy_oplog:append(
+                            A, bondy_oplog_test_projection:cell_op(2 * Ka)
+                        ),
                         {Ka + 1, Kb};
                     2 ->
-                        bondy_oplog:append(B, {b, Kb}),
+                        bondy_oplog:append(
+                            B, bondy_oplog_test_projection:cell_op(2 * Kb + 1)
+                        ),
                         {Ka, Kb + 1};
                     3 ->
                         {ok, _} = bondy_oplog:sync(A, B),
@@ -83,53 +86,11 @@ run_one(N) ->
     ),
     ?assertEqual(Total, bondy_oplog:size(A)),
     ?assertEqual(Total, bondy_oplog:size(B)),
+    CellsA = bondy_oplog_test_projection:cells(A),
+    ?assertEqual(Total, length(CellsA)),
+    ?assertEqual(CellsA, bondy_oplog_test_projection:cells(B)),
     ok = bondy_oplog:stop_instance(A),
     ok = bondy_oplog:stop_instance(B),
-    ok.
-
-%% File-backed snapshot store smoke test: compact, stop, restart with
-%% same path, verify snapshot survives.
-convergence_with_file_compaction_checkpoint() ->
-    Suffix = integer_to_list(os:system_time(microsecond)),
-    Tmp = filename:join(
-        <<"/tmp">>,
-        list_to_binary("bondy_mst_stress_" ++ Suffix)
-    ),
-    ok = filelib:ensure_path(Tmp),
-    Id = list_to_binary("file_" ++ Suffix),
-    Opts = #{
-        crdt_module => bondy_oplog_test_counter,
-        compaction_checkpoint => bondy_oplog_compaction_checkpoint_file,
-        compaction_checkpoint_opts => #{path => Tmp},
-        origin => bondy_oplog_origin:new()
-    },
-    {ok, _} = bondy_oplog:start_instance(Id, Opts),
-    [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 3)],
-    ok = bondy_oplog:await_apply(Id),
-    %% Force a peer state for compaction (single-replica self-peer).
-    LocalRoot = bondy_oplog:root_hash(Id),
-    bondy_oplog_peer_state:record_sync_complete(
-        {peer, dummy}, Id, LocalRoot
-    ),
-    bondy_oplog_peer_state:sync(),
-    {ok, {compacted, _, EventCount}} = bondy_oplog:compact(Id),
-    ?assertEqual(3, EventCount),
-    {ok, _, S1} = bondy_oplog:compaction_checkpoint(Id),
-    ?assertEqual(3, S1),
-    %% Stop the instance and re-open against the same path.
-    ok = bondy_oplog:stop_instance(Id),
-    {ok, _} = bondy_oplog:start_instance(Id, Opts),
-    {ok, _, S2} = bondy_oplog:compaction_checkpoint(Id),
-    ?assertEqual(S1, S2),
-    %% Watermark is also recovered.
-    ?assertNotEqual(
-        undefined,
-        bondy_oplog:current_watermark(Id)
-    ),
-    ok = bondy_oplog:stop_instance(Id),
-    %% Cleanup.
-    bondy_oplog_peer_state:forget_peer({peer, dummy}),
-    _ = file:del_dir_r(Tmp),
     ok.
 
 %% After compaction + restart, the HLC must be seeded so a new local
@@ -144,13 +105,15 @@ hlc_seeds_from_persisted_watermark() ->
     Id = list_to_binary("hlc_" ++ Suffix),
     Origin = bondy_oplog_origin:new(),
     Opts = #{
-        crdt_module => bondy_oplog_test_counter,
         compaction_checkpoint => bondy_oplog_compaction_checkpoint_file,
         compaction_checkpoint_opts => #{path => Tmp},
         origin => Origin
     },
-    {ok, _} = bondy_oplog:start_instance(Id, Opts),
-    [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 5)],
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+    [
+        bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+     || I <- lists:seq(1, 5)
+    ],
     LocalRoot = bondy_oplog:root_hash(Id),
     bondy_oplog_peer_state:record_sync_complete(
         {peer, dummy_hlc}, Id, LocalRoot
@@ -159,13 +122,12 @@ hlc_seeds_from_persisted_watermark() ->
     {ok, {compacted, Watermark, _}} = bondy_oplog:compact(Id),
     %% Stop and re-open with same path.
     ok = bondy_oplog:stop_instance(Id),
-    {ok, _} = bondy_oplog:start_instance(Id, Opts),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+    ?assertEqual(Watermark, bondy_oplog:current_watermark(Id)),
     %% A new local append must produce a key strictly greater than
     %% the watermark — proving HLC was seeded.
-    NewKey = bondy_oplog:append(Id, {inc, 100}),
+    NewKey = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(100)),
     ?assert(NewKey > Watermark),
-    %% Hot query sees the new event on top of the snapshot.
-    ?assertEqual(105, bondy_oplog:query(Id, value)),
     ok = bondy_oplog:stop_instance(Id),
     bondy_oplog_peer_state:forget_peer({peer, dummy_hlc}),
     _ = file:del_dir_r(Tmp),

@@ -158,8 +158,8 @@ pull_bogus(Instance, Hashes) ->
 two_instances() ->
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     {A, B}.
 
 mk_inst() ->

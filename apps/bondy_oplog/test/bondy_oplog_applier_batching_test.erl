@@ -52,30 +52,30 @@ batching_test_() ->
 %% when the cap comfortably exceeds N.
 coalesces_backlog_into_single_batch() ->
     N = 30,
-    {Total, Batches, Proj} = run_backlog(1000, N),
+    {Total, Batches, Cells} = run_backlog(1000, N),
     ?assertEqual(N, Total),
     ?assertEqual(1, Batches),
-    ?assertMatch({ok, {set, _, N}}, Proj).
+    ?assertEqual(N, Cells).
 
 %% Control: the SAME backlog with the cap at 1 applies one frame per
 %% batch. Flipping the single knob from 1000 to 1 changes the batch count
 %% from 1 to N — the falsifying comparison.
 disabled_applies_one_frame_per_batch() ->
     N = 30,
-    {Total, Batches, Proj} = run_backlog(1, N),
+    {Total, Batches, Cells} = run_backlog(1, N),
     ?assertEqual(N, Total),
     ?assertEqual(N, Batches),
-    ?assertMatch({ok, {set, _, N}}, Proj).
+    ?assertEqual(N, Cells).
 
 %% The soft cap bounds the batch: N single-event frames at a cap of K
 %% yield ceil(N/K) batches.
 respects_soft_cap() ->
     N = 30,
     K = 10,
-    {Total, Batches, Proj} = run_backlog(K, N),
+    {Total, Batches, Cells} = run_backlog(K, N),
     ?assertEqual(N, Total),
     ?assertEqual(N div K, Batches),
-    ?assertMatch({ok, {set, _, N}}, Proj).
+    ?assertEqual(N, Cells).
 
 %% Coalescing engages only under backlog. When the applier is caught up
 %% (one append, drained, before the next), each frame applies on its own
@@ -87,7 +87,9 @@ caught_up_does_not_coalesce() ->
     {Total, Batches} = with_collector(Id, N, fun() ->
         lists:foreach(
             fun(K) ->
-                _ = bondy_oplog:append(Id, {set, K, mk_val(K)}),
+                _ = bondy_oplog:append(
+                    Id, bondy_oplog_test_projection:cell_op(K)
+                ),
                 ok = bondy_oplog:await_apply(Id)
             end,
             lists:seq(1, N)
@@ -95,16 +97,16 @@ caught_up_does_not_coalesce() ->
     end),
     ?assertEqual(N, Total),
     ?assertEqual(N, Batches),
-    ?assertEqual({ok, {set, mk_val(N), N}}, bondy_oplog:projection(Id)),
+    ?assertEqual(N, length(bondy_oplog_test_projection:cells(Id))),
     ok = bondy_oplog:stop_instance(Id).
 
 %% Coalescing must not lose or duplicate events: the total event count
 %% across all batches equals the number appended, exactly.
 all_events_applied_exactly_once() ->
     N = 50,
-    {Total, _Batches, Proj} = run_backlog(16, N),
+    {Total, _Batches, Cells} = run_backlog(16, N),
     ?assertEqual(N, Total),
-    ?assertMatch({ok, {set, _, N}}, Proj).
+    ?assertEqual(N, Cells).
 
 invalid_apply_batch_max_events_rejected() ->
     Id = mk_id(),
@@ -122,7 +124,7 @@ valid_minimum_apply_batch_max_events_accepted() ->
 %% Suspend the applier, append N single-event frames (building a WAL
 %% backlog the applier cannot touch), resume + kick a drain, then collect
 %% the per-batch `applied` telemetry. Returns {TotalEvents, NumBatches,
-%% Projection}.
+%% CellCount}.
 run_backlog(MaxEvents, N) ->
     Id = mk_id(),
     {ok, _} = start(Id, MaxEvents),
@@ -130,7 +132,11 @@ run_backlog(MaxEvents, N) ->
     {Total, Batches} = with_collector(Id, N, fun() ->
         ok = sys:suspend(ApplierPid),
         lists:foreach(
-            fun(K) -> _ = bondy_oplog:append(Id, {set, K, mk_val(K)}) end,
+            fun(K) ->
+                _ = bondy_oplog:append(
+                    Id, bondy_oplog_test_projection:cell_op(K)
+                )
+            end,
             lists:seq(1, N)
         ),
         ok = sys:resume(ApplierPid),
@@ -139,9 +145,9 @@ run_backlog(MaxEvents, N) ->
         ApplierPid ! drain,
         ok = bondy_oplog:await_apply(Id)
     end),
-    Proj = bondy_oplog:projection(Id),
+    Cells = length(bondy_oplog_test_projection:cells(Id)),
     ok = bondy_oplog:stop_instance(Id),
-    {Total, Batches, Proj}.
+    {Total, Batches, Cells}.
 
 %% Attach an `applied`-event collector scoped to Id, run Fun, then gather
 %% the per-batch counts until the total reaches Target (or a deadline).
@@ -189,8 +195,7 @@ collect_applied(Target, Sum, N, Deadline) ->
     end.
 
 start(Id, MaxEvents) ->
-    bondy_oplog:start_instance(Id, #{
-        fold_module => lww_register,
+    bondy_oplog_test_projection:start_instance(Id, #{
         applier => #{apply_batch_max_events => MaxEvents}
     }).
 
@@ -207,9 +212,6 @@ applier_pid_wait(Id, Tries) ->
             timer:sleep(20),
             applier_pid_wait(Id, Tries - 1)
     end.
-
-mk_val(K) ->
-    integer_to_binary(K).
 
 mk_id() ->
     Int = erlang:unique_integer([positive]),

@@ -104,11 +104,11 @@ declarations_test_() ->
                     end,
                     [
                         {
-                            maps:get(bondy_registration_rib, ByName),
+                            maps:get(bondy_rib_registrations, ByName),
                             rib_registration
                         },
                         {
-                            maps:get(bondy_subscription_rib, ByName),
+                            maps:get(bondy_rib_subscriptions, ByName),
                             rib_subscription
                         }
                     ]
@@ -172,7 +172,7 @@ provisions_all() ->
     try
         %% Main DB + every declared main table provisioned and published —
         %% unconditionally, there is no per-table or per-domain gate.
-        ?assert(?CAT:is_open()),
+        ?assertEqual(open, ?CAT:main_status()),
         ?assertMatch(#{name := main}, ?CAT:main_db()),
         ?assertMatch(
             #{kind := db, name := main}, bondy_db:info(?CAT:main_db())
@@ -193,12 +193,12 @@ provisions_all() ->
         %% The RIB summary tables are provisioned in the ephemeral
         %% `registry` DB.
         ?assertMatch(
-            #{entity_type := bondy_registration_rib, db_name := registry},
-            ?CAT:table(bondy_registration_rib)
+            #{entity_type := bondy_rib_registrations, db_name := registry},
+            ?CAT:table(bondy_rib_registrations)
         ),
         ?assertMatch(
-            #{entity_type := bondy_subscription_rib, db_name := registry},
-            ?CAT:table(bondy_subscription_rib)
+            #{entity_type := bondy_rib_subscriptions, db_name := registry},
+            ?CAT:table(bondy_rib_subscriptions)
         ),
         %% Fold → CRDT wiring: the membership table carries the ew_flag CRDT
         %% (cell-per-fact add-wins); lww tables resolve to lww_register. (No mv
@@ -219,30 +219,32 @@ provisions_all() ->
         %% The two RIB tables use DIFFERENT carriers, and each is ratcheted
         %% here because getting either wrong is silent at runtime.
         %%
-        %% registration_rib: the generic struct toolkit, carrying its schema
-        %% as crdt_opts (bondy_oplog_crdt_struct has none of its own).
+        %% Registrations: the generic struct toolkit, carrying its schema
+        %% as crdt_opts (bondy_oplog_crdt_struct has none of its own), with
+        %% `count` a reading.
         ?assertMatch(
             #{
                 crdt_module := bondy_oplog_crdt_struct,
                 crdt_opts := #{
-                    count := _, invoke := _, earliest := _, latest := _
+                    count := {bondy_oplog_crdt_owned_reading, _},
+                    invoke := _,
+                    earliest := _,
+                    latest := _
                 }
             },
-            bondy_db:info(?CAT:table(bondy_registration_rib))
+            bondy_db:info(?CAT:table(bondy_rib_registrations))
         ),
-        %% subscription_rib: a bare counter, NO schema. It must not be a
-        %% struct and must not be tier_2 — a one-field struct here is
-        %% semantically identical and cost a measured 45-180x subscribe
-        %% regression, because tier_2 state accrues one dot per unstabilized
-        %% write. `bondy_oplog_crdt_owned_counter_proper_test`'s
+        %% Subscriptions: a bare reading, NO schema, so the cell stays
+        %% tier_0; a struct is tier_2, whose state grows with every
+        %% unstabilized write. `bondy_oplog_crdt_owned_reading_proper_test`'s
         %% `prop_state_size_is_independent_of_writes/0` is the law; this is
         %% the ratchet on the DECLARATION.
-        SubInfo = bondy_db:info(?CAT:table(bondy_subscription_rib)),
-        ?assertMatch(#{crdt_module := bondy_oplog_crdt_owned_counter}, SubInfo),
+        SubInfo = bondy_db:info(?CAT:table(bondy_rib_subscriptions)),
+        ?assertMatch(#{crdt_module := bondy_oplog_crdt_owned_reading}, SubInfo),
         ?assertEqual(
             #{},
             maps:get(crdt_opts, SubInfo, #{}),
-            "the subscription RIB cell is one counter and must carry no schema"
+            "the subscription RIB cell is one reading and must carry no schema"
         ),
         ?assertEqual(
             tier_0,
@@ -270,7 +272,7 @@ provisions_all() ->
                     )
                 )
             end,
-            [bondy_registration_rib, bondy_subscription_rib]
+            [bondy_rib_registrations, bondy_rib_subscriptions]
         ),
         %% EVERY field of the registration schema must declare `force_reap`,
         %% or a departed node's cell is never reclaimed: `reap_origins/2`
@@ -283,7 +285,7 @@ provisions_all() ->
         %% end-to-end proof and `bondy_oplog_crdt_struct_proper_test`'s
         %% `prop_reap_iff_every_touched_field_force_reaps/0` is the law.
         #{crdt_opts := RegSchema} =
-            bondy_db:info(?CAT:table(bondy_registration_rib)),
+            bondy_db:info(?CAT:table(bondy_rib_registrations)),
         ExpectedFields = [count, invoke, earliest, latest],
         ?assertEqual(
             lists:sort(ExpectedFields),
@@ -298,7 +300,7 @@ provisions_all() ->
                     maps:get(FieldKey, RegSchema),
                     lists:flatten(
                         io_lib:format(
-                            "bondy_registration_rib.~p must declare "
+                            "bondy_rib_registrations.~p must declare "
                             "force_reap",
                             [FieldKey]
                         )
@@ -318,7 +320,7 @@ provisions_all() ->
         rmrf(Tmp)
     end,
     %% Teardown cleared the published handles.
-    ?assert(await(fun() -> ?CAT:is_open() =:= false end, 100)),
+    ?assert(await(fun() -> ?CAT:main_status() =:= failed end, 100)),
     ?assertEqual(undefined, ?CAT:main_db()),
     ?assertEqual(undefined, ?CAT:table(bondy_realm)).
 

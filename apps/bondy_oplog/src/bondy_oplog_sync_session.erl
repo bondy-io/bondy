@@ -100,9 +100,7 @@ the default (`undefined`) selects the adaptive budget.
 -export([maybe_bump_ae_isolated/1]).
 -export([start/3]).
 -export([start/4]).
--export([bootstrap/3]).
 -export([bootstrap_catalogue/3]).
--export([start_bootstrap/3]).
 -export([start_bootstrap_catalogue/3]).
 
 -ifdef(TEST).
@@ -289,79 +287,6 @@ is_peer_unreachable(_) ->
     false.
 
 ?DOC("""
-Bootstrap session: fetch the peer's snapshot first, install it
-locally, then run the regular pull-direction sync for events past the
-new watermark.
-
-Suitable for a *fresh* replica joining a long-running cluster, or a
-*recovering* replica whose watermark is far behind. Falls back to
-plain sync if the peer reports `no_snapshot`.
-
-Returns `{ok, FinalRoot}` on success, `{error, Reason}` otherwise.
-""").
--spec bootstrap(instance_id(), peer_id(), opts()) ->
-    {ok, bondy_mst:hash() | undefined} | {error, term()}.
-
-bootstrap(Instance, Peer, Opts) when is_binary(Instance) ->
-    Transport = maps:get(
-        transport,
-        Opts,
-        bondy_oplog_transport_inline
-    ),
-    TransportOpts = maps:get(transport_opts, Opts, #{}),
-    case Transport:request(Peer, Instance, get_snapshot, TransportOpts) of
-        {ok, no_snapshot} ->
-            %% Peer has nothing to bootstrap from. The local instance
-            %% has no path to a `live` projection state through this
-            %% peer — but a *fresh* peer with empty state and no events
-            %% behind the watermark is still safe to flip live (there
-            %% is nothing to apply incorrectly). Skip the snapshot
-            %% install and proceed with plain sync; the lifecycle stays
-            %% as it was (caller is expected to have seeded a genesis
-            %% peer separately, or to try a peer with a snapshot).
-            run(Instance, Peer, Opts);
-        {ok, Watermark, Snapshot} ->
-            case
-                bondy_oplog_instance:load_snapshot(
-                    Instance, Watermark, Snapshot
-                )
-            of
-                {ok, _} ->
-                    %% Bootstrap completion ordering:
-                    %%   1. load_snapshot (done above) installs the
-                    %%      snapshot and advances the watermark to
-                    %%      H_boot.
-                    %%   2. `mark_live/1` writes the durable flag
-                    %%      file — the marker that "everything
-                    %%      before me succeeded." MUST be last:
-                    %%      a crash between (1) and (2) leaves no
-                    %%      flag, so restart re-runs bootstrap
-                    %%      idempotently; a crash after (2)
-                    %%      durably leaves the instance live.
-                    %%   3. Run anti-entropy for events past the new
-                    %%      watermark. Safe to interleave because
-                    %%      the applier is already gated and the WAL
-                    %%      is the buffer.
-                    ok = bondy_oplog_instance:mark_live(Instance),
-                    run(Instance, Peer, Opts);
-                {error, watermark_not_advancing} ->
-                    %% Local watermark is already ≥ peer's. The local
-                    %% instance is either already live (flag exists)
-                    %% or was a genesis seed (lifecycle was already
-                    %% live). Either way mark_live is idempotent;
-                    %% calling it here makes the path uniformly leave
-                    %% the lifecycle in `live` regardless of which
-                    %% branch was taken.
-                    ok = bondy_oplog_instance:mark_live(Instance),
-                    run(Instance, Peer, Opts);
-                {error, _} = E ->
-                    E
-            end;
-        {error, _} = E ->
-            E
-    end.
-
-?DOC("""
 Catalogue-mode bootstrap session. The peer streams its projection
 cells in chunks (`get_catalogue_snapshot_init` +
 `{get_catalogue_snapshot_next, Cursor}`); the initiator installs each
@@ -370,14 +295,8 @@ marked `live` (for a fresh caller) and the regular pull-direction sync
 runs to catch up on any events newer than the peer's session-start
 watermark.
 
-The local instance MUST be catalogue-mode (`crdt_module = undefined`).
-Single-CRDT-mode callers must use `bootstrap/3` instead. A
-`{error, not_a_catalogue_instance}` is returned otherwise.
-
-If the peer reports `no_snapshot` (it is itself single-CRDT mode, or
-has not yet wired a `cell_apply_target`) the call falls through to
-plain `run/3`. This handles the new-cluster genesis case cleanly: an
-empty peer + empty local replica produces an immediate `done`.
+If the peer reports `no_snapshot` (no process serves its projection, or its
+projection shard is not registered) the call falls through to plain `run/3`.
 
 `WasLive` is captured at session start so `finalize_catalogue_bootstrap`
 can decide whether to mark live (fresh) or skip the lifecycle update
@@ -385,20 +304,10 @@ can decide whether to mark live (fresh) or skip the lifecycle update
 """).
 -spec bootstrap_catalogue(instance_id(), peer_id(), opts()) ->
     {ok, bondy_mst:hash() | undefined}
-    | {error, not_a_catalogue_instance}
     | {error, cursor_expired}
     | {error, term()}.
 
 bootstrap_catalogue(Instance, Peer, Opts) when is_binary(Instance) ->
-    case bondy_oplog_instance:crdt_module(Instance) of
-        Mod when is_atom(Mod), Mod =/= undefined ->
-            {error, not_a_catalogue_instance};
-        undefined ->
-            do_bootstrap_catalogue(Instance, Peer, Opts)
-    end.
-
-%% @private
-do_bootstrap_catalogue(Instance, Peer, Opts) ->
     Transport = maps:get(
         transport,
         Opts,
@@ -496,7 +405,7 @@ do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) -
                     %% it is a lower bound for what the live scan ships.
                     %% It is absorbed whether or not the frontier was adopted:
                     %% the cells that DID land carry those HLCs either way.
-                    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
+                    Finalized = bondy_oplog_instance:finalize_catalogue_bootstrap(
                         Instance,
                         Watermark,
                         Adopted,
@@ -522,13 +431,25 @@ do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) -
                             unclaimable_buckets => Unclaimable
                         }
                     ),
-                    finish_bootstrap(Instance, Peer, Opts, WasLive);
+                    finish_finalized(Finalized, Instance, Peer, Opts, WasLive);
                 {error, _} = E ->
                     E
             end;
         {error, _} = E ->
             E
     end.
+
+%% @private
+%% A frontier that could not be made durable fails the session. A live
+%% replica has already installed the peer's cells, so its projection is still
+%% re-derived; a fresh one was not marked live.
+finish_finalized(ok, Instance, Peer, Opts, WasLive) ->
+    finish_bootstrap(Instance, Peer, Opts, WasLive);
+finish_finalized({error, _} = Error, Instance, Peer, Opts, true) ->
+    _ = finish_bootstrap(Instance, Peer, Opts, true),
+    Error;
+finish_finalized({error, _} = Error, _Instance, _Peer, _Opts, false) ->
+    Error.
 
 %% @private
 %% Run anti-entropy (MST page union + diff-replay), then, for a LIVE
@@ -805,31 +726,6 @@ absorb_chunks(Chunks, Pending0) ->
         {[], #{}},
         Pending1
     ).
-
-?DOC("""
-Spawns a `bootstrap/3` (single-CRDT) session in a separate process and
-returns immediately. Failures are logged and the process exits with
-`{bootstrap_failed, Reason}`. Used by the sync scheduler for
-auto-bootstrap of single-CRDT pre_bootstrap instances.
-""").
--spec start_bootstrap(instance_id(), peer_id(), opts()) -> {ok, pid()}.
-
-start_bootstrap(Instance, Peer, Opts) ->
-    Pid = spawn(fun() ->
-        case bootstrap(Instance, Peer, Opts) of
-            {ok, _} ->
-                ok;
-            {error, Reason} ->
-                ?LOG_WARNING(#{
-                    description => "bootstrap session failed",
-                    instance => Instance,
-                    peer => Peer,
-                    reason => Reason
-                }),
-                exit({bootstrap_failed, Reason})
-        end
-    end),
-    {ok, Pid}.
 
 ?DOC("""
 Spawns a `bootstrap_catalogue/3` session in a separate process and

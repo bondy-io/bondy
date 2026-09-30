@@ -89,6 +89,92 @@ init_then_get_not_found_test() ->
         )
     end).
 
+%% A checkpoint may be visible without being durable, and it is read at
+%% start, so the store refuses to open until its directory has been synced.
+init_refuses_an_unsyncable_directory_test() ->
+    Dir = mktemp_dir(),
+    try
+        Result = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            bondy_oplog_compaction_checkpoint_file:init(
+                <<"inst_unsynced">>, #{path => Dir}
+            )
+        end),
+        ?assertMatch({error, {dir_fsync_failed, _, eio}}, Result)
+    after
+        rmrf(Dir)
+    end.
+
+%% `persist_frontier` answers that the frontier is durable, so a checkpoint
+%% write that failed, before its rename or at the directory fsync after it,
+%% must not be answered with `ok`.
+persist_frontier_does_not_confirm_an_unsynced_checkpoint_test() ->
+    Tmp = mktemp_dir(),
+    Id = <<"ckpt_persist_unsynced">>,
+    Opts = #{
+        backend => bondy_mst_pack_store,
+        storage_path => list_to_binary(Tmp),
+        seed => true,
+        origin => bondy_oplog_origin:new()
+    },
+    {ok, _} = application:ensure_all_started(bondy_db),
+    try
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+        Unsynced = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, datasync, fun(_) -> {error, eio} end),
+            bondy_oplog_instance:persist_frontier(Id)
+        end),
+        ?assertEqual({error, eio}, Unsynced),
+        DirUnsynced = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            bondy_oplog_instance:persist_frontier(Id)
+        end),
+        ?assertMatch({error, {dir_fsync_failed, _, eio}}, DirUnsynced)
+    after
+        _ = bondy_oplog:stop_instance(Id),
+        rmrf(Tmp)
+    end.
+
+%% A compaction whose checkpoint write fails at the directory fsync has already
+%% put the new checkpoint in place, so the instance must not carry on with the
+%% watermark it had: the next compaction would fold the same events again.
+compaction_does_not_continue_past_an_unsynced_checkpoint_test() ->
+    Tmp = mktemp_dir(),
+    Id = <<"ckpt_compact_unsynced">>,
+    Opts = #{
+        backend => bondy_mst_pack_store,
+        storage_path => list_to_binary(Tmp),
+        seed => true,
+        origin => bondy_oplog_origin:new()
+    },
+    Peer = {peer, ckpt_compact_unsynced_peer},
+    {ok, _} = application:ensure_all_started(bondy_db),
+    try
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 3)
+        ],
+        ok = bondy_oplog:await_apply(Id),
+        bondy_oplog_peer_state:record_sync_complete(
+            Peer, Id, bondy_oplog:root_hash(Id)
+        ),
+        bondy_oplog_peer_state:sync(),
+        Result = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            try
+                bondy_oplog:compact(Id)
+            catch
+                exit:Reason -> {exit, Reason}
+            end
+        end),
+        ?assertMatch({exit, {{{dir_fsync_failed, _, eio}, _}, _}}, Result)
+    after
+        _ = bondy_oplog:stop_instance(Id),
+        bondy_oplog_peer_state:forget_peer(Peer),
+        rmrf(Tmp)
+    end.
+
 put_then_get_round_trip_test() ->
     with_state(fun(S, _Dir, _Id) ->
         W = mk_watermark(123, 7),
@@ -307,14 +393,16 @@ instance_init_fails_loudly_on_corrupt_checkpoint() ->
     ok = filelib:ensure_path(Tmp),
     Id = list_to_binary("corrupt_" ++ Suffix),
     Opts = #{
-        crdt_module => bondy_oplog_test_counter,
         compaction_checkpoint => bondy_oplog_compaction_checkpoint_file,
         compaction_checkpoint_opts => #{path => Tmp},
         origin => bondy_oplog_origin:new()
     },
     try
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 3)],
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 3)
+        ],
         ok = bondy_oplog:await_apply(Id),
         LocalRoot = bondy_oplog:root_hash(Id),
         bondy_oplog_peer_state:record_sync_complete(
@@ -329,7 +417,7 @@ instance_init_fails_loudly_on_corrupt_checkpoint() ->
         %% Re-open must fail with our tagged reason — surfaced by the
         %% supervisor as `{shutdown, {compaction_checkpoint_corrupted,
         %% _, _}}` wrapped in a `start_link` error tuple.
-        Result = bondy_oplog:start_instance(Id, Opts),
+        Result = bondy_oplog_test_projection:start_instance(Id, Opts),
         ?assertMatch({error, _}, Result),
         ?assert(contains_corruption_marker(Result))
     after
@@ -383,14 +471,16 @@ default_file_when_storage_path() ->
     ok = filelib:ensure_path(Tmp),
     Id = list_to_binary("def_fp_" ++ Suffix),
     Opts = #{
-        crdt_module => bondy_oplog_test_counter,
         storage_path => Tmp,
         seed => true,
         origin => bondy_oplog_origin:new()
     },
     try
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 3)],
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 3)
+        ],
         ok = bondy_oplog:await_apply(Id),
         LocalRoot = bondy_oplog:root_hash(Id),
         bondy_oplog_peer_state:record_sync_complete(
@@ -414,12 +504,14 @@ default_ets_when_ephemeral() ->
     Suffix = integer_to_list(os:system_time(microsecond)),
     Id = list_to_binary("def_eph_" ++ Suffix),
     Opts = #{
-        crdt_module => bondy_oplog_test_counter,
         origin => bondy_oplog_origin:new()
     },
     try
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 3)],
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 3)
+        ],
         ok = bondy_oplog:await_apply(Id),
         LocalRoot = bondy_oplog:root_hash(Id),
         bondy_oplog_peer_state:record_sync_complete(
@@ -445,14 +537,16 @@ checkpoint_persists_via_default() ->
     ok = filelib:ensure_path(Tmp),
     Id = list_to_binary("def_p_" ++ Suffix),
     Opts = #{
-        crdt_module => bondy_oplog_test_counter,
         storage_path => Tmp,
         seed => true,
         origin => bondy_oplog_origin:new()
     },
     try
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
-        [bondy_oplog:append(Id, {inc, 1}) || _ <- lists:seq(1, 3)],
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
+        [
+            bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
+         || I <- lists:seq(1, 3)
+        ],
         ok = bondy_oplog:await_apply(Id),
         LocalRoot = bondy_oplog:root_hash(Id),
         bondy_oplog_peer_state:record_sync_complete(
@@ -462,7 +556,7 @@ checkpoint_persists_via_default() ->
         {ok, {compacted, _, _}} = bondy_oplog:compact(Id),
         {ok, W1, S1} = bondy_oplog:compaction_checkpoint(Id),
         ok = bondy_oplog:stop_instance(Id),
-        {ok, _} = bondy_oplog:start_instance(Id, Opts),
+        {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
         {ok, W2, S2} = bondy_oplog:compaction_checkpoint(Id),
         ?assertEqual(W1, W2),
         ?assertEqual(S1, S2)
@@ -471,3 +565,19 @@ checkpoint_persists_via_default() ->
         bondy_oplog_peer_state:forget_peer({peer, def_p_peer}),
         rmrf(Tmp)
     end.
+
+%% The node-wide lock every suite that mocks `bondy_mst_io` takes.
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
+    ).

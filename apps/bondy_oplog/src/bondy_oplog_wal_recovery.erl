@@ -143,6 +143,8 @@ Returns `{ok, recovery_result()}` on success or `{error, Reason}` for:
   an invariant was violated. Detection here is deliberate, matching
   `bondy_oplog_wal_scrubber`'s stance that repair is operator-driven.
 - `{consumer_offset, _}` — `consumer.offset` file is malformed.
+- `{dir_fsync_failed, Dir, Reason}` — the directory could not be synced, which
+  recovery does before it reads anything in it.
 
 The caller (typically `bondy_oplog_wal:init/1`) is responsible for
 installing the returned state and publishing the head atomics. The
@@ -156,11 +158,26 @@ recovery procedure itself does no atomics work.
 ) -> {ok, recovery_result()} | {error, term()}.
 
 recover(Dir, InstanceId, Origin, Opts) when is_map(Opts) ->
+    maybe
+        ok ?= sync_dir(Dir),
+        {ok, Manifest} ?= read_manifest(Dir),
+        run_pipeline(Dir, InstanceId, Origin, Opts, Manifest)
+    end.
+
+%% @private
+%% Synced before recovery reads it, and before the writer appends to a head
+%% segment whose directory entry could otherwise still vanish.
+sync_dir(Dir) ->
+    case bondy_mst_io:fsync_dir(Dir) of
+        ok -> ok;
+        {error, Reason} -> {error, {dir_fsync_failed, Dir, Reason}}
+    end.
+
+%% @private
+read_manifest(Dir) ->
     case bondy_oplog_wal_manifest:read(Dir) of
-        {ok, Manifest} ->
-            run_pipeline(Dir, InstanceId, Origin, Opts, Manifest);
-        {error, Reason} ->
-            {error, {manifest, Reason}}
+        {ok, _} = Ok -> Ok;
+        {error, Reason} -> {error, {manifest, Reason}}
     end.
 
 %% =============================================================================
@@ -1067,8 +1084,8 @@ copy_loop(
     end.
 
 %% @private
-%% datasync + atomic rename + dir-fsync + reopen R/W. Mirrors the
-%% safety pattern used by `bondy_oplog_wal_state:atomic_write/4`.
+%% `bondy_mst_io:write_file_atomic/2`'s sequence on an already-written fd,
+%% then reopens the file read/write.
 finalize_compact_tmp(DstFd, TmpPath, FinalPath, Dir) ->
     case bondy_mst_io:datasync(DstFd) of
         ok ->

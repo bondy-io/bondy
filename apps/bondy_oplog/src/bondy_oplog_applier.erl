@@ -51,8 +51,8 @@ Sits between the per-instance WAL writer and the per-instance
   freed immediately so WAL drain and concurrent remote events can
   interleave. This keeps the applier as the sole verify+dispatch
   origin for both local and remote events. Tree-level operations
-  (`merge_pages`, `integrate_peer_root`, `truncate_prefix`, `compact`,
-  `load_snapshot`) are not event-stream operations and remain in the
+  (`merge_pages`, `integrate_peer_root`, `truncate_prefix`, `compact`)
+  are not event-stream operations and remain in the
   instance; the public façade drains the applier before invoking
   them.
 - Owns the validator snapshot used for re-verification. Operators
@@ -199,17 +199,6 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     %% lifetime of the applier.
     validator_module :: module(),
     validator_state :: term(),
-    %% Per-instance fold projection. Read once from the registry at
-    %% `init/1`; `undefined` when no fold is configured for the
-    %% instance, in which case the fold path is a strict no-op.
-    %%
-    %% Scope: single-cell-per-instance. The fold's event vocabulary is
-    %% the `op` field of each WAL event (see `bondy_oplog_event:op/1`)
-    %% by convention. Remote events bypass the WAL drain path and are
-    %% NOT folded via this path — the `replay_cell_events` cast handles
-    %% peer-authored events instead.
-    fold_module :: module() | undefined,
-    fold_state :: term(),
     %% Substrate read-side wiring. Shards bumped via
     %% `bondy_oplog_core_registry:bump_ae/4` after each successful
     %% commit. Empty list disables the wiring.
@@ -222,23 +211,21 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     publish_ns :: atom() | undefined,
     publish_fun :: publish_fun() | undefined,
     %% Per-cell projection write wiring. When set, events whose op
-    %% matches `{cell_apply, Bucket, Key, FoldEvent}` bypass the
-    %% per-instance fold and instead do a read-modify-write against the
-    %% projection adapter registered for the configured
+    %% matches `{cell_apply, Bucket, Key, FoldEvent}` do a read-modify-write
+    %% against the projection adapter registered for the configured
     %% `(NS, Index, Shard)` triple in `bondy_oplog_core_registry`. The
-    %% cell's fold module (taken from the registry entry, which can
-    %% differ from the per-instance `fold_module`) drives the
+    %% cell's CRDT, taken from that registry entry, drives the
     %% decode/apply/encode cycle. `undefined` disables the path —
     %% existing instances are unaffected.
-    cell_apply_ctx :: cell_apply_ctx() | undefined,
+    cell_apply_ctx :: cell_apply_ctx(),
     %% Per-bucket apply-context source for the cell-apply mux. `{single, Ctx}`
     %% (one table per instance — today's default) routes every bucket to `Ctx`;
     %% `{dir, #{Bucket => Ctx}}` (a multiplexing per-shard instance) routes each
     %% bucket to its own table's ctx. Seeded at init from `cell_apply_bucket` and
     %% extended at runtime via `register_table/4` / `unregister_table/2`.
-    %% `cell_apply_ctx` above stays the founding ctx for the guard clauses and
-    %% the single-table read-side handle_calls.
-    cell_apply_source = {single, undefined} :: ctx_source(),
+    %% `cell_apply_ctx` above stays the founding ctx for the single-table
+    %% read-side handle_calls.
+    cell_apply_source :: ctx_source(),
     %% tier_2 stamp-site context-regression guard. Per locally stamped
     %% cell `{Bucket, Key}`, the highest causal context this applier has
     %% handed out on the tier_2 write path (`{cell_context, _, _}`). A
@@ -409,10 +396,9 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     %% Substrate subscription wiring: namespace for post-apply publish.
     publish_ns => atom(),
     publish_fun => publish_fun(),
-    %% Per-cell projection write wiring. Setting this requires the shard
-    %% to be already registered in `bondy_oplog_core_registry`. Resolved
-    %% eagerly at init/1.
-    cell_apply_target => shard_key(),
+    %% Per-cell projection write wiring. The shard must already be
+    %% registered in `bondy_oplog_core_registry`. Resolved eagerly at init/1.
+    cell_apply_target := shard_key(),
     %% Secondary-index descriptors for this primary table. Passed
     %% through into the `cell_apply_ctx`; only meaningful alongside
     %% `cell_apply_target`.
@@ -443,7 +429,6 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
 -export([stop/1]).
 -export([enqueue_remote/2]).
 -export([refresh_validator/2]).
--export([projection/1]).
 -export([notify_drain_resume/1]).
 -export([replay_cell_events/1]).
 -export([replay_cell_events_sync/1]).
@@ -473,6 +458,7 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
 %% (`integrate_peer_root` inline replay) calls it directly.
 -export([resolve_cell_apply_ctx/1]).
 -export([build_cell_apply_source/3]).
+-export([resolve_cell_ctx/3]).
 -export([register_table/4]).
 -export([unregister_table/2]).
 -export([open_drain_gate/1]).
@@ -615,9 +601,6 @@ tombstones; same `{set, V, H}` already applied) or yields the same
 terminal state (later-HLC LWW). `strict_register` rejects duplicates
 with `{error, ...}` from `apply_event/3` but `apply_one_cell` already
 catches and logs.
-
-A no-op when the instance was started without a `cell_apply_target`
-— pure-substrate consumers are not affected.
 """.
 replay_cell_events(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:cast(ApplierPid, replay_cell_events).
@@ -629,7 +612,7 @@ Synchronous variant of `replay_cell_events/1`. Blocks the caller
 until the diff fold has been applied to the projection, so a read
 issued immediately after this returns observes the peer-merged events
 the corresponding sync session installed. Otherwise identical to the
-cast (idempotent, no-op when `cell_apply_target` is not configured).
+cast (idempotent).
 """.
 replay_cell_events_sync(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, replay_cell_events, infinity).
@@ -683,8 +666,7 @@ the last replayed root), this re-applies the COMPLETE local+peer event
 set, so a cell whose materialised state was overwritten out-of-band — a
 `replace`-mode catalogue install that clobbered a per-Origin-accumulating
 CRDT (counter, grow-set) on a live re-bootstrap — is restored to the
-converged value. The op-based replacement for the removed CvRDT `merge_states`. Idempotent
-and a no-op when `cell_apply_target` is not configured.
+converged value. Idempotent.
 """.
 rederive_projection_sync(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, rederive_projection, infinity).
@@ -700,8 +682,7 @@ the full working set in one pass even when the cap was exceeded. Combined
 with the rebuild orchestrator first clearing the stale index shard, this
 restores the index exactly. Unlike replaying the MST's events, reading the
 converged value is correct for context-carrying (tier_2) CRDTs (see
-`do_rebuild_indexes/1`). A no-op when the instance has no
-`cell_apply_target`.
+`do_rebuild_indexes/1`).
 """.
 rebuild_indexes(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:cast(ApplierPid, rebuild_indexes).
@@ -771,29 +752,10 @@ reap_origins_sync(ApplierPid, RetiredOrigins) when
 ->
     gen_server:call(ApplierPid, {reap_origins, RetiredOrigins}, infinity).
 
--spec projection(pid()) ->
-    {ok, term()} | {error, no_fold_configured}.
+-spec cell_apply_target(pid()) -> {ok, shard_key()}.
 
 -doc """
-Returns the current fold projection for the applier's instance.
-
-`{error, no_fold_configured}` when the instance was started without a
-`fold_module` opt (the legacy event-storage path is in effect).
-
-The reply observes the freshest fold state visible to the applier
-*after* the call is processed — synchronous `gen_server:call/2`
-contract. Events appended after the call returns are not reflected.
-Callers that need read-your-writes semantics across a recent append
-should call `bondy_oplog:await_apply/1` first.
-""".
-projection(ApplierPid) when is_pid(ApplierPid) ->
-    gen_server:call(ApplierPid, get_projection, infinity).
-
--spec cell_apply_target(pid()) -> {ok, shard_key()} | undefined.
-
--doc """
-Returns the applier's resolved `cell_apply_target` shard key, or
-`undefined` if no projection target was configured. Used by the
+Returns the applier's resolved `cell_apply_target` shard key. Used by the
 catalogue-snapshot bootstrap path to discover where to read the
 projection's cells from.
 """.
@@ -966,9 +928,6 @@ for `(Bucket, Key)` in the applier's single-cell scope. Used by
 write observed into the event `meta` before WAL append. Returns
 `{ok, undefined}` when the cell's CRDT does not carry a context
 (tier_0/tier_1).
-
-`{error, no_cell_apply_target}` if the applier wasn't configured with a
-`cell_apply_target`.
 """.
 cell_context(ApplierPid, Bucket, Key) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, {cell_context, Bucket, Key}, infinity).
@@ -1018,9 +977,6 @@ write is already present. The caller adopts the peer's applied frontier
 only when it is empty (`bondy_oplog_sync_session:do_bootstrap_snapshot/6`):
 a cell carries no origin and no seq, so "did everything the peer shipped
 land" is the only question this install can answer about the frontier.
-
-Returns `{error, no_cell_apply_target}` if the applier was not started
-with a `cell_apply_target`.
 """.
 install_catalogue_batch(ApplierPid, Cells) when
     is_pid(ApplierPid), is_list(Cells)
@@ -1109,6 +1065,8 @@ do_init_2(
     ApplyBatchMax = maps:get(
         apply_batch_max_events, Opts, ?DEFAULT_APPLY_BATCH_MAX_EVENTS
     ),
+    %% Before the gate read: see `bondy_oplog_instance:open_drain_gate/1`.
+    ok = bondy_oplog_registry:set_applier_pid(InstanceId, self()),
     DrainGate =
         case
             maps:get(drain_gated, Opts, false) andalso
@@ -1151,7 +1109,6 @@ do_init_2(
                 {ok, Iter} ->
                     {ValidatorMod, ValidatorState} =
                         bondy_oplog_instance:get_validator(InstP),
-                    {FoldMod, FoldState0} = init_fold(InstanceId),
                     %% Snapshot the demand-based flow-control handle
                     %% published by the instance's `init/1`. `undefined`
                     %% means the entry hasn't caught up yet — the
@@ -1199,8 +1156,6 @@ do_init_2(
                         poll_interval_ms = PollMs,
                         validator_module = ValidatorMod,
                         validator_state = ValidatorState,
-                        fold_module = FoldMod,
-                        fold_state = FoldState0,
                         ae_targets = AeTargets,
                         publish_ns = PublishNs,
                         publish_fun = PublishFun,
@@ -1222,9 +1177,6 @@ do_init_2(
                             bondy_oplog, drain_stall_alarm_ms, 60000
                         )
                     },
-                    ok = bondy_oplog_registry:set_applier_pid(
-                        InstanceId, self()
-                    ),
                     ok = bondy_oplog_registry:set_tables_registered(
                         InstanceId, DrainGate =:= open
                     ),
@@ -1251,10 +1203,7 @@ do_init_2(
                             %% The WAL drain only handles events past
                             %% `resume_position/2`, so without this the
                             %% projection stays stale until the next sync tick.
-                            case State#state.cell_apply_source of
-                                {single, undefined} -> ok;
-                                _ -> gen_server:cast(self(), replay_cell_events)
-                            end;
+                            gen_server:cast(self(), replay_cell_events);
                         gated ->
                             ok
                     end,
@@ -1267,119 +1216,116 @@ do_init_2(
     end.
 
 %% @private
-%% Resolve the optional `cell_apply_target` into a `cell_apply_ctx`
+%% Resolve `cell_apply_target` into a `cell_apply_ctx`
 %% map of the projection adapter, handle, and fold module from the
 %% shard's registry entry. `not_found` is a hard error so a typo'd
 %% triple surfaces at startup instead of silently disabling the path.
-resolve_cell_apply_ctx(Opts) ->
-    case maps:get(cell_apply_target, Opts, undefined) of
-        undefined ->
-            {ok, undefined};
-        {NS, Index, Shard} = Key ->
-            case bondy_oplog_core_registry:lookup(NS, Index, Shard) of
-                {ok, Entry} ->
-                    FoldMod = bondy_oplog_core_registry:entry_fold_module(
+resolve_cell_apply_ctx(
+    #{cell_apply_target := {NS, Index, Shard} = Key} = Opts
+) ->
+    case bondy_oplog_core_registry:lookup(NS, Index, Shard) of
+        {ok, Entry} ->
+            FoldMod = bondy_oplog_core_registry:entry_fold_module(
+                Entry
+            ),
+            CrdtMod = bondy_oplog_core_registry:entry_crdt_module(
+                Entry
+            ),
+            CausalTier =
+                bondy_oplog_core_registry:entry_causal_tier(Entry),
+            {ok, #{
+                shard_key => Key,
+                %% The table's event namespace (`undefined` unless it
+                %% opted in via `publish => true`). The replay path in
+                %% `bondy_oplog_cell_apply:apply_cell_pairs/4` gates
+                %% merge-event emission on it, and a multiplexing
+                %% instance's LOCAL publish resolves it per bucket
+                %% (`publish_batch_dir/2`). Read from the registry
+                %% ENTRY (the restart-surviving source) so a
+                %% restart-rebuilt ctx keeps emitting; falls back to
+                %% the opts for a raw, non-`bondy_db` registration.
+                publish_ns => entry_or_opt(
+                    bondy_oplog_core_registry:entry_publish_ns(Entry),
+                    publish_ns,
+                    Opts,
+                    undefined
+                ),
+                adapter =>
+                    bondy_oplog_core_registry:entry_projection_adapter(
                         Entry
                     ),
-                    CrdtMod = bondy_oplog_core_registry:entry_crdt_module(
+                handle =>
+                    bondy_oplog_core_registry:entry_projection_handle(
                         Entry
                     ),
-                    CausalTier =
-                        bondy_oplog_core_registry:entry_causal_tier(Entry),
-                    {ok, #{
-                        shard_key => Key,
-                        %% The table's event namespace (`undefined` unless it
-                        %% opted in via `publish => true`). The replay path in
-                        %% `bondy_oplog_cell_apply:apply_cell_pairs/4` gates
-                        %% merge-event emission on it, and a multiplexing
-                        %% instance's LOCAL publish resolves it per bucket
-                        %% (`publish_batch_dir/2`). Read from the registry
-                        %% ENTRY (the restart-surviving source) so a
-                        %% restart-rebuilt ctx keeps emitting; falls back to
-                        %% the opts for a raw, non-`bondy_db` registration.
-                        publish_ns => entry_or_opt(
-                            bondy_oplog_core_registry:entry_publish_ns(Entry),
-                            publish_ns,
-                            Opts,
-                            undefined
+                fold_module => FoldMod,
+                crdt_module => CrdtMod,
+                %% Per-table construction config for `CrdtMod`
+                %% (`#{}` default) — the kernel's opts-aware
+                %% `init/2` cold-start path (see
+                %% `bondy_oplog_cell_kernel:init/2`).
+                crdt_opts =>
+                    bondy_oplog_core_registry:entry_crdt_opts(Entry),
+                %% The CRDT's declared causal tier (default tier_0).
+                %% Recorded here; the tier_2 context-stamp gates on
+                %% `causal_tier := tier_2`.
+                causal_tier => CausalTier,
+                %% The cell projection kernel: `{crdt, Mod}` when a
+                %% `crdt_module` is configured, else `{fold, Mod}`
+                %% (the legacy path). Selected once, here.
+                kernel =>
+                    bondy_oplog_cell_kernel:from_modules(
+                        FoldMod, CrdtMod
+                    ),
+                cache_adapter =>
+                    bondy_oplog_core_registry:entry_cache_adapter(
+                        Entry
+                    ),
+                cache_handle =>
+                    bondy_oplog_core_registry:entry_cache_handle(Entry),
+                high_water_ref =>
+                    bondy_oplog_core_registry:entry_high_water_ref(
+                        Entry
+                    ),
+                %% Read from the registry ENTRY so a restart-rebuilt ctx
+                %% keeps indexing; `undefined` (a raw registration that
+                %% did not stamp it) falls back to the opts. `[]` in the
+                %% entry means "no indexes" and is authoritative.
+                secondary_indexes =>
+                    entry_or_opt(
+                        bondy_oplog_core_registry:entry_secondary_indexes(
+                            Entry
                         ),
-                        adapter =>
-                            bondy_oplog_core_registry:entry_projection_adapter(
-                                Entry
-                            ),
-                        handle =>
-                            bondy_oplog_core_registry:entry_projection_handle(
-                                Entry
-                            ),
-                        fold_module => FoldMod,
-                        crdt_module => CrdtMod,
-                        %% Per-table construction config for `CrdtMod`
-                        %% (`#{}` default) — the kernel's opts-aware
-                        %% `init/2` cold-start path (see
-                        %% `bondy_oplog_cell_kernel:init/2`).
-                        crdt_opts =>
-                            bondy_oplog_core_registry:entry_crdt_opts(Entry),
-                        %% The CRDT's declared causal tier (default tier_0).
-                        %% Recorded here; the tier_2 context-stamp gates on
-                        %% `causal_tier := tier_2`.
-                        causal_tier => CausalTier,
-                        %% The cell projection kernel: `{crdt, Mod}` when a
-                        %% `crdt_module` is configured, else `{fold, Mod}`
-                        %% (the legacy path). Selected once, here.
-                        kernel =>
-                            bondy_oplog_cell_kernel:from_modules(
-                                FoldMod, CrdtMod
-                            ),
-                        cache_adapter =>
-                            bondy_oplog_core_registry:entry_cache_adapter(
-                                Entry
-                            ),
-                        cache_handle =>
-                            bondy_oplog_core_registry:entry_cache_handle(Entry),
-                        high_water_ref =>
-                            bondy_oplog_core_registry:entry_high_water_ref(
-                                Entry
-                            ),
-                        %% Read from the registry ENTRY so a restart-rebuilt ctx
-                        %% keeps indexing; `undefined` (a raw registration that
-                        %% did not stamp it) falls back to the opts. `[]` in the
-                        %% entry means "no indexes" and is authoritative.
-                        secondary_indexes =>
-                            entry_or_opt(
-                                bondy_oplog_core_registry:entry_secondary_indexes(
-                                    Entry
-                                ),
-                                secondary_indexes,
-                                Opts,
-                                []
-                            ),
-                        %% The rebuild's primary-cell enumeration scope
-                        %% (`bondy_oplog_projection_adapter:cell_keys_scope()`),
-                        %% stamped by `bondy_db` from the topology. `undefined`
-                        %% for an instance started outside `bondy_db` — the
-                        %% rebuild then falls back to the MST walk.
-                        primary_cell_scope =>
-                            bondy_oplog_core_registry:entry_primary_cell_scope(
-                                Entry
-                            ),
-                        %% Applier-private OldValue frame-cache (or
-                        %% `undefined` when disabled). Created here in the
-                        %% applier's init/1, so the ETS table is owned by
-                        %% the applier process and dies with it (the cache
-                        %% is rebuildable from the projection).
-                        oldstate_cache =>
-                            bondy_oplog_cell_apply:oldstate_cache_new(
-                                maps:get(oldstate_cache, Opts, false),
-                                maps:get(
-                                    oldstate_cache_max,
-                                    Opts,
-                                    ?DEFAULT_OLDSTATE_CACHE_MAX
-                                )
-                            )
-                    }};
-                not_found ->
-                    {error, {cell_apply_target_not_registered, Key}}
-            end
+                        secondary_indexes,
+                        Opts,
+                        []
+                    ),
+                %% The rebuild's primary-cell enumeration scope
+                %% (`bondy_oplog_projection_adapter:cell_keys_scope()`),
+                %% stamped by `bondy_db` from the topology. `undefined`
+                %% for an instance started outside `bondy_db` — the
+                %% rebuild then falls back to the MST walk.
+                primary_cell_scope =>
+                    bondy_oplog_core_registry:entry_primary_cell_scope(
+                        Entry
+                    ),
+                %% Applier-private OldValue frame-cache (or
+                %% `undefined` when disabled). Created here in the
+                %% applier's init/1, so the ETS table is owned by
+                %% the applier process and dies with it (the cache
+                %% is rebuildable from the projection).
+                oldstate_cache =>
+                    bondy_oplog_cell_apply:oldstate_cache_new(
+                        maps:get(oldstate_cache, Opts, false),
+                        maps:get(
+                            oldstate_cache_max,
+                            Opts,
+                            ?DEFAULT_OLDSTATE_CACHE_MAX
+                        )
+                    )
+            }};
+        not_found ->
+            {error, {cell_apply_target_not_registered, Key}}
     end.
 
 %% @private
@@ -1431,7 +1377,7 @@ rebuild_dir_source(InstanceId, CellCtx, FoundingBucket, Opts) ->
                     case
                         resolve_cell_apply_ctx(Opts#{cell_apply_target => Key})
                     of
-                        {ok, Ctx} when Ctx =/= undefined ->
+                        {ok, Ctx} ->
                             bondy_oplog_mux:put(Acc, Bucket, Ctx);
                         _ ->
                             Acc
@@ -1499,24 +1445,6 @@ handle_call(
     end),
     {noreply, State};
 handle_call(
-    get_projection,
-    _From,
-    #state{fold_module = undefined} = State
-) ->
-    {reply, {error, no_fold_configured}, State};
-handle_call(
-    get_projection,
-    _From,
-    #state{fold_state = FS} = State
-) ->
-    {reply, {ok, FS}, State};
-handle_call(
-    {sweep_stable_cells, _StableHlc, _Opts},
-    _From,
-    #state{cell_apply_ctx = undefined} = State
-) ->
-    {reply, {error, no_projection}, State};
-handle_call(
     {sweep_stable_cells, StableHlc, Opts},
     _From,
     #state{} = StateIn
@@ -1555,12 +1483,6 @@ handle_call(barrier, _From, StateIn) ->
 handle_call(
     cell_apply_target,
     _From,
-    #state{cell_apply_ctx = undefined} = State
-) ->
-    {reply, undefined, State};
-handle_call(
-    cell_apply_target,
-    _From,
     #state{cell_apply_ctx = #{shard_key := Key}} = State
 ) ->
     {reply, {ok, Key}, State};
@@ -1595,12 +1517,6 @@ handle_call({unregister_table, Bucket}, _From, State) ->
         State#state.cell_apply_source, Bucket
     ),
     {reply, ok, State#state{cell_apply_source = Source}};
-handle_call(
-    {install_catalogue_batch, _Cells},
-    _From,
-    #state{cell_apply_ctx = undefined} = State
-) ->
-    {reply, {error, no_cell_apply_target}, State};
 handle_call(
     {install_catalogue_batch, Cells},
     _From,
@@ -1645,12 +1561,6 @@ handle_call(await_drain, From, State) ->
     %% so a subsequent rebuild/freshen observes a fully-replayed MST.
     self() ! drain,
     {noreply, State#state{drain_waiters = [From | State#state.drain_waiters]}};
-handle_call(
-    {reap_origins, _Retired},
-    _From,
-    #state{cell_apply_ctx = undefined} = State
-) ->
-    {reply, {error, no_cell_apply_target}, State};
 handle_call({reap_origins, Retired}, _From, State) ->
     %% Dead-origin VV reaping: drop the value-preserving causal-context
     %% entries of retired origins from every cell, and co-evict them from
@@ -1688,56 +1598,50 @@ handle_call(
     %% bucket; a registered table bucket resolves to its own ctx. A bucket with
     %% NO registered table — the instance-level latency probe's reserved
     %% `$probe` bucket — falls back to the founding ctx (any kernel is correct
-    %% for a probe write). An unbootstrapped instance (founding `undefined`)
-    %% has no target.
-    case resolve_cell_ctx(Source, Bucket, Founding) of
-        undefined ->
-            {reply, {error, no_cell_apply_target}, State};
-        #{
-            adapter := Adapter,
-            handle := Handle,
-            kernel := Kernel,
-            crdt_module := CrdtMod
-        } = CellCtx ->
-            %% Single-applier-per-cell read of the cell's current context. The
-            %% caller (`bondy_db:apply_with_context/4`) then appends with this
-            %% context as `meta`. The read and the append are SEPARATE calls —
-            %% not one locked critical section — so two concurrent same-origin
-            %% writes to the same cell can read the same pre-write context and
-            %% stamp it twice (a pre-existing property of the tier_2
-            %% context-stamp design; the sequential `await/1` barrier gives
-            %% read-your-writes for the common serial case). Single-applier
-            %% scope still guarantees a consistent snapshot for THIS read.
-            State0 =
-                case Adapter:get(Handle, Bucket, Key) of
-                    not_found ->
-                        bondy_oplog_cell_kernel:init(
-                            Kernel, maps:get(crdt_opts, CellCtx, #{})
-                        );
-                    {ok, Frame} ->
-                        {_PrevHlc, StateBytes, _ValueBytes} =
-                            bondy_oplog_cell_frame:decode_full(Frame),
-                        bondy_oplog_cell_kernel:decode_state(Kernel, StateBytes)
-                end,
-            Context =
-                case
-                    CrdtMod =/= undefined andalso
-                        erlang:function_exported(CrdtMod, context_of, 1)
-                of
-                    true -> CrdtMod:context_of(State0);
-                    false -> undefined
-                end,
-            {Reply, State1} = stamp_ctx_guard(State, Bucket, Key, Context),
-            {reply, Reply, State1}
-    end;
+    %% for a probe write).
+    #{
+        adapter := Adapter,
+        handle := Handle,
+        kernel := Kernel,
+        crdt_module := CrdtMod
+    } = CellCtx = resolve_cell_ctx(Source, Bucket, Founding),
+    %% Single-applier-per-cell read of the cell's current context. The
+    %% caller (`bondy_db:apply_with_context/4`) then appends with this
+    %% context as `meta`. The read and the append are SEPARATE calls —
+    %% not one locked critical section — so two concurrent same-origin
+    %% writes to the same cell can read the same pre-write context and
+    %% stamp it twice (a pre-existing property of the tier_2
+    %% context-stamp design; the sequential `await/1` barrier gives
+    %% read-your-writes for the common serial case). Single-applier
+    %% scope still guarantees a consistent snapshot for THIS read.
+    State0 =
+        case Adapter:get(Handle, Bucket, Key) of
+            not_found ->
+                bondy_oplog_cell_kernel:init(
+                    Kernel, maps:get(crdt_opts, CellCtx, #{})
+                );
+            {ok, Frame} ->
+                {_PrevHlc, StateBytes, _ValueBytes} =
+                    bondy_oplog_cell_frame:decode_full(Frame),
+                bondy_oplog_cell_kernel:decode_state(Kernel, StateBytes)
+        end,
+    Context =
+        case
+            CrdtMod =/= undefined andalso
+                erlang:function_exported(CrdtMod, context_of, 1)
+        of
+            true -> CrdtMod:context_of(State0);
+            false -> undefined
+        end,
+    {Reply, State1} = stamp_ctx_guard(State, Bucket, Key, Context),
+    {reply, Reply, State1};
 handle_call(_Req, _From, State) ->
     {reply, {error, badcall}, State}.
 
 %% @private
 %% The ctx for a cell's bucket: its own registered table ctx when the bucket is
 %% in the multiplex directory, else the founding ctx (for unregistered buckets
-%% such as the reserved latency-probe bucket). `undefined` only when the
-%% instance is unbootstrapped.
+%% such as the reserved latency-probe bucket).
 resolve_cell_ctx(Source, Bucket, Founding) ->
     case bondy_oplog_mux:resolve(Source, Bucket) of
         undefined -> Founding;
@@ -1771,15 +1675,14 @@ handle_cast(
     open_drain_gate,
     #state{drain_gate = gated} = State
 ) ->
-    %% Provisioning is complete: every table sharing this per-shard instance
-    %% has registered its cell-apply bucket, so the WAL can be replayed with a
-    %% whole `cell_apply_source` and no cell is skipped. Kick the drain (and the
-    %% cold-replay catch-up that init deferred — see `do_init_2/9`).
+    %% Every table sharing this instance has registered its bucket, so the WAL
+    %% replays with a whole `cell_apply_source`. A release racing `init/1` may
+    %% have had its `true` overwritten by that init's `false`.
+    ok = bondy_oplog_registry:set_tables_registered(
+        State#state.instance_id, true
+    ),
     self() ! drain,
-    case State#state.cell_apply_source of
-        {single, undefined} -> ok;
-        _ -> gen_server:cast(self(), replay_cell_events)
-    end,
+    ok = gen_server:cast(self(), replay_cell_events),
     {noreply, State#state{drain_gate = open}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -1898,24 +1801,6 @@ missing_sibling(undefined, _, _) -> instance_pid;
 missing_sibling(_, undefined, _) -> wal_pid;
 missing_sibling(_, _, undefined) -> mst;
 missing_sibling(_, _, _) -> none.
-
-%% @private
-%% Resolves the per-instance projection module from the registry and seeds
-%% the initial projection state. The instance `fold_module` label resolves
-%% to its native CRDT twin, so `#state.fold_module` holds a
-%% `bondy_oplog_crdt` module and the projection path runs the op-based
-%% step. Returns `{undefined, undefined}` when no module is configured —
-%% callers check `fold_module` and skip the path.
-init_fold(InstanceId) ->
-    case bondy_oplog_registry:fold_module(InstanceId) of
-        undefined ->
-            {undefined, undefined};
-        Strategy ->
-            {crdt, Mod} = bondy_oplog_cell_kernel:from_modules(
-                Strategy, undefined
-            ),
-            {Mod, Mod:init()}
-    end.
 
 %% @private
 %% Resume from `max(last_MST_key.hlc, watermark.hlc)`. The reader's
@@ -2335,14 +2220,14 @@ apply_batch(
                 State;
             _ ->
                 %% Order matters for `await_apply/1,2`'s contract:
-                %% applier-side projection writes (fold, cell_apply,
-                %% publish) run BEFORE the `install_local_batch` cast
+                %% applier-side projection writes (cell_apply, publish)
+                %% run BEFORE the `install_local_batch` cast
                 %% is dispatched to the instance. The instance's
                 %% handler is the place that signals
                 %% `drain_waiters` — by enqueuing the cast last we
                 %% guarantee that, by the time a caller's
                 %% `await_apply` sees the overlay empty, the
-                %% projection adapter, fold state, and `publish_fun`
+                %% projection adapter and `publish_fun`
                 %% have all observed the events. The earlier ordering
                 %% (cast first, then process in the applier) was a
                 %% concurrency micro-optimisation: it overlapped the
@@ -2352,29 +2237,14 @@ apply_batch(
                 %% instance is processing this batch's cast), so the
                 %% reorder only costs the within-batch overlap, which
                 %% is dominated by the projection write anyway.
-                {CellEvents, FoldEvents} = partition_by_op(Verified),
-
-                FoldT0 = erlang:monotonic_time(microsecond),
-                S1 = apply_fold_batch(State, FoldEvents),
-                telemetry:execute(
-                    [bondy_oplog, applier, batch_fold],
-                    #{
-                        duration_us => erlang:monotonic_time(microsecond) -
-                            FoldT0,
-                        count => length(FoldEvents)
-                    },
-                    #{instance_id => Id}
-                ),
-
                 CellT0 = erlang:monotonic_time(microsecond),
-                %% The WHOLE verified batch, not just `CellEvents`: the mux
+                %% The WHOLE verified batch, not just its cell ops: the mux
                 %% groups on `event_bucket/1` (which skips non-cell ops) but
                 %% claims the frontier over every seq-bearing event, and a
-                %% `seq_fill` backfill is seq-bearing. `CellEvents` still
-                %% measures the cell work below.
+                %% `seq_fill` backfill is seq-bearing.
                 ok = bondy_oplog_cell_apply:apply_cell_batch_mux(
-                    S1#state.cell_apply_source,
-                    S1#state.instance_id,
+                    State#state.cell_apply_source,
+                    State#state.instance_id,
                     Verified
                 ),
                 telemetry:execute(
@@ -2382,13 +2252,13 @@ apply_batch(
                     #{
                         duration_us => erlang:monotonic_time(microsecond) -
                             CellT0,
-                        count => length(CellEvents)
+                        count => cell_op_count(Verified)
                     },
                     #{instance_id => Id}
                 ),
 
                 PublishT0 = erlang:monotonic_time(microsecond),
-                ok = publish_batch(S1, Verified),
+                ok = publish_batch(State, Verified),
                 telemetry:execute(
                     [bondy_oplog, applier, batch_publish],
                     #{
@@ -2422,10 +2292,10 @@ apply_batch(
                     },
                     #{instance_id => Id}
                 ),
-                S1
+                State
         end,
     %% One telemetry event per applier batch, regardless of which
-    %% sub-path the events take (fold, cell_apply, publish). This is
+    %% sub-path the events take (cell_apply, publish). This is
     %% the single source of truth for "events the applier has fully
     %% processed end-to-end" — the path-specific
     %% `[bondy_oplog, applier, published]` event only fires for the
@@ -2438,72 +2308,11 @@ apply_batch(
     State1.
 
 %% @private
-%% Partitions a verified batch into `{CellApplyEvents, FoldEvents}`.
-%% `CellApplyEvents` are events whose op matches
-%% `{cell_apply, Bucket, Key, FoldEvent}`; these bypass the per-instance
-%% fold and instead drive a projection read-modify-write through
-%% `bondy_oplog_cell_apply:apply_cell_batch/3`. Everything else goes
-%% through the existing
-%% per-instance fold path.
-partition_by_op(Events) ->
-    lists:partition(
-        fun(E) ->
-            case bondy_oplog_event:op(E) of
-                {cell_apply, _, _, _} -> true;
-                _ -> false
-            end
-        end,
-        Events
-    ).
-
-%% @private
-%% Folds the verified events into the per-instance projection state.
-%% No-op when no fold module is configured. Wraps the fold in a
-%% try/catch so a misbehaving fold module cannot wedge the applier —
-%% an exception is logged and the state is preserved unchanged
-%% (the applier continues to drain the WAL but the projection
-%% deviates from the WAL; recovery semantics are not tracked here).
-apply_fold_batch(#state{fold_module = undefined} = State, _Verified) ->
-    State;
-apply_fold_batch(State, []) ->
-    State;
-apply_fold_batch(
-    #state{
-        fold_module = Mod,
-        fold_state = FS0,
-        instance_id = Id
-    } = State,
-    Verified
-) ->
-    try
-        FS1 = lists:foldl(
-            fun(Event, Acc) ->
-                bondy_oplog_crdt_commutative:apply_op(
-                    Mod,
-                    Acc,
-                    bondy_oplog_event:op(Event),
-                    bondy_oplog_event:key(Event)
-                )
-            end,
-            FS0,
-            Verified
-        ),
-        State#state{fold_state = FS1}
-    catch
-        C:R:S ->
-            ?LOG_ERROR(#{
-                description =>
-                    "bondy_oplog_applier fold raised; the projection "
-                    "is now inconsistent with the WAL until the next "
-                    "successful batch. Subtree continues to drain.",
-                instance_id => Id,
-                fold_module => Mod,
-                class => C,
-                reason => R,
-                stacktrace => S
-            }),
-            State
-    end.
+cell_op_count(Events) ->
+    length([
+        E
+     || E <- Events, {cell_apply, _, _, _} <- [bondy_oplog_event:op(E)]
+    ]).
 
 %% @private
 %% tier_2 stamp-site context-regression guard — delegates to the
@@ -2563,8 +2372,6 @@ stamp_ctx_guard(
 %% The MST walk remains the fallback for an adapter that cannot enumerate —
 %% the ephemeral ETS projection; see
 %% `bondy_oplog_cell_utils:primary_cell_directory/4`.
-do_rebuild_indexes(#state{cell_apply_ctx = undefined} = State) ->
-    State;
 do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
     case bondy_oplog_cell_apply:sec_idx(Ctx) of
         {_NS, []} ->
@@ -2643,21 +2450,6 @@ resolve_remote_gen_ref(State) ->
 %% (`{error, _}` — instance unavailable). The prepare fence needs the
 %% distinction: it must only advance its recorded generation on `ok`,
 %% or a failed replay would silently unfence subsequent context reads.
-do_replay_cell_events_r(
-    #state{cell_apply_source = {single, undefined}} = State
-) ->
-    %% A genuinely cell-apply-less instance: nothing to fold into.
-    %%
-    %% This guards on the SOURCE, not on the founding `cell_apply_ctx`, and the
-    %% difference is load-bearing. `handle_call({register_table, ...})` heals
-    %% `cell_apply_source` but never `cell_apply_ctx`, so an applier that
-    %% started before its table registered kept `cell_apply_ctx = undefined`
-    %% for its whole life — and guarding on that made every replay a permanent
-    %% no-op even once the directory was complete, silently stranding every
-    %% peer-delivered event on that instance. `apply_cell_pairs_mux/5` applies
-    %% the same `{single, undefined}` test itself, so this clause is an early
-    %% exit, not a second policy.
-    {ok, State};
 do_replay_cell_events_r(
     #state{
         cell_apply_source = Source,
@@ -3460,8 +3252,6 @@ validate_oldstate_cache_opts(Opts) ->
 
 validate_cell_apply_target(Opts) ->
     case maps:get(cell_apply_target, Opts, undefined) of
-        undefined ->
-            ok;
         {NS, Index, Shard} when
             is_atom(NS),
             is_atom(Index),

@@ -51,7 +51,7 @@ start_refuses_an_id_that_cannot_name_a_directory() ->
         fun({Id, Reason, Opts}) ->
             ?assertError(
                 {invalid_instance_id, Id, Reason},
-                bondy_oplog:start_instance(Id, Opts)
+                bondy_oplog_test_projection:start_instance(Id, Opts)
             ),
             ?assertEqual(undefined, bondy_oplog_registry:sup_pid(Id)),
             ?assertNot(lists:member(Id, bondy_oplog:list_instances()))
@@ -66,7 +66,7 @@ start_admits_a_hyphenated_id_without_storage_path() ->
     Id =
         <<"lc_db-",
             (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    {ok, SupPid} = bondy_oplog:start_instance(Id),
+    {ok, SupPid} = bondy_oplog_test_projection:start_instance(Id),
     ?assert(is_pid(SupPid)),
     WalDir = unicode:characters_to_binary(
         filename:join(["/tmp", "bondy_oplog_wal", os:getpid(), Id])
@@ -87,7 +87,7 @@ start_admits_a_hyphenated_id_without_storage_path() ->
 %% (`bondy_oplog_instance_dyn_sup:find_child_by_instance_id/1`).
 stop_survives_missing_registry_row() ->
     Id = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(Id),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     ?assert(lists:member(Id, bondy_oplog:list_instances())),
 
     %% Mint the zombie: drop the row, keep the subtree.
@@ -102,7 +102,7 @@ stop_survives_missing_registry_row() ->
 
 start_stop() ->
     Id = mk_id(),
-    {ok, SupPid} = bondy_oplog:start_instance(Id),
+    {ok, SupPid} = bondy_oplog_test_projection:start_instance(Id),
     ?assert(is_pid(SupPid)),
     K = bondy_oplog:append(Id, hi),
     ?assertMatch({ok, _}, bondy_oplog:get(Id, K)),
@@ -121,8 +121,8 @@ stop_unknown() ->
 crash_isolated_between_instances() ->
     A = mk_id(),
     B = mk_id(),
-    {ok, _} = bondy_oplog:start_instance(A),
-    {ok, _} = bondy_oplog:start_instance(B),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B),
     PidA = bondy_oplog_instance:whereis(A),
     ?assert(is_pid(PidA)),
     exit(PidA, kill),

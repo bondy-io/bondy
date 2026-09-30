@@ -51,7 +51,7 @@ bounded_under_sustained_load() ->
     InstId = mk_id(),
     NS = ns_of(InstId),
     {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
-    {ok, _} = open_instance(InstId, NS, lww_register),
+    {ok, _} = open_instance(InstId, NS),
     try
         Iters = 25,
         Batch = 20,
@@ -96,7 +96,7 @@ diff_frontier_bounds_to_recent_batch() ->
     InstId = mk_id(),
     NS = ns_of(InstId),
     {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
-    {ok, _} = open_instance(InstId, NS, lww_register),
+    {ok, _} = open_instance(InstId, NS),
     try
         Batch = 25,
         %% Batch 1: a peer confirms exactly this prefix.
@@ -144,7 +144,7 @@ watermark_reanchored_on_truncated_root() ->
     InstId = mk_id(),
     NS = ns_of(InstId),
     {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
-    {ok, _} = open_instance(InstId, NS, lww_register),
+    {ok, _} = open_instance(InstId, NS),
     try
         Batch = 25,
         %% Batch 1: a peer confirms exactly this prefix.
@@ -223,10 +223,9 @@ close_shard(Cache, Proj) ->
     ok = bondy_oplog_cache_ets:close(Cache),
     ok.
 
-open_instance(InstanceId, NS, FoldModule) ->
+open_instance(InstanceId, NS) ->
     bondy_oplog:start_instance(InstanceId, #{
         origin => bondy_oplog_origin:new(),
-        fold_module => FoldModule,
         applier => #{cell_apply_target => {NS, primary, 0}}
     }).
 
@@ -241,7 +240,7 @@ append_batch(InstanceId, I, Batch) ->
             _ = bondy_oplog:append(
                 InstanceId, {cell_apply, ?B, Key, {set, Hlc, Key}}
             ),
-            _ = bondy_oplog:projection(InstanceId)
+            ok = bondy_oplog_test_projection:drain(InstanceId)
         end,
         lists:seq(1, Batch)
     ).

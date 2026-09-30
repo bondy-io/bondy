@@ -1137,6 +1137,63 @@ gc_persists_across_reopen_test() ->
         end
     end).
 
+%% A GC whose manifest swap fails at the directory fsync has already put the
+%% new manifest in place: the store must not roll back as if it had not.
+%% The store runs in its own process, which dies as a crashed owner would,
+%% without a close; the reopened store must still hold every page.
+gc_manifest_dir_sync_failure_loses_no_page_test() ->
+    with_tmp_dir(fun(Dir) ->
+        P1 = mk_page(0, undefined, [{a, 1, undefined}]),
+        P2 = mk_page(0, undefined, [{b, 2, undefined}]),
+        Test = self(),
+        with_io_fault_lock(fun() ->
+            {Pid, Ref} = spawn_monitor(fun() ->
+                S0 = open_store(Dir),
+                {H1, S1} = bondy_mst_store:put(S0, P1),
+                {ok, S2} = bondy_mst_pack_store_seal(S1),
+                {H2, S3} = bondy_mst_store:put(S2, P2),
+                {ok, S4} = bondy_mst_pack_store_seal(S3),
+                Test ! {hashes, self(), H1, H2},
+                ok = meck:expect(
+                    bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end
+                ),
+                bondy_mst_store:gc(S4, [H1, H2])
+            end),
+            receive
+                {hashes, Pid, H1, H2} -> put(hashes, {H1, H2})
+            end,
+            receive
+                {'DOWN', Ref, process, Pid, _} -> ok
+            end
+        end),
+        {H1, H2} = get(hashes),
+        S = open_store(Dir),
+        try
+            ?assertEqual(P1, bondy_mst_store:get(S, H1)),
+            ?assertEqual(P2, bondy_mst_store:get(S, H2))
+        after
+            _ = bondy_mst_store:close(S)
+        end
+    end).
+
+%% The orphan sweep at open deletes every pack the manifest does not name, so
+%% the manifest is read only once its directory has been synced.
+open_refuses_an_unsyncable_directory_test() ->
+    with_tmp_dir(fun(Dir) ->
+        ok = bondy_mst_store:close(open_store(Dir)),
+        Raised = with_io_fault_lock(fun() ->
+            ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            try open_store(Dir) of
+                S -> {opened, bondy_mst_store:close(S)}
+            catch
+                error:Reason -> Reason
+            end
+        end),
+        ?assertMatch(
+            {pack_store_open, {manifest, {dir_fsync_failed, _, eio}}}, Raised
+        )
+    end).
+
 gc_tombstones_for_pending_preserved_test() ->
     with_tmp_dir(fun(Dir) ->
         S0 = open_store(Dir),
@@ -1470,3 +1527,19 @@ page_state_distinguishes_live_tombstoned_and_absent_test() ->
             _ = bondy_mst_store:close(S0)
         end
     end).
+
+%% The node-wide lock every suite that mocks `bondy_mst_io` takes.
+with_io_fault_lock(Body) ->
+    global:trans(
+        {{meck_vm_lock, bondy_mst_io}, self()},
+        fun() ->
+            ok = meck:new(bondy_mst_io, [passthrough]),
+            try
+                Body()
+            after
+                _ = meck:unload(bondy_mst_io)
+            end
+        end,
+        [node()],
+        infinity
+    ).

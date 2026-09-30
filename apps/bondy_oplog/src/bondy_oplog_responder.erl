@@ -71,7 +71,6 @@ partisan_gen_server:call(
 | `get_origins`                            | `{ok, [origin()]}`                                                     |
 | `get_retired`                            | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                       | `{ok, #{hash() => page()}}`                                            |
-| `get_snapshot`                           | `{ok, no_snapshot}` \| `{ok, event_key(), term()}`                     |
 | `get_catalogue_snapshot_init`            | `{ok, no_snapshot}` \| `{ok, {init, {watermark(), cursor()}}}`         |
 | `{get_catalogue_snapshot_next, Cursor}`  | `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {done, []}}` \| `{error, cursor_expired}` |
 
@@ -297,21 +296,6 @@ dispatch(InstanceId, {get_pages, _Peer, _PeerRoot, Hashes}) when
     %% budget that does not compete with scheduled sync. Until then the wire
     %% carries the information and nothing acts on it.
     do_get_pages(InstanceId, Hashes);
-dispatch(InstanceId, get_snapshot) when is_binary(InstanceId) ->
-    case bondy_oplog_instance:whereis(InstanceId) of
-        undefined ->
-            {error, {instance_not_running, InstanceId}};
-        _Pid ->
-            %% No await_apply: serve the current MST snapshot (AAE eventual);
-            %% blocking here caused the 5s sync timeouts — see `get_root`.
-            %% Wire-protocol message `get_snapshot` is preserved
-            %% (transport ABI). Internally it routes to the renamed
-            %% compaction_checkpoint API.
-            case bondy_oplog_instance:compaction_checkpoint(InstanceId) of
-                not_found -> {ok, no_snapshot};
-                {ok, W, S} -> {ok, W, S}
-            end
-    end;
 dispatch(InstanceId, get_catalogue_snapshot_init) when
     is_binary(InstanceId)
 ->

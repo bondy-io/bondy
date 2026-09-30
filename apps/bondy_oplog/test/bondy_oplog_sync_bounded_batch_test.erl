@@ -49,8 +49,8 @@ bounded_batch_converges() ->
 
     A = mk_inst(),
     B = mk_inst(),
-    {ok, _} = bondy_oplog:start_instance(A, originated_opts()),
-    {ok, _} = bondy_oplog:start_instance(B, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
+    {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     %% Enough events that B's MST holds many pages (>> 2) → many bounded rounds.
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 300)],
 

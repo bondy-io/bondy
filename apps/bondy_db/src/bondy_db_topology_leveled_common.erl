@@ -27,7 +27,6 @@ only the leaf functions the three topology modules call.
 -export([default_book_opts/1]).
 -export([ensure_dir/1]).
 -export([normalise_dir/1]).
--export([stop_bookie_safe/1]).
 -export([route/2]).
 
 %% =============================================================================
@@ -75,28 +74,6 @@ normalise_dir(Dir) when is_binary(Dir) -> binary_to_list(Dir);
 normalise_dir(Dir) when is_list(Dir) -> Dir.
 
 ?DOC("""
-Flushes and closes a Bookie, tolerating an already-dead process. The
-supervisor reaps the now-dead `temporary` child without restarting it.
-""").
--spec stop_bookie_safe(Bookie :: pid() | term()) -> ok.
-
-stop_bookie_safe(Bookie) when is_pid(Bookie) ->
-    case is_process_alive(Bookie) of
-        true ->
-            _ =
-                try
-                    leveled_bookie:book_close(Bookie)
-                catch
-                    _:_ -> ok
-                end,
-            ok;
-        false ->
-            ok
-    end;
-stop_bookie_safe(_) ->
-    ok.
-
-?DOC("""
 `route/2` callback body shared by the sharded topologies: looks `Shard`
 up in the state's `shards` map and returns the per-shard
 projection-adapter handle.
@@ -104,10 +81,14 @@ projection-adapter handle.
 -spec route(Shard :: non_neg_integer(), State :: map()) ->
     {ok, module(), map()} | {error, {unknown_shard, non_neg_integer()}}.
 
-route(Shard, #{shards := Shards}) when is_integer(Shard) ->
+route(Shard, #{shards := Shards, root_paths := RootPaths}) when
+    is_integer(Shard)
+->
     case maps:find(Shard, Shards) of
         {ok, Bookie} ->
-            Handle = #{bookie => Bookie},
+            Handle = #{
+                bookie => Bookie, root_path => maps:get(Shard, RootPaths)
+            },
             {ok, ?PROJECTION_ADAPTER, Handle};
         error ->
             {error, {unknown_shard, Shard}}

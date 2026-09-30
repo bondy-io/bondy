@@ -76,10 +76,14 @@ under each instance's directory — the cost of a departure scales with
 `db.main.shard_count`, not with the number of nodes.
 
 Ephemeral instances are cheaper but NOT free, and the difference matters to
-anything reading `frontier_origins/0`. They share one per-VM origin, so a
-departure adds one entry rather than one per shard, and nothing is persisted
-(`persist_frontier` is a no-op on ephemeral), so a restart clears whatever
-accumulated. Their frontiers are NOT empty at runtime: `merge_applied/2` is
+anything reading `frontier_origins/0`. One with an in-memory WAL (the
+`registry` DB's shards) takes a fresh origin every time its instance process
+starts (`bondy_oplog_instance_sup_origin_test`), so a departure adds one entry
+per shard per start, and each start leaves its predecessor's origin unclaimed
+by `local_origins/0`, like a VM boot; the others share one per-VM origin.
+Nothing is persisted (`persist_frontier` is a no-op on ephemeral), so a
+restart clears whatever accumulated. Their frontiers are NOT empty at runtime:
+`merge_applied/2` is
 called on both the local and the replay path with no durability gate, and a
 probe against a provisioned catalogue — one RIB cell written to the ephemeral
 `registry` DB — showed the owning shard's frontier carrying the local origin

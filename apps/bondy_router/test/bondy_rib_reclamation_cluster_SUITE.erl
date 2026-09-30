@@ -237,9 +237,9 @@ do_add_subscription(Uri, Topic) ->
 %% The four artifacts, read on this node, for cells owned by `Owner`.
 do_rib_state(Owner) ->
     #{
-        reg_cell => has_cell(bondy_registration_rib, ?PROC, Owner),
+        reg_cell => has_cell(bondy_rib_registrations, ?PROC, Owner),
         reg_stub => has_stub(registration, ?PROC, Owner),
-        sub_cell => has_cell(bondy_subscription_rib, ?TOPIC, Owner),
+        sub_cell => has_cell(bondy_rib_subscriptions, ?TOPIC, Owner),
         sub_stub => has_stub(subscription, ?TOPIC, Owner)
     }.
 
@@ -301,7 +301,7 @@ do_reclaim_all() ->
 %% `supported` and `cells_scanned`, both of which `reap_instance/2` discards).
 do_diagnose(Owner) ->
     Dead = dead_origins(),
-    Table = bondy_namespace_catalog:table(bondy_registration_rib),
+    Table = bondy_namespace_catalog:table(bondy_rib_registrations),
     Key = term_to_binary({?REALM, ?POLICY, ?PROC, Owner}),
     Cell =
         try

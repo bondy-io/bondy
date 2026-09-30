@@ -1538,6 +1538,7 @@ read_snapshot_watermark_lenient(Dir) ->
 bootstrap(#state{} = State) ->
     SegId = State#state.segment_id,
     SegPath = segment_path(State#state.dir, SegId),
+    ok = drop_unnamed_segment(SegPath),
     case
         bondy_oplog_wal_segment:create(
             SegPath, SegId, State#state.instance_id, State#state.origin
@@ -1579,6 +1580,22 @@ bootstrap(#state{} = State) ->
             end;
         {error, _} = E ->
             E
+    end.
+
+%% @private
+%% With no manifest nothing names this segment, and no frame is appended before
+%% one exists. A crash between its create and the manifest's rename leaves it
+%% behind, and the exclusive create would then fail on every start.
+drop_unnamed_segment(SegPath) ->
+    case
+        filelib:is_regular(SegPath) andalso
+            filelib:file_size(SegPath) =< ?SEG_HEADER_BYTES
+    of
+        true ->
+            _ = prim_file:delete(SegPath),
+            ok;
+        false ->
+            ok
     end.
 
 %% @private
