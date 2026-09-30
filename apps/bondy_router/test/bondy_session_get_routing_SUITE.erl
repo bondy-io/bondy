@@ -31,7 +31,9 @@ all() ->
         callback_returns_session,
         callback_realm_isolation,
         callback_unknown_guid,
-        callback_non_binary_guid
+        callback_non_binary_guid,
+        meta_api_decodes_partial_payload,
+        meta_api_forwards_only_the_guid
     ].
 
 init_per_suite(Config) ->
@@ -117,6 +119,66 @@ callback_non_binary_guid(Config) ->
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
+
+%% A CALL decoded off the wire (JSON or CBOR) reaches the meta API with its
+%% arguments still encoded in `partial` and `args = undefined`. The meta API
+%% must decode them before validating arity, or every `wamp.session.get` from
+%% a JSON or CBOR client is refused with `invalid_argument`.
+meta_api_decodes_partial_payload(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Guid = open_session(RealmUri),
+    Ctxt = bondy_context:local_context(RealmUri),
+    Uri = routing_uri(Guid),
+    lists:foreach(
+        fun(Enc) ->
+            Call = off_the_wire(Enc, [Guid]),
+            ?assertEqual(undefined, Call#call.args),
+            ?assertMatch({Enc, _}, bondy_wamp_message:partial(Call)),
+            ?assertMatch(
+                {continue, #call{procedure_uri = Uri}, _},
+                bondy_wamp_meta_api:handle_call(Call, Ctxt)
+            )
+        end,
+        [json, cbor]
+    ).
+
+%% The routing callback is registered with `callback_args => [RealmUri]` and
+%% takes `(RealmUri, Guid)`, so the rewritten CALL must carry exactly `[Guid]`
+%% whether the caller sent `[Guid]` or `[RealmUri, Guid]`; forwarding the
+%% caller's own arguments -- directly, or through a `partial` left on the
+%% CALL -- hands the callback three when the realm was named.
+meta_api_forwards_only_the_guid(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Guid = open_session(RealmUri),
+    Ctxt = bondy_context:local_context(RealmUri),
+    Uri = routing_uri(Guid),
+    lists:foreach(
+        fun({Enc, Args}) ->
+            Call = off_the_wire(Enc, Args),
+            %% The dealer decodes `partial` again before invoking the callback,
+            %% so a stale one would restore the caller's arguments.
+            ?assertMatch(
+                {continue,
+                    #call{procedure_uri = Uri, args = [Guid], partial = undefined},
+                    _},
+                bondy_wamp_meta_api:handle_call(Call, Ctxt)
+            )
+        end,
+        [{Enc, Args} || Enc <- [json, cbor], Args <- [[Guid], [RealmUri, Guid]]]
+    ).
+
+%% @private
+%% A `wamp.session.get` CALL as the WebSocket path hands it on: encoded, then
+%% decoded with partial decoding on, so its arguments are still in `partial`.
+off_the_wire(Enc, Args) ->
+    Call = bondy_wamp_message:call(1, #{}, ?WAMP_SESSION_GET, Args),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(Call, Enc)),
+    {[Decoded], <<>>} = bondy_wamp_encoding:decode(subprotocol(Enc), Bin),
+    Decoded.
+
+%% @private
+subprotocol(json) -> {ws, text, json};
+subprotocol(cbor) -> {ws, binary, cbor}.
 
 %% @private
 open_session(RealmUri) ->

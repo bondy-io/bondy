@@ -57,7 +57,20 @@ collected on demand). Best-effort AP; `{error, unavailable}` when the resolving
     )}
     | {reply, wamp_result() | wamp_error()}.
 
-handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
+handle_call(#call{} = M0, Ctxt) ->
+    %% A CALL decoded off the wire keeps its arguments encoded in `partial`
+    %% (`args` and `kwargs` are `undefined`) until something asks for them.
+    %% The dealer hands `wamp.*` calls here as they arrived, so decode before
+    %% any clause validates or reads the arguments -- as `bondy_wamp_api` does
+    %% for `bondy.*`.
+    do_handle_call(bondy_wamp_message:decode_partial(M0), Ctxt).
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+do_handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
     [_, Guid] = bondy_wamp_api_utils:validate_call_args(M0, Ctxt, 2),
     %% Sessions are not replicated, so we route the call to the node that owns
     %% the session. The client-facing session id (`Guid`) is `{NodeHash}.{Rest}`;
@@ -69,7 +82,10 @@ handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
         true ->
             Uri = <<"wamp.session.", Guid/binary, ".get">>,
             Opts = maps:put(x_procedure, ?WAMP_SESSION_GET, M0#call.options),
-            M1 = M0#call{procedure_uri = Uri, options = Opts},
+            %% The routing callback takes `(RealmUri, Guid)` with the realm
+            %% supplied as its callback argument, so forward the guid alone,
+            %% whether or not the caller named the realm.
+            M1 = M0#call{procedure_uri = Uri, options = Opts, args = [Guid]},
 
             %% As we are rewriting the call, if the session does not exist we
             %% will get either noproc or no_such_procedure and we want to reply
@@ -86,7 +102,7 @@ handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
             E = no_such_session_error(?CALL, M0#call.request_id),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     case summary(registration, RealmUri) of
         {ok, Result} ->
@@ -96,7 +112,7 @@ handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_REG_LOOKUP} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REG_LOOKUP} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
 
@@ -111,7 +127,7 @@ handle_call(#call{procedure_uri = ?WAMP_REG_LOOKUP} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_REG_MATCH} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REG_MATCH} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
 
@@ -123,7 +139,7 @@ handle_call(#call{procedure_uri = ?WAMP_REG_MATCH} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_REG_GET} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REG_GET} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
 
@@ -135,7 +151,7 @@ handle_call(#call{procedure_uri = ?WAMP_REG_GET} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_LIST_CALLEES} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_LIST_CALLEES} = M, Ctxt) ->
     [RealmUri, RegId] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     case list_registration_callees(RealmUri, RegId) of
         {ok, Result} ->
@@ -145,7 +161,7 @@ handle_call(#call{procedure_uri = ?WAMP_LIST_CALLEES} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
     [RealmUri, RegId] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     case count_callees(RealmUri, RegId) of
         {ok, Result} ->
@@ -155,7 +171,7 @@ handle_call(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     case summary(subscription, RealmUri) of
         {ok, Result} ->
@@ -165,7 +181,7 @@ handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LOOKUP} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LOOKUP} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L0 = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
     L = [subscription] ++ L0,
@@ -180,7 +196,7 @@ handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LOOKUP} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_MATCH} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_MATCH} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
 
@@ -192,7 +208,7 @@ handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_MATCH} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_GET} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_GET} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
     L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
 
@@ -204,7 +220,7 @@ handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_GET} = M, Ctxt) ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(
+do_handle_call(
     #call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST_SUBSCRIBERS} = M, Ctxt
 ) ->
     [RealmUri, RegId] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
@@ -216,7 +232,7 @@ handle_call(
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
-handle_call(
+do_handle_call(
     #call{procedure_uri = ?WAMP_SUBSCRIPTION_COUNT_SUBSCRIBERS} = M, Ctxt
 ) ->
     [RealmUri, RegId] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
@@ -233,25 +249,21 @@ handle_call(
 %% a list of what the peer "is authorized to access or provide" — and a
 %% DESCRIBE of an entry the caller may not see answers exactly as an absent
 %% one, so the reply is not an existence oracle.
-handle_call(#call{procedure_uri = ?WAMP_REFLECTION_PROC_LIST} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_PROC_LIST} = M, Ctxt) ->
     reflection_list(procedure, M, Ctxt);
-handle_call(#call{procedure_uri = ?WAMP_REFLECTION_PROC_DESCRIBE} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_PROC_DESCRIBE} = M, Ctxt) ->
     reflection_describe(procedure, M, Ctxt);
-handle_call(#call{procedure_uri = ?WAMP_REFLECTION_TOPIC_LIST} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_TOPIC_LIST} = M, Ctxt) ->
     reflection_list(topic, M, Ctxt);
-handle_call(#call{procedure_uri = ?WAMP_REFLECTION_TOPIC_DESCRIBE} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_TOPIC_DESCRIBE} = M, Ctxt) ->
     reflection_describe(topic, M, Ctxt);
-handle_call(#call{procedure_uri = ?WAMP_REFLECTION_ERROR_LIST} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_ERROR_LIST} = M, Ctxt) ->
     reflection_list(error, M, Ctxt);
-handle_call(#call{procedure_uri = ?WAMP_REFLECTION_ERROR_DESCRIBE} = M, Ctxt) ->
+do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_ERROR_DESCRIBE} = M, Ctxt) ->
     reflection_describe(error, M, Ctxt);
-handle_call(#call{} = M, _) ->
+do_handle_call(#call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
 
 %% @private
 reflection_list(Kind, M, Ctxt) ->
