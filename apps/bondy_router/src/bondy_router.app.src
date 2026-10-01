@@ -43,7 +43,6 @@
         telemetry,
         riak_sysmon,
         %% 3rd-party Serialization formats
-        msgpack,
         sidejob,
         jobs,
         uuid,
@@ -52,6 +51,7 @@
         %% 1st-party deps
         mops,
         bondy_wamp,
+        bondy_msgpack,
         bondy_metrics,
         bondy_stdlib,
         bondy_regulator,

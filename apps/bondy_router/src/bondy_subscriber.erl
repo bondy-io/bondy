@@ -223,7 +223,8 @@ do_handle_event(Event, State) ->
 %% `Retry` is `undefined` for synchronous delivery: backing off inside a
 %% `gen_server:call/3` would hold the caller for the whole budget, so the
 %% outcome is reported and the caller decides what to do with it.
-apply_callback(Event, Retry, State) ->
+apply_callback(Event0, Retry, State) ->
+    Event = bondy_wamp_message:decode_partial(Event0),
     try (State#state.callback_fun)(State#state.topic, Event) of
         ok ->
             {ok, State};

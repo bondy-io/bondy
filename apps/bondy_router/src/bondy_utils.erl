@@ -137,7 +137,7 @@ maybe_encode(_, undefined) ->
 maybe_encode(bert, Term) ->
     bert:encode(Term);
 maybe_encode(erl, Term) ->
-    binary_to_term(Term, [safe]);
+    term_to_binary(Term);
 maybe_encode(json, Term) when is_binary(Term) ->
     %% TODO this is wrong, we should be passing the metadada so that we know in
     %% which encoding the Term is
@@ -150,9 +150,7 @@ maybe_encode(json, Term) when is_binary(Term) ->
 maybe_encode(json, Term) ->
     bondy_wamp_json:encode(Term);
 maybe_encode(msgpack, Term) ->
-    %% TODO see if we can catch error when Term is already encoded
-    Opts = [{map_format, map}, {pack_str, from_binary}],
-    msgpack:pack(Term, Opts);
+    iolist_to_binary(bondy_msgpack:encode(Term));
 maybe_encode(Enc, Term) when is_binary(Enc) ->
     maybe_encode(binary_to_existing_atom(Enc, utf8), Term).
 
@@ -171,9 +169,7 @@ decode(json, <<>>) ->
 decode(json, Term) ->
     bondy_wamp_json:decode(Term);
 decode(msgpack, Term) ->
-    Opts = [{map_format, map}, {unpack_str, as_binary}],
-    {ok, Bin} = msgpack:unpack(Term, Opts),
-    Bin;
+    bondy_msgpack:decode(Term);
 decode(ContentType, Term) ->
     %% We cannot decode this so create a wrapped data object
     #{<<"type">> => ContentType, <<"content">> => Term}.

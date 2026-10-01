@@ -79,18 +79,18 @@ register_handler(Prefix, Mod) ->
     )}
     | {reply, wamp_result() | wamp_error()}.
 
-handle_call(#call{options = #{ppt_scheme := _}} = Msg, _) ->
-    Error = bondy_wamp_message:error(
-        ?CALL,
-        Msg#call.request_id,
-        Msg#call.options,
-        ?WAMP_INVALID_ARGUMENT,
-        [~"Payload Passthru Mode is not supported on Bondy Meta API."]
-    ),
-    {reply, Error};
-handle_call(#call{procedure_uri = Proc} = M0, Ctxt) ->
-    %% We make sure the partial payload is decoded (if any)
-    M = bondy_wamp_message:decode_partial(M0),
+handle_call(#call{} = M0, Ctxt) ->
+    case bondy_wamp_api_utils:decode_call(M0) of
+        {ok, M} -> handle_decoded_call(M, Ctxt);
+        {error, Reply} -> {reply, Reply}
+    end.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+handle_decoded_call(#call{procedure_uri = Proc} = M, Ctxt) ->
     Resolved = resolve(Proc),
     %% The `dry_run` convention is opt-in per procedure, and this is what makes
     %% opting out SAFE. Without this gate a procedure that does not read the
@@ -111,10 +111,6 @@ handle_call(#call{procedure_uri = Proc} = M0, Ctxt) ->
         undefined -> do_handle_call(Resolved, M, Ctxt);
         Error -> {reply, Error}
     end.
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
 
 %% @private
 %% `undefined` when the call may proceed. A malformed `dry_run` value is

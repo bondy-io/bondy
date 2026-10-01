@@ -15,7 +15,7 @@
     public_key,
     bondy_stdlib,
     bondy_cbor,
-    msgpack,
+    bondy_msgpack,
     bert,
     utils,
     app_config

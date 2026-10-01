@@ -33,7 +33,8 @@ all() ->
         callback_unknown_guid,
         callback_non_binary_guid,
         meta_api_decodes_partial_payload,
-        meta_api_forwards_only_the_guid
+        meta_api_forwards_only_the_guid,
+        internal_api_refuses_payload_passthru
     ].
 
 init_per_suite(Config) ->
@@ -116,10 +117,6 @@ callback_non_binary_guid(Config) ->
     ?assertMatch({error, ?WAMP_NO_SUCH_SESSION, _, _, _}, Result),
     ok.
 
-%% =============================================================================
-%% HELPERS
-%% =============================================================================
-
 %% A CALL decoded off the wire (JSON or CBOR) reaches the meta API with its
 %% arguments still encoded in `partial` and `args = undefined`. The meta API
 %% must decode them before validating arity, or every `wamp.session.get` from
@@ -159,13 +156,42 @@ meta_api_forwards_only_the_guid(Config) ->
             %% so a stale one would restore the caller's arguments.
             ?assertMatch(
                 {continue,
-                    #call{procedure_uri = Uri, args = [Guid], partial = undefined},
+                    #call{
+                        procedure_uri = Uri, args = [Guid], partial = undefined
+                    },
                     _},
                 bondy_wamp_meta_api:handle_call(Call, Ctxt)
             )
         end,
         [{Enc, Args} || Enc <- [json, cbor], Args <- [[Guid], [RealmUri, Guid]]]
     ).
+
+%% A CALL in Payload Passthru Mode carries a payload Bondy must not interpret,
+%% so a procedure Bondy implements refuses it instead of decoding it, on both
+%% API families.
+internal_api_refuses_payload_passthru(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Guid = open_session(RealmUri),
+    Ctxt = bondy_context:local_context(RealmUri),
+    lists:foreach(
+        fun({Mod, Proc}) ->
+            Call = bondy_wamp_message:call(
+                1, #{ppt_scheme => ~"x_custom"}, Proc, [Guid]
+            ),
+            ?assertMatch(
+                {reply, #error{error_uri = ?WAMP_INVALID_ARGUMENT}},
+                Mod:handle_call(Call, Ctxt)
+            )
+        end,
+        [
+            {bondy_wamp_meta_api, ?WAMP_SESSION_GET},
+            {bondy_wamp_api, ~"bondy.session.get"}
+        ]
+    ).
+
+%% =============================================================================
+%% HELPERS
+%% =============================================================================
 
 %% @private
 %% A `wamp.session.get` CALL as the WebSocket path hands it on: encoded, then

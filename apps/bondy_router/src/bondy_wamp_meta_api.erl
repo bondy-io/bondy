@@ -58,12 +58,10 @@ collected on demand). Best-effort AP; `{error, unavailable}` when the resolving
     | {reply, wamp_result() | wamp_error()}.
 
 handle_call(#call{} = M0, Ctxt) ->
-    %% A CALL decoded off the wire keeps its arguments encoded in `partial`
-    %% (`args` and `kwargs` are `undefined`) until something asks for them.
-    %% The dealer hands `wamp.*` calls here as they arrived, so decode before
-    %% any clause validates or reads the arguments -- as `bondy_wamp_api` does
-    %% for `bondy.*`.
-    do_handle_call(bondy_wamp_message:decode_partial(M0), Ctxt).
+    case bondy_wamp_api_utils:decode_call(M0) of
+        {ok, M} -> do_handle_call(M, Ctxt);
+        {error, Reply} -> {reply, Reply}
+    end.
 
 %% =============================================================================
 %% PRIVATE
@@ -255,11 +253,15 @@ do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_PROC_DESCRIBE} = M, Ctxt) 
     reflection_describe(procedure, M, Ctxt);
 do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_TOPIC_LIST} = M, Ctxt) ->
     reflection_list(topic, M, Ctxt);
-do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_TOPIC_DESCRIBE} = M, Ctxt) ->
+do_handle_call(
+    #call{procedure_uri = ?WAMP_REFLECTION_TOPIC_DESCRIBE} = M, Ctxt
+) ->
     reflection_describe(topic, M, Ctxt);
 do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_ERROR_LIST} = M, Ctxt) ->
     reflection_list(error, M, Ctxt);
-do_handle_call(#call{procedure_uri = ?WAMP_REFLECTION_ERROR_DESCRIBE} = M, Ctxt) ->
+do_handle_call(
+    #call{procedure_uri = ?WAMP_REFLECTION_ERROR_DESCRIBE} = M, Ctxt
+) ->
     reflection_describe(error, M, Ctxt);
 do_handle_call(#call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),

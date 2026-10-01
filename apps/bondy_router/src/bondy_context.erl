@@ -62,7 +62,6 @@ loop to provide access to that information.
 -export([local_context/1]).
 -export([local_context/2]).
 -export([new/0]).
--export([new/2]).
 -export([new/3]).
 -export([peer/1]).
 -export([peername/1]).
@@ -117,11 +116,6 @@ new() ->
         request_timeout => bondy_config:get(request_timeout, undefined),
         request_details => undefined
     }.
-
--spec new(bondy_session:peer(), subprotocol_2()) -> t().
-
-new(Peer, Subprotocol) ->
-    new(set_peer(new(), Peer), Subprotocol, #{}).
 
 -spec new(bondy_session:peer(), subprotocol_2(), Props :: map()) -> t().
 

@@ -321,6 +321,7 @@ another register request second might be permissible immediately.
 %% never-empty and self-always invariants are testable without a cluster.
 -export([prefer_reachable/2]).
 -export([is_reachable/1]).
+-export([with_callback_args/2]).
 -endif.
 
 -compile({no_auto_import, [register/2]}).
@@ -1111,19 +1112,14 @@ apply_dynamic_callback(#call{} = Msg, Callee) ->
 -spec apply_dynamic_callback(wamp_call(), bondy_ref:t(), [any()]) ->
     wamp_result() | wamp_error().
 
-apply_dynamic_callback(#call{options = #{ppt_scheme := _}} = Msg, _, _) ->
-    bondy_wamp_error:to_wamp(
-        bondy_error:new(invalid_argument, #{
-            message =>
-                ~"Payload Passthru Mode is not supported on Bondy Meta API."
-        }),
-        ?CALL,
-        Msg#call.request_id,
-        Msg#call.options
-    );
 apply_dynamic_callback(#call{} = Msg0, Callee, CBArgs) ->
-    Msg = bondy_wamp_message:decode_partial(Msg0),
+    case bondy_wamp_api_utils:decode_call(Msg0) of
+        {ok, Msg} -> apply_decoded_callback(Msg, Callee, CBArgs);
+        {error, Reply} -> Reply
+    end.
 
+%% @private
+apply_decoded_callback(#call{} = Msg, Callee, CBArgs) ->
     CallId = Msg#call.request_id,
 
     A = lists:append([
@@ -2372,12 +2368,12 @@ coerce_routing_key(CallOpts) ->
 We add context and metadata to the details of the CALL so that we
 con forward it to a remote node or create an INVOCATION with it.
 """.
-prepare_call(M, Uri, Entry, Ctxt) ->
-    Args = maybe_append_callback_args(M#call.args, Entry),
+prepare_call(M0, Uri, Entry, Ctxt) ->
+    M = with_callback_args(M0, Entry),
     Options = prepare_call_options(
         M#call.options, M#call.request_id, Uri, Entry, Ctxt
     ),
-    M#call{options = Options, args = Args}.
+    M#call{options = Options}.
 
 %% @private
 call_to_invocation(#call{options = #{'$private' := _}} = M, _, Entry, Ctxt) ->
@@ -2404,22 +2400,20 @@ call_to_invocation(#call{options = #{'$private' := Private}} = M, ReqId) ->
     Details = maps:get(invocation_details, Private),
     bondy_wamp_message:invocation_from(M, ReqId, RegistrationId, Details).
 
-%% @private
 -doc """
-If this is a callback, then it must be a remote callback, as we should
-have handled the local callback sequentially.
-We add the statically defined arguments to the INVOCATION so that
-we avoid the receiving node having to look the local copy of the entry
-to retrieve the arguments.
+`M` bound for `Entry`. A callback entry here is a remote one (a local callback
+is applied in place), so Bondy is the callee: the payload is decoded and the
+entry's static arguments are prepended, sparing the receiving node a lookup of
+its copy of the entry. Any other entry gets `M` unchanged.
 """.
-maybe_append_callback_args(Args0, Entry) ->
-    Args = args_to_list(Args0),
-
+with_callback_args(#call{} = M0, Entry) ->
     case bondy_registry_entry:is_callback(Entry) of
         true ->
-            bondy_registry_entry:callback_args(Entry) ++ Args;
+            M = bondy_wamp_message:decode_partial(M0),
+            CBArgs = bondy_registry_entry:callback_args(Entry),
+            M#call{args = CBArgs ++ args_to_list(M#call.args)};
         false ->
-            Args
+            M0
     end.
 
 %% @private
@@ -2990,11 +2984,8 @@ rib_rebind(
             true -> bondy_registry_entry:origin_id(Entry);
             false -> bondy_registry_entry:id(Entry)
         end,
-    Args = maybe_append_callback_args(M#call.args, Entry),
-    M#call{
-        options = O#{'$private' := P#{registration_id := RegId}},
-        args = Args
-    };
+    M1 = with_callback_args(M, Entry),
+    M1#call{options = O#{'$private' := P#{registration_id := RegId}}};
 rib_rebind(M, _) ->
     M.
 

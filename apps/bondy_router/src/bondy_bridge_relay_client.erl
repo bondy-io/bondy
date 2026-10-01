@@ -46,6 +46,12 @@ stateDiagram-v2
         Reason == etimedout)
 ).
 
+%% A send or receive on the connection failed: the connection is gone.
+-define(IS_CONNECTION_LOST(Reason),
+    (Reason == socket_closed orelse
+        (is_tuple(Reason) andalso element(1, Reason) == socket_error))
+).
+
 -define(IS_NETDOWN(Reason),
     (Reason == enetdown orelse
         Reason == ehostunreach orelse
@@ -380,19 +386,16 @@ active(enter, connecting, #state{} = State0) ->
         ],
         {keep_state, State, Actions}
     catch
-        throw:socket_closed ->
-            %% The socket died between connect and the HELLO send. A
-            %% state ENTER call cannot change state (gen_statem refuses
-            %% `next_state` here — the previous return was an illegal
-            %% crasher on this narrow race), so the exit to
-            %% `connecting` goes through a zero state timeout into
-            %% redial/2.
-            {keep_state, State0, [{state_timeout, 0, socket_closed}]};
+        throw:Reason when ?IS_CONNECTION_LOST(Reason) ->
+            %% The socket died before the HELLO send. A state ENTER call
+            %% cannot change state, so the exit to `connecting` goes through
+            %% a zero state timeout into redial/2.
+            {keep_state, State0, [{state_timeout, 0, {lost, Reason}}]};
         throw:Reason ->
             {stop, Reason}
     end;
-active(state_timeout, socket_closed, State) ->
-    redial(socket_closed, State);
+active(state_timeout, {lost, Reason}, State) ->
+    redial(Reason, State);
 active(enter, idle, State) ->
     Actions = [
         ping_idle_timeout(State),
@@ -430,8 +433,8 @@ active(internal, {welcome, SessionId, _Details}, State0) ->
         ],
         {keep_state, State, Actions}
     catch
-        throw:socket_closed ->
-            {next_state, connecting, State0};
+        throw:Reason when ?IS_CONNECTION_LOST(Reason) ->
+            redial(Reason, State0);
         throw:Reason ->
             {stop, Reason}
     end;
@@ -479,8 +482,8 @@ active(internal, {aae_sync, SessionId, finished}, State0) ->
         ],
         {keep_state, State, Actions}
     catch
-        throw:socket_closed ->
-            {next_state, connecting, State0};
+        throw:Reason when ?IS_CONNECTION_LOST(Reason) ->
+            redial(Reason, State0);
         throw:Reason ->
             {stop, Reason}
     end;

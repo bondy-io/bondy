@@ -24,6 +24,8 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy.hrl").
 -include("bondy_security.hrl").
 
 -compile([export_all, nowarn_export_all]).
@@ -33,11 +35,14 @@
 -define(REALM, <<"com.bondy.bridge_rpc">>).
 -define(PROC, <<"com.bridge.rpc.echo">>).
 -define(DEVICE, <<"ct_device">>).
+-define(PUB_REALM, <<"com.bondy.bridge_pub">>).
+-define(PUB_TOPIC, <<"com.bridge.pub.encoded">>).
 
 all() ->
     [
         boot_loads_every_app_module,
         bridged_call_hop_trace,
+        bridged_encoded_publish_keeps_payload,
         crashing_server_redials_with_backoff
     ].
 
@@ -210,6 +215,43 @@ bridged_call_hop_trace_steps(Core, Edge, KeyPair, Pub) ->
         )
     end.
 
+%% A PUBLISH from a JSON or CBOR client on the edge arrives with its payload
+%% still encoded; the core re-publishes it from its arguments, so a core-side
+%% subscriber must receive the payload the edge client sent.
+bridged_encoded_publish_keeps_payload(Config) ->
+    [{_, Core, _}, {_, Edge, _}] = proplists:get_value(nodes, Config),
+    #{public := Pub} = KeyPair = bondy_cryptosign:generate_key(),
+    ok = erpc:call(Core, ?MODULE, do_create_core_realm, [?PUB_REALM, Pub]),
+    ok = erpc:call(
+        Edge, bondy_trace_context_SUITE, do_create_open_realm, [?PUB_REALM]
+    ),
+    ok = erpc:call(
+        Core, ?MODULE, do_subscribe_relay, [?PUB_REALM, ?PUB_TOPIC, self()]
+    ),
+    Port = erpc:call(Core, ranch, get_port, [bridge]),
+    Topics = [#{uri => ?PUB_TOPIC, match => <<"exact">>, direction => out}],
+    ok = erpc:call(
+        Edge,
+        ?MODULE,
+        do_add_bridge,
+        [Port, ?PUB_REALM, KeyPair, <<"ct_pub_bridge">>, Topics]
+    ),
+    try
+        lists:foreach(
+            fun(Enc) ->
+                #event{args = Args, kwargs = KWArgs} =
+                    publish_until_received(Edge, Enc, 50),
+                ?assertEqual([atom_to_binary(Enc)], Args),
+                ?assertEqual(#{<<"k">> => 1}, KWArgs)
+            end,
+            [json, cbor]
+        )
+    after
+        _ = erpc:call(Edge, bondy_bridge_relay_manager, remove_bridge, [
+            <<"ct_pub_bridge">>
+        ])
+    end.
+
 %% A router that accepts and then dies on every connection: the client
 %% must treat each session-less death as a retry FAILURE — redialing
 %% with the configured backoff and stopping at the retry limit, where
@@ -354,9 +396,12 @@ do_create_core_realm(Uri, PubKey) ->
 %% `privkey` field is the testing-only signer the client supports
 %% (`bondy_bridge_relay_client:signer/2`); keys travel hex-encoded as
 %% they do in bondy.conf.
-do_add_bridge(Port, RealmUri, #{public := Pub, secret := Priv}) ->
+do_add_bridge(Port, RealmUri, KeyPair) ->
+    do_add_bridge(Port, RealmUri, KeyPair, <<"ct_bridge">>, []).
+
+do_add_bridge(Port, RealmUri, #{public := Pub, secret := Priv}, Name, Topics) ->
     Data = #{
-        name => <<"ct_bridge">>,
+        name => Name,
         enabled => true,
         endpoint => {{127, 0, 0, 1}, Port},
         transport => tcp,
@@ -364,6 +409,7 @@ do_add_bridge(Port, RealmUri, #{public := Pub, secret := Priv}) ->
             #{
                 uri => RealmUri,
                 authid => ?DEVICE,
+                topics => Topics,
                 cryptosign => #{
                     pubkey => binary:encode_hex(Pub, lowercase),
                     privkey => binary:encode_hex(Priv, lowercase)
@@ -491,6 +537,68 @@ push_modules(Node) ->
         end,
         [?MODULE, bondy_trace_context_SUITE]
     ).
+
+%% @private A process on this node subscribed to `Topic` that relays every
+%% event it receives to `To`, decoded.
+do_subscribe_relay(RealmUri, Topic, To) ->
+    Parent = self(),
+    Pid = spawn(fun() ->
+        {ok, _} = bondy_broker:subscribe(RealmUri, #{}, Topic, self()),
+        Parent ! {subscribed, self()},
+        relay_events(To)
+    end),
+    receive
+        {subscribed, Pid} -> ok
+    after 5000 -> error(subscribe_timeout)
+    end.
+
+relay_events(To) ->
+    receive
+        {?BONDY_REQ, _, _, #event{} = Event} ->
+            To ! {core_event, bondy_wamp_message:decode_partial(Event)},
+            relay_events(To)
+    end.
+
+%% @private A PUBLISH as the WebSocket path hands it to the router: encoded,
+%% then decoded with partial decoding on. Its one argument names `Enc`.
+do_publish_off_the_wire(RealmUri, Topic, Enc) ->
+    M = bondy_wamp_message:publish(
+        1, #{}, Topic, [atom_to_binary(Enc)], #{<<"k">> => 1}
+    ),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M, Enc)),
+    Sub =
+        case Enc of
+            json -> {ws, text, json};
+            cbor -> {ws, binary, cbor}
+        end,
+    {[Publish], <<>>} = bondy_wamp_encoding:decode(Sub, Bin),
+    {Enc, _} = bondy_wamp_message:partial(Publish),
+    Ctxt = bondy_context:local_context(
+        RealmUri, bondy_ref:new(internal, self())
+    ),
+    bondy_broker:forward(Publish, Ctxt).
+
+%% @private The bridge session and its topic subscription open asynchronously,
+%% so publish until the first event crosses.
+publish_until_received(_, Enc, 0) ->
+    error({no_bridged_event, Enc});
+publish_until_received(Edge, Enc, N) ->
+    ok = erpc:call(
+        Edge, ?MODULE, do_publish_off_the_wire, [?PUB_REALM, ?PUB_TOPIC, Enc]
+    ),
+    receive
+        {core_event, #event{} = Event} ->
+            flush_core_events(),
+            Event
+    after 200 ->
+        publish_until_received(Edge, Enc, N - 1)
+    end.
+
+flush_core_events() ->
+    receive
+        {core_event, _} -> flush_core_events()
+    after 500 -> ok
+    end.
 
 %% @private The bridge connect + session open + registration proxying
 %% are all asynchronous; the proxy entry appearing in the core registry

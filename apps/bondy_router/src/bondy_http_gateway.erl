@@ -337,8 +337,9 @@ handle_info(rebuild_specs, State0) ->
     %% The debounce window elapsed — rebuild once for the whole batch.
     ok = handle_spec_updates(State0),
     {noreply, State0#state{updated_specs = [], rebuild_timer = undefined}};
-handle_info({?BONDY_REQ, _, ?MASTER_REALM_URI, #event{} = Event}, State) ->
+handle_info({?BONDY_REQ, _, ?MASTER_REALM_URI, #event{} = Event0}, State) ->
     %% We informally implement bondy_subscriber
+    Event = bondy_wamp_message:decode_partial(Event0),
     Id = Event#event.subscription_id,
     Topic = maps:get(Id, State#state.subscriptions, undefined),
     NewState =

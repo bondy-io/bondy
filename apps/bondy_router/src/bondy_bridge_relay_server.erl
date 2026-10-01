@@ -788,7 +788,8 @@ handle_in({subscription_deleted, Entry}, SessionId, State0) ->
         maybe_hibernate(active, State)
     ],
     {keep_state, State, Actions};
-handle_in({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
+handle_in({forward, _, #publish{} = M0, _Opts}, SessionId, State) ->
+    M = bondy_wamp_message:decode_partial(M0),
     RealmUri = session_realm(SessionId, State),
     ReqId = M#publish.request_id,
     TopicUri = M#publish.topic_uri,

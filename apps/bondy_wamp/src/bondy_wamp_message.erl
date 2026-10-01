@@ -269,23 +269,17 @@ error_from(#register{request_id = ReqId}, Details, ErrorUri, Args, KWArgs) ->
     error(?REGISTER, ReqId, Details, ErrorUri, Args, KWArgs);
 error_from(#unregister{request_id = ReqId}, Details, ErrorUri, Args, KWArgs) ->
     error(?UNREGISTER, ReqId, Details, ErrorUri, Args, KWArgs);
-error_from(#call{} = M, Details0, ErrorUri, Args, KWArgs) ->
-    ReqId = M#call.request_id,
-    Details = maybe_merge_details(M#call.options, Details0),
+error_from(#call{request_id = ReqId}, Details, ErrorUri, Args, KWArgs) ->
     error(?CALL, ReqId, Details, ErrorUri, Args, KWArgs);
 error_from(#cancel{request_id = ReqId}, Details, ErrorUri, Args, KWArgs) ->
     error(?CANCEL, ReqId, Details, ErrorUri, Args, KWArgs);
-error_from(#invocation{} = M, Details0, ErrorUri, Args, KWArgs) ->
-    ReqId = M#invocation.request_id,
-    Details = maybe_merge_details(M#invocation.details, Details0),
+error_from(#invocation{request_id = ReqId}, Details, ErrorUri, Args, KWArgs) ->
     error(?INVOCATION, ReqId, Details, ErrorUri, Args, KWArgs);
 error_from(#subscribe{request_id = ReqId}, Details, ErrorUri, Args, KWArgs) ->
     error(?SUBSCRIBE, ReqId, Details, ErrorUri, Args, KWArgs);
 error_from(#unsubscribe{request_id = ReqId}, Details, ErrorUri, Args, KWArgs) ->
     error(?UNSUBSCRIBE, ReqId, Details, ErrorUri, Args, KWArgs);
-error_from(#publish{} = M, Details0, ErrorUri, Args, KWArgs) ->
-    ReqId = M#publish.request_id,
-    Details = maybe_merge_details(M#publish.options, Details0),
+error_from(#publish{request_id = ReqId}, Details, ErrorUri, Args, KWArgs) ->
     error(?PUBLISH, ReqId, Details, ErrorUri, Args, KWArgs).
 
 -spec publish(id(), map(), uri()) -> wamp_publish() | no_return().
@@ -816,6 +810,8 @@ validate_payload([Payload] = Args, undefined, #{ppt_scheme := _}) when
     is_binary(Payload)
 ->
     {Args, undefined};
+validate_payload(undefined, undefined, #{ppt_scheme := _}) ->
+    {undefined, undefined};
 validate_payload(_, _, #{ppt_scheme := _}) ->
     error(badarg);
 validate_payload([], undefined, _) ->
@@ -834,35 +830,37 @@ validate_kwargs(KWArgs) when is_map(KWArgs) ->
     KWArgs.
 
 %% @private
-maybe_merge_details(MessageAttrs, Details) ->
-    Attrs = [ppt_cipher, ppt_keyid, ppt_scheme, ppt_serializer],
-    maps:merge(Details, maps:with(Attrs, MessageAttrs)).
+do_decode_partial(M0, {Enc, Bin}) ->
+    {Args0, KWArgs0} =
+        case decode_tail(Enc, Bin) of
+            [] -> {undefined, undefined};
+            [A] -> {A, undefined};
+            [A, KW] -> {A, KW}
+        end,
+    {Args, KWArgs} = validate_payload(Args0, KWArgs0, payload_opts(M0)),
+    maybe_set_kwargs(maybe_set_args(clear_partial(M0), Args), KWArgs).
 
 %% @private
-do_decode_partial(M0, {json, Bin}) ->
-    case bondy_wamp_json:decode_tail(Bin) of
-        [] ->
-            clear_partial(M0);
-        [Args] ->
-            M1 = clear_partial(M0),
-            set_args(M1, Args);
-        [Args, KWArgs] ->
-            M1 = clear_partial(M0),
-            M2 = set_args(M1, Args),
-            set_kwargs(M2, KWArgs)
-    end;
-do_decode_partial(M0, {cbor, Bin}) ->
-    case bondy_wamp_cbor:decode_tail(Bin) of
-        [] ->
-            clear_partial(M0);
-        [Args] ->
-            M1 = clear_partial(M0),
-            set_args(M1, Args);
-        [Args, KWArgs] ->
-            M1 = clear_partial(M0),
-            M2 = set_args(M1, Args),
-            set_kwargs(M2, KWArgs)
-    end.
+decode_tail(json, Bin) -> bondy_wamp_json:decode_tail(Bin);
+decode_tail(cbor, Bin) -> bondy_wamp_cbor:decode_tail(Bin).
+
+%% @private
+maybe_set_args(M, undefined) -> M;
+maybe_set_args(M, Args) -> set_args(M, Args).
+
+%% @private
+maybe_set_kwargs(M, undefined) -> M;
+maybe_set_kwargs(M, KWArgs) -> set_kwargs(M, KWArgs).
+
+%% @private
+%% The map whose `ppt_scheme` governs the message's payload.
+payload_opts(#call{options = Val}) -> Val;
+payload_opts(#publish{options = Val}) -> Val;
+payload_opts(#yield{options = Val}) -> Val;
+payload_opts(#event{details = Val}) -> Val;
+payload_opts(#invocation{details = Val}) -> Val;
+payload_opts(#result{details = Val}) -> Val;
+payload_opts(#error{details = Val}) -> Val.
 
 %% @private
 clear_partial(#call{} = M) ->

@@ -45,6 +45,7 @@ short call against every procedure in the second family.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
+-export([decode_call/1]).
 -export([error/2]).
 -export([maybe_error/2]).
 -export([deprecated_procedure_error/1]).
@@ -95,6 +96,27 @@ node_spec() ->
          || #{ip := IP} = Addr <- Addrs0
         ]
     }.
+
+-doc """
+The CALL as a procedure Bondy implements consumes it: `{ok, Call}` with its
+payload decoded, or `{error, Reply}` when the CALL is in Payload Passthru Mode,
+whose payload Bondy cannot read.
+""".
+-spec decode_call(wamp_call()) -> {ok, wamp_call()} | {error, wamp_error()}.
+
+decode_call(#call{options = #{ppt_scheme := _}} = M) ->
+    Reason = bondy_error:new(invalid_argument, #{
+        message => ~"Payload Passthru Mode is not supported on Bondy Meta API."
+    }),
+    {error,
+        bondy_wamp_error:to_wamp(
+            Reason,
+            ?CALL,
+            M#call.request_id,
+            maps:without(?WAMP_PPT_ATTRS, M#call.options)
+        )};
+decode_call(#call{} = M) ->
+    {ok, bondy_wamp_message:decode_partial(M)}.
 
 -doc """
 Whether this CALL asks for a DRY RUN: `dry_run` in its `KWArgs`.

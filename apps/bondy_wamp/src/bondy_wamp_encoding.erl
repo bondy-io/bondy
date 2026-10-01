@@ -125,8 +125,8 @@ encode(Message, json, Opts) when is_list(Message) ->
     bondy_wamp_json:encode(Message, Opts);
 encode(Message, cbor, Opts) when is_list(Message) ->
     bondy_wamp_cbor:encode(Message, Opts);
-encode(Message, msgpack, Opts) when is_list(Message) ->
-    msgpack:pack(Message, Opts);
+encode(Message, msgpack, _) when is_list(Message) ->
+    bondy_msgpack:encode(Message);
 encode(Message, Format, _) when is_list(Message) ->
     error({unsupported_encoding, Format}).
 
@@ -469,10 +469,8 @@ opts(json, encode) ->
     bondy_wamp_config:get([serialization, json, encode]);
 opts(json, decode) ->
     bondy_wamp_config:get([serialization, json, decode]);
-opts(msgpack, encode) ->
-    [{map_format, map}, {pack_str, from_binary}];
-opts(msgpack, decode) ->
-    [{map_format, map}, {unpack_str, as_binary}];
+opts(msgpack, _) ->
+    [];
 opts(cbor, encode) ->
     [];
 opts(cbor, decode) ->
@@ -549,11 +547,8 @@ decode_message(Data, json, Opts, Acc) ->
 decode_message(Data, cbor, Opts, Acc) ->
     M = cbor_decode(Data, Opts),
     unpack(M, Acc);
-decode_message(Data, msgpack, Opts, Acc) ->
-    %% `partial_decode' is a bondy_wamp control flag, not a msgpack option, and
-    %% msgpack has no partial path — strip it before msgpack's strict parser.
-    {ok, M} = msgpack:unpack(Data, lists:keydelete(partial_decode, 1, Opts)),
-    unpack(M, Acc);
+decode_message(Data, msgpack, _, Acc) ->
+    unpack(bondy_msgpack:decode(Data), Acc);
 decode_message(Data, bert, _, Acc) ->
     %% SECURITY: bert is de-listed as a WIRE serializer (see
     %% bondy_wamp_subprotocol:from_binary/1 and

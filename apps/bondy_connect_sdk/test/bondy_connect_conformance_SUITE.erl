@@ -97,7 +97,8 @@ cases() ->
         progressive_input_ordering,
         progressive_results_need_opt_in,
         keepalive_survives_idle,
-        reconnect_replays_registration
+        reconnect_replays_registration,
+        router_shutdown_goodbye_reconnects
     ].
 
 init_per_suite(Config) ->
@@ -692,6 +693,32 @@ reconnect_replays_registration(Config) ->
         end
     end),
 
+    ok = bondy_connect_client:disconnect(Conn).
+
+-doc """
+A router shutting down (GOODBYE `wamp.close.system_shutdown`) is reconnected
+to, and the registration works again on the new session.
+
+The counterpart of `router_closed_session_is_observed`, whose
+`wamp.close.normal` GOODBYE must leave the client down: only the shutdown
+reason is retried.
+""".
+router_shutdown_goodbye_reconnects(Config) ->
+    Uri = <<"com.example.conformance.shutdown">>,
+    Conn = bondy_connect_ct:connect(Config),
+    {ok, _} = bondy_connect_client:register(
+        Conn, Uri, bondy_connect_ct:echo_handler()
+    ),
+    Closed = bondy_connect_ct:close_sessions(
+        ?config(transport, Config), ?WAMP_SYSTEM_SHUTDOWN
+    ),
+    ?assert(Closed >= 1),
+    ok = wait_until(fun() ->
+        case bondy_connect_client:call(Conn, Uri, [<<"b">>]) of
+            {ok, #{args := [<<"b">>]}} -> true;
+            _ -> false
+        end
+    end),
     ok = bondy_connect_client:disconnect(Conn).
 
 -doc """

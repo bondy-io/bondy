@@ -1014,7 +1014,8 @@ send_retained(Entry) ->
 -spec apply_dynamic_callback(wamp_event(), bondy_ref:t(), [any()]) ->
     wamp_result() | wamp_error().
 
-apply_dynamic_callback(#event{} = Msg, Subscriber, CBArgs) ->
+apply_dynamic_callback(#event{} = Msg0, Subscriber, CBArgs) ->
+    Msg = bondy_wamp_message:decode_partial(Msg0),
     {M, F} = bondy_ref:callback(Subscriber),
 
     A = lists:append([

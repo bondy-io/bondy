@@ -1690,6 +1690,58 @@ partial_decode_call_test(_) ->
         [{json, {ws, text, json}}, {cbor, {ws, binary, cbor}}]
     ).
 
+%% A Payload Passthru Mode message decoded off the wire keeps its single opaque
+%% payload in `partial`, and decoding the partial yields it. A passthru message
+%% whose payload breaks the passthru rule (more than one argument) is still
+%% refused, once the payload is decoded.
+partial_decode_ppt_test(_) ->
+    Opts = #{ppt_scheme => <<"x_custom">>},
+    Payload = [<<"opaque">>],
+    Ms = [
+        bondy_wamp_message:call(1, Opts, <<"com.example.p">>, Payload),
+        bondy_wamp_message:publish(1, Opts, <<"com.example.t">>, Payload),
+        bondy_wamp_message:event(1, 2, Opts, Payload),
+        bondy_wamp_message:result(1, Opts, Payload),
+        bondy_wamp_message:yield(1, Opts, Payload),
+        bondy_wamp_message:invocation(1, 2, Opts, Payload),
+        bondy_wamp_message:error(48, 1, Opts, <<"com.example.e">>, Payload)
+    ],
+    lists:foreach(
+        fun({M, {Enc, Subprotocol}}) ->
+            Bin = iolist_to_binary(bondy_wamp_encoding:encode(M, Enc)),
+            {[Decoded], <<>>} = bondy_wamp_encoding:decode(Subprotocol, Bin),
+            ?assertMatch({Enc, _}, bondy_wamp_message:partial(Decoded)),
+            Full = bondy_wamp_message:decode_partial(Decoded),
+            ?assertEqual(Payload, args_of(Full)),
+            ?assertEqual(undefined, bondy_wamp_message:partial(Full))
+        end,
+        [
+            {M, EncSub}
+         || M <- Ms,
+            EncSub <- [{json, {ws, text, json}}, {cbor, {ws, binary, cbor}}]
+        ]
+    ),
+    Bad = bondy_wamp_message:call(1, #{}, <<"com.example.p">>, [<<"a">>, 1]),
+    lists:foreach(
+        fun({Enc, Subprotocol}) ->
+            Bin = iolist_to_binary(bondy_wamp_encoding:encode(Bad, Enc)),
+            {[Decoded0], <<>>} = bondy_wamp_encoding:decode(Subprotocol, Bin),
+            Decoded = Decoded0#call{options = Opts},
+            ?assertError(
+                badarg, bondy_wamp_message:decode_partial(Decoded)
+            )
+        end,
+        [{json, {ws, text, json}}, {cbor, {ws, binary, cbor}}]
+    ).
+
+args_of(#call{args = A}) -> A;
+args_of(#publish{args = A}) -> A;
+args_of(#event{args = A}) -> A;
+args_of(#result{args = A}) -> A;
+args_of(#yield{args = A}) -> A;
+args_of(#invocation{args = A}) -> A;
+args_of(#error{args = A}) -> A.
+
 partial_decode_error_test(_) ->
     M = bondy_wamp_message:error(
         16,
@@ -1910,3 +1962,19 @@ pack_badarg_test(_) ->
     ?assertError(badarg, bondy_wamp_encoding:pack(invalid)),
     ?assertError(badarg, bondy_wamp_encoding:pack({not_a_wamp_message})),
     ?assertError(badarg, bondy_wamp_encoding:pack(undefined)).
+
+%% A WAMP null is `undefined` in Erlang whichever encoding carried it, so a
+%% value crossing between JSON, CBOR and MessagePack peers keeps it.
+null_maps_alike_across_encodings_test(_) ->
+    Term = [undefined, null, #{<<"k">> => undefined}],
+    Json = bondy_wamp_json:decode(
+        iolist_to_binary(bondy_wamp_json:encode(Term))
+    ),
+    Cbor = bondy_wamp_cbor:decode(
+        iolist_to_binary(bondy_wamp_cbor:encode(Term))
+    ),
+    Msgpack = bondy_msgpack:decode(
+        iolist_to_binary(bondy_msgpack:encode(Term))
+    ),
+    ?assertEqual(Json, Msgpack),
+    ?assertEqual(Cbor, Msgpack).

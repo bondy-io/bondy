@@ -61,7 +61,9 @@ all() ->
         permanent_abort_still_fails_fast,
         connect_error_reports_the_router_reason,
         initial_connect_retries_when_enabled,
-        reconnect_budget_exhaustion_gives_up
+        reconnect_budget_exhaustion_gives_up,
+        pre_session_drops_back_off_and_give_up,
+        shutdown_goodbye_reconnects_after_delay
     ].
 
 init_per_suite(Config) ->
@@ -702,6 +704,91 @@ reconnect_budget_exhaustion_gives_up(_) ->
     %% The process is gone for good — no restart.
     ?assertEqual(down, bondy_connect_client:status(Conn)).
 
+%% A router that accepts every connection and drops it before WELCOME: after
+%% the first session was up, each pre-session drop must consume the retry
+%% budget with backoff, so the client gives up at the limit instead of
+%% redialling at full speed with a fresh budget each time.
+pre_session_drops_back_off_and_give_up(_) ->
+    Server = start_flap_server(self()),
+    Port = drop_server_port(Server),
+    {ok, Conn} = bondy_connect_client:connect(#{
+        transport => tcp,
+        endpoint => {?HOST, Port},
+        realm => ?REALM,
+        auth => #{method => ?WAMP_ANON_AUTH},
+        serializers => [json],
+        ping => #{enabled => false},
+        reconnect => #{
+            enabled => true,
+            retry_initial_connect => false,
+            max_retries => 3,
+            interval => 200,
+            deadline => 0,
+            backoff_enabled => false
+        }
+    }),
+    Pid = conn_pid(Conn),
+    Ref = erlang:monitor(process, Pid),
+    ok = drop_server_drop(Server),
+    try
+        receive
+            {'DOWN', Ref, process, Pid, Reason} ->
+                ?assertMatch({shutdown, {reconnect_failed, _}}, Reason)
+        after 10000 ->
+            ct:fail({did_not_give_up, flap_dials()})
+        end,
+        %% The established dial, the first redial after the session dropped,
+        %% then one per retry.
+        Dials = flap_dials(),
+        ?assert(Dials =< 6, {redialled_without_backoff, Dials})
+    after
+        stop_drop_server(Server)
+    end.
+
+%% A router announcing its shutdown (GOODBYE `wamp.close.system_shutdown`) is
+%% reconnected to, but not at once: the GOODBYE consumes the retry budget, so
+%% the next dial waits the configured interval.
+shutdown_goodbye_reconnects_after_delay(_) ->
+    Interval = 500,
+    Server = start_goodbye_server(self()),
+    Port = drop_server_port(Server),
+    {ok, Conn} = bondy_connect_client:connect(#{
+        transport => tcp,
+        endpoint => {?HOST, Port},
+        realm => ?REALM,
+        auth => #{method => ?WAMP_ANON_AUTH},
+        serializers => [json],
+        ping => #{enabled => false},
+        reconnect => #{
+            enabled => true,
+            retry_initial_connect => false,
+            max_retries => 3,
+            interval => Interval,
+            deadline => 0,
+            backoff_enabled => false
+        }
+    }),
+    try
+        ok = drop_server_drop(Server),
+        GoodbyeAt =
+            receive
+                {goodbye_sent, T} -> T
+            after 5000 -> ct:fail(no_goodbye)
+            end,
+        RedialAt =
+            receive
+                {redialed, T2} -> T2
+            after 5000 -> ct:fail(no_redial)
+            end,
+        ?assert(
+            RedialAt - GoodbyeAt >= Interval,
+            {redialed_after_ms, RedialAt - GoodbyeAt}
+        )
+    after
+        _ = bondy_connect_client:disconnect(Conn),
+        stop_drop_server(Server)
+    end.
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -886,6 +973,111 @@ drop_accept(LSock) ->
     _ = gen_tcp:close(Sock),
     _ = gen_tcp:close(LSock),
     ok.
+
+%% @private A mock raw-socket server whose first connection establishes a
+%% session and is dropped on `drop_server_drop/1`; every later connection is
+%% closed after the client's HELLO, before WELCOME. Each accept is reported to
+%% `Parent` as `flap_dial`.
+start_flap_server(Parent) ->
+    {ok, LSock} = gen_tcp:listen(0, [
+        binary,
+        {ip, {127, 0, 0, 1}},
+        {active, false},
+        {reuseaddr, true},
+        {packet, 0}
+    ]),
+    {ok, Port} = inet:port(LSock),
+    Acceptor = spawn(fun() ->
+        receive
+            go -> flap_first(LSock, Parent)
+        end
+    end),
+    ok = gen_tcp:controlling_process(LSock, Acceptor),
+    Acceptor ! go,
+    {drop_server, Port, Acceptor}.
+
+%% @private
+flap_first(LSock, Parent) ->
+    {ok, Sock} = gen_tcp:accept(LSock, 5000),
+    Parent ! flap_dial,
+    ok = serve_welcome(Sock),
+    receive
+        drop -> ok
+    after 10000 -> ok
+    end,
+    _ = gen_tcp:close(Sock),
+    flap_rest(LSock, Parent).
+
+%% @private
+flap_rest(LSock, Parent) ->
+    case gen_tcp:accept(LSock, 15000) of
+        {ok, Sock} ->
+            Parent ! flap_dial,
+            _ = drop_after_hello(Sock),
+            _ = gen_tcp:close(Sock),
+            flap_rest(LSock, Parent);
+        {error, _} ->
+            ok
+    end.
+
+%% @private Complete the raw handshake and read the HELLO, then return so the
+%% caller closes the socket before any WELCOME.
+drop_after_hello(Sock) ->
+    {ok, <<16#7F, _:8, 0:16>> = Req} = gen_tcp:recv(Sock, 4, 5000),
+    ok = gen_tcp:send(Sock, Req),
+    {ok, <<_:8, Len:24>>} = gen_tcp:recv(Sock, 4, 5000),
+    {ok, _Hello} = gen_tcp:recv(Sock, Len, 5000),
+    ok.
+
+%% @private A mock raw-socket server that establishes one session and, on
+%% `drop_server_drop/1`, sends GOODBYE `wamp.close.system_shutdown` on it,
+%% reporting `{goodbye_sent, Ms}` to `Parent`, then reports the next accept as
+%% `{redialed, Ms}` (monotonic milliseconds).
+start_goodbye_server(Parent) ->
+    {ok, LSock} = gen_tcp:listen(0, [
+        binary,
+        {ip, {127, 0, 0, 1}},
+        {active, false},
+        {reuseaddr, true},
+        {packet, 0}
+    ]),
+    {ok, Port} = inet:port(LSock),
+    Acceptor = spawn(fun() ->
+        receive
+            go -> goodbye_accept(LSock, Parent)
+        end
+    end),
+    ok = gen_tcp:controlling_process(LSock, Acceptor),
+    Acceptor ! go,
+    {drop_server, Port, Acceptor}.
+
+%% @private
+goodbye_accept(LSock, Parent) ->
+    {ok, Sock} = gen_tcp:accept(LSock, 5000),
+    ok = serve_welcome(Sock),
+    receive
+        drop -> ok
+    end,
+    Goodbye = bondy_wamp_message:goodbye(#{}, ?WAMP_SYSTEM_SHUTDOWN),
+    Codec = bondy_connect_codec:new(json, 1048576, 1048576),
+    {ok, Frame} = bondy_connect_codec:encode(Goodbye, Codec),
+    ok = gen_tcp:send(Sock, Frame),
+    Parent ! {goodbye_sent, erlang:monotonic_time(millisecond)},
+    {ok, Sock2} = gen_tcp:accept(LSock, 10000),
+    Parent ! {redialed, erlang:monotonic_time(millisecond)},
+    _ = gen_tcp:close(Sock),
+    _ = gen_tcp:close(Sock2),
+    ok.
+
+%% @private Accepts reported so far by the flap server.
+flap_dials() ->
+    flap_dials(0).
+
+flap_dials(N) ->
+    receive
+        flap_dial -> flap_dials(N + 1)
+    after 0 -> N
+    end.
 
 %% @private The TCP socket port owned by a connection process (`undefined` if
 %% there is not exactly one — e.g. mid-reconnect between close and re-connect).
