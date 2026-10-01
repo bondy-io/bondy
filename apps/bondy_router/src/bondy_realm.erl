@@ -1842,7 +1842,7 @@ from_file(Filename, Opts) ->
                         Prefix = binary_utils:join([A, B, C], <<", ">>),
                         <<Prefix/binary, "...">>;
                     false ->
-                        binary_utils:join([<<"a">>, <<"b">>], <<", ">>)
+                        binary_utils:join(Uris, <<", ">>)
                 end,
 
             ?LOG_INFO(#{
