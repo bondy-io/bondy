@@ -783,33 +783,51 @@ process_records([Record | Rest], StateName, Data) ->
 %% well-behaved clients to back off and come back (possibly landing on another
 %% node via their load balancer).
 %%
-%% Routing a transient abort through the ordinary failure path is what gets it
+%% A router-initiated GOODBYE gets the same treatment, and for the same
+%% reason: `?WAMP_SYSTEM_SHUTDOWN` is sent to every established session as
+%% the router shuts down, and an operator restarting it expects well-behaved
+%% clients to reconnect once it comes back, not to give up for good.
+%%
+%% Routing a transient stop through the ordinary failure path is what gets it
 %% the backoff loop. Stopping here unconditionally would bypass `is_retriable/1`
-%% and `reconnect_allowed/2` entirely, so EVERY abort would kill the connection
-%% for good, including the one the router has explicitly marked retryable.
+%% and `reconnect_allowed/2` entirely, so EVERY abort or GOODBYE would kill the
+%% connection for good, including the ones the router explicitly sends as
+%% recoverable — confirmed empirically for GOODBYE specifically: before this
+%% function also checked it, an established connection silently failed to
+%% reconnect after a graceful router restart, with no log line anywhere,
+%% because GOODBYE reached neither `is_retriable/1` nor `reconnect_allowed/2`.
 on_protocol_stop(Reason, Data) ->
-    case find_abort(Reason) of
+    case find_stop_signal(Reason) of
         {ok, {abort, Uri, Details} = Abort} ->
             case is_transient_abort(Uri, Details) of
                 true -> on_transport_failure(Abort, Data);
+                false -> {stop, Reason, Data}
+            end;
+        {ok, {goodbye, Uri} = Goodbye} ->
+            case is_transient_goodbye_uri(Uri) of
+                true -> on_transport_failure(Goodbye, Data);
                 false -> {stop, Reason, Data}
             end;
         error ->
             {stop, Reason, Data}
     end.
 
-%% @private Dig the `{abort, Uri, Details}` payload out of a protocol stop
-%% reason.
+%% @private Dig an `{abort, Uri, Details}` or `{goodbye, Uri}` payload out of
+%% a protocol stop reason.
 %%
-%% `bondy_connect_protocol:handle_message/2` already wraps the abort in
-%% `shutdown`, and `route_handshake/3` wraps the result again, so the reason
-%% actually arrives as `{shutdown, {shutdown, {abort, _, _}}}`. Recursing on the
-%% wrapper instead of matching a fixed nesting depth means adding or removing a
-%% layer cannot silently turn a retryable refusal back into a fatal one — which
-%% is precisely the bug this function exists to have fixed once.
-find_abort({abort, _, _} = Abort) -> {ok, Abort};
-find_abort({shutdown, Inner}) -> find_abort(Inner);
-find_abort(_) -> error.
+%% `bondy_connect_protocol:handle_message/2` already wraps either in
+%% `shutdown`, and `route_handshake/3`/`route_established/2` wrap the result
+%% again, so the reason actually arrives as
+%% `{shutdown, {shutdown, {abort, _, _}}}` or
+%% `{shutdown, {shutdown, {goodbye, _}}}`. Recursing on the wrapper instead of
+%% matching a fixed nesting depth means adding or removing a layer cannot
+%% silently turn a retryable stop back into a fatal one — which is precisely
+%% the bug this function exists to have fixed once, for ABORT originally and
+%% now for GOODBYE too.
+find_stop_signal({abort, _, _} = Abort) -> {ok, Abort};
+find_stop_signal({goodbye, _} = Goodbye) -> {ok, Goodbye};
+find_stop_signal({shutdown, Inner}) -> find_stop_signal(Inner);
+find_stop_signal(_) -> error.
 
 %% @private
 %% Control frames. An inbound ping (router keepalive) is answered with a pong; a
@@ -1643,7 +1661,19 @@ on_transport_failure(Reason, Data0) ->
 %% is the exact storm the load gate exists to stop, so a refusal has to advance
 %% the same `bondy_retry' ladder (jittered by default) that every other failure
 %% uses, and carry the delay into `connecting'.
+%%
+%% `{handshake_error, _}' is the same shape of refusal one layer down: the
+%% transport connect succeeds but the protocol upgrade fails, which is exactly
+%% what a router mid-restart does to every new socket while its listener is
+%% still coming up. Confirmed empirically: before this clause existed, a
+%% restarting router drove over 3500 zero-delay reconnect attempts in ~5
+%% seconds (the catch-all below re-enters `connecting' with `pending_delay'
+%% still `undefined', which both skips the backoff timer AND resets the retry
+%% budget on every single iteration) -- a busy-loop hammering the router
+%% instead of backing off from it.
 reconnect_after_failure({abort, _, _} = Reason, Data) ->
+    backoff_into_connecting(Reason, Data);
+reconnect_after_failure({handshake_error, _} = Reason, Data) ->
     backoff_into_connecting(Reason, Data);
 reconnect_after_failure(_Reason, Data) ->
     {next_state, connecting, Data}.
@@ -1838,6 +1868,7 @@ disable_net_monitor(false) ->
 
 %% @private Failure reasons we treat as recoverable (worth reconnecting).
 is_retriable({abort, Uri, Details}) -> is_transient_abort(Uri, Details);
+is_retriable({goodbye, Uri}) -> is_transient_goodbye_uri(Uri);
 is_retriable(connection_closed) -> true;
 is_retriable(establish_timeout) -> true;
 is_retriable(ping_timeout) -> true;
@@ -1875,6 +1906,28 @@ is_transient_abort(Uri, _) ->
 is_transient_abort_uri(?WAMP_UNAVAILABLE) -> true;
 is_transient_abort_uri(~"bondy.error.unavailable") -> true;
 is_transient_abort_uri(_) -> false.
+
+%% @private Whether a router-initiated GOODBYE describes a condition that
+%% could clear -- the GOODBYE counterpart to `is_transient_abort_uri/1`.
+%%
+%% Unlike ABORT (which carries `bondy_error`'s `nature` key when the router
+%% is Bondy), GOODBYE's `reason_uri` is the only signal available -- the WAMP
+%% GOODBYE message has no equivalent details map to carry one. This is
+%% therefore an allow-list, same reasoning as the abort fallback: a GOODBYE
+%% reason we cannot classify stays fatal, because retrying a genuinely
+%% permanent closure (the realm being torn down, an admin logout) forever is
+%% worse than surfacing it.
+%%
+%% `?WAMP_SYSTEM_SHUTDOWN` is the one reason that unambiguously means "this
+%% specific process is going away, not this session's welcome"; an operator
+%% restarting the router sends exactly this on every established session as
+%% it shuts down. Confirmed empirically: before this fix, every established
+%% `bondy_connect_sdk` connection failed to reconnect after `SIGTERM`/a
+%% graceful container restart, silently and without any log line, because
+%% GOODBYE was never routed through `is_retriable/1`/`reconnect_allowed/2` at
+%% all -- see `find_stop_signal/1` and `on_protocol_stop/2`.
+is_transient_goodbye_uri(?WAMP_SYSTEM_SHUTDOWN) -> true;
+is_transient_goodbye_uri(_) -> false.
 
 %% @private
 is_retriable_posix(R) ->
