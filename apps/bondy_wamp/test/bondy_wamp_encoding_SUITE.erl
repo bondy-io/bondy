@@ -1665,6 +1665,31 @@ partial_decode_publish_test(_) ->
     ?assertEqual(#{<<"key">> => <<"value">>}, FullDecoded#publish.kwargs),
     ?assertEqual(undefined, bondy_wamp_message:partial(FullDecoded)).
 
+%% decode_partial/1 must leave a CALL fully decoded: args/kwargs set AND the
+%% partial cleared. A CALL that keeps its partial has two copies of its
+%% arguments, and the raw one wins the next time anything decodes it.
+partial_decode_call_test(_) ->
+    M = bondy_wamp_message:call(
+        1, #{}, <<"com.example.proc">>, [1, 2], #{<<"key">> => <<"value">>}
+    ),
+    lists:foreach(
+        fun({Enc, Subprotocol}) ->
+            Bin = iolist_to_binary(bondy_wamp_encoding:encode(M, Enc)),
+            {[Decoded], <<>>} = bondy_wamp_encoding:decode(Subprotocol, Bin),
+            ?assertMatch({Enc, _}, bondy_wamp_message:partial(Decoded)),
+
+            Full = bondy_wamp_message:decode_partial(Decoded),
+            ?assertEqual([1, 2], Full#call.args),
+            ?assertEqual(#{<<"key">> => <<"value">>}, Full#call.kwargs),
+            ?assertEqual(undefined, bondy_wamp_message:partial(Full)),
+
+            %% Arguments set after decoding are the ones that survive.
+            Rewritten = bondy_wamp_message:decode_partial(Full#call{args = [3]}),
+            ?assertEqual([3], Rewritten#call.args)
+        end,
+        [{json, {ws, text, json}}, {cbor, {ws, binary, cbor}}]
+    ).
+
 partial_decode_error_test(_) ->
     M = bondy_wamp_message:error(
         16,

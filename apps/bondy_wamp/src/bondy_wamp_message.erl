@@ -865,6 +865,8 @@ do_decode_partial(M0, {cbor, Bin}) ->
     end.
 
 %% @private
+clear_partial(#call{} = M) ->
+    M#call{partial = undefined};
 clear_partial(#error{} = M) ->
     M#error{partial = undefined};
 clear_partial(#event{} = M) ->
