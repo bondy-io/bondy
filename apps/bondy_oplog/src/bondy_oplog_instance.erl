@@ -3551,7 +3551,10 @@ do_handle_call(
         handle := Handle,
         kernel := Kernel,
         crdt_module := CrdtMod
-    } = CellCtx = bondy_oplog_applier:resolve_cell_ctx(Source, Bucket, Founding),
+    } =
+        CellCtx = bondy_oplog_applier:resolve_cell_ctx(
+            Source, Bucket, Founding
+        ),
     State0 =
         case Adapter:get(Handle, Bucket, Key) of
             not_found ->
@@ -8062,4 +8065,3 @@ target(InstanceId) when is_binary(InstanceId) ->
     end;
 target(Other) ->
     error({invalid_target, Other}).
-
