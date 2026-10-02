@@ -86,6 +86,29 @@ datasync_failure_leaves_target_and_removes_tmp_test() ->
         ?assertEqual([<<"manifest">>], entries(Dir))
     end).
 
+%% =============================================================================
+%% A directory fsync that fails after the rename
+%% =============================================================================
+
+%% The rename has happened, so neither `ok` nor `{error, _}` would be true:
+%% the new content is visible and not known to be durable. It raises, so a
+%% caller's rollback does not undo what the renamed file now names.
+dir_sync_failure_after_the_rename_raises_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "manifest"),
+        ok = file:write_file(Path, ?OLD),
+        with_io_fault_lock(fun() ->
+            meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
+            ?assertError(
+                {dir_fsync_failed, Dir, eio},
+                bondy_log_io:write_atomic(Path, ?NEW)
+            )
+        end),
+        %% The new content is in place despite the raise.
+        ?assertEqual({ok, ?NEW}, file:read_file(Path)),
+        ?assertEqual([<<"manifest">>], entries(Dir))
+    end).
+
 rename_failure_leaves_target_and_removes_tmp_test() ->
     with_dir(fun(Dir) ->
         Path = filename:join(Dir, "manifest"),

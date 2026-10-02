@@ -23,8 +23,9 @@ latest `{Watermark, Checkpoint}` as an Erlang External Term Format binary.
 ## Durability (`put_checkpoint/3`)
 
 The checkpoint, `{Watermark, Checkpoint}` as ETF, is written with
-`bondy_mst_io:write_file_atomic/2`, and `put_checkpoint/3` has its error
-contract.
+`bondy_log_io:write_atomic/2`, and `put_checkpoint/3` has its error
+contract — including its raise on a directory fsync that fails once the
+checkpoint has been renamed into place.
 
 ## Corruption detection
 

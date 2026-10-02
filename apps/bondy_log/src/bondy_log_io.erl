@@ -65,16 +65,20 @@ Options:
   that cleans strays and the writer agree on the name by
   construction.
 
-Returns `ok` once the rename and the directory fsync have completed,
-or `{error, Reason}` from the first failing step, in which case
-`Path` still holds its previous content (or is still absent) and the
-temporary file has been deleted. A failing directory fsync is reported
-as `{dir_fsync_failed, Dir, Reason}`: the content is renamed into place
-but the directory entry is not durable, which a caller that confirms a
-checkpoint must tell apart from a failure that wrote nothing.
+Returns `ok` once the rename and the directory fsync have completed, or
+`{error, Reason}` for a failure BEFORE the rename, which leaves `Path` with
+its previous content (or still absent) and the temporary file deleted.
+
+A directory fsync that fails AFTER the rename raises
+`{dir_fsync_failed, Dir, Reason}`. No return value would be true there: the
+new content is visible but not known to be durable, and a caller whose
+rollback assumed nothing had changed would undo what the renamed file now
+names. That is what keeps the WAL from deleting a segment whose manifest is
+already in place (`bondy_oplog_wal_durability_test`). A caller that must
+answer with a value catches it, as `bondy_log_idx:write_file/2` does.
 """.
 -spec write_atomic(file:filename_all(), iodata(), opts()) ->
-    ok | {error, term()}.
+    ok | {error, term()} | no_return().
 
 write_atomic(Path, IoData, Opts) when is_map(Opts) ->
     TmpPath = maps:get(tmp_path, Opts, default_tmp_path(Path)),
@@ -117,12 +121,13 @@ write_and_sync(TmpPath, IoData) ->
     end.
 
 %% @private
-%% Tagged so a caller can tell "the bytes are in place but the directory
-%% entry is not durable" from a failure that wrote nothing at all.
+%% Raises rather than returns, so a caller's rollback does not run on a
+%% failure that has already renamed the content into place. See
+%% `write_atomic/2,3`.
 fsync_dir(Dir) ->
     case bondy_mst_io:fsync_dir(Dir) of
         ok -> ok;
-        {error, Reason} -> {error, {dir_fsync_failed, Dir, Reason}}
+        {error, Reason} -> error({dir_fsync_failed, Dir, Reason})
     end.
 
 %% @private

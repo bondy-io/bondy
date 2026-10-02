@@ -360,7 +360,11 @@ Caller is responsible for choosing the path; typically:
 write_file(Path, Entries) when is_list(Entries) ->
     Header = encode_header(length(Entries)),
     Body = encode_entries(Entries),
-    bondy_log_io:write_atomic(Path, [Header | Body]).
+    try
+        bondy_log_io:write_atomic(Path, [Header | Body])
+    catch
+        error:{dir_fsync_failed, _, _} = Reason -> {error, Reason}
+    end.
 
 -doc """
 Reads and parses a `.qidx` file at `Path`.

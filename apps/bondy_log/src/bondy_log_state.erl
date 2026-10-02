@@ -162,7 +162,9 @@ read_consumer_offset(Dir) ->
 
 -doc """
 Atomically writes `consumer_offset()` to `Dir`. Uses the four-step
-durability sequence (write tmp → datasync → rename → fsync dir).
+durability sequence (write tmp → datasync → rename → fsync dir) and has
+`bondy_log_io:write_atomic/3`'s error contract, raising on a directory
+fsync that fails once the rename has happened.
 """.
 -spec write_consumer_offset(file:filename_all(), consumer_offset()) ->
     ok | {error, term()}.
@@ -256,8 +258,9 @@ read_snapshot_watermark(Dir) ->
 
 -doc """
 Atomically writes `Key` as the new watermark. Uses the same four-step
-durability sequence as `write_consumer_offset/2`. Errors at any step
-short-circuit and leave the prior on-disk watermark intact.
+durability sequence as `write_consumer_offset/2`, with the same error
+contract: a returned error leaves the prior on-disk watermark intact; a
+directory fsync that fails after the rename raises.
 """.
 -spec write_snapshot_watermark(file:filename_all(), bondy_log_record:key()) ->
     ok | {error, term()}.

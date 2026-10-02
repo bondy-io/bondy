@@ -1702,13 +1702,6 @@ bootstrap(#state{} = State) ->
                         bytes_total = ?SEG_HEADER_BYTES,
                         live_segments_count = 1
                     }};
-                {error, {dir_fsync_failed, _, _}} = E ->
-                    %% A manifest naming this segment is in place; only
-                    %% its directory entry is not durable. Same reason as
-                    %% in `open_next_segment/1`: the segment is not an
-                    %% orphan and must survive.
-                    _ = prim_file:close(Fd),
-                    E;
                 {error, _} = E ->
                     %% The .qdata is on disk but the manifest write
                     %% failed — without a manifest the segment is an
@@ -2168,18 +2161,13 @@ open_next_segment(
                     },
                     State2 = notify_durable_waiters(State1),
                     {ok, State2};
-                {error, {dir_fsync_failed, _, _}} = E ->
-                    %% The manifest is renamed into place and already
-                    %% names this segment; only its directory entry is
-                    %% not durable (`bondy_log_io:write_atomic/3`). The
-                    %% segment is not an orphan, and deleting it leaves a
-                    %% manifest naming a file that is gone — the log would
-                    %% not reopen at all.
-                    _ = prim_file:close(NewFd),
-                    E;
                 {error, _} = E ->
                     %% Pre-commit failure: the new segment file is on
-                    %% disk but the manifest still names the old one.
+                    %% disk but the manifest still names the old one —
+                    %% a manifest write that renamed and then failed its
+                    %% directory fsync raises instead of arriving here
+                    %% (`bondy_log_io:write_atomic/3`), so this rollback
+                    %% never deletes a segment the manifest names.
                     %% Delete the orphan eagerly so a retry of `rotate`
                     %% can `create/4` the same segment id without
                     %% colliding on the `exclusive` open.

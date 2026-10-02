@@ -161,10 +161,10 @@ read(Dir) ->
 Atomically writes `Manifest` to `Dir`.
 
 Implements the four-step durability sequence described in the module
-docstring. Returns `ok` or `{error, Reason}`.
-
-Errors at any step short-circuit the sequence and leave the prior
-on-disk manifest intact (because the rename has not yet happened).
+docstring, and has `bondy_log_io:write_atomic/3`'s error contract: a
+returned `{error, Reason}` is a failure before the rename, so the prior
+on-disk manifest is intact; a directory fsync that fails after the rename
+raises, because by then this manifest is the one on disk.
 """.
 -spec write(Dir :: file:filename_all(), t()) -> ok | {error, term()}.
 
