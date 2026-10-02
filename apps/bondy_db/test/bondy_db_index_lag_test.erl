@@ -60,6 +60,10 @@ lag_test_() ->
         test(
             "close_while_writer_sup_down",
             fun close_while_writer_sup_down/1
+        ),
+        test(
+            "close_keeps_ops_applied_after_the_index_flush",
+            fun close_keeps_ops_applied_after_the_index_flush/1
         )
     ]}.
 
@@ -443,6 +447,48 @@ close_while_writer_sup_down({Db, _Sup, _Dir}) ->
     ok = wait_for_new(bondy_oplog_secondary_sup, SecSup, 200),
     ?assertEqual(ok, Closed),
     ?assertEqual([], supervisor:which_children(bondy_oplog_secondary_sup)).
+
+%% A write still waiting in the WAL when the table closes is applied by the
+%% instance's applier while the close runs, released here as the close stops
+%% the instance. The reopened index is trusted, so it must hold that write.
+%% Red when the indexes are flushed and stamped clean before the instance
+%% stops.
+close_keeps_ops_applied_after_the_index_flush({Db, _Sup, _Dir}) ->
+    {ok, T0} = open_lww(Db),
+    R = <<"r1">>,
+    InstanceIds = maps:values(maps:get(instance_ids, T0)),
+    Appliers = [bondy_oplog_registry:applier_pid(I) || I <- InstanceIds],
+    ok = meck:new(bondy_oplog, [passthrough]),
+    try
+        [ok = sys:suspend(A) || A <- Appliers],
+        ok = bondy_db:apply_async(
+            T0, R, <<"late">>, {set, bondy_db:tick(T0), <<"l">>}
+        ),
+        Resumed = atomics:new(1, []),
+        ok = meck:expect(bondy_oplog, stop_instance, fun(Id) ->
+            _ =
+                atomics:add_get(Resumed, 1, 1) =:= 1 andalso
+                    [ok = sys:resume(A) || A <- Appliers],
+            _ = bondy_oplog_instance:await_apply(Id),
+            meck:passthrough([Id])
+        end),
+        ok = bondy_db:close_table(T0)
+    after
+        meck:unload(bondy_oplog)
+    end,
+    {ok, T1} = open_lww(Db),
+    ?assertEqual(
+        {ok, {<<"l">>, '_'}},
+        case bondy_db:read(T1, R, <<"late">>) of
+            {ok, {V, _}} -> {ok, {V, '_'}};
+            Other -> Other
+        end
+    ),
+    ?assertEqual(
+        {ok, [{<<"late">>, #{}}]},
+        bondy_db:index_get(T1, R, by_value, <<"l">>, #{})
+    ),
+    ok = bondy_db:close_table(T1).
 
 %% =============================================================================
 %% Helpers

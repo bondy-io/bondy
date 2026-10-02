@@ -634,9 +634,15 @@ index_backend(leveled, _Spec) ->
 
 -doc """
 Release the resources owned by `Table`. Stops every per-shard oplog
-instance, unregisters every shard from `bondy_oplog_core_registry`,
-deletes every per-shard cache table, then asks the topology to release
-its physical resources (Bookies, etc.).
+instance (or, on a shared one, removes the table from it), unregisters
+every shard from `bondy_oplog_core_registry`, deletes every per-shard
+cache table, then asks the topology to release its physical resources
+(Bookies, etc.).
+
+The primary shards go first: once the applier can no longer apply this
+table's events, every index op it dispatched is in its writer, so the
+indexes' flush and clean stamp cover them (`bondy_db_index_lag_test`:
+`close_keeps_ops_applied_after_the_index_flush/1`).
 
 Whether physical resources are actually freed is still the topology's
 call — single_bookie keeps its Bookie alive across `close_table/1` and
@@ -654,7 +660,6 @@ close_table(
         cache_handles := CacheHandles
     } = Table
 ) ->
-    teardown_indexes(NS, maps:get(indexes, Table, #{})),
     lists:foreach(
         fun(Shard) ->
             teardown_shard(
@@ -663,6 +668,7 @@ close_table(
         end,
         lists:seq(0, ShardCount - 1)
     ),
+    teardown_indexes(NS, maps:get(indexes, Table, #{})),
     _ = Topology:close_table(TableState, undefined),
     ok.
 
@@ -827,11 +833,10 @@ visible to a subsequent `read/3` from the same caller
 (read-your-writes). The wait is for this event alone: other appenders'
 pending events on the shard do not extend it.
 
-The event is an op of the table's CRDT. One the CRDT cannot apply is
-refused before the append with `{error, {invalid_op, Event}}`, so it never
-reaches the log (`bondy_oplog_cell_kernel:check_op/3`,
-`bondy_db_apply_many_test`). Idempotency and conflict resolution are the
-CRDT's.
+The event is an op of the table's CRDT, and the facade does not check it:
+an op the CRDT cannot apply is appended and replicated, and the applier
+skips its cell with an ERROR log (`bondy_oplog_cell_apply`). Idempotency
+and conflict resolution are the CRDT's.
 
 Returns `ok` on successful WAL durability + applier commit;
 `{error, rejected}` when the event is WAL-durable but the applier
@@ -841,8 +846,7 @@ refused to install it (it will never reach the projection);
 dies with the write pending (in both the write is durable and still
 pending — the caller cannot tell whether it has been applied since); or
 the append's own refusal. `backpressure`, `working_set_full`,
-`wal_full`, `wal_unavailable` and `invalid_op` mean the event was not
-written. A WAL writer that fails mid-append answers with its failure
+`wal_full` and `wal_unavailable` mean the event was not written. A WAL writer that fails mid-append answers with its failure
 (`{datasync_failed, _}`, `{write_failed, _}`, or the reason it stopped
 with): like `timeout`, the event may still be durable and be applied once
 the shard restarts, so retrying a non-idempotent op can apply it twice
@@ -918,8 +922,8 @@ possibly-busy instance); only the commit barrier is skipped.
 No write→readable latency sample is recorded — the metric measures
 exactly the barrier this variant does not have.
 
-An op the table's CRDT cannot apply is refused as in `apply/4`, and an
-`{error, _}` says whether the event was written as it does there.
+An `{error, _}` says whether the event was written as it does for
+`apply/4`.
 """.
 -spec apply_async(
     Table :: table(),
@@ -1026,8 +1030,6 @@ folded into one frame — apply those cells individually with `apply/4`.
 
 Returns `ok` once every shard frame is durable and committed, or `{error, _}`,
 read per shard frame as for `apply/4`.
-One write whose op the table's CRDT cannot apply refuses the whole batch with
-`{error, {invalid_op, Event}}` before any frame is appended.
 An empty batch is `ok`.
 """.
 -spec apply_many(
@@ -1056,14 +1058,12 @@ group_batch([], Acc) ->
 group_batch([{Table, Realm, Key, Event} | Rest], Acc) when
     is_map(Table) andalso is_binary(Realm) andalso is_binary(Key)
 ->
-    case {maps:get(causal_tier, Table, tier_0), check_event(Table, Event)} of
-        {tier_2, _} ->
+    case maps:get(causal_tier, Table, tier_0) of
+        tier_2 ->
             {error,
                 {tier_2_batch_unsupported,
                     maps:get(namespace, Table, undefined)}};
-        {_, {error, _} = Err} ->
-            Err;
-        {_, ok} ->
+        _ ->
             #{
                 db_topology := Topology,
                 table_state := TableState,
@@ -1150,25 +1150,6 @@ await_barrier(InstanceId, Barrier, N) ->
 
 %% @private
 do_apply(Table, InstanceId, Bucket, Key, Event, Barrier) ->
-    case check_event(Table, Event) of
-        ok -> append_event(Table, InstanceId, Bucket, Key, Event, Barrier);
-        {error, _} = Err -> Err
-    end.
-
-%% @private
-%% Refuse an op the table's CRDT cannot apply before it is appended: once in
-%% the log the applier skips it, yet it replicates and counts as applied.
-check_event(Table, Event) ->
-    Kernel = bondy_oplog_cell_kernel:from_modules(
-        maps:get(fold_module, Table, undefined),
-        maps:get(crdt_module, Table, undefined)
-    ),
-    bondy_oplog_cell_kernel:check_op(
-        Kernel, maps:get(crdt_opts, Table, #{}), Event
-    ).
-
-%% @private
-append_event(Table, InstanceId, Bucket, Key, Event, Barrier) ->
     case maps:get(causal_tier, Table, tier_0) of
         tier_2 ->
             apply_with_context(InstanceId, Bucket, Key, Event, Barrier);
