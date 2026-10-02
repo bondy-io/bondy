@@ -164,6 +164,7 @@ unsynced pages on recovery. Callers that need stricter durability
     | {incoming, term()}
     | {pending_scan, term()}
     | {orphan_cleanup, term()}
+    | {recover_seal, term()}
     | needs_recovery
     | {instance_id_mismatch, binary(), binary()}
     | {hash_algo_mismatch, atom(), atom()}.
@@ -817,8 +818,9 @@ open_after_recovery(Dir, InstanceId, HashAlgo, Manifest, Policy) ->
 %%     in `pack-<id>`, so the frozen file is an orphan -> delete it.
 %%   - otherwise -> re-seal it synchronously into `pack-<id>` and add the id
 %%     to the manifest, so the rolled pages become durable in a sealed pack
-%%     with no reliance on WAL replay. An unreadable frozen file is
-%%     discarded (the WAL applier re-derives its pages).
+%%     with no reliance on WAL replay. An unreadable frozen file fails the
+%%     open and is kept: the manifest's root may reference its pages
+%%     (`recovery_keeps_an_unreadable_sealing_file_test`).
 %% If an uncommitted roll was recovered and `incoming.pack` is gone (the
 %% roll renamed it away but its manifest commit never landed), the manifest
 %% is flipped to `incoming_pack = absent` so the subsequent incoming open
@@ -886,11 +888,8 @@ reseal_recovered(Dir, IH, Algo, M, PackId, Path) ->
             %% Header-only frozen file — nothing to seal; drop it.
             _ = prim_file:delete(Path),
             {ok, M, true};
-        {error, _} ->
-            %% Unreadable/corrupt frozen pack — discard; the WAL applier
-            %% re-derives its pages on replay.
-            _ = prim_file:delete(Path),
-            {ok, M, true}
+        {error, R} ->
+            {error, {recover_seal, R}}
     end.
 
 %% @private

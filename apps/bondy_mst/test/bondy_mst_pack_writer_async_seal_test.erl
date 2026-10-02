@@ -350,3 +350,25 @@ recovery_deletes_committed_sealing_orphan_test() ->
 
         assert_all_readable(Dir, Pairs)
     end).
+
+%% An uncommitted roll whose frozen file the reopen cannot open (here eacces,
+%% standing in for emfile or EIO) still holds the pages of the committed root.
+%% The reopen must fail and keep the file, so a later reopen re-seals it.
+recovery_keeps_an_unreadable_sealing_file_test() ->
+    with_tmp_dir(fun(Dir) ->
+        {ok, W0} = open_writer(Dir),
+        {W1, [{Root, _} | _] = Pairs} = append_all(W0, pages(6)),
+        {ok, W2} = bondy_mst_pack_writer:set_root(W1, Root),
+        {ok, _Job, _W3} = bondy_mst_pack_writer:roll_incoming(W2),
+        SealingPath = sealing_path(Dir, 1),
+        ok = file:change_mode(SealingPath, 8#000),
+        Reopen = open_writer(Dir),
+        _ = file:change_mode(SealingPath, 8#644),
+        ?assertMatch({error, _}, Reopen),
+
+        {ok, WR} = open_writer(Dir),
+        ?assertEqual(Root, bondy_mst_pack_writer:current_root(WR)),
+        bondy_mst_pack_writer:close(WR),
+
+        assert_all_readable(Dir, Pairs)
+    end).
