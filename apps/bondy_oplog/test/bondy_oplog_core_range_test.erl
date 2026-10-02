@@ -26,6 +26,7 @@ range_test_() ->
         fun projection_and_overlay_merge_per_key/0,
         fun half_open_interval_excludes_high_key/0,
         fun limit_caps_the_result/0,
+        fun cleared_cells_cost_extra_pages/0,
         fun include_overlay_false_drops_overlay_events/0,
         fun fence_excludes_overlay_events_past_it/0,
         fun overlay_only_undefined_terminal_is_filtered/0,
@@ -128,6 +129,42 @@ limit_caps_the_result() ->
         bondy_oplog_core:range(NS, primary, {<<"k">>, <<"z">>}, #{limit => 2}),
     ?assertEqual(2, length(Rows)),
     teardown_shard(Setup).
+
+cleared_cells_cost_extra_pages() ->
+    NS = mk_ns(),
+    {Setup, #{projection := PH}} =
+        setup_shard(NS, primary, 0, 1, lww_register),
+    materialise(PH, <<"a">>, {cleared, 1}, 1),
+    materialise(PH, <<"b">>, {cleared, 2}, 2),
+    materialise(PH, <<"c">>, {set, <<"vc">>, 3}, 3),
+    Self = self(),
+    Id = {?MODULE, make_ref()},
+    ok = telemetry:attach(
+        Id,
+        [bondy_oplog_core, range],
+        fun
+            (_, #{pages_read := P}, #{namespace := N}, _) when N =:= NS ->
+                Self ! {pages_read, P};
+            (_, _, _, _) ->
+                ok
+        end,
+        undefined
+    ),
+    try
+        ?assertEqual(
+            {ok, [{<<"c">>, <<"vc">>, 3}]},
+            bondy_oplog_core:range(
+                NS, primary, {<<"a">>, <<"z">>}, #{limit => 1}
+            )
+        ),
+        receive
+            {pages_read, Pages} -> ?assertEqual(3, Pages)
+        after 1000 -> error(no_range_event)
+        end
+    after
+        telemetry:detach(Id),
+        teardown_shard(Setup)
+    end.
 
 include_overlay_false_drops_overlay_events() ->
     NS = mk_ns(),

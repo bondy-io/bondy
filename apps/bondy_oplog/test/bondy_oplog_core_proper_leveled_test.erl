@@ -5,6 +5,8 @@
 %%   - prop_read_returns_latest_fold_leveled/0   (read consistency)
 %%   - prop_range_monotonicity_leveled/0         (range scans)
 %%   - prop_overlay_projection_merge_leveled/0   (projection + overlay)
+%%   - bondy_oplog_core_proper_test:prop_range_pages_every_live_cell/1
+%%                                               (range paging)
 %%
 %% Between them they touch every adapter callback the substrate uses on the
 %% hot path. `delete/2` and `info/1` are exercised in the adapter-level suite
@@ -330,6 +332,9 @@ properties_leveled_test_() ->
         Props = [
             prop_read_returns_latest_fold_leveled(),
             prop_range_monotonicity_leveled(),
+            bondy_oplog_core_proper_test:prop_range_pages_every_live_cell(
+                fun with_shard/1
+            ),
             prop_overlay_projection_merge_leveled()
         ],
         lists:foreach(

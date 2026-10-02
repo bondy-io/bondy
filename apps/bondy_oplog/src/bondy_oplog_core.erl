@@ -112,7 +112,7 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 }.
 -type read_batch_result() :: #{batch_key() := read_result()}.
 
--type range_spec() :: {Low :: term(), High :: term() | infinity}.
+-type range_spec() :: {Low :: binary(), High :: binary() | infinity}.
 %% `High' may be the atom `infinity' for an open-ended scan (every key
 %% greater than or equal to `Low' in the bucket). Used by the
 %% secondary-index primary-scan fallback; supported by the ETS and
@@ -374,7 +374,10 @@ the results.
 
 ## Opts
 
-- `limit` — max rows in the result (default `1000`).
+- `limit` — max rows in the result (default `1000`). Cells that read as
+  absent (cleared) do not count toward it, so a result shorter than `limit`
+  means the band is exhausted and a caller can page from the successor of
+  the last key it got (`bondy_oplog_core_proper_test:prop_range_pages_every_live_cell/0`).
 - `include_overlay` — set `false` to exclude pending events (default `true`).
 - `fence` — HLC ceiling for overlay events (default `infinity`).
 - `shard` — explicit shard override.
@@ -387,9 +390,9 @@ range(NS, Index, Bucket, {Low, High}, Opts) when is_map(Opts) ->
         {ok, Entry} ->
             {_NS, _Idx, Shard} = bondy_oplog_core_registry:entry_key(Entry),
             T0 = erlang:monotonic_time(microsecond),
-            Result = do_range(Entry, Bucket, Low, High, Opts),
+            {Result, Pages} = do_range(Entry, Bucket, Low, High, Opts),
             DurUs = erlang:monotonic_time(microsecond) - T0,
-            emit_range_event(NS, Index, Shard, Bucket, Result, DurUs),
+            emit_range_event(NS, Index, Shard, Bucket, Result, Pages, DurUs),
             Result;
         {error, _} = Err ->
             Err
@@ -980,6 +983,11 @@ registry_lookup(NS, Index, Shard) ->
         not_found -> {error, shard_not_registered}
     end.
 
+%% The projection's `limit` counts cleared frames too, so a full projection
+%% page can merge to fewer than `limit` live rows: read on until `limit` rows
+%% or a short page. Overlay keys merge per page span, so an overlay-only key
+%% cannot move the caller's cursor past projection keys not yet read
+%% (`bondy_oplog_core_proper_test:prop_range_pages_every_live_cell/0`).
 do_range(Entry, Bucket, Low, High, Opts) ->
     Limit = maps:get(limit, Opts, default_range_limit()),
     IncludeOverlay = maps:get(include_overlay, Opts, true),
@@ -988,17 +996,45 @@ do_range(Entry, Bucket, Low, High, Opts) ->
     CrdtOpts = bondy_oplog_core_registry:entry_crdt_opts(Entry),
     PA = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     PH = bondy_oplog_core_registry:entry_projection_handle(Entry),
+    Page = fun(Lo) ->
+        case PA:range(PH, Bucket, Lo, High, Opts) of
+            {ok, ProjEntries} ->
+                {Hi, Next} = page_end(ProjEntries, Limit, High),
+                OverlayEntries = overlay_for_range(
+                    Entry, Bucket, Lo, Hi, Fence, IncludeOverlay
+                ),
+                Rows = merge_range(
+                    Kernel, CrdtOpts, ProjEntries, OverlayEntries
+                ),
+                {ok, Rows, Next};
+            {error, _} = Err ->
+                Err
+        end
+    end,
+    range_pages(Page, Low, Limit, 1, []).
 
-    case PA:range(PH, Bucket, Low, High, Opts) of
-        {ok, ProjEntries} ->
-            OverlayEntries = overlay_for_range(
-                Entry, Bucket, Low, High, Fence, IncludeOverlay
-            ),
-            Merged = merge_range(Kernel, CrdtOpts, ProjEntries, OverlayEntries),
-            {ok, lists:sublist(Merged, Limit)};
+%% @private
+range_pages(Page, Lo, Need, Pages, Acc) ->
+    case Page(Lo) of
+        {ok, Rows, Next} ->
+            case {Next, Need - length(Rows)} of
+                {{more, Lo1}, Need1} when Need1 > 0 ->
+                    range_pages(Page, Lo1, Need1, Pages + 1, [Rows | Acc]);
+                _ ->
+                    Last = lists:sublist(Rows, Need),
+                    {{ok, lists:append(lists:reverse(Acc, [Last]))}, Pages}
+            end;
         {error, _} = Err ->
-            Err
+            {Err, Pages}
     end.
+
+%% @private
+page_end(ProjEntries, Limit, High) when length(ProjEntries) < Limit ->
+    {High, done};
+page_end(ProjEntries, _Limit, _High) ->
+    {Last, _Frame} = lists:last(ProjEntries),
+    Next = <<Last/binary, 0>>,
+    {Next, {more, Next}}.
 
 overlay_for_range(_Entry, _Bucket, _Low, _High, _Fence, false) ->
     [];
@@ -1302,7 +1338,7 @@ batch_summary({ok, Results, _Fence}) ->
 batch_summary(_Err) ->
     {0, 0, 0}.
 
-emit_range_event(NS, Index, Shard, Bucket, Result, DurUs) ->
+emit_range_event(NS, Index, Shard, Bucket, Result, Pages, DurUs) ->
     {Entries, Bytes} =
         case Result of
             {ok, Rows} ->
@@ -1320,6 +1356,7 @@ emit_range_event(NS, Index, Shard, Bucket, Result, DurUs) ->
         #{
             duration_us => DurUs,
             entries_returned => Entries,
+            pages_read => Pages,
             scanned_bytes => Bytes
         },
         #{

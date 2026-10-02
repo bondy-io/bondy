@@ -63,15 +63,11 @@ read_event_increments_counters() ->
 
 range_event_increments_counter() ->
     NS = mk_ns(),
-    fire_range(NS),
-    fire_range(NS),
-    ?assertEqual(
-        2,
-        counter_value(
-            bondy_oplog_core_ranges_total,
-            #{namespace => NS}
-        )
-    ).
+    fire_range(NS, 1),
+    fire_range(NS, 3),
+    Label = #{namespace => NS},
+    ?assertEqual(2, counter_value(bondy_oplog_core_ranges_total, Label)),
+    ?assertEqual(4, counter_value(bondy_oplog_core_range_pages_total, Label)).
 
 snapshot_emits_refresh_event_per_namespace() ->
     NS = mk_ns(),
@@ -235,9 +231,17 @@ fire_read(NS, Hit) ->
     ).
 
 fire_range(NS) ->
+    fire_range(NS, 1).
+
+fire_range(NS, Pages) ->
     bondy_oplog_core_metrics:handle_event(
         [bondy_oplog_core, range],
-        #{duration_us => 1, entries_returned => 1, scanned_bytes => 1},
+        #{
+            duration_us => 1,
+            entries_returned => 1,
+            pages_read => Pages,
+            scanned_bytes => 1
+        },
         #{namespace => NS, index => primary, shard => 0},
         undefined
     ).

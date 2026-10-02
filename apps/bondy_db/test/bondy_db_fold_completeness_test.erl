@@ -180,13 +180,10 @@ clear_while_folding({_Db, T}) ->
     ),
     ?assertEqual(N, length(Visited)),
     ?assertEqual(N, length(lists:usort(Visited))),
-    %% ...and every cell really is cleared (cleared cells read back as a
-    %% non-binary value, so the scan still sees the rows).
-    Live = [
-        K
-     || {K, V, _H} <- fold_rows(T, Prefix, <<"d0">>), is_binary(V)
-    ],
-    ?assertEqual([], Live).
+    ?assertEqual(
+        [],
+        [K || K <- Visited, bondy_db:read(T, ?R, K) =/= {error, not_found}]
+    ).
 
 %% =============================================================================
 %% HELPERS

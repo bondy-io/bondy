@@ -40,10 +40,15 @@ through the public counter API:
 |---|---|
 | `bondy_oplog_core_reads_total`          | `#{namespace}`    |
 | `bondy_oplog_core_ranges_total`         | `#{namespace}`    |
+| `bondy_oplog_core_range_pages_total`    | `#{namespace}`    |
 | `bondy_oplog_core_cache_hits_total`     | `#{namespace}`    |
 | `bondy_oplog_core_cache_misses_total`   | `#{namespace}`    |
 
-No ETS write contention on the hot path: each event is a single
+A range reads projection pages until it has `limit` live rows, so
+`range_pages_total` above `ranges_total` counts the extra pages spent
+reading past cleared cells.
+
+No ETS write contention on the hot path: each counter update is a
 `counters:add/3` against the namespace's atomics array.
 
 ## Configuration
@@ -72,6 +77,7 @@ the restart. A restart of `bondy_metrics` wipes the counters.
 
 -define(M_READS, bondy_oplog_core_reads_total).
 -define(M_RANGES, bondy_oplog_core_ranges_total).
+-define(M_RANGE_PAGES, bondy_oplog_core_range_pages_total).
 -define(M_CACHE_HITS, bondy_oplog_core_cache_hits_total).
 -define(M_CACHE_MISSES, bondy_oplog_core_cache_misses_total).
 
@@ -184,10 +190,13 @@ handle_event([bondy_oplog_core, read], #{hit := Hit}, #{namespace := NS}, _Cfg) 
             bondy_metrics:counter(#{name => ?M_CACHE_MISSES, label => Label})
     end,
     ok;
-handle_event([bondy_oplog_core, range], _Meas, #{namespace := NS}, _Cfg) ->
+handle_event(
+    [bondy_oplog_core, range], #{pages_read := Pages}, #{namespace := NS}, _Cfg
+) ->
+    Label = #{namespace => NS},
+    ok = bondy_metrics:counter(#{name => ?M_RANGES, label => Label}),
     ok = bondy_metrics:counter(#{
-        name => ?M_RANGES,
-        label => #{namespace => NS}
+        name => ?M_RANGE_PAGES, label => Label, delta => Pages
     });
 handle_event(_Event, _Meas, _Meta, _Cfg) ->
     ok.
@@ -206,6 +215,11 @@ init(Opts) ->
     }),
     ok = bondy_metrics:declare(#{
         name => ?M_RANGES, help => <<"Substrate range reads, by namespace.">>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => ?M_RANGE_PAGES,
+        help =>
+            <<"Projection pages read by substrate range reads, by namespace.">>
     }),
     ok = bondy_metrics:declare(#{
         name => ?M_CACHE_HITS,

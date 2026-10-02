@@ -158,6 +158,7 @@ events_for_window(Tab, Bucket, Key, AfterHlc, MaxHlc) ->
 -doc """
 Range scan: return all overlay rows in `Bucket` whose `Key` is in
 `[KeyLow, KeyHigh)` and whose HLC is strictly greater than `AfterHlc`.
+`KeyHigh = infinity` removes the upper key bound.
 Result is a list of `{Key, Event}` tuples in `(Key, HLC)` ascending
 order. `Bucket` is constant across the scan, so it is not repeated in
 each result tuple.
@@ -166,7 +167,7 @@ each result tuple.
     tid(),
     bucket(),
     KeyLow :: cell_key(),
-    KeyHigh :: cell_key(),
+    KeyHigh :: cell_key() | infinity,
     after_hlc()
 ) -> [{cell_key(), bondy_oplog_event:t()}].
 
@@ -174,11 +175,7 @@ range(Tab, Bucket, KeyLow, KeyHigh, AfterHlc) ->
     MS = [
         {
             {{{Bucket, '$1'}, '$2', '_'}, '$3'},
-            [
-                {'>=', '$1', {const, KeyLow}},
-                {'<', '$1', {const, KeyHigh}},
-                {'>', '$2', AfterHlc}
-            ],
+            [{'>', '$2', AfterHlc} | key_band(KeyLow, KeyHigh)],
             [{{'$1', '$3'}}]
         }
     ],
@@ -187,7 +184,8 @@ range(Tab, Bucket, KeyLow, KeyHigh, AfterHlc) ->
 -doc """
 Range scan bounded above by `MaxHlc` (inclusive). All overlay rows in
 `Bucket` whose `Key` is in `[KeyLow, KeyHigh)` and whose HLC is
-`=< MaxHlc` are returned. `MaxHlc = infinity` removes the upper bound.
+`=< MaxHlc` are returned. `KeyHigh = infinity` removes the upper key bound,
+`MaxHlc = infinity` the upper HLC bound.
 
 Used by `bondy_oplog_core:range/4` for fence-aware range scans where the
 per-cell `> ProjHlc` filter is applied at the merge step.
@@ -196,7 +194,7 @@ per-cell `> ProjHlc` filter is applied at the merge step.
     tid(),
     bucket(),
     KeyLow :: cell_key(),
-    KeyHigh :: cell_key(),
+    KeyHigh :: cell_key() | infinity,
     MaxHlc :: bondy_hlc:hlc() | infinity
 ) -> [{cell_key(), bondy_oplog_event:t()}].
 
@@ -206,15 +204,19 @@ range_window(Tab, Bucket, KeyLow, KeyHigh, MaxHlc) when is_integer(MaxHlc) ->
     MS = [
         {
             {{{Bucket, '$1'}, '$2', '_'}, '$3'},
-            [
-                {'>=', '$1', {const, KeyLow}},
-                {'<', '$1', {const, KeyHigh}},
-                {'=<', '$2', MaxHlc}
-            ],
+            [{'=<', '$2', MaxHlc} | key_band(KeyLow, KeyHigh)],
             [{{'$1', '$3'}}]
         }
     ],
     ets:select(Tab, MS).
+
+%% @private
+%% Atoms sort before binaries, so `Key < infinity` is false for every key and
+%% the open bound must drop the guard rather than compare against it.
+key_band(KeyLow, infinity) ->
+    [{'>=', '$1', {const, KeyLow}}];
+key_band(KeyLow, KeyHigh) ->
+    [{'>=', '$1', {const, KeyLow}}, {'<', '$1', {const, KeyHigh}}].
 
 -doc """
 Evict rows that have been promoted to the projection. Deletes every row

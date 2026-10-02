@@ -33,6 +33,8 @@
 -export([prop_cache_coherence_write_through/0]).
 -export([prop_fenced_read_excludes_past_fence/0]).
 -export([prop_range_monotonicity/0]).
+-export([prop_range_pages_every_live_cell/0]).
+-export([prop_range_pages_every_live_cell/1]).
 -export([prop_ensure_fresh_correctness/0]).
 -export([prop_subscription_delivers_matches/0]).
 -export([prop_overlay_projection_merge/0]).
@@ -91,6 +93,30 @@ range_bounds_gen() ->
             true -> {L, H};
             false -> {H, L}
         end
+    ).
+
+%% `{Key, ProjState, OverlayEvents}` over a key universe wider than any page
+%% limit drawn below, so a band spans several pages. Overlay HLCs start above
+%% the projection's, so every overlay event applies.
+cells_gen() ->
+    ?LET(
+        Specs,
+        vector(8, {proj_state_gen(), overlay_events_gen()}),
+        [
+            {<<C>>, Proj, Overlay}
+         || {C, {Proj, Overlay}} <- lists:zip(lists:seq($a, $h), Specs),
+            {Proj, Overlay} =/= {undefined, []}
+        ]
+    ).
+
+proj_state_gen() ->
+    oneof([undefined, {set, hlc_value(1), 1}, {cleared, 1}]).
+
+overlay_events_gen() ->
+    ?LET(
+        N,
+        integer(0, 2),
+        ?LET(Ops, vector(N, op_kind_gen()), hlc_index(Ops, 2, []))
     ).
 
 %% =============================================================================
@@ -189,6 +215,39 @@ prop_range_monotonicity() ->
             Sorted = ResultKeys =:= lists:sort(ResultKeys),
             Expected = [K || K <- UniqueKeys, K >= Low, K < High],
             Sorted andalso ResultKeys =:= Expected
+        end)
+    ).
+
+%% Paging `range/4` from the successor of each page's last key, until a page
+%% comes back shorter than `limit`, yields every live cell of the band once,
+%% in key order. Cleared cells, in the projection or the overlay, sit among
+%% the live ones. `bondy_db`'s shard walk and `bondy_relation` page this way.
+prop_range_pages_every_live_cell() ->
+    prop_range_pages_every_live_cell(fun with_shard/1).
+
+prop_range_pages_every_live_cell(WithShard) ->
+    ?FORALL(
+        {Cells, Limit, High},
+        {cells_gen(), integer(1, 4), oneof([<<"z">>, infinity])},
+        WithShard(fun(NS) ->
+            lists:foreach(
+                fun({K, Proj, Overlay}) ->
+                    materialise(NS, K, Proj),
+                    [insert_overlay(NS, K, E) || E <- Overlay]
+                end,
+                Cells
+            ),
+            Pages = range_pages(NS, <<"a">>, High, Limit),
+            Expected = [
+                {K, V, H}
+             || {K, Proj, Overlay} <- Cells,
+                {V, H} <- expected_cell(Proj, Overlay)
+            ],
+            ?WHENFAIL(
+                io:format("Pages: ~p~nExpected: ~p~n", [Pages, Expected]),
+                lists:append(Pages) =:= Expected andalso
+                    lists:all(fun(P) -> length(P) =< Limit end, Pages)
+            )
         end)
     ).
 
@@ -442,9 +501,10 @@ materialise(_NS, _Key, undefined) ->
 
 do_materialise(NS, Key, State) ->
     {ok, Entry} = bondy_oplog_core_registry:lookup(NS, primary, 0),
+    PA = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     PH = bondy_oplog_core_registry:entry_projection_handle(Entry),
     Frame = bondy_oplog_test_helpers:frame(?STRATEGY, State, hlc_of(State)),
-    ok = ?PROJ_MOD:put_batch(PH, [{<<>>, Key, Frame}]).
+    ok = PA:put_batch(PH, [{<<>>, Key, Frame}]).
 
 mk_event(Hlc, Op) ->
     Key = bondy_oplog_event:key(Hlc, <<"o">>, Hlc),
@@ -488,6 +548,29 @@ expected_read(Events) ->
     case bondy_oplog_crdt_lww_register:to_value(State) of
         undefined -> undefined;
         Value -> {Value, hlc_of(State)}
+    end.
+
+range_pages(NS, Low, High, Limit) ->
+    {ok, Rows} =
+        bondy_oplog_core:range(NS, primary, {Low, High}, #{limit => Limit}),
+    case length(Rows) < Limit of
+        true ->
+            [Rows];
+        false ->
+            {Last, _, _} = lists:last(Rows),
+            [Rows | range_pages(NS, <<Last/binary, 0>>, High, Limit)]
+    end.
+
+expected_cell(Proj, Overlay) ->
+    Init =
+        case Proj of
+            undefined -> initial();
+            _ -> Proj
+        end,
+    State = fold_events(Init, Overlay),
+    case bondy_oplog_crdt_lww_register:to_value(State) of
+        undefined -> [];
+        Value -> [{Value, hlc_of(State)}]
     end.
 
 equal_read_result(Got, Expected) ->
@@ -570,6 +653,7 @@ properties_test_() ->
             prop_overlay_projection_merge(),
             prop_fenced_read_excludes_past_fence(),
             prop_range_monotonicity(),
+            prop_range_pages_every_live_cell(),
             prop_ensure_fresh_correctness(),
             prop_subscription_delivers_matches(),
             prop_cache_coherence_write_through(),
