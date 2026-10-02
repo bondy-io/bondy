@@ -255,7 +255,9 @@ on restart and re-applied; fold idempotency absorbs duplicates.
 events into the MST and staged a new root in memory
 (`set_root/2` rewrites the manifest lazily); the synchronous drain call
 flushes that root to disk (`bondy_mst:flush/1`, pages before the
-pointer) in lockstep with the `consumer.offset` write about to follow.
+pointer) before the `consumer.offset` write that follows. A failed
+flush stops the instance, and an instance that is gone stops the
+applier, so the offset never passes events the durable root lacks.
 That advances the on-disk root and the WAL retention cursor together,
 bounding crash replay to one commit window — without it the on-disk
 root lags, restart re-reads the whole WAL, and the compaction watermark

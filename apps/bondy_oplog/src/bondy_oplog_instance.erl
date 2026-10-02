@@ -2993,16 +2993,10 @@ do_handle_call(
         end,
     {reply, Reply, State};
 do_handle_call(drain_install_queue, _From, State0) ->
-    %% Barrier for the applier's commit boundary — calls jump past casts, so
-    %% every prior `install_local_batch` cast is handled by the time this one
-    %% is — and the MST root durability barrier. Each install staged the new
-    %% root in memory only; flushing here advances the on-disk root in
-    %% lockstep with the WAL `consumer.offset` commit, bounding crash replay
-    %% to one commit window. Without it the resume reads a stale root and
-    %% replays the whole WAL, and the watermark never advances. The seal runs
-    %% after the flush, so rolled pages are durable before an async seal.
-    State = maybe_drive_seal(flush_mst_root(State0)),
-    {reply, ok, State};
+    %% The call queues behind every earlier `install_local_batch` cast, and
+    %% `ok` means the root holding them is durable. The seal runs after the
+    %% flush, so rolled pages are durable before an async seal.
+    {reply, ok, maybe_drive_seal(flush_mst_root(State0))};
 do_handle_call(await_overlay_drained, From, State) ->
     %% Event-driven `await_apply/1,2`. Reply inline when the overlay
     %% is already empty; otherwise queue the caller and let
@@ -5330,45 +5324,20 @@ is_fast_install(Event, Origin, MaxSeq) ->
         bondy_oplog_event:key_seq(Key) > MaxSeq.
 
 %% @private
-%% MST root durability barrier, invoked at the applier's commit boundary
-%% (`drain_install_queue`). Each install_local_batch merged its events into the
-%% MST and staged the new root in RAM via `bondy_mst:put_batch/2`'s single
-%% `set_root`; this forces that staged root durable so `resume_position/2`
-%% bounds crash replay to one commit window. It rides the existing per-commit
-%% barrier — it does NOT touch the per-batch merge fast path and never enters
-%% the per-put path. No-op for ephemeral (ets/map) backends.
+%% Forces the MST root staged in RAM by `bondy_mst:put_batch/2` durable, or
+%% raises `{mst_flush_failed, Reason}`, stopping the instance
+%% (`bondy_oplog_commit_barrier_test`). No retry: Linux reports a writeback
+%% error once per file, so a second `datasync` can answer `ok` for pages it
+%% dropped (errseq_t, Linux 4.13; PostgreSQL wiki "Fsync Errors"). Reopening
+%% recovers from what the disk holds. No-op for ephemeral (ets/map) backends.
 flush_mst_root(#state{mst = undefined} = State) ->
     State;
-flush_mst_root(#state{mst = MST0, instance_id = Id} = State) ->
+flush_mst_root(#state{mst = MST0} = State) ->
     case bondy_mst:flush(MST0) of
         {ok, MST1} ->
             State#state{mst = MST1};
         {error, Reason} ->
-            ?LOG_ERROR(#{
-                description =>
-                    "Failed to flush durable MST root at commit barrier",
-                instance_id => Id,
-                reason => Reason
-            }),
-            %% Leave the staged root in place; the next commit barrier retries.
-            State
-    end.
-
-%% @private
-%% Like `flush_mst_root/1` but surfaces the error instead of swallowing it.
-%% Compaction uses this so it can REFUSE to advance the durable checkpoint
-%% watermark when the (truncated) MST root could not be made durable —
-%% otherwise the durable checkpoint outruns the durable root and a crash in
-%% between resumes past events on reboot (`resume_position/2`), corrupting
-%% the shard. Returns `{ok, State}` (mst handle advanced) or `{error, _}`.
-flush_mst_root_checked(#state{mst = undefined} = State) ->
-    {ok, State};
-flush_mst_root_checked(#state{mst = MST0} = State) ->
-    case bondy_mst:flush(MST0) of
-        {ok, MST1} ->
-            {ok, State#state{mst = MST1}};
-        {error, _} = Error ->
-            Error
+            error({mst_flush_failed, Reason})
     end.
 
 %% @private
@@ -7022,41 +6991,15 @@ do_finalize_catalogue_compaction(State, Started, Frontier) ->
     {MST1, TruncateUs} = tc(fun() ->
         truncate_below_or_equal(State#state.mst, Frontier, State)
     end),
-    %% Persist the truncated MST root BEFORE advancing the durable checkpoint.
-    %% The reboot resume position is `max(durable_root_last.hlc,
-    %% durable_checkpoint.hlc)`, so the durable checkpoint must never outrun the
-    %% durable root — otherwise a crash between the checkpoint write and the
-    %% next commit-barrier flush resumes PAST events on reboot, corrupting the
-    %% shard. A flush failure ABORTS the compaction: the original un-truncated
-    %% state is left untouched and retried next cycle rather than advancing the
-    %% checkpoint past a non-durable root.
-    {FlushRes, FlushUs} = tc(fun() ->
-        flush_mst_root_checked(State#state{mst = MST1})
+    %% The truncated root is durable BEFORE the checkpoint is written, so the
+    %% checkpoint never outruns the root (`bondy_oplog_applier:resume_position/2`
+    %% resumes from their max; `bondy_oplog_compaction_root_durability_test`).
+    {StateF, FlushUs} = tc(fun() ->
+        flush_mst_root(State#state{mst = MST1})
     end),
-    case FlushRes of
-        {ok, StateF} ->
-            finalize_catalogue_compaction_commit(
-                StateF, State, Started, Frontier, TruncateUs, FlushUs
-            );
-        {error, Reason} ->
-            %% DO NOT carry `MST1` forward on the belief that the
-            %% pre-truncate root is now dangling. It is not: this branch is
-            %% reachable only on the pack backend, where the truncate runs
-            %% WITHOUT collecting and `bondy_mst_pack_store:free/3` only adds
-            %% the rewritten spine pages to the `free_set`, which is
-            %% explicitly not a read mask. `State0`'s root is therefore still
-            %% fully readable, while carrying the truncated tree forward would
-            %% drop events the durable checkpoint does not cover.
-            ?LOG_ERROR(#{
-                description =>
-                    "Aborting compaction: durable MST root flush failed; "
-                    "checkpoint NOT advanced to avoid outrunning the root",
-                instance_id => State#state.instance_id,
-                frontier => Frontier,
-                reason => Reason
-            }),
-            {{error, {compaction_flush_failed, Reason}}, State}
-    end.
+    finalize_catalogue_compaction_commit(
+        StateF, State, Started, Frontier, TruncateUs, FlushUs
+    ).
 
 %% @private
 %% Tail of `finalize_catalogue_compaction/3`, reached once the truncated

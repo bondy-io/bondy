@@ -37,9 +37,11 @@ Sits between the per-instance WAL writer and the per-instance
 - At commit boundaries (every `commit_every` events or `end_of_log`)
   the applier issues a synchronous `drain_install_queue` call to the
   instance before persisting `consumer.offset` and advancing the
-  WAL's committed-segment marker. This call returns once every
-  in-flight install cast has been processed, so retention never
-  drops a segment whose events the instance has not yet installed.
+  WAL's committed-segment marker. The call returns `ok` once every
+  in-flight install cast has been processed and the MST root holding
+  them is durable; otherwise it exits and the offset stays where it was
+  (`bondy_oplog_commit_barrier_test`). Only this boundary writes the
+  offset; `terminate/2` does not.
 - Acts as the verify gateway for peer-received events.
   `bondy_oplog_instance:append_remote/2` forwards each remote event
   here via `enqueue_remote/2`. The applier captures a read-only
@@ -122,10 +124,7 @@ instances are unaffected.
     would extend it linearly in the batch size with ETS `select`s and
     `erlang:send/2`s.
   - Graceful-shutdown gap: at-commit would require an in-memory
-    accumulator drained from `terminate/2`. The shutdown path already
-    writes `consumer.offset` independently, so a partial drain failure
-    would silently lose subscriber notifications without a way for
-    crash recovery to recover them (the offset advanced).
+    accumulator drained from `terminate/2`, which a crash never runs.
   - Crash semantics: at-least-once delivery is the contract on either
     side (a crash between apply and commit re-applies events on
     restart, producing duplicates regardless of timing). Subscribers
@@ -1753,16 +1752,7 @@ handle_info(drain_backstop, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, #state{
-    iter = Iter,
-    consumer_offset = CO,
-    wal_dir = Dir,
-    uncommitted = N
-}) ->
-    case N > 0 of
-        true -> _ = bondy_log_state:write_consumer_offset(Dir, CO);
-        false -> ok
-    end,
+terminate(_Reason, #state{iter = Iter}) ->
     case Iter of
         undefined -> ok;
         _ -> bondy_log_reader:close(Iter)
@@ -3055,35 +3045,7 @@ commit_now(
         consumer_offset = CO
     } = State
 ) ->
-    %% Drain barrier: block until the instance has processed every
-    %% `install_local_batch` cast we issued before this commit. The
-    %% FIFO mailbox ordering of casts and the synchronous call
-    %% together guarantee that, when the call returns, all events
-    %% whose keys we're about to commit have been installed in the
-    %% MST. Without this barrier, `notify_committed_segment` could
-    %% drop a WAL segment whose events the instance has not yet
-    %% applied — a hard durability hole on a co-crash.
     ok = drain_install_queue(InstancePid),
-    %% NOTE: `last_replayed_root` is NOT advanced here even though
-    %% `drain_install_queue/1` proves every local install has been
-    %% applied to the MST. Reason: a peer sync's
-    %% `integrate_peer_root/2` can interleave with the WAL drain and
-    %% land remote pages in the MST under the same root that this
-    %% barrier returns. Those remote events flow through the
-    %% `replay_cell_events` cast — not through
-    %% `bondy_oplog_cell_apply:apply_cell_batch/3` —
-    %% so the projection has *not* seen them yet. Advancing the
-    %% watermark to the live root here would mark them as already
-    %% replayed, and `do_replay_cell_events/1` would short-circuit
-    %% before folding them. Empirically (Jepsen OR-set,
-    %% random-partition-halves): doing so produces 27/226 lost adds.
-    %% Leaving the watermark anchored at its previous value keeps the
-    %% next `do_replay_cell_events/1` honest — it sees a diff that
-    %% includes both the locally-installed events and any
-    %% interleaving peer events. Local events are re-folded
-    %% idempotently (CRDT contract); the cost is one extra RMW per
-    %% local event per sync tick, dominated by the sync round-trip
-    %% itself.
     case bondy_log_state:write_consumer_offset(Dir, CO) of
         ok ->
             Seg = bondy_log_state:committed_segment(CO),
@@ -3098,25 +3060,14 @@ commit_now(
                 instance_id => InstanceId,
                 reason => Reason
             }),
-            %% Keep uncommitted > 0 so the next commit boundary retries.
             State
     end.
 
 %% @private
-%% Synchronous barrier — `gen_server:call` jumps the instance mailbox
-%% to the back of the queue, so every prior cast (the `install_local_batch`
-%% messages from this drain pass) has been fully handled by the time
-%% this call returns. A `noproc` race during subtree shutdown is
-%% treated as a "no events to wait on" and tolerated.
+%% Exits when the instance is gone or its root flush failed; either way the
+%% `one_for_all` subtree is restarting and nothing may be committed.
 drain_install_queue(InstancePid) ->
-    try gen_server:call(InstancePid, drain_install_queue, infinity) of
-        ok -> ok
-    catch
-        exit:{noproc, _} -> ok;
-        exit:noproc -> ok;
-        exit:{normal, _} -> ok;
-        exit:{shutdown, _} -> ok
-    end.
+    gen_server:call(InstancePid, drain_install_queue, infinity).
 
 %% @private
 %% Tells the WAL writer to advance its committed-segment marker so the
