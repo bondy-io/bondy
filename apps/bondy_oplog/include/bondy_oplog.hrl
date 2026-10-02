@@ -12,9 +12,6 @@
 
 %% -----------------------------------------------------------------------------
 %% Records and constants for the MST-based event-store replication layer.
-%% Architecture references:
-%%   _design/0_architecture.md
-%%   _design/3_mst_append_only.md
 %% -----------------------------------------------------------------------------
 
 -ifndef(BONDY_OPLOG_HRL).
@@ -46,11 +43,9 @@
 %% (Stage 4) interprets peer ids; the peer-state ETS keys on them.
 -type peer_id() :: term().
 
-%% HLC pack layout: 48 bits of physical millisecond timestamp +
-%% 16 bits of logical counter. Compares as a plain integer.
--define(BONDY_OPLOG_HLC_LOGICAL_BITS, 16).
--define(BONDY_OPLOG_HLC_LOGICAL_MASK, 16#FFFF).
--define(BONDY_OPLOG_HLC_LOGICAL_MAX, 16#FFFF).
+%% The HLC pack layout (`?BONDY_HLC_LOGICAL_*`) comes from the clock's own
+%% header; event keys are ordered by that integer.
+-include_lib("bondy_stdlib/include/bondy_hlc.hrl").
 
 %% A globally unique event identity and total order key. Tuple element order
 %% is significant because ETS ordered_set sorts tuples lexicographically:

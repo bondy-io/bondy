@@ -38,7 +38,7 @@ line, for human debuggability:
 {last_compacted_at, 1715522400000}.
 ```
 
-The format mirrors the WAL manifest (`bondy_oplog_wal_manifest`).
+The format mirrors the WAL manifest (`bondy_log_manifest`).
 Forward-compat: unknown fields parsed from disk are tolerated
 and dropped; missing required fields produce a typed parse
 error.
@@ -255,8 +255,8 @@ encode(#?MODULE{} = M) ->
 %% `write_read_survives_high_byte_root_test_` and
 %% `prop_encode_decode_roundtrip`, all through the real `file:consult/1`.
 %% `~tw` never string-renders a binary, but it does write an atom such as
-%% `'café'` verbatim, so the directive alone was not the fix (measured
-%% against `io_lib` + `file:consult/1`, 2026-09-03). With this manifest's
+%% `'café'` verbatim, so the directive alone does not close the class
+%% (measured against `io_lib` + `file:consult/1`). With this manifest's
 %% schema no atom field is free (`hash_algo` must be `sha256`), so that
 %% class is not reachable through `t()` and is NOT pinned here; the byte
 %% encoding is what keeps it unreachable as the schema grows.

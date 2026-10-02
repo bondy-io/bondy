@@ -3,13 +3,11 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_oplog_wal_frame).
+-module(bondy_log_frame).
 
--include("bondy_doc.hrl").
--include("bondy_oplog_wal.hrl").
+-include("bondy_log.hrl").
 
--moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Pure encode/decode of WAL frame headers and bodies.
 
 Every batch is written as one frame; a single-event append is a
@@ -18,7 +16,7 @@ one-element batch. The frame layout is:
 ```
 Offset  Size  Field           Description
 ------  ----  -----           -----------
-   0     4    Magic           0x42444F50  ("BDOP")
+   0     4    Magic           per-log constant, named by the adapter
    4     4    FrameLen        total frame length in bytes, including header
    8     4    CRC             over bytes [4 .. FrameLen)
   12     1    FrameVersion    schema version (1 or 2)
@@ -26,8 +24,14 @@ Offset  Size  Field           Description
                               bit 1: encrypted body  (v2 only)
                               bit 2: CRC32C          (v2 only — reserved)
                               bits 3..23: reserved, zero
-  16   var    Body            encoded list of bondy_oplog_event
+  16   var    Body            opaque to this module (the log kind decides)
 ```
+
+The magic is a **required parameter** of `encode/2`, `decode/2` and
+`decode_header/2` (option `{magic, M}`; omitting it is `badarg`). Each
+log kind names its own through its adapter (`bondy_log_record:frame_magic/0`)
+so a scanner resynchronising on one kind's frames never accepts another's;
+this module has no magic of its own.
 
 The CRC covers `FrameLen || FrameVersion || Flags || Body` — i.e.
 bytes `[4 .. FrameLen)`. It does **not** cover Magic or CRC itself;
@@ -57,28 +61,31 @@ format is the only consumer.
   accept both v1 and v2; v1 readers meeting a v2 frame return
   `unsupported_version`.
 
-`encode/1,2` returns the frame as iodata so callers (the writer,
+`encode/2` returns the frame as iodata so callers (the writer,
 tests) that hand the result to `prim_file:write/2` avoid an extra
 binary copy of the body. Wrap with `iolist_to_binary/1` if a
 contiguous binary is needed.
 
 This module is pure: no I/O. It is the building block used by the
-writer (`bondy_oplog_wal`), the reader (`bondy_oplog_wal_reader`), and
-the recovery scanner (`bondy_oplog_wal_recovery`).
-""").
+log writer (`bondy_log_wal`), reader (`bondy_log_reader`) and recovery
+scanner (`bondy_log_recovery`).
+""".
 
--define(MAGIC, ?BONDY_OPLOG_WAL_FRAME_MAGIC).
--define(HEADER_BYTES, ?BONDY_OPLOG_WAL_FRAME_HEADER_BYTES).
--define(VERSION_V1, ?BONDY_OPLOG_WAL_FRAME_VERSION_V1).
--define(VERSION_V2, ?BONDY_OPLOG_WAL_FRAME_VERSION_V2).
--define(VERSION_CURRENT, ?BONDY_OPLOG_WAL_FRAME_VERSION).
--define(KNOWN_FLAGS_V1, ?BONDY_OPLOG_WAL_FRAME_KNOWN_FLAGS_V1).
--define(KNOWN_FLAGS_V2, ?BONDY_OPLOG_WAL_FRAME_KNOWN_FLAGS_V2).
+-define(HEADER_BYTES, ?BONDY_LOG_FRAME_HEADER_BYTES).
+-define(VERSION_V1, ?BONDY_LOG_FRAME_VERSION_V1).
+-define(VERSION_V2, ?BONDY_LOG_FRAME_VERSION_V2).
+-define(VERSION_CURRENT, ?BONDY_LOG_FRAME_VERSION).
+-define(KNOWN_FLAGS_V1, ?BONDY_LOG_FRAME_KNOWN_FLAGS_V1).
+-define(KNOWN_FLAGS_V2, ?BONDY_LOG_FRAME_KNOWN_FLAGS_V2).
 
 -type body() :: iodata().
 -type frame() :: iodata().
 -type flags() :: 0..16#FFFFFF.
 -type frame_version() :: 0..16#FF.
+-type magic() :: 0..16#FFFFFFFF.
+-type encode_opt() ::
+    {version, frame_version()} | {flags, flags()} | {magic, magic()}.
+-type decode_opt() :: {magic, magic()}.
 -type decode_error() ::
     bad_magic
     | crc_mismatch
@@ -93,55 +100,49 @@ the recovery scanner (`bondy_oplog_wal_recovery`).
 -export_type([frame/0]).
 -export_type([flags/0]).
 -export_type([frame_version/0]).
+-export_type([magic/0]).
+-export_type([encode_opt/0]).
+-export_type([decode_opt/0]).
 -export_type([decode_error/0]).
 
--export([encode/1]).
 -export([encode/2]).
--export([decode/1]).
--export([decode_header/1]).
+-export([decode/2]).
+-export([decode_header/2]).
 -export([header_bytes/0]).
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
-?DOC("Returns the fixed frame header size in bytes (16).").
+-doc "Returns the fixed frame header size in bytes (16).".
 -spec header_bytes() -> pos_integer().
 
 header_bytes() ->
     ?HEADER_BYTES.
 
-?DOC("""
-Encodes `Body` into a frame with default version and zero flags.
-
-Equivalent to `encode(Body, [])`.
-""").
--spec encode(body()) -> frame().
-
-encode(Body) ->
-    encode(Body, []).
-
-?DOC("""
-Encodes `Body` into a frame. `Opts` may contain:
+-doc """
+Encodes `Body` into a frame. `Opts` must name the magic and may set:
 
 - `{version, FrameVersion}` — defaults to the current writer version
-  (`?BONDY_OPLOG_WAL_FRAME_VERSION`). Accepts `1` or `2`; explicit `1`
+  (`?BONDY_LOG_FRAME_VERSION`). Accepts `1` or `2`; explicit `1`
   is intended for tests producing legacy fixtures.
 - `{flags, Flags}` — only bits in the version's known-flags mask are
   accepted; any other bit produces `badarg` at encode-time so the
   on-disk format stays clean of forward contamination. Defaults to
   `0`.
+- `{magic, Magic}` — the 32-bit magic written at offset 0. Required;
+  a missing option or a value outside `0..16#FFFFFFFF` is `badarg`.
 
 `Body` may be any `iodata()`. The returned frame is also `iodata()` —
 callers that pass it to `prim_file:write/2` avoid an extra body copy.
 Wrap with `iolist_to_binary/1` if a contiguous binary is needed.
-""").
--spec encode(body(), [{version, frame_version()} | {flags, flags()}]) ->
-    frame().
+""".
+-spec encode(body(), [encode_opt()]) -> frame().
 
 encode(Body, Opts) when is_list(Opts) ->
     Version = proplists:get_value(version, Opts, ?VERSION_CURRENT),
     Flags = proplists:get_value(flags, Opts, 0),
+    Magic = required_magic(Opts),
     valid_version(Version) orelse error({badarg, {version, Version}}),
     valid_flags(Version, Flags) orelse
         error({badarg, {flags, Flags}}),
@@ -157,15 +158,17 @@ encode(Body, Opts) when is_list(Opts) ->
         [<<FrameLen:32/big-unsigned>>, VerFlags, Body]
     ),
     [
-        <<?MAGIC:32/big-unsigned, FrameLen:32/big-unsigned,
+        <<Magic:32/big-unsigned, FrameLen:32/big-unsigned,
             Crc:32/big-unsigned>>,
         VerFlags,
         Body
     ].
 
-?DOC("""
+-doc """
 Decodes a single frame from `Binary`. The binary must contain **exactly
 one complete frame**; both too-few and too-many bytes are errors.
+`Opts` must contain `{magic, Magic}` (a caller that omits it is `badarg`);
+a frame carrying any other magic is `bad_magic`.
 
 Returns `{ok, Body, Meta}` where `Meta = #{version => V, flags => F}`,
 or `{error, Reason}`. See `decode_error/0` for the reason space.
@@ -175,7 +178,7 @@ Errors used by the recovery scanner to drive break-and-truncate:
 - `truncated_body` — declared FrameLen exceeds the available bytes.
 - `trailing_bytes` — declared FrameLen is shorter than the available
   bytes; caller has read past the frame end.
-- `bad_magic` — Magic field is not `BDOP`.
+- `bad_magic` — Magic field is not the expected magic.
 - `crc_mismatch` — the frame's CRC (algorithm selected by version
   and `Flags` bit 2) does not match the computed value over
   `[4..FrameLen)`.
@@ -185,28 +188,34 @@ Errors used by the recovery scanner to drive break-and-truncate:
   set.
 
 For streaming decode (multiple frames in a stream), use
-`decode_header/1` to read the header from the first 16 bytes, then read
+`decode_header/2` to read the header from the first 16 bytes, then read
 `FrameLen - 16` more bytes and pass the complete frame here.
-""").
--spec decode(binary()) ->
+""".
+-spec decode(binary(), [decode_opt()]) ->
     {ok, binary(), #{version := frame_version(), flags := flags()}}
     | {error, decode_error()}.
 
-decode(Bin) when is_binary(Bin), byte_size(Bin) < ?HEADER_BYTES ->
+decode(Bin, Opts) when is_binary(Bin), is_list(Opts) ->
+    do_decode(Bin, required_magic(Opts)).
+
+%% @private
+do_decode(Bin, _Magic) when byte_size(Bin) < ?HEADER_BYTES ->
     %% Size check is first so a too-short input is reported as
     %% truncated regardless of whatever bytes it happens to contain.
     {error, truncated_header};
-decode(
-    <<?MAGIC:32/big-unsigned, FrameLen:32/big-unsigned, Crc:32/big-unsigned,
-        Version:8/unsigned, Flags:24/big-unsigned, Rest/binary>>
+do_decode(
+    <<Magic:32/big-unsigned, FrameLen:32/big-unsigned, Crc:32/big-unsigned,
+        Version:8/unsigned, Flags:24/big-unsigned, Rest/binary>>,
+    Magic
 ) ->
     decode_validated(FrameLen, Crc, Version, Flags, Rest);
-decode(<<Magic:32/big-unsigned, _/binary>>) when Magic =/= ?MAGIC ->
+do_decode(_Bin, _Magic) ->
     {error, bad_magic}.
 
-?DOC("""
+-doc """
 Decodes only the 16-byte frame header. Used by the streaming recovery
-scanner that reads the body separately after sizing.
+scanner that reads the body separately after sizing. `Opts` must
+contain `{magic, Magic}` as for `decode/2`.
 
 Returns `{ok, Header}` where `Header = #{frame_len => integer(),
 crc => integer(), version => frame_version(), flags => flags()}`, or
@@ -214,9 +223,9 @@ crc => integer(), version => frame_version(), flags => flags()}`, or
 
 `unknown_flag`, `unsupported_version` and `crc_mismatch` are **not**
 reported here; this is a sniff function. The caller must read the body
-and call `decode/1` for full validation.
-""").
--spec decode_header(binary()) ->
+and call `decode/2` for full validation.
+""".
+-spec decode_header(binary(), [decode_opt()]) ->
     {ok, #{
         frame_len := pos_integer(),
         crc := non_neg_integer(),
@@ -225,11 +234,16 @@ and call `decode/1` for full validation.
     }}
     | {error, bad_magic | length_invalid | truncated_header}.
 
-decode_header(Bin) when is_binary(Bin), byte_size(Bin) < ?HEADER_BYTES ->
+decode_header(Bin, Opts) when is_binary(Bin), is_list(Opts) ->
+    do_decode_header(Bin, required_magic(Opts)).
+
+%% @private
+do_decode_header(Bin, _Magic) when byte_size(Bin) < ?HEADER_BYTES ->
     {error, truncated_header};
-decode_header(
-    <<?MAGIC:32/big-unsigned, FrameLen:32/big-unsigned, Crc:32/big-unsigned,
-        Version:8/unsigned, Flags:24/big-unsigned, _/binary>>
+do_decode_header(
+    <<Magic:32/big-unsigned, FrameLen:32/big-unsigned, Crc:32/big-unsigned,
+        Version:8/unsigned, Flags:24/big-unsigned, _/binary>>,
+    Magic
 ) when FrameLen >= ?HEADER_BYTES ->
     {ok, #{
         frame_len => FrameLen,
@@ -237,13 +251,14 @@ decode_header(
         version => Version,
         flags => Flags
     }};
-decode_header(
-    <<?MAGIC:32/big-unsigned, FrameLen:32/big-unsigned, _/binary>>
+do_decode_header(
+    <<Magic:32/big-unsigned, FrameLen:32/big-unsigned, _/binary>>,
+    Magic
 ) when
     FrameLen < ?HEADER_BYTES
 ->
     {error, length_invalid};
-decode_header(<<Magic:32/big-unsigned, _/binary>>) when Magic =/= ?MAGIC ->
+do_decode_header(_Bin, _Magic) ->
     {error, bad_magic}.
 
 %% =============================================================================
@@ -320,6 +335,16 @@ valid_flags(Version, F) when is_integer(F), F >= 0, F =< 16#FFFFFF ->
     F band (bnot Mask band 16#FFFFFF) =:= 0;
 valid_flags(_Version, _F) ->
     false.
+
+%% @private
+%% The `{magic, M}` option every entry point requires: a missing option
+%% is a caller bug, not a data error, so it is `badarg` rather than an
+%% `{error, _}` a scanner could mistake for a bad frame.
+required_magic(Opts) ->
+    case proplists:get_value(magic, Opts) of
+        M when is_integer(M), M >= 0, M =< 16#FFFFFFFF -> M;
+        Other -> error({badarg, {magic, Other}})
+    end.
 
 %% @private
 known_flags(?VERSION_V1) -> ?KNOWN_FLAGS_V1;

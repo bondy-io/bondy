@@ -7,8 +7,9 @@
 %% `proofs/tla/SeqSeed.tla` refutes the shipped seeding rule and
 %% `proofs/isabelle/Seq_Seed.thy` proves the one built: at `init/1` the
 %% counter is the maximum over the compaction checkpoint's own-origin
-%% frontier entry, the live MST and the retained WAL — the last handed over
-%% by the WAL writer before it publishes its pid. Each case here is one of
+%% frontier entry, the live MST and the retained WAL — the last returned by
+%% `bondy_oplog_wal:open/2` and handed to the instance by the supervisor
+%% (`bondy_oplog_instance:wal_opened/3`) before minting opens. Each case here is one of
 %% the model's counterexample traces run against the real instance on a
 %% real directory: same instance id, same origin, same `storage_path`, a
 %% stop, a start. Both were red against the code as shipped.
@@ -17,7 +18,7 @@
 %% the proved rule it is `max acknowledged own seq + 1`; under a regressed
 %% counter it collides with an acknowledged seq.
 %%
-%% What each case discriminates (mutation-checked 2026-09-03):
+%% What each case discriminates (mutation-checked):
 %%   - `compact_to_empty_then_clean_restart` pins the Jepsen scenario. It
 %%     goes red only when BOTH the frontier seed and the WAL seed are gone:
 %%     under the shipped retention rule the WAL's head segment always holds
@@ -25,9 +26,15 @@
 %%     trace. The frontier seed is load-bearing for a WAL whose manifest
 %%     predates `max_seq` (first restart after upgrade) and for the general
 %%     retention rule the proof assumes; it has no falsifier of its own here.
-%%   - `mint_before_the_wal_tail_is_replayed` discriminates the WAL seed:
-%%     with `bondy_oplog_wal:init/1` seeding 0 it is red, the other stays
-%%     green.
+%%   - `mint_before_the_wal_tail_is_replayed` is the clean-stop trace, not
+%%     a WAL-seed falsifier: a clean stop writes the checkpoint, whose
+%%     `minted` slot seeds the restart on its own. Mutation-checked on BOTH
+%%     sides of the seed inversion — forcing the WAL-side seed to 0 and
+%%     `wal_opened/3` delivering 0 each leave it green.
+%%   - `mint_after_the_instance_is_killed` is the WAL-seed falsifier:
+%%     the instance is killed, so no
+%%     checkpoint is written and the retained WAL is the only durable
+%%     seed. With `wal_opened/3` delivering 0 it is red.
 %%
 %% `failed_datasync_does_not_remint_its_seq` makes one WAL datasync fail. The
 %% refused append's frame is already in the segment, so the seq the instance
@@ -54,6 +61,9 @@ seq_seed_restart_test_() ->
             end},
             {timeout, 60, fun() ->
                 checkpoint_records_the_minted_seq(Dir)
+            end},
+            {timeout, 60, fun() ->
+                mint_after_the_instance_is_killed(Dir)
             end},
             {timeout, 60, fun() ->
                 failed_datasync_does_not_remint_its_seq(Dir)
@@ -193,6 +203,59 @@ mint_before_the_wal_tail_is_replayed(Dir) ->
         close_shard(Cache, Proj)
     end.
 
+%% The retained WAL as the ONLY seed. The instance is killed — `terminate/2`
+%% never runs, so no checkpoint (and no minted slot) is written and the
+%% frontier is empty; the one_for_all sibling restart reopens the WAL and
+%% hands its maximum to the new instance (`wal_opened/3`). The first mint
+%% after the restart must land above that maximum. The registry row of the
+%% killed incarnation outlives it, fast-path bundle included: the new
+%% incarnation must not let a caller mint from that stale bundle before it
+%% has seeded (`init/1` clears it).
+mint_after_the_instance_is_killed(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    Origin = bondy_oplog_origin:new(),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    try
+        {ok, _} = open_pack_instance(InstId, NS, Dir, Origin, #{
+            drain_gated => true
+        }),
+        N = 10,
+        Keys = [
+            bondy_oplog:append(
+                InstId, {cell_apply, ?B, key(1, J), {set, 1000 + J, key(1, J)}}
+            )
+         || J <- lists:seq(1, N)
+        ],
+        MaxSeq = lists:max([bondy_oplog_event:key_seq(K) || K <- Keys]),
+        ?assertEqual(N, MaxSeq),
+        %% Premise: no checkpoint exists, nothing was applied.
+        ?assertEqual([], checkpoint_files_lenient(Dir, InstId)),
+        ?assertEqual(undefined, mst_last_key(InstId)),
+
+        OldInst = bondy_oplog_instance:whereis(InstId),
+        OldWal = bondy_oplog_registry:wal_pid(InstId),
+        true = is_pid(OldInst) andalso is_pid(OldWal),
+        true = exit(OldInst, kill),
+        ok = await_subtree_restart(InstId, OldInst, OldWal, 5000),
+        ?assertEqual([], checkpoint_files_lenient(Dir, InstId)),
+        ?assertEqual(
+            #{}, maps:with([Origin], bondy_oplog_registry:frontier(InstId))
+        ),
+
+        Key = append_when_open(
+            InstId,
+            {cell_apply, ?B, <<"after">>, {set, 99_000, <<"after">>}},
+            5000
+        ),
+        ?assertEqual(Origin, bondy_oplog_event:key_origin(Key)),
+        ?assertEqual(MaxSeq + 1, bondy_oplog_event:key_seq(Key))
+    after
+        ok = bondy_oplog:stop_instance(InstId),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj)
+    end.
+
 %% The compaction checkpoint carries the own-origin MINTED maximum in a slot
 %% of its own, separate from the applied frontier.
 %%
@@ -201,7 +264,7 @@ mint_before_the_wal_tail_is_replayed(Dir) ->
 %% while the allocator needs "highest seq ever handed out" and treats an
 %% under-claim as licence to re-mint a dot a peer already applied. They ride
 %% one map today, so capping the frontier for soundness would regress the
-%% allocator — the trap in `_design/applied_frontier.md` §5.
+%% allocator.
 %%
 %% The discriminating assertion is the one on the PERSISTED PAYLOAD: the
 %% own-origin frontier entry is reaped before the checkpoint is written, so a
@@ -308,7 +371,7 @@ failed_datasync_does_not_remint_its_seq(Dir) ->
         end),
         ?assertMatch({error, _}, Refused),
         _ = append_until_accepted(InstId, <<"accepted">>, 100),
-        {ok, It} = bondy_oplog_wal_reader:open(
+        {ok, It} = bondy_log_reader:open(
             bondy_oplog_registry:wal_pid(InstId), beginning, [{follow, false}]
         ),
         Seqs = [
@@ -381,7 +444,7 @@ append_until_accepted(InstId, K, N) ->
     end.
 
 read_all(It0, Acc) ->
-    case bondy_oplog_wal_reader:next(It0) of
+    case bondy_log_reader:next(It0) of
         {ok, Events, _, _, It} -> read_all(It, Acc ++ Events);
         end_of_log -> Acc
     end.
@@ -411,6 +474,64 @@ checkpoint_files(Dir, InstId) ->
     ],
     ?assert(length(Files) >= 1),
     Files.
+
+checkpoint_files_lenient(Dir, InstId) ->
+    [
+        F
+     || F <- filelib:wildcard(filename:join(Dir, "**/checkpoint.etf")),
+        string:find(F, binary_to_list(InstId)) =/= nomatch
+    ].
+
+%% Polls until the one_for_all restart has produced a new instance AND a
+%% new WAL pid, both alive.
+await_subtree_restart(InstId, OldInst, OldWal, TimeoutMs) ->
+    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
+    await_subtree_restart_loop(InstId, OldInst, OldWal, Deadline).
+
+await_subtree_restart_loop(InstId, OldInst, OldWal, Deadline) ->
+    Inst = bondy_oplog_instance:whereis(InstId),
+    Wal = bondy_oplog_registry:wal_pid(InstId),
+    Fresh =
+        is_pid(Inst) andalso Inst =/= OldInst andalso
+            is_process_alive(Inst) andalso
+            is_pid(Wal) andalso Wal =/= OldWal andalso
+            is_process_alive(Wal),
+    case Fresh of
+        true ->
+            ok;
+        false ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true -> error({subtree_restart_timeout, Inst, Wal});
+                false -> timer:sleep(20)
+            end,
+            await_subtree_restart_loop(InstId, OldInst, OldWal, Deadline)
+    end.
+
+%% `bondy_oplog:append/2` answers `{error, wal_unavailable}` (or `noproc`
+%% while the instance is mid-restart) until `wal_opened/3` has landed;
+%% retry until it mints.
+append_when_open(InstId, Op, TimeoutMs) ->
+    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
+    append_when_open_loop(InstId, Op, Deadline).
+
+append_when_open_loop(InstId, Op, Deadline) ->
+    Res =
+        try bondy_oplog:append(InstId, Op) of
+            R -> R
+        catch
+            error:{noproc, _} -> {error, noproc}
+        end,
+    case Res of
+        {error, Reason} when
+            Reason =:= wal_unavailable; Reason =:= noproc
+        ->
+            erlang:monotonic_time(millisecond) > Deadline andalso
+                error({append_timeout, Reason}),
+            timer:sleep(20),
+            append_when_open_loop(InstId, Op, Deadline);
+        Key ->
+            Key
+    end.
 
 mk_id() ->
     list_to_binary(

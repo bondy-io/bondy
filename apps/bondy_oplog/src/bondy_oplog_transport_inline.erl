@@ -60,15 +60,9 @@ do_request(PeerInstance, get_root) ->
     _ = bondy_oplog_instance:await_apply(PeerInstance),
     {ok, bondy_oplog_instance:root_hash(PeerInstance)};
 do_request(PeerInstance, get_frontier) ->
-    %% Snapshot the applied VV FIRST, then drain, then answer the
-    %% SNAPSHOT — the responder's installed-consistency order (see
-    %% `bondy_oplog_responder`'s `get_frontier` clause): every event the
-    %% snapshot counts is in the overlay before the drain starts, so it
-    %% is installed by the time we answer and the round's later root
-    %% read is same-or-newer. Draining first and reading after can
-    %% count an event applied mid-call that the served tree cannot yet
-    %% ship. In-VM transport ⇒ no fingerprint leg (the responder's
-    %% Partisan path carries it).
+    %% The responder's installed-consistency order: snapshot the applied
+    %% vector FIRST, then drain, then answer the SNAPSHOT. In-VM transport,
+    %% so there is no fingerprint leg — the Partisan path carries that.
     Frontier = bondy_oplog_instance:frontier(PeerInstance),
     _ = bondy_oplog_instance:await_apply(PeerInstance),
     {ok, Frontier};

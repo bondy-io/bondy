@@ -305,16 +305,16 @@ range_asc_returns_ascending({Pid, _Dir}) ->
 %% `High = infinity` — the form EVERY band-paging caller uses
 %% ---------------------------------------------------------------------------
 %%
-%% This branch used to fold the whole bucket (`{range, Bucket, all}`) and
-%% discard `Key < Low` inside the fold function, so each page re-visited every
-%% key below `Low`. It now seeds the ledger range at `Low` instead.
+%% This branch seeds the ledger range at `Low`. Folding the whole bucket
+%% (`{range, Bucket, all}`) and discarding `Key < Low` inside the fold
+%% function re-visits every key below `Low` on every page.
 %%
 %% These pin EQUIVALENCE, which is all that is testable here. There is
-%% deliberately no cost ratchet: measured, a skipped ledger entry costs about
-%% 0.3us, against roughly 22ms of fixed snapshot setup per `range/5` call, so
-%% at any bucket size a unit test can build the signal sits inside the noise.
-%% The change is an asymptotic one (the drain of a band stops being quadratic
-%% in the band's length) and is not enforced by a test.
+%% deliberately no cost ratchet: a skipped ledger entry costs far less than
+%% the fixed snapshot setup per `range/5` call, so at any bucket size a unit
+%% test can build the signal sits inside the noise. The property is
+%% asymptotic — draining a band stops being quadratic in the band's length
+%% — and is not enforced by a test.
 
 range_open_ended_is_inclusive_of_low({Pid, _Dir}) ->
     fun() ->

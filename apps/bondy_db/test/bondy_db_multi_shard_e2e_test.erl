@@ -223,16 +223,13 @@ multi_realm_isolation_under_fanout({_Topo, Db, _Sup, _Dir}) ->
     ok = bondy_db:close_table(T).
 
 per_shard_scan_recovers_all_keys({_Topo, Db, _Sup, _Dir}) ->
-    %% `bondy_db:range/5` is single-shard by contract; the caller
-    %% scatters. Write a fanned-out key set, scatter-scan, then verify
-    %% the union (deduplicated) equals the input set and each row's
-    %% value+HLC matches what was written.
+    %% `bondy_db:range/5` is single-shard by contract; the caller scatters.
     %%
-    %% Per-entity routes each shard to its own bookie, so each shard's
-    %% scan returns a disjoint slice. Single-bookie aliases every shard
-    %% onto one bookie, so each shard's scan returns the *whole* bucket
-    %% — the same key surfaces once per shard. `usort` flattens both
-    %% cases to the union semantics that the test actually cares about.
+    %% Per-entity routes each shard to its own bookie, so each shard's scan
+    %% returns a disjoint slice. Single-bookie aliases every shard onto one
+    %% bookie, so each shard's scan returns the *whole* bucket — the same key
+    %% surfaces once per shard. `usort` flattens both cases to the union
+    %% semantics the test cares about.
     {ok, T} = bondy_db:open_table(Db, users, #{}),
     Realm = <<"r1">>,
     Keys = test_keys(?KEYS),

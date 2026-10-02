@@ -4,15 +4,12 @@
 %% =============================================================================
 
 %% `bondy_db:probe_write/1` and `bondy_db:delete/3` on a **fused** instance
-%% — both go through `bondy_db:probe_module/1`, which previously resolved
-%% the instance's `cell_apply_target` via the applier only: for a fused
-%% instance (which has none by design) it always returned `undefined`, so
-%% `probe_write/1` always reported `{skip, no_crdt_module}` (breaking the
-%% opt-in idle-latency heartbeat) and `delete/3` always returned
-%% `{error, {no_crdt_module, _}}` (breaking whole-cell removal), regardless
-%% of whether the table's CRDT actually supported either. `bondy_oplog_
-%% instance:cell_apply_target/1` (new, mirroring the applier's) fixes the
-%% resolution; both call sites needed no changes beyond that.
+%% — both go through `bondy_db:probe_module/1`, which must resolve the
+%% instance's `cell_apply_target` through
+%% `bondy_oplog_instance:cell_apply_target/1` and not through the applier
+%% alone: a fused instance has no applier by design, so an applier-only
+%% resolution answers `undefined` for it and reports `{skip, no_crdt_module}`
+%% and `{error, {no_crdt_module, _}}` whatever the table's CRDT supports.
 -module(bondy_db_probe_delete_fused_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -59,8 +56,8 @@ delete_on_fused() ->
         {ok, {true, hlc}}, strip_hlc(bondy_db:read(T, <<"r1">>, <<"f">>))
     ),
 
-    %% delete/3 previously failed with {error, {no_crdt_module, _}} for
-    %% any fused table, regardless of whether its CRDT supported removal.
+    %% An applier-only `cell_apply_target` resolution refuses this with
+    %% `{error, {no_crdt_module, _}}` whatever the CRDT supports.
     ok = bondy_db:delete(T, <<"r1">>, <<"f">>),
     ?assertEqual(
         {ok, {false, hlc}}, strip_hlc(bondy_db:read(T, <<"r1">>, <<"f">>))

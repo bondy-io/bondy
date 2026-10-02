@@ -135,9 +135,9 @@ idle_clears() ->
 
 %% A consumer offset committed at `{Seg, Off}`.
 co({Seg, Off}) ->
-    CO0 = bondy_oplog_wal_state:new_consumer_offset(),
-    CO1 = bondy_oplog_wal_state:with_position(CO0, Seg, Off),
-    bondy_oplog_wal_state:with_commit_count(CO1, 1).
+    CO0 = bondy_log_state:new_consumer_offset(),
+    CO1 = bondy_log_state:with_position(CO0, Seg, Off),
+    bondy_log_state:with_commit_count(CO1, 1).
 
 %% This fixture runs SASL's own `alarm_handler`, whose `get_alarms/0` returns
 %% the raw term the producer raised — here the `{Id, Description, Opts}` triple,

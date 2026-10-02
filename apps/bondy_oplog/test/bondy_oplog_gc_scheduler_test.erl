@@ -134,7 +134,7 @@ trigger_error_does_not_crash() ->
     ?assert(is_process_alive(Pid)),
     ok = bondy_oplog:stop_instance(Inst).
 
-%% Step 5 of BONDY_DB_RECLAMATION_PLAN.md — a SECOND scheduler instance with
+%% A SECOND scheduler instance with
 %% its own name, interval, cap and trigger runs concurrently with the default
 %% one, and neither observes the other's ticks or settings. This is what lets
 %% reclamation run on its own cadence without duplicating the module.

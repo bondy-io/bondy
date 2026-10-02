@@ -106,7 +106,6 @@ before its child is terminated (`bondy_db_leveled_sup_test`).
 -export([bookies/1]).
 -export([bookie_roots/1]).
 
-%% Child start callback (keyed Bookies) — not part of the public API.
 -export([start_registered/3]).
 -export([book_start/1]).
 
@@ -153,8 +152,6 @@ stop(Sup) when is_pid(Sup) ->
                 catch
                     _:_ -> ok
                 end,
-            %% Erase the keyed handle registration (no-op for the
-            %% never-registered anonymous ids).
             _ = persistent_term:erase(?PT_KEY(Sup, Id))
         end,
         Ids

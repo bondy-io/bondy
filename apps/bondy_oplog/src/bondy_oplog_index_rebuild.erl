@@ -178,7 +178,6 @@ run_rebuild(NS, IndexName) ->
         AllSec = [E || E <- Shards, is_secondary(E)],
         case Targets of
             [] ->
-                %% No such index registered under NS — nothing to rebuild.
                 ok;
             _ ->
                 do_rebuild(NS, IndexName, Primaries, Targets, AllSec),

@@ -301,14 +301,13 @@ incoming_root_restart(Dir) ->
     ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
     ok.
 
-%% This began as a regression for the LIVE symptom: the main shards used
-%% SLASH-bearing instance ids (`main/13`), so the instance directory ended in
-%% TWO components and a path helper that strips one to find the "base"
-%% double-nested the id (`.../main/main/13`) — the persisted root was
-%% read/written on a different path than the data, the tree never restored on
-%% reopen, and the WAL replayed in full every boot.
+%% The LIVE symptom this guards: a SLASH-bearing instance id (`main/13`) ends
+%% the instance directory in TWO components, so a path helper that strips one
+%% to find the "base" double-nests the id (`.../main/main/13`) — the persisted
+%% root is read and written on a different path than the data, the tree never
+%% restores on reopen, and the WAL replays in full every boot.
 %%
-%% That whole class is now unreachable rather than fixed:
+%% That whole class is unreachable rather than guarded against:
 %% `bondy_oplog_path:storage_path/3` REFUSES an id containing `/`, and
 %% `bondy_db:encode_instance_id/2,3` joins with `-`, so an id always names one
 %% directory and `filename:dirname/1` strips exactly the instance. The two
@@ -480,17 +479,16 @@ run(Dir) ->
     ?assert(is_pid(InstP)),
     ?assert(is_pid(ApplierPid)),
 
-    %% The fix: the instance folds its own (sealed-pack) MST and returns the full
-    %% set of pairs. This is the cold-replay fold the applier now DELEGATES here
-    %% instead of running in its own process — reading the sealed packs from the
-    %% fd-owning process, which is the whole point.
+    %% The instance folds its own (sealed-pack) MST and returns the full set
+    %% of pairs. The applier DELEGATES the cold-replay fold here rather than
+    %% running it in its own process, so the sealed packs are read from the
+    %% fd-owning process — which is the whole point.
     {ok, {_Root, Pairs}} = bondy_oplog_instance:replay_pairs(InstP, undefined),
     ?assertEqual(?BATCH, length(Pairs)),
 
-    %% Best-effort reproduction of the bug for documentation: folding the same
-    %% MST from THIS (foreign) process reads a raw, instance-owned fd for any
-    %% sealed page not in the page cache and crashes with
-    %% `not_on_controlling_process` — the failure the fix avoids. Not asserted,
+    %% The contrast, not asserted: folding the same MST from THIS (foreign)
+    %% process reads a raw, instance-owned fd for any sealed page not in the
+    %% page cache and crashes with `not_on_controlling_process`. Unassertable
     %% because a warm page cache can serve every page from RAM.
     _ =
         try

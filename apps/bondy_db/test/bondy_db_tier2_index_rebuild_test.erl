@@ -25,8 +25,8 @@
 %%   1. Sequential dominance: the rebuilt projected column EXACTLY equals
 %%      the live column — no resurrected superseded siblings.
 %%   2. Genuine concurrency: the rebuilt column PRESERVES legitimate
-%%      concurrent siblings (the fix reads the value, it does not collapse
-%%      it).
+%%      concurrent siblings — reading the value preserves them where
+%%      re-folding collapses them.
 
 -module(bondy_db_tier2_index_rebuild_test).
 

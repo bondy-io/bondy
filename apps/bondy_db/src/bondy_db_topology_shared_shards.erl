@@ -122,7 +122,6 @@ init(DbName, Opts) when is_atom(DbName), is_map(Opts) ->
                         sup => Sup,
                         dir => ?COMMON:normalise_dir(Dir),
                         book_opts_fun => BookOpts,
-                        %% Resolved on first `open_table/4`.
                         shard_count => undefined,
                         shards => #{}
                     },
@@ -153,7 +152,6 @@ open_table(EntityType, ShardCount, _TableOpts, #{dir := Dir} = State0) when
     end.
 
 route(Shard, State) when is_integer(Shard) ->
-    %% Shared with `bondy_db_topology_per_entity` via the common helper.
     ?COMMON:route(Shard, State).
 
 -doc """

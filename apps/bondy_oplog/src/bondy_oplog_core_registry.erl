@@ -161,44 +161,40 @@ keeps reads parallel.
     %% table's writes. Appended last so existing `#entry`-index
     %% `ets:update_element` writes stay valid.
     causal_tier = tier_0 :: bondy_oplog_crdt:tier(),
-    %% Index shards only. The `bondy_oplog_projection_adapter:clear_scope()`
-    %% the rebuild passes to `Adapter:clear/2` when wiping this shard before a
+    %% Index shards only. The `bondy_oplog_projection_adapter:clear_scope()` the
+    %% rebuild passes to `Adapter:clear/2` when wiping this shard before a
     %% re-fold. The owner (`bondy_db`) computes it from the topology's keyspace
     %% layout: `{entity, ET, IndexName}` on a backend that co-locates several
-    %% tables in one Bookie (`shared_shards`, `single_bookie`) so a sibling
+    %% tables in one Bookie (`shared_shards`, `single_bookie`), so a sibling
     %% table sharing the same `IndexName` is not over-wiped; `{suffix, _}` on a
-    %% single-table handle. `undefined` for primary shards and as a backward-
-    %% compatible default — `reset_target_shard/1` then falls back to the
-    %% bare-suffix scope. Appended last so existing `#entry`-index
-    %% `ets:update_element` writes stay valid.
+    %% single-table handle. `undefined` for primary shards, and
+    %% `reset_target_shard/1` then falls back to the bare-suffix scope.
     index_clear_scope = undefined ::
         bondy_oplog_projection_adapter:clear_scope() | undefined,
-    %% Primary shards only. The `bondy_oplog_projection_adapter:cell_keys_scope()`
-    %% the secondary-index rebuild passes to `Adapter:cell_keys/2` to enumerate
-    %% this primary's complete cell directory from the durable projection. The
-    %% owner (`bondy_db`) computes it from the topology's keyspace layout:
-    %% `{entity, ET}` on a backend whose primary bucket carries the entity type
+    %% Primary shards only. The
+    %% `bondy_oplog_projection_adapter:cell_keys_scope()` the secondary-index
+    %% rebuild passes to `Adapter:cell_keys/2` to enumerate this primary's
+    %% complete cell directory from the durable projection. The owner
+    %% (`bondy_db`) computes it from the topology's keyspace layout: `{entity,
+    %% EntityType}` on a backend whose primary bucket carries the entity type
     %% (`shared_shards`, `single_bookie`); `all_primary` on a dedicated-Bookie
     %% backend whose bucket is realm-keyed (`per_entity`). `undefined` for index
-    %% shards and as a backward-compatible default — the rebuild then falls back
-    %% to the MST walk. Appended last so existing `#entry`-index
-    %% `ets:update_element` writes stay valid.
+    %% shards, and the rebuild then falls back to the MST walk.
     primary_cell_scope = undefined ::
         bondy_oplog_projection_adapter:cell_keys_scope() | undefined,
     %% Primary shards only. The per-table routing config the multiplexer needs to
     %% (re)build a cell-apply ctx from the registry ALONE, so a `one_for_all`
     %% instance-subtree restart can self-heal its `cell_apply_source` for every
-    %% table on the shard (the runtime `register_table/4` adds are otherwise lost
-    %% on restart). The registry entry survives the restart; the applier/fused
-    %% instance rebuilds its source from every primary entry whose `instance_id`
-    %% matches.
+    %% table on the shard — the runtime `register_table/4` adds are otherwise
+    %% lost on restart. The registry entry survives the restart; the applier or
+    %% fused instance rebuilds its source from every primary entry whose
+    %% `instance_id` matches.
     %%
-    %% `cell_apply_bucket`: the entity-type Bucket this table's events carry —
+    %% `cell_apply_bucket` is the entity-type Bucket this table's events carry,
     %% the multiplexer's directory key. Set only for a `per_shard` (collapsed)
-    %% instance, where it is realm-independent (`atom_to_binary(ET)`); `undefined`
-    %% for a `per_table_shard` (single-table) instance, whose source is keyless.
-    %% Appended last so existing `#entry`-index `ets:update_element` writes stay
-    %% valid.
+    %% instance, where it is realm-independent (`atom_to_binary(ET)`);
+    %% `undefined` for a `per_table_shard` (single-table) instance, whose source
+    %% is keyless.
     cell_apply_bucket = undefined :: binary() | undefined,
     %% `publish_ns`: the namespace remote-merge events publish under
     %% (`publish => true` tables), or `undefined`. Authoritative here so a
@@ -220,10 +216,9 @@ keeps reads parallel.
     %% (`NS/IndexName/idx/SecShard`, one writer per index shard) on a
     %% `per_table_shard` backend. `undefined` for primary shards and for a raw
     %% registration. The durable basis for refcounted writer teardown
-    %% (`writer_key_in_use/1`) and crash self-healing
-    %% (`index_entries_for_writer/1`), exactly as `instance_id` is for primaries.
-    %% Appended last so existing `#entry`-index `ets:update_element` writes stay
-    %% valid.
+    %% (`writer_key_in_use/1`) and crash/epoch self-healing
+    %% (`index_entries_for_writer/1`), exactly as `instance_id` is for
+    %% primaries.
     writer_key = undefined :: binary() | undefined,
     %% Optional per-table construction config for a `crdt_module` that needs
     %% more than an event to build its bottom state (e.g.
@@ -241,10 +236,13 @@ keeps reads parallel.
 }).
 
 -record(state, {
-    %% MonitorRef -> shard_key()
     mon_to_key = #{} :: #{reference() := shard_key()},
-    %% shard_key() -> MonitorRef
-    key_to_mon = #{} :: #{shard_key() := reference()}
+    key_to_mon = #{} :: #{shard_key() := reference()},
+    %% Fresh `make_ref()` per gen_server start. Exposed via
+    %% `current_epoch/0` and broadcast on `bondy_oplog_core_events`
+    %% under topic `bondy_oplog_core_registry_started`. Owners cache the
+    %% epoch and treat a change as "registry was restarted; re-register".
+    epoch :: reference()
 }).
 
 -type shard_key() :: {atom(), atom(), non_neg_integer()}.
@@ -989,17 +987,14 @@ back to the primary) until a rebuild clears the flag. No-op for a primary.
 index_mark_rebuild(#entry{inflight_ref = undefined}) ->
     ok;
 index_mark_rebuild(#entry{inflight_ref = Ref} = E) ->
-    %% Durable trust marker: on the 0→1 transition, REMOVE the trust marker so
-    %% the "not trusted" state survives restart — a dropped/wedged durable shard
-    %% is then rebuilt on the next open instead of trusted incomplete. The
-    %% removal MUST be synchronous (an async removal could be lost in a crash,
-    %% leaving the marker present → a silently-incomplete index trusted on
-    %% restart), so we keep it inline but gate it on the transition: a sustained
-    %% saturation calling this per dropped batch then pays the projection
-    %% `delete` only ONCE (until a rebuild clears the flag), not per drop.
-    %% `atomics:exchange` makes the test-and-set race-free across concurrent
-    %% markers. On an ephemeral (ETS) projection the marker set is wiped with
-    %% the table on restart anyway, which is also correct (the index rebuilds).
+    %% Durable trust marker: on the 0->1 transition REMOVE the marker, so "not
+    %% trusted" survives restart and a dropped or wedged durable shard is
+    %% rebuilt on the next open rather than trusted incomplete. The removal
+    %% must be SYNCHRONOUS — an async one could be lost in a crash, leaving
+    %% the marker present and a silently incomplete index trusted on restart —
+    %% so it stays inline, gated on the transition: sustained saturation pays
+    %% the projection `delete` once until a rebuild clears the flag, not once
+    %% per dropped batch. `atomics:exchange` makes the test-and-set race-free.
     case atomics:exchange(Ref, ?NEEDS_REBUILD_SLOT, 1) of
         1 -> ok;
         _ -> remove_trust_marker(E)
@@ -1165,15 +1160,15 @@ trust_marker_frame() ->
 %% API: durable index clean-shutdown flag
 %% =============================================================================
 %% The cold-start trust decision's second gate. The trust marker says a shard
-%% was *built*; this flag says it was *cleanly closed* — its in-flight coalesce
+%% was BUILT; this flag says it was CLEANLY CLOSED — its in-flight coalesce
 %% buffer reached disk before shutdown. A shard is trusted on open only if both
 %% are present; otherwise it is rebuilt. `bondy_db:close_table/1` sets it after
-%% `flush_sync`; cold-start reads then clears it (so a crash this run leaves the
-%% shard dirty → rebuilt next open). Presence-only, reusing the trust marker's
-%% payload-free frame. Stored at `bondy_oplog_index_key:clean_flag_loc/3`
-%% (reserved bucket `<<"$idx_clean">>`, outside the index keyspace). All
-%% best-effort (`catch`): a persistence failure degrades to a rebuild on the next
-%% open, never raising into the caller.
+%% `flush_sync`; cold-start reads then clear it, so a crash this run leaves the
+%% shard dirty and it is rebuilt next open. Presence-only, reusing the trust
+%% marker's payload-free frame. Stored at
+%% `bondy_oplog_index_key:clean_flag_loc/3` (reserved bucket `<<"$idx_clean">>`,
+%% outside the index keyspace). All best-effort (`catch`): a persistence failure
+%% degrades to a rebuild on the next open, never raising into the caller.
 
 -doc """
 Write the durable clean-shutdown flag for an index shard, certifying it was
@@ -1266,8 +1261,6 @@ init([]) ->
 
 handle_call({register, NS, Index, Shard, Owner, Config}, _From, State0) ->
     Key = {NS, Index, Shard},
-    %% If a previous registration exists for this key, demonitor it
-    %% before installing the new owner.
     State1 = drop_monitor_for_key(Key, State0),
     Ae =
         case maps:find(ae_atomics, Config) of

@@ -120,8 +120,7 @@ gap_within(Local, Peer, Phantom, N) ->
 %% into the projection. The bootstrapped replica's clock must absorb them, or
 %% its next locally minted event can carry an HLC BELOW a stability point
 %% computed from the very cells it installed — the resurrection hazard
-%% causal-stability reclamation exists to prevent
-%% (BONDY_DB_RECLAMATION_PROOF.md §7.1).
+%% causal-stability reclamation exists to prevent.
 %%
 %% Two deliberate test-shape choices:
 %% - The peer's MST is truncated EMPTY before the bootstrap, so the AAE round
@@ -175,12 +174,11 @@ bootstrap_absorbs_installed_hlcs() ->
     teardown(Peer),
     teardown(Local).
 
-%% Direct, deterministic regression for the fix mechanism. A catalogue bootstrap
-%% ships the peer's projection cells, which carry only HLC + value — NOT the
-%% per-origin `{Origin, Seq}` the applied-frontier VV is built from — so the
-%% frontier cannot be derived from the install and must be ADOPTED from the
-%% peer. `finalize_catalogue_bootstrap/4` does that; the legacy `/3` must not
-%% (an empty merge), preserving its historical behaviour.
+%% A catalogue bootstrap ships the peer's projection cells, which carry only
+%% HLC + value — NOT the per-origin `{Origin, Seq}` the applied-frontier VV is
+%% built from — so the frontier cannot be derived from the install and must be
+%% ADOPTED from the peer. `finalize_catalogue_bootstrap/4` adopts it; `/3`
+%% merges nothing.
 finalize_adopts_peer_frontier() ->
     {Local, _, _, _} = setup_instance(),
     ?assertEqual(#{}, bondy_oplog_instance:frontier(Local)),
@@ -189,7 +187,7 @@ finalize_adopts_peer_frontier() ->
     ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
         Local, 0, PeerFrontier, true
     ),
-    %% THE FIX: the peer's applied frontier is adopted.
+    %% The peer's applied frontier is adopted.
     ?assertEqual(PeerFrontier, bondy_oplog_instance:frontier(Local)),
 
     %% Legacy `/3` leaves the frontier untouched (empty merge), unchanged.
@@ -224,8 +222,8 @@ finalize_does_not_go_live_on_an_unpersisted_frontier() ->
 %% post-import state). With the source MST empty the tail anti-entropy transfers
 %% nothing, so the ONLY way the bootstrapped replica gets a non-empty frontier
 %% is by adopting the peer's in finalize. `WasLive = false` (pre_bootstrap)
-%% means `finish_bootstrap` does not rederive either. Before the fix the
-%% replica therefore held all the projection data yet kept an EMPTY frontier —
+%% means `finish_bootstrap` does not rederive either. Without the adoption the
+%% replica holds all the projection data and an EMPTY frontier —
 %% DIVERGED-with-data forever against the convergence oracle.
 bootstrap_seeds_local_frontier() ->
     BaseDir = test_dir(),
@@ -260,9 +258,9 @@ bootstrap_seeds_local_frontier() ->
 
     {ok, _} = bondy_oplog_sync_session:bootstrap_catalogue(Local, Peer, #{}),
 
-    %% THE FIX: with the source MST compacted-empty, the only path to a
-    %% non-empty frontier is adopting the peer's in finalize. Without it the
-    %% replica stays DIVERGED-with-data — the production symptom.
+    %% With the source MST compacted-empty, the only path to a non-empty
+    %% frontier is adopting the peer's in finalize. Without it the replica
+    %% stays DIVERGED-with-data.
     ?assertEqual(PeerFrontier, bondy_oplog_instance:frontier(Local)),
 
     teardown(Peer),

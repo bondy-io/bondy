@@ -28,7 +28,8 @@
         %% over Partisan (deployments run connect_disterl => false).
         partisan,
         %% Umbrella
-        bondy_mst
+        bondy_mst,
+        bondy_log
     ]},
     {env, []},
     {modules, []},

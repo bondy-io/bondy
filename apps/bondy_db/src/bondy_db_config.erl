@@ -203,7 +203,6 @@ larger.
 
 leveled_opts() ->
     [
-        %% Ledger cache and journal sizing.
         {cache_size, get(leveled_cache_size, 2000)},
         {cache_multiple, get(leveled_cache_multiple, 2)},
         {max_journalsize, get(leveled_max_journalsize, 1_000_000_000)},
@@ -213,10 +212,8 @@ leveled_opts() ->
         {ledger_preloadpagecache_level,
             get(leveled_ledger_preloadpagecache_level, 4)},
 
-        %% Durability.
         {sync_strategy, get(leveled_sync_strategy, none)},
 
-        %% Journal compaction.
         {waste_retention_period,
             optional(get(leveled_waste_retention_period, off))},
         {max_run_length, optional(get(leveled_max_run_length, default))},
@@ -227,17 +224,14 @@ leveled_opts() ->
         {journalcompaction_scoreonein,
             get(leveled_journalcompaction_scoreonein, 1)},
 
-        %% Compression.
         {compression_method, get(leveled_compression_method, lz4)},
         {compression_point, get(leveled_compression_point, on_receipt)},
         {compression_level, get(leveled_compression_level, 1)},
         {ledger_compression, get(leveled_ledger_compression, as_store)},
 
-        %% Snapshots.
         {snapshot_timeout_short, get(leveled_snapshot_timeout_short, 900)},
         {snapshot_timeout_long, get(leveled_snapshot_timeout_long, 43_200)},
 
-        %% Logging and statistics.
         {log_level, get(leveled_log_level, info)},
         {stats_percentage, get(leveled_stats_percentage, 10)},
         {stats_logfrequency, get(leveled_stats_logfrequency, 30)}

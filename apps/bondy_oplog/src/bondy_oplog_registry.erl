@@ -67,7 +67,8 @@ table's lifecycle tied to a supervisor child.
     watermark :: undefined | bondy_oplog_event:event_key(),
     snapshot :: undefined | {bondy_oplog_event:event_key(), term()},
     live_size :: non_neg_integer(),
-    %% Filled in by `bondy_oplog_wal:init/1` after the row exists.
+    %% Published by `bondy_oplog_log_adapter:register/2` after the row
+    %% exists.
     %% Stays `undefined` between an instance gen_server start and the
     %% WAL writer's first publish, and after a one_for_all subtree
     %% restart between the instance's init and the WAL's init.
@@ -94,18 +95,15 @@ table's lifecycle tied to a supervisor child.
     %% (no heir) — the row's `overlay_tab` field is then stale until the
     %% next instance `init/1` republishes a fresh tid.
     overlay_tab :: ets:tid() | undefined,
-    %% Bundle of per-instance handles + immutable opts that the
-    %% `bondy_oplog_instance:append_fast/2,3` path needs to build
-    %% an event entirely in the caller's process. Set once, at
-    %% instance init, to either:
-    %% - `undefined` when the configured validator is *not* stateless
-    %%   (or the consumer disabled the fast path explicitly): all
-    %%   appends route through the instance gen_server.
-    %% - a map with `hlc`, `seq`, `overlay_counters`, `origin`,
-    %%   `validator_module`, `validator_state`, and the overlay /
-    %%   working-set caps: the caller signs in-process, calls the
-    %%   WAL directly, inserts the overlay row itself, and bumps the
-    %%   shared atomics.
+    %% Bundle of per-instance handles + immutable opts that
+    %% `bondy_oplog_instance:append_fast/2,3` needs to build an event entirely
+    %% in the caller's process. Set once, at instance init, to `undefined` when
+    %% the configured validator is not stateless (or the consumer disabled the
+    %% fast path), in which case every append routes through the instance
+    %% gen_server; otherwise to a map with `hlc`, `seq`, `overlay_counters`,
+    %% `origin`, `validator_module`, `validator_state` and the overlay /
+    %% working-set caps, and the caller signs in-process, calls the WAL
+    %% directly, inserts the overlay row itself and bumps the shared atomics.
     fast_path :: undefined | fast_path(),
     %% Substrate read-side freshness targets. The list of
     %% `{Namespace, Index, Shard}` tuples that the applier (on every
@@ -115,14 +113,14 @@ table's lifecycle tied to a supervisor child.
     %% instance's lifetime. Empty list = wiring disabled.
     ae_targets = [] :: [{atom(), atom(), non_neg_integer()}],
     %% Per-instance applied-frontier version vector: `#{Origin => max Seq}` over
-    %% every `{HLC, Origin, Seq}` event materialised by this instance (across all
-    %% shards it multiplexes). Because the op-log is delivered causally (no gaps
-    %% per origin), the max Seq per origin faithfully identifies the applied event
-    %% set, so two nodes with equal frontiers have converged — a compaction-
-    %% invariant convergence oracle (the cumulative applied position is unchanged
-    %% by compaction). Maintained by the applier at the commit barrier
-    %% (`merge_frontier/2`, a max-merge), read lock-free by the observer / AAE
-    %% responder (`frontier/1`). O(#origins); persisted with the checkpoint.
+    %% every `{HLC, Origin, Seq}` event materialised by this instance, across
+    %% all shards it multiplexes. Because the op-log is delivered causally (no
+    %% gaps per origin), the max Seq per origin faithfully identifies the
+    %% applied event set, so two nodes with equal frontiers have converged — a
+    %% convergence oracle unchanged by compaction. Maintained by the applier at
+    %% the commit barrier (`merge_frontier/2`, a max-merge), read lock-free by
+    %% the observer / AAE responder (`frontier/1`). O(#origins); persisted with
+    %% the checkpoint.
     frontier = #{} :: #{binary() => non_neg_integer()},
     %% The applied frontier's SECOND component: per origin, the seqs this
     %% instance has folded that sit ABOVE its prefix bound because an earlier
@@ -142,41 +140,33 @@ table's lifecycle tied to a supervisor child.
     %% VOLATILE and LOCAL. It is not checkpointed — dropping it denotes LESS,
     %% which is the safe direction (`dropping_pending_is_sound`), and the boot
     %% re-fold rebuilds it in one pass (`refold_restores_exactness`). It is
-    %% never shipped: peers receive the prefix alone, which is a lowering of an
-    %% exact claim and so disturbs no peer-side result
-    %% (`shipping_the_prefix_is_sound`). Written only through
-    %% `merge_applied/2` and cleared only by `reap_frontier/2`, both under the
-    %% same CAS as `frontier`.
+    %% never shipped: peers receive the prefix alone, a lowering of an exact
+    %% claim that disturbs no peer-side result (`shipping_the_prefix_is_sound`).
+    %% Written only through `merge_applied/2` and cleared only by
+    %% `reap_frontier/2`, both under the same CAS as `frontier`.
     %%
     %% Cost: one interval per HOLE, not per seq above it
     %% (`pending_intervals_bounded_by_holes`), so a permanently unroutable
     %% bucket costs one interval for that origin however many later seqs fold
     %% behind it.
     pending = #{} :: #{binary() => bondy_interval_set:t()},
-    %% Demand-based applier→instance flow control. Single-slot atomic
-    %% counter shared between the applier (increments before
-    %% dispatching an `install_local_batch` cast) and the instance
-    %% (decrements after handling). When the value reaches
-    %% `max_install_in_flight`, the applier defers reading the next
-    %% WAL batch and waits for the instance to send a `drain_resume`
-    %% cast. Bounds the instance's mailbox at `cap × batch_size`
-    %% events regardless of write throughput. Published once at
-    %% instance init; `undefined` between the entry's creation and
-    %% the instance's `init/1` finishing (a brief race the applier
-    %% tolerates by treating it as "no cap" until visible).
+    %% Demand-based applier->instance flow control; the contract is at the
+    %% applier's own `#state.install_in_flight`. Published once at instance
+    %% init. `undefined` between the entry's creation and the instance's
+    %% `init/1` finishing — a brief race the applier tolerates by treating it as
+    %% "no cap" until visible.
     install_in_flight :: atomics:atomics_ref() | undefined,
     max_install_in_flight :: pos_integer() | undefined,
-    %% Remote-delivery generation (slot 1): bumped by the instance at the
-    %% END of every `integrate_peer_root` handler — the point at which
-    %% peer-merged events count as locally DELIVERED. The applier caches
-    %% this ref and compares it against the generation it last replayed
-    %% to, so its prepare fence (`{cell_context, _, _}`) detects "events
-    %% delivered but not yet folded into my projection" with a single
-    %% atomic read — see the I1 invariant note at that handler. Published
-    %% once at instance init; `undefined` between the entry's creation
-    %% and the instance's `init/1` finishing (nothing can have been
-    %% integrated before then, so the applier safely treats it as
-    %% generation 0).
+    %% Remote-delivery generation (slot 1): bumped by the instance at the END of
+    %% every `integrate_peer_root` handler — the point at which peer-merged
+    %% events count as locally DELIVERED. The applier caches this ref and
+    %% compares it against the generation it last replayed to, so its prepare
+    %% fence detects "events delivered but not yet folded into my projection"
+    %% with a single atomic read
+    %% (`bondy_oplog_applier:ensure_remote_caught_up/1`). `undefined` between
+    %% the entry's creation and the instance's `init/1` finishing; nothing can
+    %% have been integrated before then, so the applier treats it as generation
+    %% 0.
     remote_gen :: atomics:atomics_ref() | undefined,
     %% Per-instance bootstrap lifecycle handle
     %% (`bondy_oplog_bootstrap_lifecycle`). Created at instance init —
@@ -203,13 +193,14 @@ table's lifecycle tied to a supervisor child.
     %% the one and adopts the other. This is the serving half only — the
     %% installing half is `bondy_oplog_sync_session:adopt_frontier/3`, and
     %% neither subsumes the other (`MuxBucketSkip_Minus_ServeGate`,
-    %% `_Minus_AdoptIfComplete`). Written by the applier at its `init/1` (from
-    %% `drain_gated`), and set `true` by `bondy_oplog_instance:open_drain_gate/1`
-    %% and again by the applier when it handles that release.
-    %% Defaults to `true`, so an instance that is never gated — single-table,
-    %% memory topology, tests — behaves exactly as before. A gated instance
-    %% reads `true` for the window between the instance publishing its row
-    %% and the applier reaching `init/1`; that window is not closed here.
+    %% `_Minus_AdoptIfComplete`). Written by the applier at its `init/1`
+    %% (from `drain_gated`), and set `true` by
+    %% `bondy_oplog_instance:open_drain_gate/1` and again by the applier
+    %% when it handles that release. Defaults to `true`, so an instance that
+    %% is never gated — single-table, memory topology, tests — behaves as
+    %% ungated. A gated instance reads `true` for the window between the
+    %% instance publishing its row and the applier reaching `init/1`; that
+    %% window is not closed here.
     tables_registered = true :: boolean(),
     %% The `bondy_db` DB this instance belongs to. Carried in the instance
     %% opts by the provisioning path (`bondy_db:open_table_provision/7`) and
@@ -222,7 +213,7 @@ table's lifecycle tied to a supervisor child.
 -record(state, {}).
 
 -type fast_path() :: #{
-    hlc := bondy_oplog_hlc:t(),
+    hlc := bondy_hlc:t(),
     seq := atomics:atomics_ref(),
     overlay_counters := atomics:atomics_ref(),
     origin := bondy_oplog_origin:t(),
@@ -901,12 +892,12 @@ The remaining callers, and the predicate each carries:
   (`Bucket_Skip_Soundness.unconditional_adoption_unsound`,
   `proofs/tla/MuxBucketSkip_Minus_AdoptIfComplete.cfg`).
 
-A fourth caller used to merge `bondy_oplog_instance:frontier_from_mst/1` — the
-max `cell_apply` seq PRESENT IN THE LOG. The MST records receipt, not
-materialisation, so that over-claimed every cell received and skipped, and
-because `watermark_door/2` and `capped_truncation_point/2` judge "never
-applied" against this same frontier, the over-claim also disarmed the repair.
-It is deleted; boot now re-folds instead (`replay_anchor/1`).
+The log's own max `cell_apply` seq is NOT a fourth source. The MST records
+receipt, not materialisation, so merging it over-claims every cell that was
+received and skipped, and because `watermark_door/2` and
+`capped_truncation_point/2` judge "never applied" against this same frontier,
+the over-claim also disarms the repair. Boot re-folds instead
+(`bondy_oplog_instance:replay_anchor/1`).
 """).
 -spec merge_frontier(instance_id(), #{binary() => non_neg_integer()}) -> ok.
 
@@ -956,11 +947,11 @@ boundaries, delivery order, or failure visibility
 (`proofs/isabelle/Frontier_Pending.thy`, `pending_exact`), and the prefix it
 reports is the largest sound claim (`pending_sound`, `pending_maximal`).
 
-**Why the caller no longer reports failures.** The predecessor
-(`bondy_oplog_cell_apply:claim/2`) capped its claim below the lowest seq the
-same batch had failed to materialise. That is sound exactly when every absent
-seq below the claim is visible to that call (`shipped_sound_when_visible`) and
-unsound the moment a batch boundary falls between the hole and the claim
+**Why failure reporting is not the mechanism.** A writer that caps its claim
+below the lowest seq the same batch failed to materialise is sound exactly
+when every absent seq below the claim is visible to that call
+(`shipped_sound_when_visible`), and unsound the moment a batch boundary falls
+between the hole and the claim
 (`shipped_split_batch_overclaims`) — and boundaries are set by drain timing,
 which nothing chooses. Better failure reporting cannot fix it: no writer whose
 state is one integer per origin is both sound and eventually complete, and the
@@ -1003,18 +994,15 @@ merge_applied(InstanceId, Applied0) when
     end.
 
 %% @private
-%% One origin: add the materialised seqs to its pending set, then absorb.
 add_applied(Origin, Seqs, F, P) ->
     Prefix = maps:get(Origin, F, 0),
     Set0 = maps:get(Origin, P, bondy_interval_set:new()),
     %% Seqs at or below the prefix are ALREADY claimed and must not re-enter
     %% pending: once there they no longer continue the prefix, so nothing would
-    %% ever absorb them and the set would grow without bound.
-    %%
-    %% This is not an edge case. Re-presenting already-folded events is the
-    %% normal path — the fold is idempotent by design and
+    %% ever absorb them and the set would grow without bound. This is the
+    %% normal path, not an edge case — the fold is idempotent by design,
     %% `bondy_oplog_instance:replay_anchor/1` re-presents the WHOLE live oplog
-    %% at a boot that finds a gap — and a lost CAS re-applies this function to
+    %% at a boot that finds a gap, and a lost CAS re-applies this function to
     %% the winner's value, which already absorbed them. Pinned by
     %% `bondy_oplog_frontier_pending_test:absorbing_is_idempotent/0`.
     Set = lists:foldl(
@@ -1030,7 +1018,6 @@ add_applied(Origin, Seqs, F, P) ->
     absorb(Origin, Prefix, Set, F, P).
 
 %% @private
-%% Absorb every origin of `Origins` whose pending set now continues its prefix.
 absorb_all([], F, P) ->
     {F, P};
 absorb_all([Origin | Rest], F, P) ->
@@ -1138,24 +1125,21 @@ drop_retired(Partial) ->
     end.
 
 %% @private
-%% Compare-and-swap on the frontier column. `Fun` maps the current frontier
-%% to either a new one, `{New, Result}`, or `no_change`.
+%% Compare-and-swap on the frontier column. `Fun` maps the current frontier to
+%% either a new one, `{New, Result}`, or `no_change`. The compare covers the
+%% FRONTIER exactly (see `swap/6`) and the remaining columns as an ordinary
+%% match pattern, which is enough for the writers that exist: every other column
+%% is published once, at instance or WAL init, so frontier-against-frontier is
+%% the only contention a running node produces.
 %%
-%% The compare covers the FRONTIER exactly (see `swap/6`) and the remaining
-%% columns as an ordinary match pattern. That is enough for the writers that
-%% exist: every other column is published once, at instance or WAL init, so
-%% frontier-against-frontier is the only contention a running node produces.
-%%
-%% Retries until it wins, with no attempt budget and no unguarded fallback.
-%% A budget needs somewhere to go when it runs out, and the only destination
-%% is a plain read-modify-write, which loses exactly the update the CAS
-%% exists to protect. That the retry loop is what prevents the loss is
-%% pinned by `bondy_oplog_frontier_reap_test`'s
-%% `a_stale_frontier_compare_loses_no_origin/0`, which injects the
-%% interleaving the loop otherwise hides.
-%% Retrying is safe because `Fun` is re-applied to the value just read, and
-%% the loop makes system-wide progress because a failed swap means another
-%% writer committed.
+%% Retries until it wins, with no attempt budget and no unguarded fallback. A
+%% budget needs somewhere to go when it runs out, and the only destination is a
+%% plain read-modify-write, which loses exactly the update the CAS exists to
+%% protect. That the retry loop is what prevents the loss is pinned by
+%% `bondy_oplog_frontier_reap_test:a_stale_frontier_compare_loses_no_origin/0`,
+%% which injects the interleaving the loop otherwise hides. Retrying is safe
+%% because `Fun` is re-applied to the value just read, and the loop makes
+%% system-wide progress because a failed swap means another writer committed.
 cas_frontier(InstanceId, Fun) ->
     case ets:lookup(?TABLE, InstanceId) of
         [#entry{frontier = Cur, pending = CurP} = E] ->

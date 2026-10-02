@@ -139,8 +139,8 @@ skew_within_bound_returns_ok() ->
     NS = mk_ns(),
     {Setup, #{projection := PH}} =
         setup_shard(NS, primary, 0, 1, lww_register),
-    H1 = bondy_oplog_hlc:encode(1_000, 0),
-    H2 = bondy_oplog_hlc:encode(1_050, 0),
+    H1 = bondy_hlc:encode(1_000, 0),
+    H2 = bondy_hlc:encode(1_050, 0),
     materialise(PH, <<"a">>, {set, <<"va">>, H1}, H1),
     materialise(PH, <<"b">>, {set, <<"vb">>, H2}, H2),
     Reads = [{NS, primary, ?B, <<"a">>}, {NS, primary, ?B, <<"b">>}],
@@ -151,8 +151,8 @@ skew_above_bound_returns_error() ->
     NS = mk_ns(),
     {Setup, #{projection := PH}} =
         setup_shard(NS, primary, 0, 1, lww_register),
-    H1 = bondy_oplog_hlc:encode(1_000, 0),
-    H2 = bondy_oplog_hlc:encode(2_000, 0),
+    H1 = bondy_hlc:encode(1_000, 0),
+    H2 = bondy_hlc:encode(2_000, 0),
     materialise(PH, <<"a">>, {set, <<"va">>, H1}, H1),
     materialise(PH, <<"b">>, {set, <<"vb">>, H2}, H2),
     Reads = [{NS, primary, ?B, <<"a">>}, {NS, primary, ?B, <<"b">>}],
@@ -222,8 +222,8 @@ consistency_snapshot_applies_half_lag_skew() ->
     NS = mk_ns(),
     {Setup, #{projection := PH}} =
         setup_shard(NS, primary, 0, 1, lww_register),
-    H1 = bondy_oplog_hlc:encode(1_000, 0),
-    H2 = bondy_oplog_hlc:encode(1_150, 0),
+    H1 = bondy_hlc:encode(1_000, 0),
+    H2 = bondy_hlc:encode(1_150, 0),
     materialise(PH, <<"a">>, {set, <<"va">>, H1}, H1),
     materialise(PH, <<"b">>, {set, <<"vb">>, H2}, H2),
     Reads = [{NS, primary, ?B, <<"a">>}, {NS, primary, ?B, <<"b">>}],

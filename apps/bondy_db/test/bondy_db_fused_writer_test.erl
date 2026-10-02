@@ -3,15 +3,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Fused-writer rollout, Step 3: a `fused` ephemeral instance drains its own
+%% A `fused` ephemeral instance drains its own
 %% WAL and installs into BOTH the projection and the MST inline, with NO
 %% separate applier (the supervisor omits it). These tests prove the fused
 %% drain actually runs end-to-end: a local write reaches the MST (live_size
 %% advances — overlay-served reads would pass even with a broken drain, so we
 %% gate on the install, not the read) and the value reads back correctly.
 %%
-%% Scope: the local drain path (the H1 removal). Cross-node convergence is
-%% Step 4; these are single-node.
+%% Scope: the local drain path. Cross-node convergence is
+%% `bondy_db_fused_convergence_test`; these are single-node.
 
 -module(bondy_db_fused_writer_test).
 

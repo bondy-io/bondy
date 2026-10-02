@@ -1,11 +1,15 @@
 %% =============================================================================
-%% Unit tests for `bondy_oplog_wal_segment` (segment header create/read).
+%% Unit tests for `bondy_log_segment` (segment header create/read).
+%%
+%% The header's two identity fields are opaque to the segment module; the
+%% oplog adapter's encoding and verification of them are tested in
+%% `bondy_oplog_log_adapter_test`. Here `verify/3` is exercised through
+%% the oplog adapter only to pin the `{orphan_segment, Reason}` wrapping.
 %% =============================================================================
 
 -module(bondy_oplog_wal_segment_test).
 
 -include_lib("eunit/include/eunit.hrl").
--include("bondy_oplog.hrl").
 -include("bondy_oplog_wal.hrl").
 
 %% =============================================================================
@@ -44,6 +48,12 @@ with_dir(Fun) ->
 instance_id() -> <<"test-instance-1">>.
 origin() -> <<1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16>>.
 
+ctx() -> #{instance_id => instance_id(), origin => origin()}.
+
+identity() ->
+    {ok, Identity} = bondy_oplog_log_adapter:encode_identity(ctx()),
+    Identity.
+
 %% =============================================================================
 %% Construction + header round-trip
 %% =============================================================================
@@ -51,91 +61,61 @@ origin() -> <<1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16>>.
 create_and_read_header_test() ->
     with_dir(fun(Dir) ->
         SegId = 7,
-        Path = filename:join(Dir, bondy_oplog_wal_segment:filename(SegId)),
+        Path = filename:join(Dir, bondy_log_segment:filename(SegId)),
         {ok, Fd, Header} =
-            bondy_oplog_wal_segment:create(
-                Path, SegId, instance_id(), origin()
-            ),
+            bondy_log_segment:create(Path, SegId, identity()),
         ok = prim_file:close(Fd),
-        ?assertEqual(SegId, bondy_oplog_wal_segment:segment_id(Header)),
-        ?assertEqual(origin(), bondy_oplog_wal_segment:origin(Header)),
+        ?assertEqual(SegId, bondy_log_segment:segment_id(Header)),
+        ?assertEqual(identity(), bondy_log_segment:identity(Header)),
         %% Reopen and re-parse.
-        {ok, Fd2, Header2} = bondy_oplog_wal_segment:open(Path),
+        {ok, Fd2, Header2} = bondy_log_segment:open(Path),
         ok = prim_file:close(Fd2),
         ?assertEqual(Header, Header2)
     end).
 
 filename_is_zero_padded_test() ->
-    ?assertEqual(<<"000000000.qdata">>, bondy_oplog_wal_segment:filename(0)),
-    ?assertEqual(<<"000000042.qdata">>, bondy_oplog_wal_segment:filename(42)),
+    ?assertEqual(<<"000000000.qdata">>, bondy_log_segment:filename(0)),
+    ?assertEqual(<<"000000042.qdata">>, bondy_log_segment:filename(42)),
     ?assertEqual(
         <<"999999999.qdata">>,
-        bondy_oplog_wal_segment:filename(999999999)
-    ).
-
-instance_id_hash_is_8_bytes_test() ->
-    Hash = bondy_oplog_wal_segment:instance_id_hash(instance_id()),
-    ?assertEqual(8, byte_size(Hash)).
-
-instance_id_hash_is_stable_test() ->
-    ?assertEqual(
-        bondy_oplog_wal_segment:instance_id_hash(<<"abc">>),
-        bondy_oplog_wal_segment:instance_id_hash(<<"abc">>)
-    ),
-    ?assertNotEqual(
-        bondy_oplog_wal_segment:instance_id_hash(<<"abc">>),
-        bondy_oplog_wal_segment:instance_id_hash(<<"abd">>)
+        bondy_log_segment:filename(999999999)
     ).
 
 header_bytes_is_48_test() ->
-    ?assertEqual(48, bondy_oplog_wal_segment:header_bytes()).
+    ?assertEqual(48, bondy_log_segment:header_bytes()).
 
 %% =============================================================================
-%% Identity validation (verify/3) — orphan detection
+%% Identity validation (verify/3) — orphan detection through the adapter
 %% =============================================================================
 
 verify_match_test() ->
     with_dir(fun(Dir) ->
-        Path = filename:join(Dir, bondy_oplog_wal_segment:filename(0)),
+        Path = filename:join(Dir, bondy_log_segment:filename(0)),
         {ok, Fd, Header} =
-            bondy_oplog_wal_segment:create(Path, 0, instance_id(), origin()),
+            bondy_log_segment:create(Path, 0, identity()),
         ok = prim_file:close(Fd),
         ?assertEqual(
             ok,
-            bondy_oplog_wal_segment:verify(
-                Header,
-                instance_id(),
-                origin()
+            bondy_log_segment:verify(
+                Header, bondy_oplog_log_adapter, ctx()
             )
         )
     end).
 
-verify_instance_mismatch_test() ->
+%% The adapter's reason travels inside `orphan_segment` untouched.
+verify_mismatch_is_an_orphan_segment_test() ->
     with_dir(fun(Dir) ->
-        Path = filename:join(Dir, bondy_oplog_wal_segment:filename(0)),
+        Path = filename:join(Dir, bondy_log_segment:filename(0)),
         {ok, Fd, Header} =
-            bondy_oplog_wal_segment:create(Path, 0, instance_id(), origin()),
+            bondy_log_segment:create(Path, 0, identity()),
         ok = prim_file:close(Fd),
         ?assertMatch(
             {error, {orphan_segment, instance_id_hash_mismatch}},
-            bondy_oplog_wal_segment:verify(
+            bondy_log_segment:verify(
                 Header,
-                <<"other-instance">>,
-                origin()
+                bondy_oplog_log_adapter,
+                (ctx())#{instance_id => <<"other-instance">>}
             )
-        )
-    end).
-
-verify_origin_mismatch_test() ->
-    with_dir(fun(Dir) ->
-        Path = filename:join(Dir, bondy_oplog_wal_segment:filename(0)),
-        {ok, Fd, Header} =
-            bondy_oplog_wal_segment:create(Path, 0, instance_id(), origin()),
-        ok = prim_file:close(Fd),
-        OtherOrigin = <<16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1>>,
-        ?assertMatch(
-            {error, {orphan_segment, origin_mismatch}},
-            bondy_oplog_wal_segment:verify(Header, instance_id(), OtherOrigin)
         )
     end).
 
@@ -153,7 +133,7 @@ open_missing_file_test() ->
         %% corruption to every later open.
         ?assertEqual(
             {error, missing_segment},
-            bondy_oplog_wal_segment:open(Path)
+            bondy_log_segment:open(Path)
         ),
         ?assertNot(filelib:is_regular(Path))
     end).
@@ -164,7 +144,7 @@ open_truncated_header_test() ->
         ok = file:write_file(Path, <<1, 2, 3, 4>>),
         ?assertEqual(
             {error, truncated_header},
-            bondy_oplog_wal_segment:open(Path)
+            bondy_log_segment:open(Path)
         )
     end).
 
@@ -176,32 +156,37 @@ open_bad_magic_test() ->
         <<_:32, Rest/binary>> = Garbage,
         Bin = <<16#DEADBEEF:32, Rest/binary>>,
         ok = file:write_file(Path, Bin),
-        ?assertEqual({error, bad_magic}, bondy_oplog_wal_segment:open(Path))
+        ?assertEqual({error, bad_magic}, bondy_log_segment:open(Path))
     end).
 
 create_refuses_existing_file_test() ->
     with_dir(fun(Dir) ->
-        Path = filename:join(Dir, bondy_oplog_wal_segment:filename(0)),
+        Path = filename:join(Dir, bondy_log_segment:filename(0)),
         ok = file:write_file(Path, <<0>>),
         ?assertMatch(
             {error, _},
-            bondy_oplog_wal_segment:create(
-                Path,
-                0,
-                instance_id(),
-                origin()
-            )
+            bondy_log_segment:create(Path, 0, identity())
         )
     end).
 
-create_rejects_invalid_origin_test() ->
+%% The header fields are fixed-width; an identity of the wrong shape
+%% is refused before the file is created.
+create_rejects_malformed_identity_test() ->
     with_dir(fun(Dir) ->
-        Path = filename:join(Dir, bondy_oplog_wal_segment:filename(0)),
-        TooShort = <<1, 2, 3>>,
+        Path = filename:join(Dir, bondy_log_segment:filename(0)),
         ?assertError(
             function_clause,
-            bondy_oplog_wal_segment:create(Path, 0, instance_id(), TooShort)
-        )
+            bondy_log_segment:create(
+                Path, 0, (identity())#{id16 => <<1, 2, 3>>}
+            )
+        ),
+        ?assertError(
+            function_clause,
+            bondy_log_segment:create(
+                Path, 0, (identity())#{hash8 => <<1, 2, 3>>}
+            )
+        ),
+        ?assertNot(filelib:is_regular(Path))
     end).
 
 %% =============================================================================
@@ -212,11 +197,11 @@ read_header_advances_position_test() ->
     %% After read_header/1 the fd is positioned at offset 48 so the caller
     %% can begin appending frames or scanning forward.
     with_dir(fun(Dir) ->
-        Path = filename:join(Dir, bondy_oplog_wal_segment:filename(0)),
+        Path = filename:join(Dir, bondy_log_segment:filename(0)),
         {ok, Fd, _Header} =
-            bondy_oplog_wal_segment:create(Path, 0, instance_id(), origin()),
+            bondy_log_segment:create(Path, 0, identity()),
         ok = prim_file:close(Fd),
-        {ok, Fd2, _Header2} = bondy_oplog_wal_segment:open(Path),
+        {ok, Fd2, _Header2} = bondy_log_segment:open(Path),
         {ok, Pos} = prim_file:position(Fd2, {cur, 0}),
         ?assertEqual(48, Pos),
         ok = prim_file:close(Fd2)

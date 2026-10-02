@@ -8,9 +8,9 @@
 The one encoder for files read back with `file:consult/1`.
 
 Every on-disk manifest in Bondy (`bondy_mst_pack_manifest`,
-`bondy_oplog_wal_manifest`, `bondy_oplog_wal_state`, `bondy_db_manifest`) is
+`bondy_log_manifest`, `bondy_log_state`, `bondy_db_manifest`) is
 a sequence of Erlang terms that `file:consult/1` parses. Producing those bytes
-has two steps, and both are load-bearing:
+has two steps:
 
 1. `io_lib:format/2` renders the term to a list of *characters* — code points,
    not bytes. `~tw` is used for a single-line, deterministic rendering in

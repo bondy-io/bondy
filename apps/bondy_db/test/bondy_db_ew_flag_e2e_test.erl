@@ -57,8 +57,8 @@ toggle(Db) ->
     ?assertEqual(true, read_value(T, <<"f">>)),
     ok = bondy_db:close_table(T).
 
-%% `removal_op() -> disable` + `stabilize/2` end-to-end
-%% (BONDY_DB_RECLAMATION_PROOF.md §9): `delete/3` on an ew table issues a
+%% `removal_op() -> disable` + `stabilize/2` end-to-end:
+%% `delete/3` on an ew table issues a
 %% disable (value hidden at once, cell retained), and the applier's stable-cell
 %% sweep physically discards it once its HLC is strictly below the stability
 %% point — while a LIVE (enabled) flag survives the same sweep.

@@ -360,7 +360,7 @@ What happens when a node restarts?
 ```mermaid
 flowchart TB
     BOOT([instance subtree boots])
-    WI["WAL writer init/1<br/>(bondy_oplog_wal_recovery:recover/_)"]
+    WI["WAL writer init/1<br/>(bondy_log_recovery:recover/_)"]
     M[read manifest]
     HEAD[open head segment]
     SCAN[tail-scan to last valid CRC]
@@ -541,9 +541,11 @@ Implementation:
   monitor (`new/0`, `arm/1`, `handle_tick/1`, the pure
   `gc_decision/3`); passive state driven by the instance from
   `handle_info(gc_tick, …)`.
-- `bondy_oplog_wal.erl` — WAL gen_server: `append_batch/2`,
-  `await_durable/3`, `set_committed_segment/2`. (The consumer offset
-  is persisted by `bondy_oplog_wal_state:write_consumer_offset/2`.)
+- `bondy_oplog_wal.erl` — the oplog's WAL: opens a `bondy_log_wal`
+  writer (the `bondy_log` app's log core) with `bondy_oplog_log_adapter`
+  and delegates `append_batch/2`, `await_durable/3`,
+  `set_committed_segment/2` to it. (The consumer offset is persisted by
+  `bondy_log_state:write_consumer_offset/2`.)
 - `bondy_oplog_wal_mem.erl` + `bondy_oplog_wal_mem_reader.erl` —
   the in-memory (ETS) WAL backend for fused ephemeral instances.
 - `bondy_oplog_origin.erl` — origin persistence under
@@ -552,10 +554,20 @@ Implementation:
   (`flat` | `sharded`, selected by the `path_layout` option).
 - `bondy_oplog_compaction_checkpoint.erl` (+ `_ets` / `_file`) —
   the compaction checkpoint behaviour and backends.
-- `bondy_oplog_wal_recovery.erl` — boot-time tail scan + manifest
-  reconciliation.
-- `bondy_oplog_wal_frame.erl`, `_segment.erl`, `_idx.erl`,
-  `_manifest.erl`, `_codec.erl` — on-disk format.
+- `bondy_log_wal.erl`, `bondy_log_recovery.erl`, `bondy_log_reader.erl`,
+  `bondy_log_segment.erl`, `_idx.erl`, `_manifest.erl`, `_state.erl`,
+  `_scrubber.erl` — the log core, in the `bondy_log` library app shared
+  with Bondy Streams: the writer (group-commit fsync, rotation,
+  retention, backpressure), boot-time tail scan + manifest
+  reconciliation, the drain cursor and the on-disk layout. The frame
+  envelope (`bondy_log_frame`), the body codec (`bondy_log_codec`), the
+  key-registry behaviour and the atomic-write idiom (`bondy_log_io`)
+  live there too; `bondy_oplog_wal.hrl` re-exports the constants under
+  the `BONDY_OPLOG_WAL_*` names. The core is oplog-free: what a record
+  *is* (`bondy_log_record`), what the segment header's identity fields
+  hold (`bondy_log_identity`) and where the writer pid is published
+  (`bondy_log_directory`) are three behaviours one adapter module
+  implements; `bondy_oplog_log_adapter.erl` is the oplog's.
 - `bondy_oplog_sync_scheduler.erl` — single global scheduler;
   `run_tick/1`, `dispatch_for/2`.
 - `bondy_oplog_sync_session.erl` — `run/3`, `bootstrap_catalogue/3`,

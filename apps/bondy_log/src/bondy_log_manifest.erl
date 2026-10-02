@@ -3,19 +3,16 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_oplog_wal_manifest).
+-module(bondy_log_manifest).
 
--include("bondy_doc.hrl").
--include("bondy_oplog.hrl").
--include("bondy_oplog_wal.hrl").
+-include("bondy_log.hrl").
 
--moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance WAL manifest read/write with atomic rename semantics.
 
 The manifest records the metadata required to open a WAL: the current
 head segment id, the list of live sealed segments with their
-`FirstHlc`, retention configuration, etc.
+`FirstKey`, retention configuration, etc.
 
 Format is a sequence of `file:consult/1`-readable Erlang terms, one
 per line, for human debuggability:
@@ -36,24 +33,31 @@ per line, for human debuggability:
 
 `scrubber_alerts` is a proplist of `{SegmentId, Reason}` raised by
 the integrity scrubber. Defaults to `[]`. Entries are added by
-`bondy_oplog_wal:mark_segment_alert/3` and cleared by
-`bondy_oplog_wal:clear_segment_alert/2`. The list is read as
+`bondy_log_wal:mark_segment_alert/3` and cleared by
+`bondy_log_wal:clear_segment_alert/2`. The list is read as
 `[]` if the term is absent from the manifest (forward-compat).
 
-`write/2` replaces the manifest with `bondy_mst_io:write_file_atomic/2` and
-has its error contract.
-""").
+Writes go through `bondy_log_io:write_atomic/3`, the tmp-then-rename pattern:
+
+1. Write `manifest.tmp` with the new content.
+2. `datasync` the temp file.
+3. `rename(manifest.tmp, manifest)` — atomic on POSIX same-filesystem.
+4. `datasync` the enclosing directory — required on ext4/xfs.
+
+An interrupted rename leaves either the old or the new manifest; never
+a partial mix.
+""".
 
 -record(?MODULE, {
-    manifest_version = ?BONDY_OPLOG_WAL_MANIFEST_VERSION ::
+    manifest_version = ?BONDY_LOG_MANIFEST_VERSION ::
         non_neg_integer(),
-    instance_id :: instance_id(),
+    instance_id :: bondy_log_wal:instance_id(),
     current_segment :: non_neg_integer(),
-    live_segments :: [{non_neg_integer(), hlc_or_undefined()}],
+    live_segments :: [{non_neg_integer(), key_or_undefined()}],
     deleted_through :: non_neg_integer(),
     retention = [] :: [{atom(), term()}],
     scrubber_alerts = [] :: [scrubber_alert()],
-    %% The largest own-origin seq ever appended to a SEALED segment.
+    %% The largest record seq (`bondy_log_record:max_seq/1`) ever appended to a SEALED segment.
     %% Rewritten at every rotation (which is also when a segment seals),
     %% so on open `max(max_seq, head-segment scan)` is the largest seq in
     %% the retained WAL — the instance seeds its seq counter from it
@@ -65,9 +69,9 @@ has its error contract.
     last_rotated_at :: non_neg_integer()
 }).
 
--type hlc_or_undefined() :: bondy_oplog_hlc:hlc() | undefined.
+-type key_or_undefined() :: bondy_log_record:key() | undefined.
 -type t() :: #?MODULE{}.
--type live_segment() :: {non_neg_integer(), hlc_or_undefined()}.
+-type live_segment() :: {non_neg_integer(), key_or_undefined()}.
 -type scrubber_alert() :: {SegmentId :: non_neg_integer(), Reason :: atom()}.
 
 -export_type([t/0]).
@@ -98,17 +102,17 @@ has its error contract.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Constructs a fresh manifest for a new instance.
 
 `SegmentId` is the id of the first segment to be created (typically
 `0`); it is set as both `current_segment` and the sole entry in
-`live_segments` with an `undefined` `FirstHlc` (it will be filled in
+`live_segments` with an `undefined` `FirstKey` (it will be filled in
 when the first batch is written and the manifest is rewritten on
 rotation).
-""").
+""".
 -spec new(
-    InstanceId :: instance_id(),
+    InstanceId :: bondy_log_wal:instance_id(),
     SegmentId :: non_neg_integer(),
     Retention :: [{atom(), term()}]
 ) -> t().
@@ -131,7 +135,7 @@ new(InstanceId, SegmentId, Retention) when
         last_rotated_at = Now
     }.
 
-?DOC("""
+-doc """
 Reads and parses the manifest at `Dir`.
 
 Returns `{ok, Manifest}` on success or `{error, Reason}` if the file is
@@ -140,12 +144,12 @@ missing required field, structurally invalid live_segments list, etc.).
 
 The on-disk format is `file:consult/1`-readable; this function uses
 `file:consult/1` directly so a hand-edited manifest is still loadable.
-""").
+""".
 -spec read(Dir :: file:filename_all()) ->
     {ok, t()} | {error, term()}.
 
 read(Dir) ->
-    Path = filename:join(Dir, ?BONDY_OPLOG_WAL_MANIFEST_FILENAME),
+    Path = filename:join(Dir, ?BONDY_LOG_MANIFEST_FILENAME),
     case file:consult(Path) of
         {ok, Terms} ->
             parse_terms(Terms);
@@ -153,81 +157,90 @@ read(Dir) ->
             E
     end.
 
-?DOC("Replaces the manifest in `Dir` with `Manifest`; see the moduledoc.").
+-doc """
+Atomically writes `Manifest` to `Dir`.
+
+Implements the four-step durability sequence described in the module
+docstring. Returns `ok` or `{error, Reason}`.
+
+Errors at any step short-circuit the sequence and leave the prior
+on-disk manifest intact (because the rename has not yet happened).
+""".
 -spec write(Dir :: file:filename_all(), t()) -> ok | {error, term()}.
 
 write(Dir, #?MODULE{} = Manifest) ->
-    bondy_mst_io:write_file_atomic(
-        filename:join(Dir, ?BONDY_OPLOG_WAL_MANIFEST_FILENAME),
-        format(Manifest)
-    ).
+    TmpPath = filename:join(Dir, ?BONDY_LOG_MANIFEST_TMP_FILENAME),
+    FinalPath = filename:join(Dir, ?BONDY_LOG_MANIFEST_FILENAME),
+    bondy_log_io:write_atomic(FinalPath, format(Manifest), #{
+        tmp_path => TmpPath
+    }).
 
-?DOC("Returns the InstanceId of `Manifest`.").
--spec instance_id(t()) -> instance_id().
+-doc "Returns the InstanceId of `Manifest`.".
+-spec instance_id(t()) -> bondy_log_wal:instance_id().
 instance_id(#?MODULE{instance_id = Id}) -> Id.
 
-?DOC("Returns the current head segment id.").
+-doc "Returns the current head segment id.".
 -spec current_segment(t()) -> non_neg_integer().
 current_segment(#?MODULE{current_segment = Id}) -> Id.
 
-?DOC("Returns the list of `{SegmentId, FirstHlc}` for live segments.").
+-doc "Returns the list of `{SegmentId, FirstKey}` for live segments.".
 -spec live_segments(t()) -> [live_segment()].
 live_segments(#?MODULE{live_segments = L}) -> L.
 
-?DOC("Returns the largest segment id known to be deleted.").
+-doc "Returns the largest segment id known to be deleted.".
 -spec deleted_through(t()) -> non_neg_integer().
 deleted_through(#?MODULE{deleted_through = D}) -> D.
 
-?DOC("Returns the retention configuration proplist.").
+-doc "Returns the retention configuration proplist.".
 -spec retention(t()) -> [{atom(), term()}].
 retention(#?MODULE{retention = R}) -> R.
 
-?DOC("""
+-doc """
 Returns the list of integrity-scrubber alerts as `{SegmentId, Reason}`
 pairs. Empty list when no segment is quarantined.
-""").
+""".
 -spec scrubber_alerts(t()) -> [scrubber_alert()].
 scrubber_alerts(#?MODULE{scrubber_alerts = A}) -> A.
 
-?DOC("""
-Returns the largest own-origin seq recorded for the sealed segments; `0`
+-doc """
+Returns the largest record seq (`bondy_log_record:max_seq/1`) recorded for the sealed segments; `0`
 when none was recorded (fresh WAL, or a manifest written before the field
 existed).
-""").
+""".
 -spec max_seq(t()) -> non_neg_integer().
 max_seq(#?MODULE{max_seq = S}) -> S.
 
-?DOC("Returns the manifest creation timestamp (ms since epoch).").
+-doc "Returns the manifest creation timestamp (ms since epoch).".
 -spec created_at(t()) -> non_neg_integer().
 created_at(#?MODULE{created_at = T}) -> T.
 
-?DOC("Returns the last rotation timestamp (ms since epoch).").
+-doc "Returns the last rotation timestamp (ms since epoch).".
 -spec last_rotated_at(t()) -> non_neg_integer().
 last_rotated_at(#?MODULE{last_rotated_at = T}) -> T.
 
-?DOC("""
+-doc """
 Rotates the manifest: advances `current_segment`, appends the new
-segment to `live_segments` with an `undefined` `FirstHlc`, and refreshes
+segment to `live_segments` with an `undefined` `FirstKey`, and refreshes
 `last_rotated_at`.
 
-The `FirstHlc` of the previous (now-sealed) head segment is passed in;
+The `FirstKey` of the previous (now-sealed) head segment is passed in;
 the corresponding entry in `live_segments` is updated. Pass `undefined`
 if the segment was empty (no batches written before rotation).
-""").
+""".
 -spec with_current_segment(
     t(),
     NewSegmentId :: non_neg_integer(),
-    PrevSegmentFirstHlc :: hlc_or_undefined()
+    PrevSegmentFirstKey :: key_or_undefined()
 ) -> t().
 
 with_current_segment(
     #?MODULE{current_segment = Prev, live_segments = Live0} = M,
     NewSegmentId,
-    PrevSegmentFirstHlc
+    PrevSegmentFirstKey
 ) when
     is_integer(NewSegmentId), NewSegmentId > Prev
 ->
-    Live1 = update_first_hlc(Live0, Prev, PrevSegmentFirstHlc),
+    Live1 = update_first_key(Live0, Prev, PrevSegmentFirstKey),
     Live2 = Live1 ++ [{NewSegmentId, undefined}],
     M#?MODULE{
         current_segment = NewSegmentId,
@@ -235,29 +248,29 @@ with_current_segment(
         last_rotated_at = erlang:system_time(millisecond)
     }.
 
-?DOC("Replaces the `live_segments` list verbatim. Used by retention sweep.").
+-doc "Replaces the `live_segments` list verbatim. Used by retention sweep.".
 -spec with_live_segments(t(), [live_segment()]) -> t().
 with_live_segments(#?MODULE{} = M, Live) when is_list(Live) ->
     M#?MODULE{live_segments = Live}.
 
-?DOC("Advances `deleted_through`. Monotonically non-decreasing.").
+-doc "Advances `deleted_through`. Monotonically non-decreasing.".
 -spec with_deleted_through(t(), non_neg_integer()) -> t().
 with_deleted_through(#?MODULE{deleted_through = Old} = M, New) when
     is_integer(New), New >= Old
 ->
     M#?MODULE{deleted_through = New}.
 
-?DOC("Replaces the retention proplist.").
+-doc "Replaces the retention proplist.".
 -spec with_retention(t(), [{atom(), term()}]) -> t().
 with_retention(#?MODULE{} = M, Retention) when is_list(Retention) ->
     M#?MODULE{retention = Retention}.
 
-?DOC("""
+-doc """
 Records a scrubber alert for `SegmentId` with `Reason`. If an alert
 already exists for the segment, its reason is replaced (last writer
 wins — multiple bad frames in the same segment still produce one
 alert).
-""").
+""".
 -spec with_scrubber_alert(t(), non_neg_integer(), atom()) -> t().
 with_scrubber_alert(#?MODULE{scrubber_alerts = A} = M, SegmentId, Reason) when
     is_integer(SegmentId), SegmentId >= 0, is_atom(Reason)
@@ -265,20 +278,20 @@ with_scrubber_alert(#?MODULE{scrubber_alerts = A} = M, SegmentId, Reason) when
     A1 = lists:keystore(SegmentId, 1, A, {SegmentId, Reason}),
     M#?MODULE{scrubber_alerts = A1}.
 
-?DOC("""
+-doc """
 Clears any scrubber alert for `SegmentId`. Returns the manifest
 unchanged if no alert was present.
-""").
+""".
 -spec without_scrubber_alert(t(), non_neg_integer()) -> t().
 without_scrubber_alert(#?MODULE{scrubber_alerts = A} = M, SegmentId) when
     is_integer(SegmentId), SegmentId >= 0
 ->
     M#?MODULE{scrubber_alerts = lists:keydelete(SegmentId, 1, A)}.
 
-?DOC("""
-Records the largest own-origin seq appended so far. Monotone: a value
+-doc """
+Records the largest record seq (`bondy_log_record:max_seq/1`) appended so far. Monotone: a value
 below the recorded one is ignored.
-""").
+""".
 -spec with_max_seq(t(), non_neg_integer()) -> t().
 with_max_seq(#?MODULE{max_seq = Old} = M, Seq) when
     is_integer(Seq), Seq >= 0
@@ -346,7 +359,7 @@ required(K, M) ->
     end.
 
 %% @private
-validate_manifest_version(?BONDY_OPLOG_WAL_MANIFEST_VERSION) ->
+validate_manifest_version(?BONDY_LOG_MANIFEST_VERSION) ->
     ok;
 validate_manifest_version(V) ->
     throw({invalid, {unsupported_manifest_version, V}}).
@@ -387,18 +400,18 @@ validate_max_seq(V) ->
     throw({invalid, {invalid_max_seq, V}}).
 
 %% @private
-update_first_hlc(Live, SegmentId, FirstHlc) ->
+update_first_key(Live, SegmentId, FirstKey) ->
     [
         case S of
-            SegmentId -> {S, prefer_existing(H, FirstHlc)};
+            SegmentId -> {S, prefer_existing(H, FirstKey)};
             _ -> {S, H}
         end
      || {S, H} <- Live
     ].
 
 %% @private
-%% Preserve an existing first_hlc rather than overwriting with the new
-%% one — once a segment has its first HLC, it never changes.
+%% Preserve an existing first_key rather than overwriting with the new
+%% one — once a segment has its first key, it never changes.
 prefer_existing(undefined, New) -> New;
 prefer_existing(Existing, _) -> Existing.
 
@@ -421,7 +434,7 @@ format(#?MODULE{
     %% caller-supplied term, so both can carry bytes or characters that an
     %% `iolist_to_binary/1` of the rendering would write as invalid UTF-8
     %% and `file:consult/1` would then refuse. Pinned through disk by
-    %% `bondy_oplog_wal_manifest_test:write_read_survives_high_bytes_test_`.
+    %% the manifest test's `write_read_survives_high_bytes_test_`.
     bondy_consult:encode([
         {manifest_version, MV},
         {instance_id, InstanceId},

@@ -228,7 +228,6 @@ only the causal histories, thus ignoring the values.
 -spec equal(clock() | vector(), clock() | vector()) -> boolean().
 % DVVSet
 equal({C1, _}, {C2, _}) -> equal2(C1, C2);
-%vector clocks
 equal(C1, C2) when is_list(C1) and is_list(C2) -> equal2(C1, C2).
 
 %% Private function
@@ -312,12 +311,10 @@ lww(F, C = {E, _}) ->
         {anonym, _, V} -> new(join(C), [V])
     end.
 
-%% find_entry/2 - Private function
 find_entry(F, {[], [V | T]}) -> find_entry(F, null, V, {[], T}, anonym);
 find_entry(F, {[{_, _, []} | T], Vs}) -> find_entry(F, {T, Vs});
 find_entry(F, {[{I, _, [V | _]} | T], Vs}) -> find_entry(F, I, V, {T, Vs}, id).
 
-%% find_entry/5 - Private function
 find_entry(F, I, V, C, Flag) ->
     Fun = fun(A, B) ->
         case F(A, B) of
@@ -329,7 +326,6 @@ find_entry(F, I, V, C, Flag) ->
     end,
     find_entry2(Fun, I, V, C, Flag).
 
-%% find_entry2/5 - Private function
 find_entry2(_, I, V, {[], []}, anonym) ->
     {anonym, I, V};
 find_entry2(_, I, V, {[], []}, id) ->

@@ -670,18 +670,14 @@ Runs one compaction cycle on `InstanceId`. See
     | {error, term()}.
 
 compact(InstanceId) ->
-    %% No `await_apply` overlay-drain barrier here (unlike `truncate_prefix/2`,
+    %% No `await_apply` overlay-drain barrier here, unlike `truncate_prefix/2`,
     %% which truncates at a CALLER-supplied watermark that may sit above
-    %% overlay-pending events). Compaction derives its frontier from
-    %% peer-synced roots (`compute_frontier_for/2`), and a peer can only have
-    %% synced events this node has already INSTALLED + PUBLISHED — so the
-    %% frontier is always `=< the installed watermark`, strictly below the
-    %% overlay-pending window. A non-empty overlay therefore cannot affect what
-    %% is truncated. The barrier was not just redundant but harmful: under
-    %% sustained writes the overlay never reaches 0, so the 5s `await_apply`
-    %% timed out every cycle and compaction effectively never ran — most
-    %% visibly for a fused instance (it IS the drain), leaving the MST to grow
-    %% unbounded and `mst_install` latency to climb.
+    %% overlay-pending events. Compaction derives its frontier from peer-synced
+    %% roots, and a peer can only have synced events this node has already
+    %% INSTALLED and PUBLISHED, so that frontier never exceeds the installed
+    %% watermark and a non-empty overlay cannot affect what is truncated.
+    %% Adding the barrier stalls compaction outright: under sustained writes
+    %% the overlay never reaches zero, so the wait times out every cycle.
     bondy_oplog_compaction:compact(InstanceId).
 
 -spec current_watermark(instance_id()) ->

@@ -72,13 +72,13 @@ Creates a new page
 pattern() ->
     {
         ?MODULE,
-        % level
+        %% level
         '_',
-        % low
+        %% low
         '_',
-        % list
+        %% list
         '_',
-        % freed_at
+        %% freed_at
         '_'
     }.
 

@@ -66,7 +66,7 @@ an enable that observed every disable.
 
 -type context() :: bondy_dvvset:vector().
 -type state() :: {
-    bondy_oplog_crdt_rw_core:cell(), context(), bondy_oplog_hlc:hlc()
+    bondy_oplog_crdt_rw_core:cell(), context(), bondy_hlc:hlc()
 }.
 -type op() :: enable | disable.
 
@@ -157,7 +157,7 @@ context_of({_Cell, CC, _Hlc}) ->
 The whole-cell removal for `bondy_db:delete/3`: a `disable` extends the
 token's remove frontier, driving the value to the fold's empty (`false`,
 disable-wins); the cell is physically reclaimed later by `stabilize/2`
-once the disable is causally stable (BONDY_DB_RECLAMATION_PROOF.md §9).
+once the disable is causally stable (`stabilize/2`).
 """.
 -spec removal_op() -> disable.
 
@@ -165,17 +165,19 @@ removal_op() ->
     disable.
 
 -doc """
-Causal stabilization (BONDY_DB_RECLAMATION_PROOF.md §9): `discard` when the
-flag is `false` (no surviving enable) and every constituent operation is
-strictly below the stability point (`hlc(S) < StableHlc`). The retained
-remove frontier only beats a CONCURRENT enable, and by obligation A7 no
-future-delivered enable is concurrent with the stable disables — it
-observed them — so it survives on the kept state exactly as on a fresh
-cell; the frontier is effect-unreachable. Strict bound: an operation at
+Causal stabilization: `discard` when the flag is `false` (no surviving
+enable) and every constituent operation is strictly below the stability point
+(`hlc(S) < StableHlc`). The retained remove frontier only beats a CONCURRENT
+enable, and a future-delivered enable observed the stable disables rather
+than racing them, so it survives on the kept state exactly as on a fresh
+cell; the frontier is effect-unreachable. That is what makes this
+interpretation HLC-governed, the class for which a scalar frontier licenses
+the reduction (`proofs/isabelle/Stabilization.thy`,
+`hlc_governed_reduction_sound`). Strict bound: an operation at
 exactly `StableHlc` may be undelivered. A live flag (`true`) is data and
 is kept at any stability point.
 """.
--spec stabilize(bondy_oplog_hlc:hlc(), state()) -> keep | discard.
+-spec stabilize(bondy_hlc:hlc(), state()) -> keep | discard.
 
 stabilize(StableHlc, {_Cell, _CC, Hlc} = State) when Hlc < StableHlc ->
     case to_value(State) of
@@ -185,7 +187,7 @@ stabilize(StableHlc, {_Cell, _CC, Hlc} = State) when Hlc < StableHlc ->
 stabilize(_StableHlc, _State) ->
     keep.
 
--spec hlc(state()) -> bondy_oplog_hlc:hlc().
+-spec hlc(state()) -> bondy_hlc:hlc().
 
 hlc({_Cell, _CC, Hlc}) ->
     Hlc.

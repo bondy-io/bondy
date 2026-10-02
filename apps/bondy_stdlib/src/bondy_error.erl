@@ -578,6 +578,7 @@ types() ->
         not_found,
         already_exists,
         method_not_allowed,
+        not_implemented,
         request_timeout,
         timeout,
         argument_error,
@@ -605,6 +606,20 @@ types() ->
         mail_delivery_failed,
         relay_unavailable,
         mail_queue_full,
+        %% Streams
+        stream_already_exists,
+        stream_not_active,
+        stream_no_quorum,
+        stream_unsettled_members,
+        stream_producer_fenced,
+        stream_producer_gap,
+        stream_invalid_producer,
+        stream_not_captured,
+        stream_not_capturable,
+        stream_no_such_channel,
+        stream_invalid_position,
+        stream_unseen_generation,
+        stream_too_many_channels,
         %% WAMP
         no_such_realm,
         no_such_procedure,
@@ -1589,6 +1604,19 @@ entry(method_not_allowed) ->
         permanent,
         ~"The method is not allowed for this resource."
     );
+entry(not_implemented) ->
+    entry(
+        ~"bondy.error.not_implemented",
+        ~"C019",
+        permanent,
+        ~"The procedure '%{procedure}' is not implemented in this release.",
+        <<
+            "The procedure is part of an API this node announces and is "
+            "reserved to it, but the release does not implement it yet. "
+            "Neither retrying nor changing the request helps; a later "
+            "release will."
+        >>
+    );
 entry(request_timeout) ->
     entry(
         ~"bondy.error.request_timeout",
@@ -1860,6 +1888,201 @@ entry(mail_queue_full) ->
             "is applied: the message is refused immediately rather than the "
             "caller being made to wait on a relay that is not keeping up. Retry "
             "with backoff."
+        >>
+    );
+%% -----------------------------------------------------------------------------
+%% Streams (`bondy.stream.*`)
+%%
+%% What a caller can act on is the detail, never a cell: `already_exists`
+%% and `not_active` carry the generation that is the stream with its status
+%% and effective configuration, so a caller retrying a create after
+%% `no_quorum` can tell its own generation from another's, and a modify
+%% refused learns what the stream is now.
+%% -----------------------------------------------------------------------------
+
+entry(stream_already_exists) ->
+    entry(
+        ~"bondy.error.stream.already_exists",
+        ~"T001",
+        permanent,
+        ~"The stream already exists.",
+        <<
+            "A stream with this URI is active in the realm: the details "
+            "name its generation, status and configuration. A shared "
+            "stream is created once; to change its configuration use "
+            "'bondy.stream.modify', to start it again close it first."
+        >>
+    );
+entry(stream_not_active) ->
+    entry(
+        ~"bondy.error.stream.not_active",
+        ~"T002",
+        permanent,
+        ~"The stream is not active.",
+        <<
+            "The stream's current generation is closing or closed, so its "
+            "configuration can no longer change: the details name it. A "
+            "create starts a new generation."
+        >>
+    );
+entry(stream_no_quorum) ->
+    entry(
+        ~"bondy.error.stream.no_quorum",
+        ~"T003",
+        transient,
+        ~"The stream control plane could not commit the operation.",
+        <<
+            "A majority of the realm's stream replicas did not acknowledge "
+            "within the request timeout — this node is on the minority side "
+            "of a partition, or the replicas are down. The operation is not "
+            "known to be committed: it may have reached some replicas, and "
+            "what reached them is kept and reconciled. Retry; a create "
+            "retried may answer 'already_exists' naming the caller's own "
+            "generation, which is the create having succeeded."/utf8
+        >>
+    );
+entry(stream_unsettled_members) ->
+    shared_uri(
+        entry(
+            ~"bondy.error.stream.no_quorum",
+            ~"T004",
+            transient,
+            ~"The stream control plane is not yet placed on this node.",
+            <<
+                "This node's view of the cluster's stable members is still "
+                "settling — a node that has just started, or just seen a "
+                "peer join or leave, waits out the reconfiguration debounce "
+                "before it places anything. Nothing was performed. Retry."/utf8
+            >>
+        )
+    );
+%% A publication to a captured topic (§19 A-3's producer rules, and the
+%% capture path itself). `producer_fenced` and `producer_gap` carry the
+%% numbers a producer needs to recover: the current epoch, the expected
+%% sequence.
+entry(stream_producer_fenced) ->
+    entry(
+        ~"bondy.error.stream.producer_fenced",
+        ~"T005",
+        permanent,
+        ~"The publication's producer epoch is older than the current one.",
+        <<
+            "Another instance of this producer id has established a later "
+            "epoch on this stream (the details name it), so this publisher "
+            "is a zombie and its publication was not captured nor delivered. "
+            "A producer that means to take over starts a new epoch at "
+            "sequence 0."
+        >>
+    );
+entry(stream_producer_gap) ->
+    entry(
+        ~"bondy.error.stream.producer_gap",
+        ~"T006",
+        permanent,
+        ~"The publication's producer sequence is not the one expected.",
+        <<
+            "The producer sequence must follow the last captured one — the "
+            "details name the sequence expected and the one received — and "
+            "a new producer, or a new epoch, starts at 0. Nothing was "
+            "captured nor delivered. A producer that lost its place (a new "
+            "session, a crash) starts a new epoch at sequence 0."/utf8
+        >>
+    );
+entry(stream_invalid_producer) ->
+    entry(
+        ~"bondy.error.stream.invalid_producer",
+        ~"T007",
+        permanent,
+        ~"The publication's producer option is malformed.",
+        <<
+            "'_producer' must be a dictionary of exactly 'id' (a non-empty "
+            "string), 'epoch' and 'seq' (unsigned 64-bit integers). Nothing "
+            "was captured nor delivered."
+        >>
+    );
+entry(stream_not_captured) ->
+    entry(
+        ~"bondy.error.stream.not_captured",
+        ~"T008",
+        transient,
+        ~"The publication could not be captured into its stream.",
+        <<
+            "The topic is bound by a stream but the capture path on this "
+            "node is not available (its writer is starting or restarting), "
+            "so an acknowledged publication is refused rather than "
+            "acknowledged without its record; nothing was delivered. Retry: "
+            "a retry carrying the same producer triple is deduplicated."
+        >>
+    );
+entry(stream_no_such_channel) ->
+    entry(
+        ~"bondy.error.stream.no_such_channel",
+        ~"T010",
+        permanent,
+        ~"No consume channel of this session has the supplied Consumer id.",
+        <<
+            "A channel belongs to the session that opened it, so an id "
+            "another session was given is not this session's and is not "
+            "found; an id this session was given names nothing once its "
+            "channel has ended. Neither becomes true by being retried. Open "
+            "a channel and use the Consumer id its STREAM_OPENED states."
+        >>
+    );
+entry(stream_not_capturable) ->
+    entry(
+        ~"bondy.error.stream.not_capturable",
+        ~"T009",
+        permanent,
+        ~"The publication cannot be captured from where it was made.",
+        <<
+            "The topic is bound by a stream, but this publication was not "
+            "made from its session's own process — an internal, relayed or "
+            "pooled publication — and a stream captures a session's "
+            "publications from that process alone (the chain is the "
+            "session). Nothing was delivered. Publish from the session's own "
+            "connection, or do not acknowledge."/utf8
+        >>
+    );
+entry(stream_invalid_position) ->
+    entry(
+        ~"bondy.error.stream.invalid_position",
+        ~"T011",
+        permanent,
+        ~"The position is not a resume token minted for this stream.",
+        <<
+            "A resume token is signed under the realm's stream keys and "
+            "names the stream it was minted for, so bytes that are not a "
+            "token, a token no key of this realm signed and a token of "
+            "another stream are one answer here; no channel was opened. "
+            "None of them becomes valid by being retried. Open from the "
+            "beginning, from the end or from a clock instead."
+        >>
+    );
+entry(stream_too_many_channels) ->
+    entry(
+        ~"bondy.error.stream.too_many_channels",
+        ~"T013",
+        transient,
+        ~"The session holds as many consume channels as the node admits.",
+        <<
+            "A channel holds an un-acked window of the serving node's memory "
+            "for as long as it is open, so the number one session may hold at "
+            "once is bounded by that node; no channel was opened. Retry: "
+            "closing a channel this session no longer reads admits another."
+        >>
+    );
+entry(stream_unseen_generation) ->
+    entry(
+        ~"bondy.error.stream.unseen_generation",
+        ~"T012",
+        transient,
+        ~"The position names a generation this node has not converged on.",
+        <<
+            "A resume token names the generation its channel read, and this "
+            "node's view of the stream does not reach that far yet — the "
+            "ordinary shape of a resume made on a node other than the one "
+            "that minted the token. No channel was opened. Retry: the same "
+            "token is served once this node has caught up."/utf8
         >>
     );
 %% -----------------------------------------------------------------------------

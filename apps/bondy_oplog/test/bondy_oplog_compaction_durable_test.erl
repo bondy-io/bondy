@@ -143,13 +143,13 @@ durable_compaction_with_seal(Dir) ->
 
 %% Compaction is the only producer of the WAL's snapshot watermark: the
 %% retention sweep drops a segment only below the committed offset AND below
-%% that watermark (`bondy_oplog_wal:compute_deletable/1`), and until
+%% that watermark (`bondy_oplog_wal:retention_sweep/1`), and until
 %% compaction fed it nothing ever advanced it, so no production WAL ever
 %% dropped a segment — it grew to `max_total_wal_size` and then refused
-%% appends with `wal_full`. Found 2026-09-03 while modelling the seq-counter
-%% seed (`proofs/tla/SeqSeed.tla`); the model's RETAINED invariant is exactly
-%% "a segment goes only below the DURABLE checkpoint watermark", which is why
-%% the advance must follow the checkpoint write, never precede it.
+%% appends with `wal_full`. The RETAINED invariant of
+%% `proofs/tla/SeqSeed.tla` is exactly "a segment goes only below the DURABLE
+%% checkpoint watermark", which is why the advance must follow the checkpoint
+%% write, never precede it.
 %%
 %% Tiny segments so a handful of writes span several; `commit_every => 1` so
 %% the committed offset is past them; `min_live_segments => 1` so the floor

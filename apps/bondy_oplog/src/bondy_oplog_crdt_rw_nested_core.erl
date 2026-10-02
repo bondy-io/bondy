@@ -90,7 +90,7 @@ a flat (non-nested) value.
     Dot :: dot(),
     Ctx :: bondy_oplog_crdt_aw_core:vv(),
     SubMod :: module(),
-    Hlc :: bondy_oplog_hlc:hlc(),
+    Hlc :: bondy_hlc:hlc(),
     SubOp :: term()
 ) -> entries().
 

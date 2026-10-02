@@ -178,10 +178,10 @@ rejected_events_release_the_cap() ->
     %% must leave the admission counters with it. Fill a cap of 2 with two
     %% events the validator refuses on replay: once the applier has evicted
     %% their rows, a third append must be admitted, and the counters must
-    %% read empty. Before the fix the rows were deleted but the counters
-    %% never decremented, so every rejected event permanently consumed a
-    %% slot of the cap: two rejections here left the shard refusing every
-    %% write with `backpressure`.
+    %% read empty. Deleting the rows without decrementing the counters makes
+    %% every rejected event consume a slot of the cap permanently: the two
+    %% rejections here would leave the shard refusing every write with
+    %% `backpressure`.
     Id = mk_id(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
         max_overlay_events => 2

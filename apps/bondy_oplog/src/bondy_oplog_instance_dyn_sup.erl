@@ -97,14 +97,13 @@ stop_instance(InstanceId) when is_binary(InstanceId) ->
     ok = bondy_oplog_instance_keeper:forget(InstanceId),
     case bondy_oplog_registry:sup_pid(InstanceId) of
         undefined ->
-            %% No registry row — but the SUBTREE may still be running. A
-            %% consumer teardown that failed mid-close can drop the row while
-            %% the supervisor child survives. `list_instances/0` enumerates
-            %% ROWS, so such an instance is invisible to it and to every
-            %% scheduler driven from it — but invisible must not mean
-            %% unkillable (`{error, not_found}` forever, a zombie holding its
-            %% WAL and storage for the VM's lifetime). Resolve it through the
-            %% supervisor instead
+            %% No registry row, but the SUBTREE may still be running: a
+            %% consumer teardown that failed mid-close drops the row while the
+            %% supervisor child survives. `list_instances/0` enumerates ROWS,
+            %% so such an instance is invisible to every scheduler driven
+            %% from it — and invisible must not mean unkillable, or it holds
+            %% its WAL and storage for the VM's lifetime. Resolve it through
+            %% the supervisor
             %% (`bondy_oplog_lifecycle_test:stop_survives_missing_registry_row/0`).
             case find_child_by_instance_id(InstanceId) of
                 undefined ->
@@ -248,14 +247,12 @@ do_start(InstanceId, Opts) ->
         {error, _} = E ->
             %% A subtree that dies during start leaves its registry row
             %% behind: the instance registers in its own `init/1`, before a
-            %% later child (an applier rejecting its options, a backend
-            %% refusing a path) fails to start. Because
-            %% `list_instances/0` enumerates the registry, that row is a
-            %% phantom instance — every scheduler would dispatch gc and sync
-            %% work to something that does not exist, for the lifetime of the
-            %% node. Unregistering here cannot take the row from a healthy
-            %% instance: `start_instance/2` above reaches `do_start/2` only
-            %% when `sup_pid` is `undefined` or its process is dead.
+            %% later child brings the subtree down. Because `list_instances/0`
+            %% enumerates the registry, that row is a phantom instance every
+            %% scheduler would dispatch gc and sync work to for the node's
+            %% lifetime. Unregistering here cannot take the row from a healthy
+            %% instance: `start_instance/2` reaches `do_start/2` only when
+            %% `sup_pid` is `undefined` or its process is dead.
             _ = bondy_oplog_registry:unregister(InstanceId),
             E
     end.

@@ -77,7 +77,7 @@ as the sole convergence kernel.
 
 - `removal_op() -> Op | undefined` the operation that removes the WHOLE
   cell, for `bondy_db:delete/3` — `clear` for register-like types,
-  `disable` for the flags (BONDY_DB_RECLAMATION_PROOF.md §9). Collection
+  `disable` for the flags. Collection
   types return `undefined`: a set or map has no whole-cell removal, its
   entries are removed individually.
 
@@ -200,7 +200,7 @@ silently diverge.
 
 -callback to_value(State :: term()) -> Value :: term().
 
--callback hlc(State :: term()) -> bondy_oplog_hlc:hlc().
+-callback hlc(State :: term()) -> bondy_hlc:hlc().
 
 -callback encode_state(State :: term()) -> binary().
 
@@ -211,7 +211,7 @@ silently diverge.
 -callback removal_op() -> Op :: term() | undefined.
 
 -callback stabilize(
-    StableHlc :: bondy_oplog_hlc:hlc(),
+    StableHlc :: bondy_hlc:hlc(),
     State :: term()
 ) -> keep | {keep, State :: term()} | discard.
 

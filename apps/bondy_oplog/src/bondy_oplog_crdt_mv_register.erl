@@ -142,7 +142,7 @@ before the next write (pinned by `bondy_db_tier2_durability_test`).
 
 -type register_value() :: term().
 -type clock() :: bondy_dvvset:clock().
--type state() :: {clock(), bondy_oplog_hlc:hlc()}.
+-type state() :: {clock(), bondy_hlc:hlc()}.
 -type op() :: {set, register_value()}.
 
 -export_type([state/0, op/0, register_value/0]).
@@ -197,15 +197,14 @@ apply_op({Clock, Hlc}, {set, V}, Key, Context) ->
     Origin = bondy_oplog_event:key_origin(Key),
     EventHlc = bondy_oplog_event:key_hlc(Key),
     Ctx = normalise_context(Context),
-    %% `update/2` moves `V` from the anonymous slot to `Origin`'s dot, so
-    %% the contribution always has an EMPTY anonymous slot. The cell clock
-    %% likewise never holds anonymous values. This matters for canonical
-    %% encoding: `bondy_dvvset:sync/2`'s anonymous-value union is
-    %% `sets:to_list(sets:from_list(...))` (order-nondeterministic), and it
-    %% is reached only when BOTH operands carry a non-empty anonymous slot
-    %% — which never happens here. Keep it that way: every path into the
-    %% clock must go through `update/2` (an id-dotted value), never
-    %% `new/1,2` left un-`update`d.
+    %% `update/2` moves `V` from the anonymous slot to `Origin`'s dot, so a
+    %% contribution always has an EMPTY anonymous slot, and the cell clock
+    %% never holds anonymous values either. That is what keeps the encoding
+    %% canonical: `bondy_dvvset:sync/2`'s anonymous-value union is
+    %% order-nondeterministic, and it is reached only when BOTH operands carry
+    %% a non-empty anonymous slot. Every path into the clock must therefore go
+    %% through `update/2` with an id-dotted value, never a `new/1,2` left
+    %% un-`update`d.
     Contribution = bondy_dvvset:update(bondy_dvvset:new(Ctx, [V]), Origin),
     NewClock = bondy_dvvset:sync([Clock, Contribution]),
     {NewClock, erlang:max(Hlc, EventHlc)}.
@@ -276,7 +275,7 @@ reap_origins({{}, _Hlc} = State, _Retired) ->
     %% The bare empty clock `{}` (no entries) — nothing to reap.
     {State, []}.
 
--spec hlc(state()) -> bondy_oplog_hlc:hlc().
+-spec hlc(state()) -> bondy_hlc:hlc().
 
 hlc({_Clock, Hlc}) ->
     Hlc.

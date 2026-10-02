@@ -98,10 +98,10 @@ cells decode unchanged after the cutover (a zero-migration swap).
 
 -type presence() :: live | dead.
 -type columns() :: binary().
--type state() :: {presence(), columns(), bondy_oplog_hlc:hlc()}.
+-type state() :: {presence(), columns(), bondy_hlc:hlc()}.
 -type op() ::
-    {put, columns(), bondy_oplog_hlc:hlc()}
-    | {remove, bondy_oplog_hlc:hlc()}.
+    {put, columns(), bondy_hlc:hlc()}
+    | {remove, bondy_hlc:hlc()}.
 
 -export_type([state/0, op/0]).
 
@@ -155,7 +155,7 @@ apply_op(State, {remove, H}, _Key) when is_integer(H) ->
 to_value({live, Cols, _H}) -> Cols;
 to_value({dead, _Cols, _H}) -> undefined.
 
--spec hlc(state()) -> bondy_oplog_hlc:hlc().
+-spec hlc(state()) -> bondy_hlc:hlc().
 
 hlc({_P, _C, H}) -> H.
 

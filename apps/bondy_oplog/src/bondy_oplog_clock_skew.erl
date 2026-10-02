@@ -10,7 +10,7 @@ Detection of a peer whose physical clock runs ahead of ours.
 
 ## Why this only observes
 
-The HLC merge (`bondy_oplog_hlc:peer_next/3`) takes
+The HLC merge (`bondy_hlc:peer_next/3`) takes
 `max(OldPhys, max(Wall, PeerPhys))`, so a peer stamp far in the future drags
 this replica's clock forward, and the clock never regresses. On a
 last-writer-wins cell that is a write a later honest write cannot overwrite.
@@ -31,7 +31,7 @@ dominate it", which negates that theorem and removes the hypothesis the
 stabilization argument rests on.
 
 Rejecting the event instead is no better. An event's HLC is stamped once at
-its origin (`bondy_oplog_instance:append/*` via `bondy_oplog_hlc:now/1`) and
+its origin (`bondy_oplog_instance:append/*` via `bondy_hlc:now/1`) and
 travels with it unchanged; that is what lets every replica agree on order. A
 rejection decided against *local* wall clock is not a decision every replica
 makes identically, so replicas would disagree on the applied set. That breaks
@@ -40,7 +40,7 @@ convergence, which the threat model rates security-critical.
 So this module changes nothing. It reads a value and reports. Because it
 neither alters a timestamp nor drops an event, there is no invariant to
 re-establish and `Hlc.thy` is untouched -- which is also why the check lives
-here rather than inside `bondy_oplog_hlc`.
+here rather than inside `bondy_hlc`.
 
 ## What it is worth
 
@@ -112,7 +112,7 @@ Pure: it decides nothing and mutates nothing.
 check(Hlc, WallMs) when is_integer(Hlc), Hlc >= 0, is_integer(WallMs) ->
     %% The physical component is the high bits; the logical counter below it
     %% is a tie-break within a millisecond and carries no wall-clock meaning.
-    Physical = Hlc bsr ?BONDY_OPLOG_HLC_LOGICAL_BITS,
+    Physical = Hlc bsr ?BONDY_HLC_LOGICAL_BITS,
 
     case Physical - WallMs of
         Ahead when Ahead > 0 ->

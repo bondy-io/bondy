@@ -836,7 +836,7 @@ tokens, so it reports a stable sentinel of `0`. Aliases resolve to the canonical
 user's version.
 """.
 -spec token_version(RealmUri :: uri(), Username :: username_int()) ->
-    {ok, bondy_oplog_hlc:hlc()} | {error, not_found}.
+    {ok, bondy_hlc:hlc()} | {error, not_found}.
 
 token_version(RealmUri, Username0) ->
     case normalise_username(Username0) of

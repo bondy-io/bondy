@@ -42,7 +42,7 @@ exhaustion.
 - `{Bucket, Key}` — the substrate cell key composed of the storage-layer
   partition and the per-cell id. The composition is internal to this
   module; callers pass `Bucket` and `Key` as separate arguments.
-- `EventHlc :: bondy_oplog_hlc:hlc()` — the event's HLC, lifted out so
+- `EventHlc :: bondy_hlc:hlc()` — the event's HLC, lifted out so
   HLC-windowed match-specs can compare it without unpacking the
   `event_key()` record.
 - `EventKey :: bondy_oplog_event:event_key()` — the full
@@ -85,7 +85,7 @@ watermark, preserving rows that arrived after the batch was assembled.
 -type bucket() :: binary().
 -type key() :: bondy_mst:key().
 -type cell_key() :: binary().
--type after_hlc() :: bondy_oplog_hlc:hlc().
+-type after_hlc() :: bondy_hlc:hlc().
 
 %% =============================================================================
 %% API
@@ -139,7 +139,7 @@ caller's as-of point.
     bucket(),
     cell_key(),
     AfterHlc :: after_hlc(),
-    MaxHlc :: bondy_oplog_hlc:hlc()
+    MaxHlc :: bondy_hlc:hlc()
 ) -> [bondy_oplog_event:t()].
 
 events_for_window(Tab, Bucket, Key, AfterHlc, MaxHlc) ->
@@ -197,7 +197,7 @@ per-cell `> ProjHlc` filter is applied at the merge step.
     bucket(),
     KeyLow :: cell_key(),
     KeyHigh :: cell_key(),
-    MaxHlc :: bondy_oplog_hlc:hlc() | infinity
+    MaxHlc :: bondy_hlc:hlc() | infinity
 ) -> [{cell_key(), bondy_oplog_event:t()}].
 
 range_window(Tab, Bucket, KeyLow, KeyHigh, infinity) ->
@@ -223,7 +223,7 @@ the number of rows deleted (`select_delete/2`'s native return).
 """.
 -spec evict_to(
     tid(),
-    AppliedHlc :: bondy_oplog_hlc:hlc(),
+    AppliedHlc :: bondy_hlc:hlc(),
     AppliedEventKey :: bondy_oplog_event:event_key()
 ) -> non_neg_integer().
 

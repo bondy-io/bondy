@@ -293,12 +293,12 @@ info_db_and_table({Db, _Sup, _Dir}) ->
 
 ets_owner_survives_caller_death() ->
     Parent = self(),
-    %% `open_table/3` from a transient process — the facade caller. Under
-    %% the pre-fix code it owned the projection table AND the cache, and
-    %% the registry monitor was on it, so its death wiped all three. With
-    %% the fix every per-shard resource is anchored in the DB-scoped
-    %% `bondy_db_topology_memory_owner`. Capture the full `Table` handle
-    %% so the parent can keep driving the facade after the caller dies.
+    %% `open_table/3` from a transient process — the facade caller. Every
+    %% per-shard resource is anchored in the DB-scoped
+    %% `bondy_db_topology_memory_owner`, not in the caller: a caller owning
+    %% the projection table, the cache and the registry monitor loses all
+    %% three when it dies. Capture the full `Table` handle so the parent can
+    %% keep driving the facade after the caller dies.
     {Caller, MRef} = spawn_monitor(fun() ->
         {ok, Db} = bondy_db:open(ets_owner_db, #{
             topology => bondy_db_topology_memory,
@@ -398,9 +398,9 @@ ets_backend_e2e({Db, _Sup, _Dir}) ->
     ?assertEqual({ok, {<<"v2">>, H2}}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
     %% Single-shard range over the shard `alice` lives in (the facade
     %% does not scatter-merge; mirror `range_returns_states`). Resolve the
-    %% shard via `shard_for/3` rather than hardcoding the placement formula —
-    %% memory now buckets by entity type and folds the realm into the key, so
-    %% the legacy `phash2({Realm, Key})` no longer matches.
+    %% shard via `shard_for/3` rather than hardcoding the placement formula:
+    %% memory buckets by entity type and folds the realm into the key, so the
+    %% placement is not `phash2({Realm, Key})`.
     Shard = bondy_db:shard_for(T, <<"r1">>, <<"alice">>),
     {ok, Rows} = bondy_db:range(
         T, <<"r1">>, <<"a">>, <<"z">>, #{shard => Shard, limit => 100}
@@ -533,7 +533,7 @@ warn_default_wal_path_test_() ->
 %% =============================================================================
 
 %% `reconcile/4` is the write used to apply declarative config on every boot.
-%% The contract that fixes the cross-node convergence bug: re-asserting an
+%% The convergence contract: re-asserting an
 %% UNCHANGED value emits NO operation, so the cell's HLC does not advance and
 %% the per-shard state stays identical across nodes/boots. A genuine
 %% change still writes (fresh HLC). A durable (leveled) table is used because

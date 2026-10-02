@@ -8,10 +8,10 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("bondy_oplog.hrl").
 
--define(BITS, ?BONDY_OPLOG_HLC_LOGICAL_BITS).
+-define(BITS, ?BONDY_HLC_LOGICAL_BITS).
 
 %% Pack a physical millisecond value with a logical counter, the way
-%% `bondy_oplog_hlc:encode/2` does.
+%% `bondy_hlc:encode/2` does.
 hlc(PhysMs, Logical) ->
     (PhysMs bsl ?BITS) bor Logical.
 

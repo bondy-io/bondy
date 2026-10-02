@@ -18,7 +18,7 @@ replication layer.
 An *event key* is a `{HLC, Origin, Seq}` triple that is globally unique
 *by construction*:
 
-- `HLC` — a 64-bit Hybrid Logical Clock value (see `bondy_oplog_hlc`).
+- `HLC` — a 64-bit Hybrid Logical Clock value (see `bondy_hlc`).
 - `Origin` — the opaque binary id of the creating replica.
 - `Seq` — a per-Origin monotonic counter; never reused or rolled back.
 
@@ -76,7 +76,7 @@ Constructs an event key. The caller is responsible for ensuring the
 `{HLC, Origin, Seq}` triple is fresh — typically this is done by
 `bondy_oplog_instance` rather than the application.
 """).
--spec key(bondy_oplog_hlc:hlc(), bondy_oplog_origin:t(), non_neg_integer()) ->
+-spec key(bondy_hlc:hlc(), bondy_oplog_origin:t(), non_neg_integer()) ->
     event_key().
 
 key(HLC, Origin, Seq) when
@@ -88,7 +88,7 @@ key(HLC, Origin, Seq) when
 ->
     #bondy_oplog_event_key{hlc = HLC, origin = Origin, seq = Seq}.
 
--spec key_hlc(event_key()) -> bondy_oplog_hlc:hlc().
+-spec key_hlc(event_key()) -> bondy_hlc:hlc().
 key_hlc(#bondy_oplog_event_key{hlc = HLC}) -> HLC.
 
 -spec key_origin(event_key()) -> bondy_oplog_origin:t().
@@ -181,7 +181,7 @@ and `<<255, ...>>` of any length is larger than any practical Origin,
 this sentinel is correct for any Origin shorter than 256 bytes — which
 covers every documented Origin format (16-byte UUID, 32-byte SHA-256).
 """).
--spec max_key_for_hlc(bondy_oplog_hlc:hlc()) -> event_key().
+-spec max_key_for_hlc(bondy_hlc:hlc()) -> event_key().
 
 max_key_for_hlc(HLC) when is_integer(HLC), HLC >= 0 ->
     %% 256 bytes of 0xFF dominates any Origin we accept.

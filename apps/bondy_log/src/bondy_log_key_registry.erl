@@ -3,15 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_oplog_wal_key_registry).
+-module(bondy_log_key_registry).
 
--include("bondy_doc.hrl").
--include("bondy_oplog_wal.hrl").
+-include("bondy_log.hrl").
 
--moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for the per-instance encryption key registry consulted by
-`bondy_oplog_wal_codec` when body encryption is enabled.
+`bondy_log_codec` when body encryption is enabled.
 
 The WAL writer asks for the *current* key (the one to encrypt new
 frames with); the reader and recovery scanner ask for *historic*
@@ -69,7 +67,7 @@ needs auth tokens, lease renewal, or local caching. By keeping the
 key store behind a behaviour, the WAL does not need to ship a Vault
 client, an AWS SDK, or any other transport. Implementations are
 also easier to unit-test in isolation.
-""").
+""".
 
 -type key_id() :: 0..16#FFFF.
 -type cipher_key() :: <<_:256>>.
@@ -77,15 +75,15 @@ also easier to unit-test in isolation.
 -export_type([key_id/0]).
 -export_type([cipher_key/0]).
 
-?DOC("""
+-doc """
 Returns the writer's current encryption key. Called once per frame on
 the write hot path; implementations should cache rather than do
 network I/O per call.
-""").
+""".
 -callback current_key() -> {key_id(), cipher_key()}.
 
-?DOC("""
+-doc """
 Looks up a key by id. Called on the read path; `{error, missing}` is
 the only valid failure response.
-""").
+""".
 -callback lookup_key(key_id()) -> {ok, cipher_key()} | {error, missing}.

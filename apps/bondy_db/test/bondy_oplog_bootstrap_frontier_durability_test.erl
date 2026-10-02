@@ -85,11 +85,11 @@ adopted_frontier_is_durable_at_bootstrap() ->
             Instances
         ),
 
-        %% 2. THE FIX: durable on disk NOW, before any `terminate/2`. Read the
-        %%    actual checkpoint files (what `restore_frontier/2` reads on
-        %%    restart), not the registry cache. Without the fix there are no
-        %%    checkpoint files — a freshly-bootstrapped shard that has neither
-        %%    compacted nor been cleanly stopped has never written one.
+        %% 2. Durable on disk NOW, before any `terminate/2`. Read the actual
+        %%    checkpoint files (what `restore_frontier/2` reads on restart),
+        %%    not the registry cache: a freshly-bootstrapped shard that has
+        %%    neither compacted nor been cleanly stopped writes none unless
+        %%    the bootstrap itself does.
         Files = filelib:wildcard(
             filename:join(PDir, "**/checkpoint.etf")
         ),

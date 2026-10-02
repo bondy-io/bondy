@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Unit tests for `bondy_oplog_wal_recovery` and writer reopen.
+%% Unit tests for `bondy_log_recovery` and writer reopen.
 %%
 %% Tests are organised around the recovery responsibilities:
 %%
@@ -65,7 +65,7 @@ mk_event(Hlc, Seq) ->
 generate_events(_HLC, 0, _) ->
     [];
 generate_events(HLC, N, Seq) ->
-    Hlc = bondy_oplog_hlc:now(HLC),
+    Hlc = bondy_hlc:now(HLC),
     [mk_event(Hlc, Seq) | generate_events(HLC, N - 1, Seq + 1)].
 
 instance_dir(Dir) ->
@@ -73,18 +73,18 @@ instance_dir(Dir) ->
 
 %% Drains the WAL into a flat event list via a bounded reader.
 read_all(Pid) ->
-    {ok, Iter} = bondy_oplog_wal_reader:open(Pid, beginning),
+    {ok, Iter} = bondy_log_reader:open(Pid, beginning),
     drain(Iter, []).
 
 drain(Iter, Acc) ->
-    case bondy_oplog_wal_reader:next(Iter) of
+    case bondy_log_reader:next(Iter) of
         {ok, Batch, _, _, NewIter} ->
             drain(NewIter, Acc ++ Batch);
         end_of_log ->
-            ok = bondy_oplog_wal_reader:close(Iter),
+            ok = bondy_log_reader:close(Iter),
             Acc;
         {error, _} = E ->
-            ok = bondy_oplog_wal_reader:close(Iter),
+            ok = bondy_log_reader:close(Iter),
             E
     end.
 
@@ -115,7 +115,7 @@ with_fresh_wal(Opts, Fun) ->
 clean_close_then_reopen_preserves_events_test() ->
     {Dir, Events} =
         with_fresh_wal(#{}, fun(Pid) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Es = generate_events(HLC, 7, 1),
             [{ok, _, _} = bondy_oplog_wal:append(Pid, E) || E <- Es],
             Es
@@ -131,19 +131,19 @@ clean_close_then_reopen_preserves_events_test() ->
     end.
 
 reopen_continues_appending_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
         {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        E1 = mk_event(bondy_oplog_hlc:now(HLC), 1),
-        E2 = mk_event(bondy_oplog_hlc:now(HLC), 2),
+        E1 = mk_event(bondy_hlc:now(HLC), 1),
+        E2 = mk_event(bondy_hlc:now(HLC), 2),
         {ok, _, _} = bondy_oplog_wal:append(P1, E1),
         {ok, _, _} = bondy_oplog_wal:append(P1, E2),
         ok = bondy_oplog_wal:close(P1),
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         %% Continue appending after reopen.
-        E3 = mk_event(bondy_oplog_hlc:now(HLC), 3),
+        E3 = mk_event(bondy_hlc:now(HLC), 3),
         {ok, _, _} = bondy_oplog_wal:append(P2, E3),
         ?assertEqual([E1, E2, E3], read_all(P2)),
         ok = bondy_oplog_wal:close(P2)
@@ -152,7 +152,7 @@ reopen_continues_appending_test() ->
     end.
 
 reopen_across_rotation_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         %% Tight cap so each event triggers a rotation.
@@ -164,7 +164,7 @@ reopen_across_rotation_test() ->
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         ?assertEqual(Events, read_all(P2)),
         %% Verify head segment carries on incrementing.
-        E7 = mk_event(bondy_oplog_hlc:now(HLC), 7),
+        E7 = mk_event(bondy_hlc:now(HLC), 7),
         {ok, _, _} = bondy_oplog_wal:append(P2, E7),
         ?assertEqual(Events ++ [E7], read_all(P2)),
         ok = bondy_oplog_wal:close(P2)
@@ -181,7 +181,7 @@ reopen_across_rotation_test() ->
 %% size, and reader should surface all frames that were intact below
 %% the truncation point.
 truncated_tail_recovers_to_last_valid_frame_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
@@ -200,7 +200,7 @@ truncated_tail_recovers_to_last_valid_frame_test() ->
         %% should survive recovery (depending on frame size, but the
         %% truncation is mid-last-frame so events 1..4 must be there).
         SegPath = filename:join(
-            instance_dir(Dir), bondy_oplog_wal_segment:filename(0)
+            instance_dir(Dir), bondy_log_segment:filename(0)
         ),
         {ok, #file_info{size = Size}} = file:read_file_info(SegPath),
         {ok, Fd} = file:open(SegPath, [read, write, raw, binary]),
@@ -225,12 +225,52 @@ truncated_tail_recovers_to_last_valid_frame_test() ->
         %% Lastly the *first* call after recovery must update the
         %% positions sensibly — the new event lands strictly after
         %% the last recovered position.
-        E6 = mk_event(bondy_oplog_hlc:now(HLC), 6),
+        E6 = mk_event(bondy_hlc:now(HLC), 6),
         {ok, _, {SegId, Off}} = bondy_oplog_wal:append(P3, E6),
         ?assertEqual(0, SegId),
         LastSurvivedPos = lists:nth(length(Read), Positions),
         ?assert(Off >= element(2, LastSurvivedPos)),
         ok = bondy_oplog_wal:close(P3)
+    after
+        rmrf(Dir)
+    end.
+
+%% The `max_seq` that `open/2` returns counts CRC-valid frames only. The
+%% falsifier: a seed that still counts the frame break-and-truncate lopped
+%% off would leave a permanent hole in the origin's seq sequence — the
+%% recovered log never held that seq, and the next mint skips past it.
+%% Seqs ascend here, so the truncated LAST frame carries the highest seq
+%% and the surviving prefix's maximum is strictly below it.
+open_max_seq_excludes_truncated_tail_test() ->
+    HLC = bondy_hlc:new(),
+    Dir = mktemp_dir(),
+    try
+        Opts = #{dir => Dir, origin => origin()},
+        {ok, P1, #{max_seq := 0}} = bondy_oplog_wal:open(instance_id(), Opts),
+        Events = generate_events(HLC, 5, 1),
+        _ = [{ok, _, _} = bondy_oplog_wal:append(P1, E) || E <- Events],
+        ?assertEqual(5, maps:get(max_seq, bondy_oplog_wal:info(P1))),
+        ok = bondy_oplog_wal:close(P1),
+        SegPath = filename:join(
+            instance_dir(Dir), bondy_log_segment:filename(0)
+        ),
+        {ok, #file_info{size = Size}} = file:read_file_info(SegPath),
+        {ok, Fd} = file:open(SegPath, [read, write, raw, binary]),
+        {ok, _} = file:position(Fd, Size - 10),
+        ok = file:truncate(Fd),
+        ok = file:close(Fd),
+        {ok, P2, #{max_seq := MaxSeq}} = bondy_oplog_wal:open(
+            instance_id(), Opts
+        ),
+        Read = read_all(P2),
+        Survived = [
+            bondy_oplog_event:key_seq(bondy_oplog_event:key(E))
+         || E <- Read
+        ],
+        ?assert(length(Survived) < 5),
+        ?assertEqual(lists:max(Survived), MaxSeq),
+        ?assert(MaxSeq < 5),
+        ok = bondy_oplog_wal:close(P2)
     after
         rmrf(Dir)
     end.
@@ -241,16 +281,16 @@ truncated_tail_recovers_to_last_valid_frame_test() ->
 %% truncate immediately after the segment header: recovery should see
 %% zero frames and reopen cleanly.
 truncated_to_just_segment_header_recovers_empty_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
         {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        E = mk_event(bondy_oplog_hlc:now(HLC), 1),
+        E = mk_event(bondy_hlc:now(HLC), 1),
         {ok, _, _} = bondy_oplog_wal:append(P1, E),
         ok = bondy_oplog_wal:close(P1),
         SegPath = filename:join(
-            instance_dir(Dir), bondy_oplog_wal_segment:filename(0)
+            instance_dir(Dir), bondy_log_segment:filename(0)
         ),
         {ok, Fd} = file:open(SegPath, [read, write, raw, binary]),
         {ok, _} = file:position(Fd, ?SEG_HEADER),
@@ -269,7 +309,7 @@ truncated_to_just_segment_header_recovers_empty_test() ->
 %% should also trigger break-and-truncate. The earlier frames must
 %% survive intact.
 bit_flip_in_last_frame_truncates_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
@@ -278,7 +318,7 @@ bit_flip_in_last_frame_truncates_test() ->
         [{ok, _, _} = bondy_oplog_wal:append(P1, E) || E <- Events],
         ok = bondy_oplog_wal:close(P1),
         SegPath = filename:join(
-            instance_dir(Dir), bondy_oplog_wal_segment:filename(0)
+            instance_dir(Dir), bondy_log_segment:filename(0)
         ),
         {ok, Bin} = file:read_file(SegPath),
         Size = byte_size(Bin),
@@ -302,7 +342,7 @@ bit_flip_in_last_frame_truncates_test() ->
 %% boundaries; the scan, a torn tail and the consumer-offset clamp are each
 %% checked past the first chunk.
 scan_across_read_chunks_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{
@@ -315,7 +355,7 @@ scan_across_read_chunks_test() ->
         ),
         Events = [
             bondy_oplog_event:new(
-                bondy_oplog_event:key(bondy_oplog_hlc:now(HLC), origin(), Seq),
+                bondy_oplog_event:key(bondy_hlc:now(HLC), origin(), Seq),
                 {op, crypto:strong_rand_bytes(Size)},
                 undefined
             )
@@ -331,26 +371,26 @@ scan_across_read_chunks_test() ->
         ok = bondy_oplog_wal:close(P1),
         N = length(Events),
         InstDir = instance_dir(Dir),
-        SegPath = filename:join(InstDir, bondy_oplog_wal_segment:filename(0)),
+        SegPath = filename:join(InstDir, bondy_log_segment:filename(0)),
         Size = filelib:file_size(SegPath),
         ?assert(Size > 3 * 1024 * 1024),
         LastHlc = bondy_oplog_event:key_hlc(
             bondy_oplog_event:key(lists:last(Events))
         ),
         Target = lists:nth(N - 5, Offs),
-        CO = bondy_oplog_wal_state:with_position(
-            bondy_oplog_wal_state:new_consumer_offset(), 0, Target + 7
+        CO = bondy_log_state:with_position(
+            bondy_log_state:new_consumer_offset(), 0, Target + 7
         ),
-        ok = bondy_oplog_wal_state:write_consumer_offset(InstDir, CO),
+        ok = bondy_log_state:write_consumer_offset(InstDir, CO),
         R1 = recover(InstDir),
         ?assertMatch(
             #{append_count := N, head_offset := Size, max_seq := N},
             R1
         ),
-        ?assertEqual(LastHlc, maps:get(last_hlc, R1)),
+        ?assertEqual(LastHlc, maps:get(last_key, R1)),
         ?assertEqual(
             Target,
-            bondy_oplog_wal_state:committed_frame_offset(
+            bondy_log_state:committed_frame_offset(
                 maps:get(consumer_offset, R1)
             )
         ),
@@ -367,8 +407,18 @@ scan_across_read_chunks_test() ->
     end.
 
 recover(InstDir) ->
-    {ok, R} = bondy_oplog_wal_recovery:recover(
-        InstDir, instance_id(), origin(), #{}
+    {ok, R} = bondy_log_recovery:recover(
+        InstDir,
+        instance_id(),
+        #{
+            adapter => bondy_oplog_log_adapter,
+            identity => #{
+                instance_id => instance_id(), origin => origin()
+            },
+            idx_interval_bytes =>
+                ?BONDY_OPLOG_WAL_IDX_DEFAULT_INTERVAL_BYTES,
+            recovery_mode => strict
+        }
     ),
     ok = file:close(maps:get(head_fd, R)),
     R.
@@ -442,7 +492,7 @@ orphan_tmp_files_removed_on_open_test() ->
 %% =============================================================================
 
 sealed_qidx_rebuilt_when_missing_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin(), max_segment_bytes => 200},
@@ -457,28 +507,28 @@ sealed_qidx_rebuilt_when_missing_test() ->
         ],
         ok = bondy_oplog_wal:close(P1),
         Seg0Idx = filename:join(
-            instance_dir(Dir), bondy_oplog_wal_idx:filename(0)
+            instance_dir(Dir), bondy_log_idx:filename(0)
         ),
         ?assert(filelib:is_regular(Seg0Idx)),
         ok = file:delete(Seg0Idx),
         %% Reopen. Recovery should rebuild segment 0's .qidx.
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         ?assert(filelib:is_regular(Seg0Idx)),
-        {ok, Entries} = bondy_oplog_wal_idx:read_file(Seg0Idx),
+        {ok, Entries} = bondy_log_idx:read_file(Seg0Idx),
         ?assert(length(Entries) >= 1),
         %% And HLC seek into the rebuilt index works.
         Target = lists:nth(2, Hlcs),
-        {ok, Iter} = bondy_oplog_wal_reader:open(P2, {hlc, Target}),
-        {ok, [First], _, _, _} = bondy_oplog_wal_reader:next(Iter),
+        {ok, Iter} = bondy_log_reader:open(P2, {key, Target}),
+        {ok, [First], _, _, _} = bondy_log_reader:next(Iter),
         ?assertEqual(lists:nth(2, Events), First),
-        ok = bondy_oplog_wal_reader:close(Iter),
+        ok = bondy_log_reader:close(Iter),
         ok = bondy_oplog_wal:close(P2)
     after
         rmrf(Dir)
     end.
 
 sealed_qidx_rebuilt_when_corrupt_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin(), max_segment_bytes => 200},
@@ -489,13 +539,13 @@ sealed_qidx_rebuilt_when_corrupt_test() ->
         ],
         ok = bondy_oplog_wal:close(P1),
         Seg0Idx = filename:join(
-            instance_dir(Dir), bondy_oplog_wal_idx:filename(0)
+            instance_dir(Dir), bondy_log_idx:filename(0)
         ),
         %% Corrupt the .qidx — bad magic header.
         ok = file:write_file(Seg0Idx, <<0:128>>),
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         %% After recovery the .qidx is rewritten with a valid header.
-        {ok, _Entries} = bondy_oplog_wal_idx:read_file(Seg0Idx),
+        {ok, _Entries} = bondy_log_idx:read_file(Seg0Idx),
         ok = bondy_oplog_wal:close(P2)
     after
         rmrf(Dir)
@@ -509,7 +559,7 @@ sealed_qidx_rebuilt_when_corrupt_test() ->
 %% segment's last valid offset. After recovery, it must be clamped
 %% down to a real frame boundary ≤ last_valid_offset.
 consumer_offset_clamped_to_last_valid_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
@@ -527,14 +577,14 @@ consumer_offset_clamped_to_last_valid_test() ->
         ok = bondy_oplog_wal:close(P1),
         InstDir = instance_dir(Dir),
         %% Write a fake commit at a wildly-past-EOF offset.
-        CO = bondy_oplog_wal_state:with_position(
-            bondy_oplog_wal_state:new_consumer_offset(), 0, 1_000_000
+        CO = bondy_log_state:with_position(
+            bondy_log_state:new_consumer_offset(), 0, 1_000_000
         ),
-        ok = bondy_oplog_wal_state:write_consumer_offset(InstDir, CO),
+        ok = bondy_log_state:write_consumer_offset(InstDir, CO),
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         ok = bondy_oplog_wal:close(P2),
-        {ok, Clamped} = bondy_oplog_wal_state:read_consumer_offset(InstDir),
-        ClampedOff = bondy_oplog_wal_state:committed_frame_offset(
+        {ok, Clamped} = bondy_log_state:read_consumer_offset(InstDir),
+        ClampedOff = bondy_log_state:committed_frame_offset(
             Clamped
         ),
         %% Per design §6 the clamp lands on a frame boundary. Legal
@@ -563,19 +613,19 @@ consumer_offset_clamped_when_segment_swept_test() ->
         InstDir = instance_dir(Dir),
         %% Pretend the applier committed past segment 42 even though
         %% we only have segment 0.
-        CO = bondy_oplog_wal_state:with_position(
-            bondy_oplog_wal_state:new_consumer_offset(), 42, ?SEG_HEADER
+        CO = bondy_log_state:with_position(
+            bondy_log_state:new_consumer_offset(), 42, ?SEG_HEADER
         ),
-        ok = bondy_oplog_wal_state:write_consumer_offset(InstDir, CO),
+        ok = bondy_log_state:write_consumer_offset(InstDir, CO),
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         ok = bondy_oplog_wal:close(P2),
-        {ok, Clamped} = bondy_oplog_wal_state:read_consumer_offset(InstDir),
+        {ok, Clamped} = bondy_log_state:read_consumer_offset(InstDir),
         ?assertEqual(
-            0, bondy_oplog_wal_state:committed_segment(Clamped)
+            0, bondy_log_state:committed_segment(Clamped)
         ),
         ?assertEqual(
             ?SEG_HEADER,
-            bondy_oplog_wal_state:committed_frame_offset(Clamped)
+            bondy_log_state:committed_frame_offset(Clamped)
         )
     after
         rmrf(Dir)
@@ -589,7 +639,7 @@ consumer_offset_clamped_when_segment_swept_test() ->
 %% (the per-instance dir is keyed on InstanceId), so the read of the
 %% non-existent manifest hits `bootstrap` rather than `recovery` — no
 %% mismatch is raised. The actual mismatch path is exercised by
-%% directly calling `bondy_oplog_wal_recovery:recover/4`.
+%% directly calling `bondy_log_recovery:recover/3`.
 recover_refuses_instance_id_mismatch_test() ->
     Dir = mktemp_dir(),
     try
@@ -599,11 +649,14 @@ recover_refuses_instance_id_mismatch_test() ->
         InstDir = instance_dir(Dir),
         ?assertMatch(
             {error, {instance_id_mismatch, <<"different">>, _}},
-            bondy_oplog_wal_recovery:recover(
+            bondy_log_recovery:recover(
                 InstDir,
                 <<"different">>,
-                origin(),
                 #{
+                    adapter => bondy_oplog_log_adapter,
+                    identity => #{
+                        instance_id => <<"different">>, origin => origin()
+                    },
                     idx_interval_bytes =>
                         ?BONDY_OPLOG_WAL_IDX_DEFAULT_INTERVAL_BYTES,
                     recovery_mode => strict
@@ -644,17 +697,20 @@ recover_refuses_manifest_with_current_not_in_live_test() ->
         ]),
         ok = file:write_file(ManifestPath, Bin),
         SegPath = filename:join(
-            InstDir, bondy_oplog_wal_segment:filename(0)
+            InstDir, bondy_log_segment:filename(0)
         ),
         %% Sanity: the segment file is on disk pre-recovery.
         ?assert(filelib:is_regular(SegPath)),
         ?assertMatch(
             {error, {manifest, {current_not_in_live, 0, []}}},
-            bondy_oplog_wal_recovery:recover(
+            bondy_log_recovery:recover(
                 InstDir,
                 instance_id(),
-                origin(),
                 #{
+                    adapter => bondy_oplog_log_adapter,
+                    identity => #{
+                        instance_id => instance_id(), origin => origin()
+                    },
                     idx_interval_bytes =>
                         ?BONDY_OPLOG_WAL_IDX_DEFAULT_INTERVAL_BYTES,
                     recovery_mode => strict
@@ -673,13 +729,13 @@ recover_refuses_orphan_segment_test() ->
     try
         Opts = #{dir => Dir, origin => origin()},
         {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        HLC = bondy_oplog_hlc:new(),
-        E1 = mk_event(bondy_oplog_hlc:now(HLC), 1),
+        HLC = bondy_hlc:new(),
+        E1 = mk_event(bondy_hlc:now(HLC), 1),
         {ok, _, _} = bondy_oplog_wal:append(P1, E1),
         ok = bondy_oplog_wal:close(P1),
         InstDir = instance_dir(Dir),
         SegPath = filename:join(
-            InstDir, bondy_oplog_wal_segment:filename(0)
+            InstDir, bondy_log_segment:filename(0)
         ),
         %% Rewrite segment 0's first 4 bytes (magic) so it fails
         %% header validation on reopen — simulating an orphan or
@@ -706,14 +762,14 @@ recover_refuses_orphan_segment_test() ->
     end.
 
 %% =============================================================================
-%% 7. Rescan recovery (WAL_DESIGN_V2.md §3 PR2)
+%% 7. Rescan recovery
 %% =============================================================================
 
 %% Helper. Appends N events, closes the WAL, returns the segment-file
 %% path plus the list of appended events and their on-disk positions
 %% so individual frames can be located for corruption injection.
 seed_segment(Opts0) ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     Opts = maps:merge(#{dir => Dir, origin => origin()}, Opts0),
     {ok, P} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -727,7 +783,7 @@ seed_segment(Opts0) ->
     ],
     ok = bondy_oplog_wal:close(P),
     SegPath = filename:join(
-        instance_dir(Dir), bondy_oplog_wal_segment:filename(0)
+        instance_dir(Dir), bondy_log_segment:filename(0)
     ),
     {Dir, SegPath, Events, Positions}.
 
@@ -904,7 +960,7 @@ attach_recovery_handler(Tag) ->
     fun() -> telemetry:detach(HandlerId) end.
 
 recovery_scanned_bytes_reports_head_walked_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     Tag = scanned_bytes_clean,
     Detach = attach_recovery_handler(Tag),
@@ -918,7 +974,7 @@ recovery_scanned_bytes_reports_head_walked_test() ->
         HeadSize = filelib:file_size(
             filename:join(
                 instance_dir(Dir),
-                bondy_oplog_wal_segment:filename(0)
+                bondy_log_segment:filename(0)
             )
         ),
         %% Exercise: reopen; capture the recovery telemetry event.
@@ -941,7 +997,7 @@ recovery_scanned_bytes_reports_head_walked_test() ->
     end.
 
 recovery_scanned_bytes_includes_rescan_skips_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     Tag = scanned_bytes_rescan,
     Detach = attach_recovery_handler(Tag),
@@ -957,7 +1013,7 @@ recovery_scanned_bytes_includes_rescan_skips_test() ->
         ok = bondy_oplog_wal:close(P1),
         SegPath = filename:join(
             instance_dir(Dir),
-            bondy_oplog_wal_segment:filename(0)
+            bondy_log_segment:filename(0)
         ),
         HeadSize = filelib:file_size(SegPath),
         %% Corrupt a single byte inside the middle frame's body so the

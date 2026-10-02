@@ -27,7 +27,7 @@
     bondy_oplog_instance,
     bondy_oplog_wal,
     bondy_oplog_applier,
-    bondy_oplog_wal_scrubber
+    bondy_log_scrubber
 ]).
 
 instance_sup_test_() ->

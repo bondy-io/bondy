@@ -3,18 +3,15 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_oplog_wal_segment).
+-module(bondy_log_segment).
 
--include("bondy_doc.hrl").
--include("bondy_oplog.hrl").
--include("bondy_oplog_wal.hrl").
+-include("bondy_log.hrl").
 
--moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Segment header read/write and segment file lifecycle primitives.
 
 A WAL segment file (`.qdata`) starts with a fixed 48-byte header
-followed by a stream of frames written by `bondy_oplog_wal_frame`.
+followed by a stream of frames written by `bondy_log_frame`.
 The header is written once on segment creation, fsynced, and never
 updated afterwards.
 
@@ -25,30 +22,37 @@ Offset  Size  Field           Description
    4     1    Version
    5     3    Flags
    8     8    SegmentId       monotonic per-instance
-  16     8    InstanceIdHash  first 8 bytes of sha256(InstanceId)
+  16     8    Hash8           identity field, see below
   24     8    CreatedAt       wall-clock millis since epoch
-  32    16    Origin          16-byte binary from bondy_oplog_origin
+  32    16    Id16            identity field, see below
 ```
 
-`create/4` writes a new segment file with its header, fsyncs both file
+`Hash8` and `Id16` are the log's identity as encoded by its
+`bondy_log_identity` adapter (`encode_identity/1`); this module stores
+and returns them and never interprets them. For the oplog adapter they
+are the first 8 bytes of `sha256(InstanceId)` and the 16-byte origin.
+
+`create/3` writes a new segment file with its header, fsyncs both file
 and enclosing directory, and returns the open RW file descriptor.
 `read_header/1` parses the header from an already-open file. `verify/3`
-checks that an in-memory header belongs to the expected instance and
-origin (rejecting orphan tarballs / wrong-instance files).
-""").
+hands the parsed identity to the adapter and reports a mismatch as an
+orphan segment (a backup tarball restored into the wrong log, a segment
+copied between instances).
+""".
 
--define(MAGIC, ?BONDY_OPLOG_WAL_SEGMENT_MAGIC).
--define(HEADER_BYTES, ?BONDY_OPLOG_WAL_SEGMENT_HEADER_BYTES).
--define(VERSION, ?BONDY_OPLOG_WAL_SEGMENT_VERSION).
--define(INSTANCE_HASH_BYTES, ?BONDY_OPLOG_WAL_INSTANCE_ID_HASH_BYTES).
+-define(MAGIC, ?BONDY_LOG_SEGMENT_MAGIC).
+-define(HEADER_BYTES, ?BONDY_LOG_SEGMENT_HEADER_BYTES).
+-define(VERSION, ?BONDY_LOG_SEGMENT_VERSION).
+-define(HASH8_BYTES, ?BONDY_LOG_SEGMENT_HASH8_BYTES).
+-define(ID16_BYTES, ?BONDY_LOG_SEGMENT_ID16_BYTES).
 
 -record(?MODULE, {
     segment_id :: non_neg_integer(),
     version :: non_neg_integer(),
     flags :: non_neg_integer(),
-    instance_id_hash :: binary(),
+    hash8 :: <<_:64>>,
     created_at :: non_neg_integer(),
-    origin :: binary()
+    id16 :: <<_:128>>
 }).
 
 -type segment_id() :: non_neg_integer().
@@ -57,15 +61,15 @@ origin (rejecting orphan tarballs / wrong-instance files).
 -export_type([segment_id/0]).
 -export_type([t/0]).
 
--export([create/4]).
+-export([create/3]).
 -export([open/1]).
 -export([read_header/1]).
+-export([decode_header/1]).
 -export([verify/3]).
 -export([header_bytes/0]).
--export([instance_id_hash/1]).
 -export([filename/1]).
 -export([segment_id/1]).
--export([origin/1]).
+-export([identity/1]).
 -export([created_at/1]).
 -export([encode_header/1]).
 
@@ -73,41 +77,26 @@ origin (rejecting orphan tarballs / wrong-instance files).
 %% API
 %% =============================================================================
 
-?DOC("Returns the segment header size in bytes (48).").
+-doc "Returns the segment header size in bytes (48).".
 -spec header_bytes() -> pos_integer().
 
 header_bytes() ->
     ?HEADER_BYTES.
 
-?DOC("""
+-doc """
 Returns the canonical filename for the `.qdata` of the given segment id.
 The id is rendered as a 9-digit zero-padded decimal so that
 lexicographic order matches numeric order on directory listings.
 
 Returns a binary to match the in-tree convention; `filename:join/2`
 accepts both binaries and charlists transparently.
-""").
+""".
 -spec filename(segment_id()) -> binary().
 
 filename(Id) when is_integer(Id), Id >= 0 ->
     iolist_to_binary(io_lib:format("~9..0B.qdata", [Id])).
 
-?DOC("""
-Returns the 8-byte instance id hash used in segment headers.
-
-It is the leading 8 bytes of `crypto:hash(sha256, InstanceId)`. The hash
-makes the segment header self-describing — a segment file restored onto
-the wrong instance directory is detected via header mismatch.
-""").
--spec instance_id_hash(instance_id()) -> binary().
-
-instance_id_hash(InstanceId) when
-    is_binary(InstanceId), byte_size(InstanceId) > 0
-->
-    Full = crypto:hash(sha256, InstanceId),
-    binary:part(Full, 0, ?INSTANCE_HASH_BYTES).
-
-?DOC("""
+-doc """
 Creates a new segment file at `Path` with the given header fields.
 
 Steps:
@@ -121,35 +110,32 @@ The fd is opened read/write up front and returned as-is, so the caller
 can append frames without re-opening.
 
 Returns `{ok, Fd, Header}` on success or `{error, Reason}` on failure. A
-failure removes the file: no manifest names a segment before this returns,
-and a file left behind would make every later exclusive create of the same
-segment fail (`bondy_oplog_wal_durability_test`).
-""").
+failure removes the file: the segment is created with an exclusive open, so
+a partial file left behind would fail every later create of that segment.
+""".
 -spec create(
     Path :: file:filename_all(),
     SegmentId :: segment_id(),
-    InstanceId :: instance_id(),
-    Origin :: bondy_oplog_origin:t()
+    Identity :: bondy_log_identity:identity()
 ) ->
     {ok, file:fd(), t()} | {error, term()}.
 
-create(Path, SegmentId, InstanceId, Origin) when
+create(Path, SegmentId, #{hash8 := Hash8, id16 := Id16}) when
     is_integer(SegmentId),
     SegmentId >= 0,
-    is_binary(InstanceId),
-    byte_size(InstanceId) > 0,
-    is_binary(Origin),
-    byte_size(Origin) =:= ?BONDY_OPLOG_ORIGIN_BYTES
+    is_binary(Hash8),
+    byte_size(Hash8) =:= ?HASH8_BYTES,
+    is_binary(Id16),
+    byte_size(Id16) =:= ?ID16_BYTES
 ->
-    InstanceHash = instance_id_hash(InstanceId),
     CreatedAt = erlang:system_time(millisecond),
     Header = #?MODULE{
         segment_id = SegmentId,
         version = ?VERSION,
         flags = 0,
-        instance_id_hash = InstanceHash,
+        hash8 = Hash8,
         created_at = CreatedAt,
-        origin = Origin
+        id16 = Id16
     },
     HeaderBin = encode_header(Header),
     case prim_file:open(Path, [read, write, raw, binary, exclusive]) of
@@ -166,7 +152,7 @@ create(Path, SegmentId, InstanceId, Origin) when
             E
     end.
 
-?DOC("""
+-doc """
 Opens an existing segment file for read/write and parses its header.
 
 Returns `{ok, Fd, Header}` if the segment header parses cleanly, or
@@ -176,7 +162,7 @@ Returns `{ok, Fd, Header}` if the segment header parses cleanly, or
 `{error, missing_segment}` means the file does not exist — distinct from
 `truncated_header`, which means it exists but is shorter than the 48-byte
 header. Never creates the file.
-""").
+""".
 -spec open(file:filename_all()) ->
     {ok, file:fd(), t()} | {error, missing_segment | term()}.
 
@@ -219,7 +205,7 @@ open_verified(Path, {ok, Header}) ->
 open_verified(_Path, {error, _} = E) ->
     E.
 
-?DOC("""
+-doc """
 Reads and parses the 48-byte segment header from the start of `Fd`.
 
 Leaves the file position at offset 48 (the start of the first frame),
@@ -229,87 +215,96 @@ Errors:
 - `bad_magic` — header magic does not match `BDSG`.
 - `unsupported_version` — header version is not v1.
 - `truncated_header` — fewer than 48 bytes available.
-""").
+""".
 -spec read_header(file:fd()) ->
     {ok, t()}
     | {error, bad_magic | unsupported_version | truncated_header | term()}.
 
 read_header(Fd) ->
     case prim_file:pread(Fd, 0, ?HEADER_BYTES) of
-        {ok, Bin} when is_binary(Bin), byte_size(Bin) < ?HEADER_BYTES ->
-            %% Size check first so a too-small file is always reported
-            %% as truncated regardless of its contents.
-            {error, truncated_header};
-        {ok,
-            <<?MAGIC:32/big-unsigned, Version:8/unsigned, Flags:24/big-unsigned,
-                SegmentId:64/big-unsigned,
-                InstanceHash:?INSTANCE_HASH_BYTES/binary,
-                CreatedAt:64/big-unsigned,
-                Origin:?BONDY_OPLOG_ORIGIN_BYTES/binary>>} ->
-            case Version of
-                ?VERSION ->
+        {ok, Bin} ->
+            case decode_header(Bin) of
+                {ok, _} = Ok ->
                     %% Position fd past the header so subsequent
                     %% sequential reads/writes land on frame 0.
                     {ok, _} = prim_file:position(Fd, ?HEADER_BYTES),
-                    {ok, #?MODULE{
-                        segment_id = SegmentId,
-                        version = Version,
-                        flags = Flags,
-                        instance_id_hash = InstanceHash,
-                        created_at = CreatedAt,
-                        origin = Origin
-                    }};
-                _ ->
-                    {error, unsupported_version}
+                    Ok;
+                {error, _} = E ->
+                    E
             end;
-        {ok, <<Magic:32/big-unsigned, _/binary>>} when Magic =/= ?MAGIC ->
-            {error, bad_magic};
         eof ->
             {error, truncated_header};
         {error, _} = E ->
             E
     end.
 
-?DOC("""
-Verifies a parsed header belongs to the expected instance/origin.
+-doc """
+Parses a segment header from its bytes — the first 48 of a segment held
+in memory — with `read_header/1`'s errors; a longer binary is parsed by
+its first 48 bytes.
+""".
+-spec decode_header(binary()) ->
+    {ok, t()} | {error, bad_magic | unsupported_version | truncated_header}.
 
-Returns `ok` if every identity field matches the caller's expectation,
-or `{error, {orphan_segment, Reason}}` where `Reason` describes the
-first mismatched field. The recovery procedure uses this to refuse
-orphan segments (e.g., a backup tarball restored onto the wrong
-instance or replica).
+decode_header(Bin) when is_binary(Bin), byte_size(Bin) < ?HEADER_BYTES ->
+    %% Size check first so a too-small file is always reported as
+    %% truncated regardless of its contents.
+    {error, truncated_header};
+decode_header(
+    <<?MAGIC:32/big-unsigned, Version:8/unsigned, Flags:24/big-unsigned,
+        SegmentId:64/big-unsigned, Hash8:?HASH8_BYTES/binary,
+        CreatedAt:64/big-unsigned, Id16:?ID16_BYTES/binary, _/binary>>
+) ->
+    case Version of
+        ?VERSION ->
+            {ok, #?MODULE{
+                segment_id = SegmentId,
+                version = Version,
+                flags = Flags,
+                hash8 = Hash8,
+                created_at = CreatedAt,
+                id16 = Id16
+            }};
+        _ ->
+            {error, unsupported_version}
+    end;
+decode_header(<<Magic:32/big-unsigned, _/binary>>) when Magic =/= ?MAGIC ->
+    {error, bad_magic}.
 
-Identity check fields:
-- `InstanceIdHash` — first 8 bytes of `sha256(InstanceId)`.
-- `Origin` — the 16-byte replica id.
+-doc """
+Verifies a parsed header belongs to the log identified by `Ctx`
+through the `bondy_log_identity` adapter `Adapter`.
+
+Returns `ok` when the adapter accepts the header's identity fields, or
+`{error, {orphan_segment, Reason}}` with the adapter's own reason (the
+oplog adapter answers `origin_mismatch` or `instance_id_hash_mismatch`).
+The recovery procedure and the reader use this to refuse orphan
+segments before reading any frame.
 
 The `SegmentId` is **not** checked here: the caller chooses which file
 to open and pairs it with its expected segment id separately.
-""").
--spec verify(t(), instance_id(), bondy_oplog_origin:t()) ->
-    ok
-    | {error, {orphan_segment, instance_id_hash_mismatch | origin_mismatch}}.
+""".
+-spec verify(t(), Adapter :: module(), bondy_log_identity:ctx()) ->
+    ok | {error, {orphan_segment, term()}}.
 
-verify(#?MODULE{instance_id_hash = Hash, origin = Origin}, InstanceId, Origin) ->
-    Expected = instance_id_hash(InstanceId),
-    case Hash of
-        Expected -> ok;
-        _ -> {error, {orphan_segment, instance_id_hash_mismatch}}
-    end;
-verify(#?MODULE{}, _InstanceId, _Origin) ->
-    {error, {orphan_segment, origin_mismatch}}.
+verify(#?MODULE{} = Header, Adapter, Ctx) ->
+    case Adapter:verify_identity(identity(Header), Ctx) of
+        ok -> ok;
+        {error, Reason} -> {error, {orphan_segment, Reason}}
+    end.
 
-?DOC("Returns the SegmentId field of a parsed header.").
+-doc "Returns the SegmentId field of a parsed header.".
 -spec segment_id(t()) -> segment_id().
 
 segment_id(#?MODULE{segment_id = Id}) -> Id.
 
-?DOC("Returns the Origin field of a parsed header.").
--spec origin(t()) -> bondy_oplog_origin:t().
+-doc "Returns the two identity fields of a parsed header.".
+-spec identity(t()) -> bondy_log_identity:identity().
 
-origin(#?MODULE{origin = O}) -> O.
+identity(#?MODULE{hash8 = Hash8, id16 = Id16}) ->
+    #{hash8 => Hash8, id16 => Id16}.
 
-?DOC("Returns the CreatedAt millisecond timestamp of a parsed header.").
+-doc "Returns the CreatedAt millisecond timestamp of a parsed header.".
 -spec created_at(t()) -> non_neg_integer().
 
 created_at(#?MODULE{created_at = C}) -> C.
@@ -318,30 +313,29 @@ created_at(#?MODULE{created_at = C}) -> C.
 %% PRIVATE
 %% =============================================================================
 
-?DOC("""
+-doc """
 Encodes a segment header record back into its 48-byte on-disk form.
 
-Used by `bondy_oplog_wal_recovery` to rewrite a head segment during
+Used by `bondy_log_recovery` to rewrite a head segment during
 `rescan` recovery: the new (compacted) segment carries the original
-header unchanged so the file's identity (`segment_id`,
-`instance_id_hash`, `origin`, `created_at`) is preserved across the
-rewrite.
-""").
+header unchanged so the file's identity (`segment_id`, `hash8`, `id16`,
+`created_at`) is preserved across the rewrite.
+""".
 -spec encode_header(t()) -> binary().
 
 encode_header(#?MODULE{
     segment_id = SegmentId,
     version = Version,
     flags = Flags,
-    instance_id_hash = InstanceHash,
+    hash8 = Hash8,
     created_at = CreatedAt,
-    origin = Origin
+    id16 = Id16
 }) ->
-    ?INSTANCE_HASH_BYTES = byte_size(InstanceHash),
-    ?BONDY_OPLOG_ORIGIN_BYTES = byte_size(Origin),
+    ?HASH8_BYTES = byte_size(Hash8),
+    ?ID16_BYTES = byte_size(Id16),
     <<?MAGIC:32/big-unsigned, Version:8/unsigned, Flags:24/big-unsigned,
-        SegmentId:64/big-unsigned, InstanceHash/binary,
-        CreatedAt:64/big-unsigned, Origin/binary>>.
+        SegmentId:64/big-unsigned, Hash8/binary, CreatedAt:64/big-unsigned,
+        Id16/binary>>.
 
 %% @private
 %% Writes the header bytes, fsyncs the file descriptor, and fsyncs the

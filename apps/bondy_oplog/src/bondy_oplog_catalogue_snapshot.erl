@@ -91,8 +91,6 @@ skip-if-older check on `pre_bootstrap`.
         255, 255, 255>>
 ).
 
-%% Default batch size. Configurable via app env
-%% `catalogue_snapshot_batch_size`.
 -define(DEFAULT_BATCH_SIZE, 64).
 
 %% =============================================================================

@@ -6,13 +6,12 @@
 %% Causally-stable CRDT cell reclamation (`bondy_oplog_instance:reclaim_
 %% stable_cells/1`) on a **fused** instance — the fused mirror of
 %% `bondy_oplog_reclamation_test.erl`'s solo scenarios. A fused instance has
-%% no separate applier process, so `reclaim_stable_cells/1` previously
-%% always returned `reclamation_stalled(InstanceId, no_applier)` for it,
-%% permanently: `bondy_oplog_gc_scheduler` drives every instance
-%% unfiltered, so a fused shard's dead cells (e.g. an emptied group's
-%% tombstone) accumulated forever, silently. `bondy_oplog_cell_utils:
-%% sweep/6` (shared with the applier) now runs in-process on the fused
-%% instance.
+%% no separate applier process, so `reclaim_stable_cells/1` must run
+%% `bondy_oplog_cell_utils:sweep/6` in-process. An applier-only path answers
+%% `reclamation_stalled(InstanceId, no_applier)` for it permanently, and
+%% because `bondy_oplog_gc_scheduler` drives every instance unfiltered, a
+%% fused shard's dead cells (an emptied group's tombstone, say) then
+%% accumulate forever and silently.
 -module(bondy_oplog_reclamation_fused_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -62,8 +61,7 @@ solo_fused_reclaims_the_tail_tombstone() ->
 %% `ew_flag`'s existing pattern). `pn_counter` exports no `removal_op/0` — no
 %% explicit clear/removal event exists for this CRDT, unlike
 %% `solo_fused_reclaims_the_tail_tombstone/0` above — so this is a genuinely
-%% different reclamation path from every other fused-reclamation test in this
-%% repo, previously exercised nowhere.
+%% different reclamation path from every other fused-reclamation test here.
 pn_counter_reclaims_at_algebraic_zero() ->
     Id = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}),
     K = <<"vehicle_42">>,

@@ -161,6 +161,7 @@ it).
 -export([fold_all/4]).
 -export([map_update/4]).
 -export([namespace/1]).
+-export([unfold_key/1]).
 -export([open/2]).
 -export([open_table/3]).
 -export([probe_write/1]).
@@ -192,10 +193,6 @@ it).
 -define(DEFAULT_SHARD_COUNT, 8).
 -define(INDEX, primary).
 
-%% How long `apply/4` and `apply_batch/1` wait for their own events to be
-%% applied (`bondy_oplog:await_applied/3`) before answering
-%% `{error, timeout}` — the write is WAL-durable and still pending. The
-%% same 5 s the whole-overlay `bondy_oplog:await_apply/1` barrier has.
 -define(APPLY_TIMEOUT, 5000).
 
 %% Rows pulled per shard per step by the shard walk (`walk_shards/7`). It
@@ -223,24 +220,17 @@ it).
 
 -type realm() :: binary().
 
-%% A point read's result: the cell's decoded value paired with the HLC at
-%% which it was last written.
--type entry() :: {Value :: term(), Hlc :: bondy_oplog_hlc:hlc()}.
+-type entry() :: {Value :: term(), Hlc :: bondy_hlc:hlc()}.
 
-%% A range / list row: a key with its decoded value and write HLC.
--type row() :: {Key :: binary(), Value :: term(), Hlc :: bondy_oplog_hlc:hlc()}.
+-type row() :: {Key :: binary(), Value :: term(), Hlc :: bondy_hlc:hlc()}.
 
 -type db() :: #{
     name := atom(),
     topology := module(),
     topology_state := bondy_db_topology:state(),
-    %% DB-scoped projection provider for `projection_backend => ets`
-    %% tables. `undefined` when the DB topology is itself
-    %% `bondy_db_topology_memory` (it is its own provider); otherwise a
-    %% `bondy_db_topology_memory` state created at `open/2`.
     ets_provider := bondy_db_topology:state() | undefined,
     opts := map(),
-    hlc := bondy_oplog_hlc:t()
+    hlc := bondy_hlc:t()
 }.
 
 -type projection_backend() :: leveled | ets.
@@ -253,7 +243,7 @@ it).
     %% resolves bucket + route + cache + owner through it, so an ephemeral
     %% table inside a leveled DB needs no special-casing downstream.
     db_topology := module(),
-    db_hlc := bondy_oplog_hlc:t(),
+    db_hlc := bondy_hlc:t(),
     entity_type := atom(),
     namespace := atom(),
     shard_count := pos_integer(),
@@ -262,18 +252,9 @@ it).
     table_state := bondy_db_topology:table_state(),
     instance_ids := #{non_neg_integer() := binary()},
     cache_handles := #{non_neg_integer() := term()},
-    %% Secondary indexes declared via `open_table` `indexes => [Spec]`,
-    %% keyed by index name. Each is an independent term-sharded shard-set
-    %% under `(Namespace, IndexName, SecShard)`, on the same projection
-    %% backend as this table (ets if ephemeral, leveled if durable) — see
-    %% `index_provision/0`.
     indexes := #{atom() := index_provision()}
 }.
 
-%% A provisioned secondary index: its declarative spec, secondary shard
-%% count, the effective topology + table state that own its projection
-%% tables (the table's own backend — ets or leveled), and the
-%% per-secondary-shard cache handles.
 -type index_provision() :: #{
     spec := bondy_oplog_index_spec:spec(),
     sec_shard_count := pos_integer(),
@@ -322,7 +303,7 @@ open(Name, Opts) when is_atom(Name), is_map(Opts) ->
                                 topology_state => State,
                                 ets_provider => EtsProvider,
                                 opts => Opts,
-                                hlc => bondy_oplog_hlc:new()
+                                hlc => bondy_hlc:new()
                             },
                             {ok, Db};
                         {error, _} = Err ->
@@ -462,43 +443,22 @@ open_table_provision(
     Db, EntityType, Merged, FoldModule, Backend, Topology, State
 ) ->
     ShardCount = maps:get(shard_count, Merged, ?DEFAULT_SHARD_COUNT),
-    %% Strategy-aware shard routing inputs, threaded into the
-    %% table state and consumed by `shard_for/3`. The defaults reproduce the
-    %% legacy `phash2({Bucket, Key})` placement (strategy `entity`), so a
-    %% table declaring neither routes exactly as before.
     PartitionStrategy = maps:get(partition_strategy, Merged, entity),
     RealmPrefixDepth = maps:get(realm_prefix_depth, Merged, 1),
     AggregateRoot = maps:get(aggregate_root, Merged, identity),
     DbName = maps:get(name, Db),
     NS = namespace_atom(DbName, EntityType),
-    %% Default the applier's OldValue frame-cache ON for durable
-    %% (leveled) projections and OFF for ephemeral (ets) ones. The cache
-    %% elides the projection journal read on the per-cell write path: for
-    %% leveled that read hits the on-disk journal — the dominant per-shard
-    %% durable-write cost (~+47% throughput when cached, measured on Fly
-    %% Linux: cell_apply 42ms → 7.5ms) — while for ets the OldValue read is
-    %% already in-memory, so the cache is pure overhead. A caller-supplied
-    %% `oldstate_cache` (under `oplog_instance_opts.applier`) always wins.
     OplogOpts0 = default_oldstate_cache_opt(
         maps:get(oplog_instance_opts, Merged, #{}), Backend
     ),
-    %% Ephemeral fused-writer opt-in (fused-writer rollout, Step 1).
-    %% Only an ephemeral (ets projection) table may fuse the applier
+    %% Only an ephemeral (ets projection) table may fuse the applier's
     %% `cell_apply` with the instance MST install into one process; a
-    %% durable (leveled) table MUST keep the two-process split. The
-    %% authoritative ephemeral signal is the resolved projection
-    %% `Backend`, not the caller's `durability` acknowledgement — so
-    %% the gate lives here, where `Backend` is known. Fail fast at open,
-    %% not at the first fused write. Threaded into the instance opts so
-    %% each shard's instance records + republishes it; nothing reads it
-    %% for behaviour yet (the durable pipeline is untouched).
+    %% durable (leveled) table keeps the two-process split. The gate
+    %% lives here because the authoritative signal is the resolved
+    %% `Backend`, not the caller's `durability` acknowledgement, and it
+    %% refuses at open rather than at the first fused write.
     Fused = maps:get(fused, Merged, false),
     ok = assert_fused_requires_ephemeral(Fused, Backend),
-    %% Retention-bounded MST history (`mst_retention` under
-    %% `oplog_instance_opts`) is fused-only — and fused is ephemeral-only
-    %% (asserted above) — so a durable table can never be retention-bounded.
-    %% The instance re-validates at start; asserting here too makes the
-    %% failure a crisp open_table error rather than a child-start crash.
     ok = assert_mst_retention_requires_fused(
         maps:get(mst_retention, OplogOpts0, undefined), Fused
     ),
@@ -507,21 +467,13 @@ open_table_provision(
     %% of parsing it back out of the instance id — which would make
     %% `bondy_oplog` depend on this module's id-composition convention.
     OplogOpts1 = OplogOpts0#{fused => Fused, db => DbName},
-    %% Opt-in change-notification (`publish => true`): wire every shard's
-    %% applier to publish each verified apply (local OR AE-replicated) to the
-    %% table namespace via `bondy_oplog_core:publish/4`, so a reactor can
-    %% `subscribe(NS, _)` and react (e.g. the API Gateway cowboy-dispatch
-    %% rebuild). Off by default — only tables with a reactor pay the cost.
     OplogOpts = maybe_enable_publish(OplogOpts1, NS, Merged),
     %% Native operation-based CRDT for the cell projection. An explicit
-    %% `crdt_module` wins; otherwise the `fold_module` is mapped to its
-    %% native op-based twin via
-    %% `bondy_oplog_cell_kernel:default_crdt_for_fold/1` (every former
-    %% fold has a byte-identical CRDT twin, so durable cells decode either
-    %% way). An unknown label maps to `undefined`; the kernel's
-    %% `from_modules/2` then errors at open. Threaded only into the registry
-    %% Config (not the oplog instance opts — that would engage the
-    %% monolithic CRDT path).
+    %% `crdt_module` wins; otherwise `bondy_oplog_cell_kernel:
+    %% default_crdt_for_fold/1` maps the `fold_module` to its byte-identical
+    %% op-based twin, so durable cells decode either way. Threaded only into
+    %% the registry Config: putting it in the oplog instance opts would engage
+    %% the monolithic CRDT path.
     CrdtModule =
         case maps:get(crdt_module, Merged, undefined) of
             undefined ->
@@ -529,15 +481,7 @@ open_table_provision(
             ExplicitCrdt ->
                 ExplicitCrdt
         end,
-    %% Optional per-table construction config for `CrdtModule`, for a CRDT
-    %% that needs more than an event to build its bottom state (e.g.
-    %% `bondy_oplog_crdt_struct`'s schema) — see
-    %% `bondy_oplog_cell_kernel:init/2`. `#{}` for every other CRDT.
     CrdtOpts = maps:get(crdt_opts, Merged, #{}),
-    %% Fail fast: a `tier_2` CRDT MUST be `order_independent` (its eager
-    %% `apply_op` must equal the group `interpret_cog`, since the DVV join
-    %% is commutative). Catches a mis-declared module at open, not at the
-    %% first silent divergence.
     ok = assert_causal_tier_consistency(CrdtModule),
     %% Static secondary-index descriptors (already validated). The primary
     %% appliers need them at start to term-diff and dispatch index updates;
@@ -568,36 +512,17 @@ open_table_provision(
                         provision_indexes(Db, NS, Merged, ShardCount, Backend)
                     of
                         {ok, IndexMap} ->
-                            %% Cold-start index recovery. For each index, load
-                            %% every shard's durable trust marker
-                            %% (`index_load_rebuild_marker/1`): a shard that is
-                            %% built + clean (marker present, kept complete
-                            %% `<= snapshot_wm` by the compaction flush barrier)
-                            %% is TRUSTED and only freshened; a shard with no
-                            %% marker (a newly-declared index, or one left
-                            %% incomplete by a pre-restart drop, or any
-                            %% ephemeral/ETS shard whose cells were wiped on
-                            %% restart) is REBUILT from the primary. This
-                            %% replaces the old unconditional O(table) backfill —
-                            %% the common durable restart is now trust + bounded
-                            %% tail-replay, never a full re-derive. Freshening
-                            %% (or the rebuild's own freshen) keeps a finite
-                            %% `max_lag` read passing even on an empty shard.
                             ok = assert_durable_rebuild_invariant(
                                 Backend, IndexMap
                             ),
-                            %% Defer the index cold-start barrier when the
-                            %% founding instance's WAL drain is GATED. The
-                            %% barrier `await_drain`s the primary, but a gated
-                            %% drain never reaches end-of-log, so running it here
-                            %% would DEADLOCK; and the founding instance is
-                            %% shared across tables, so draining before the
-                            %% siblings register would replay the shared WAL with
-                            %% an incomplete routing directory (skipping — and on
-                            %% the durable backend LOSING — the not-yet-registered
-                            %% tables' cells). The orchestrator runs the deferred
-                            %% cold-start via `cold_start_table_indexes/1` once it
-                            %% has released every shard's gate (`start_draining/1`).
+                            %% Defer the index cold-start barrier when the founding instance's WAL
+                            %% drain is GATED: the barrier `await_drain`s the primary, and a gated
+                            %% drain never reaches end-of-log, so running it here DEADLOCKS. The
+                            %% founding instance is also shared across tables, so draining before the
+                            %% siblings register replays the shared WAL with an incomplete routing
+                            %% directory and loses the unregistered tables' cells on the durable
+                            %% backend. `cold_start_table_indexes/1` runs it once every gate is
+                            %% released.
                             ok =
                                 case is_drain_gated(OplogOpts) of
                                     true ->
@@ -684,10 +609,6 @@ resolve_backend(_Topology, Merged) ->
     end.
 
 %% @private
-%% Map the resolved backend to the effective projection topology + state
-%% for this table. `leveled` uses the DB's own topology; `ets` uses
-%% `bondy_db_topology_memory` — the DB's own state when it already is a
-%% memory DB, otherwise the dedicated provider created at `open/2`.
 effective_topology(leveled, #{topology := Topology, topology_state := S}) ->
     {Topology, S};
 effective_topology(ets, #{
@@ -698,23 +619,12 @@ effective_topology(ets, #{ets_provider := S}) ->
     {bondy_db_topology_memory, S}.
 
 %% @private
-%% The projection backend for an index, given the originating TABLE's backend.
-%% Index durability STRICTLY follows the table — an `ets` table gets `ets`
-%% indices, a `leveled` table gets `leveled` indices — so index cells live next
-%% to the data they index and inherit its lifecycle (cold-start trust marker,
-%% compaction flush barrier).
-%%
-%% ETS indices are an EPHEMERAL-stack-only mode: a durable (`leveled`) table
-%% always gets durable indices. Durable data needs a durable index it can trust
-%% and rebuild from at cold start (the trust marker + `cell_keys/2` re-fold);
-%% volatile ETS indices over durable data would be silently lost on restart, so
-%% ETS indices on the durable stack are not a supported mode and there is no knob
-%% to force them. (Conversely, durable indices over RAM-only data rebuilt from
-%% peers are nonsensical, so `ets` always maps to `ets`.)
-%%
-%% A per-table / per-index override is a trivial later add HERE — the `Spec` is
-%% in scope, so a future `index_backend` key on the spec would slot in without
-%% touching the call sites. Kept as a clean seam rather than a knob for now.
+%% The projection backend for an index STRICTLY follows the table's, so
+%% index cells live beside the data they index and inherit its lifecycle
+%% (cold-start trust marker, compaction flush barrier). There is no knob:
+%% volatile ETS indices over durable data would be silently lost on
+%% restart, and durable indices over RAM-only data rebuilt from peers are
+%% nonsensical.
 index_backend(ets, _Spec) ->
     ets;
 index_backend(leveled, _Spec) ->
@@ -855,10 +765,10 @@ fold-specific events before calling `apply/4`.
 Strictly greater than the previous value returned by `tick/1` on the
 same DB.
 """.
--spec tick(Table :: table()) -> bondy_oplog_hlc:hlc().
+-spec tick(Table :: table()) -> bondy_hlc:hlc().
 
 tick(#{db_hlc := Hlc}) ->
-    bondy_oplog_hlc:now(Hlc).
+    bondy_hlc:now(Hlc).
 
 -doc """
 Deletes the cell at `(Realm, Key)` in `Table`.
@@ -1156,14 +1066,12 @@ group_batch([Bad | _], _Acc) ->
     {error, {invalid_batch_write, Bad}}.
 
 %% @private
-%% Append each shard group's atomic frame (pipelining the WAL appends), then
-%% collect every group's per-event answers so the whole batch is
-%% read-your-writes. One barrier per group, taken before its append: its
-%% events are answered separately (`bondy_oplog:append_many/3`), and
-%% `await_applied/3` releases the barrier whatever the outcome. A group
-%% refused at the append releases the barriers of the groups already
-%% appended without awaiting them — those frames are durable and will be
-%% applied; the batch's answer is the refusal.
+%% One barrier per group, taken before its append, because a group's events
+%% are answered separately (`bondy_oplog:append_many/3`); `await_applied/3`
+%% releases it whatever the outcome, so no barrier outlives the call. A
+%% group refused at the append releases the already-appended groups'
+%% barriers without awaiting them — those frames are durable and will be
+%% applied, but the batch's answer is the refusal.
 commit_batch_groups(Groups) ->
     case append_batch_groups(Groups, []) of
         {ok, Pending} ->
@@ -1206,7 +1114,6 @@ await_batch_groups([{InstanceId, Barrier, N} | Rest], Result) ->
     end.
 
 %% @private
-%% Awaiting zero answers releases a barrier without waiting.
 release_batch_groups(Pending) ->
     _ = [bondy_oplog:await_applied(B, 0, 0) || {_Id, B, _N} <- Pending],
     ok.
@@ -1241,14 +1148,10 @@ do_apply(Table, InstanceId, Bucket, Key, Event, Barrier) ->
     end.
 
 %% @private
-%% tier_2 write path: stamp the cell's CURRENT causal context (a version
-%% vector, read in the applier's single-cell scope) into the event
-%% `meta`, so `interpret_cog/2` can resolve concurrency. The op itself
-%% stays pure (no state-inspecting resolution). This is the ORIGIN
-%% stamp; remote events arrive
-%% already-stamped via `append_remote` and are never re-stamped.
-%% Read-your-writes holds because the per-event barrier commits each
-%% write's projection before the same caller's next write reads context.
+%% tier_2 write path: stamp the cell's CURRENT causal context into the
+%% event `meta` so `interpret_cog/2` can resolve concurrency, keeping the
+%% op itself free of state-inspecting resolution. This is the ORIGIN stamp;
+%% a remote event arrives already-stamped and is never re-stamped.
 apply_with_context(InstanceId, Bucket, Key, Event, Barrier) ->
     try cell_context(InstanceId, Bucket, Key) of
         {error, _} = Err ->
@@ -1466,7 +1369,7 @@ probe_op_for(bondy_oplog_crdt_max_register) ->
 probe_op_for(bondy_oplog_crdt_min_register) ->
     {set, 0};
 probe_op_for(bondy_oplog_crdt_lww_register) ->
-    {set, bondy_oplog_hlc:now(bondy_oplog_hlc:new()), ?PROBE_TOKEN};
+    {set, bondy_hlc:now(bondy_hlc:new()), ?PROBE_TOKEN};
 probe_op_for(_Other) ->
     skip.
 
@@ -1770,13 +1673,11 @@ list(Table, Realm) when is_binary(Realm) ->
     Collect = fun(Row, Acc) -> [Row | Acc] end,
     case fold(Table, Realm, <<>>, infinity, Collect, []) of
         {ok, Rev} ->
-            %% `fold/6` yields shard by shard, so the rows arrive
-            %% partition-ordered. This function's contract is ASCENDING
-            %% (`bondy_db_publish_list_test:list_pages_to_completion/0` pins
-            %% it) and it materialises the whole realm regardless, so the
-            %% order is restored by sorting what is already in memory —
-            %% O(N log N) on decoded rows, against the O(N x shards) row
-            %% DECODES a scatter-merge pays to keep them ordered as it goes.
+            %% `fold/6` yields shard by shard, so rows arrive partition-ordered while
+            %% this function's contract is ASCENDING
+            %% (`bondy_db_publish_list_test:list_pages_to_completion/0`). It
+            %% materialises the whole realm regardless, so sorting in memory is
+            %% O(N log N) against the O(N x shards) row decodes a scatter-merge pays.
             {ok, lists:keysort(1, Rev)};
         {error, _} = Err ->
             Err
@@ -2396,6 +2297,27 @@ namespace(#{namespace := NS}) ->
     NS.
 
 -doc """
+Splits a STORAGE key into the realm and the caller-facing key.
+
+A storage key is what `fold_all/4` streams and what the change events
+`bondy_oplog_core` publishes carry (`bondy_oplog_core_event` and
+`bondy_oplog_core_merge_event`): on a realm-folding topology — both DBs
+Bondy ships — it is `<<Realm, 0, Key>>` (`cell_key/3`). The realm is
+NUL-free (`assert_nul_free_realm/1` enforces it on every write), so the
+FIRST separator is exact; `Key` may contain NULs and comes back verbatim.
+This is the one place that inverse lives — a reactor must not spell the
+fold itself. Raises `{badarg, {storage_key, Bin}}` on a key with no
+separator.
+""".
+-spec unfold_key(StorageKey :: binary()) -> {realm(), Key :: binary()}.
+
+unfold_key(StorageKey) when is_binary(StorageKey) ->
+    case binary:split(StorageKey, <<0>>) of
+        [Realm, Key] -> {Realm, Key};
+        _ -> error({badarg, {storage_key, StorageKey}})
+    end.
+
+-doc """
 The number of primary shards `Table` is partitioned into.
 
 A cell's shard is `shard_for/3`; a cross-shard read must visit `0..N-1`.
@@ -2489,15 +2411,11 @@ assert_batch(Table, Ops) ->
     end.
 
 %% @private
-%% A batch is ONE dot, and a nested sub-op accumulates in its target's
-%% dot-store BY dot (`bondy_oplog_crdt_nested_core:put_nested/7`) — so a
-%% second sub-op on the same field/key under one packed identity would
-%% silently replace the first, losing its contribution. The nested-op
-%% shapes are the convention shared by every nested-capable type: the
-%% struct's `{apply, FieldKey, SubOp}` and the collections'
-%% `{apply, Key, SubMod, SubOp}`. Flat forms (`put`/`rmv`/`add`) are
-%% exempt: sharing one dot is exactly their documented atomic,
-%% mutually-concurrent batch semantics.
+%% A batch is ONE dot and a nested sub-op accumulates in its target's
+%% dot-store BY dot (`bondy_oplog_crdt_nested_core:put_nested/7`), so a
+%% second sub-op on the same field under one packed identity would silently
+%% replace the first. Flat forms (`put`/`rmv`/`add`) are exempt: sharing one
+%% dot is their documented atomic batch semantics.
 assert_batch_ops(Ops) ->
     Targets = [T || Op <- Ops, T <- batch_subop_targets(Op)],
     case Targets -- lists:usort(Targets) of
@@ -2511,9 +2429,6 @@ batch_subop_targets({apply, Target, _SubMod, _SubOp}) -> [Target];
 batch_subop_targets(_Op) -> [].
 
 %% @private
-%% Translate a declarative `#{put => #{F => V}, rmv => [F]}` map edit into
-%% the flat op list `apply_batch/4` consumes. Order is irrelevant — the
-%% packed ops are mutually-concurrent and target distinct map keys.
 edit_to_ops(Edit) ->
     case maps:keys(Edit) -- [put, rmv] of
         [] ->
@@ -2535,13 +2450,10 @@ edit_to_ops(Edit) ->
 
 %% @private
 %% Provision shards `0 .. Count-1` with rollback. `ProvisionFun(Shard)`
-%% returns `{ok, ValA, ValB}` — the per-shard result pair, folded into two
-%% accumulator maps keyed by `Shard` — or `{error, _}`. On any failure
-%% every shard already built (`0 .. Shard-1`) is handed to
-%% `TeardownFun(S, AccA, AccB)` (best-effort) and the error is returned.
-%% Shared by the primary-shard and secondary-index-shard loops; the (A, B)
-%% pair carries (instance-id, cache) for the primary and (cache, writer)
-%% for an index, in provision-then-teardown order.
+%% answers `{ok, ValA, ValB}` or `{error, _}`; on failure every shard
+%% already built is handed to `TeardownFun(S, AccA, AccB)`, best-effort.
+%% The (A, B) pair is (instance-id, cache) for a primary shard and (cache,
+%% writer) for an index, in provision-then-teardown order.
 provision_seq(Count, ProvisionFun, TeardownFun) ->
     provision_seq(Count, ProvisionFun, TeardownFun, 0, #{}, #{}).
 
@@ -2747,9 +2659,6 @@ register_shard(
     end.
 
 %% @private
-%% A CRDT module's declared causal tier, or `tier_0` when no native CRDT
-%% is configured (the legacy fold path). `tier_2` provisions the per-cell
-%% DVV causal-context stamp for the table's writes.
 causal_tier_of(undefined) ->
     tier_0;
 causal_tier_of(CrdtModule) when is_atom(CrdtModule) ->
@@ -2977,8 +2886,6 @@ start_or_join_shard_instance(
     Bucket = collapse_bucket(EntityType),
     case bondy_oplog_instance:whereis(InstanceId) of
         undefined ->
-            %% First table on this shard: found the shared instance, seeding its
-            %% cell-apply directory with this table's bucket.
             start_shard_instance(
                 NS,
                 InstanceId,
@@ -2988,15 +2895,6 @@ start_or_join_shard_instance(
                 Bucket
             );
         _Pid ->
-            %% A sibling already founded the shard instance: register this
-            %% table's bucket so its events route to this table's projection.
-            %% Carry the caller's applier opts through verbatim — they hold
-            %% `publish_ns`/`publish_fun` (a `publish => true` table's
-            %% merge-event emission) and `oldstate_cache`, which
-            %% `resolve_cell_apply_ctx/1` reads off these opts. `fold_module`
-            %% comes from the registry entry, not here. Without this, a sibling
-            %% table that opted into publishing would silently stop firing
-            %% remote-merge reactor events.
             CallerApplier = maps:get(applier, OplogOpts, #{}),
             TableOpts = CallerApplier#{secondary_indexes => SecIndexes},
             case
@@ -3301,8 +3199,6 @@ provision_index_shard(
                         fold_module => undefined,
                         crdt_module => bondy_oplog_crdt_index_entry,
                         overlay => disabled,
-                        %% Back-pressure atomics (in-flight count +
-                        %% needs_rebuild flag). Index shards only.
                         inflight_atomics => atomics:new(2, [{signed, true}]),
                         %% The rebuild's wipe scope. The topology owns it (it
                         %% knows whether its Bookie co-locates entity types):
@@ -3504,17 +3400,13 @@ index_descriptors(Specs, DefaultShardCount, Topology) ->
     ].
 
 %% @private
-%% Invariant tripwire for the durable-index rebuild. A durable (leveled) table
-%% that declares secondary indexes relies on its projection adapter exporting
-%% `cell_keys/2` to enumerate the COMPLETE cell directory (under the topology's
-%% `cell_keys_scope()`) — without it the rebuild would silently fall back to the
-%% truncatable MST and miss every compacted cell (see
-%% `bondy_oplog_cell_utils:primary_cell_directory/4`). The leveled adapter always
-%% exports it, so this never fires in the current design; it pins the contract
-%% so a future durable adapter — or a deletion of `cell_keys/2` from the leveled
-%% adapter — fails loudly at open instead of silently degrading to the MST.
-%% (Ephemeral/ETS tables legitimately omit it and fall back to the MST by
-%% design, so only the `leveled` backend is asserted.)
+%% A durable table with secondary indexes needs its projection adapter to
+%% export `cell_keys/2`; without it the rebuild falls back to the
+%% truncatable MST and misses every compacted cell
+%% (`bondy_oplog_cell_utils:primary_cell_directory/4`). The leveled adapter
+%% exports it, so this never fires today — it fails a future adapter loudly
+%% at open instead of silently degrading. Ephemeral/ETS tables omit it by
+%% design and are not asserted.
 assert_durable_rebuild_invariant(leveled, IndexMap) when
     map_size(IndexMap) > 0
 ->
@@ -3535,10 +3427,6 @@ assert_durable_rebuild_invariant(_Backend, _IndexMap) ->
     ok.
 
 %% @private
-%% `true` when this table's founding instance is provisioned with the WAL drain
-%% gated (`oplog_instance_opts.applier.drain_gated`). The inline index cold-start
-%% barrier is deferred for such tables — see the call site and
-%% `cold_start_table_indexes/1`.
 is_drain_gated(OplogOpts) ->
     maps:get(drain_gated, maps:get(applier, OplogOpts, #{}), false) =:= true.
 
@@ -3549,14 +3437,10 @@ cold_start_indexes(_NS, _InstanceIds, IndexMap) when map_size(IndexMap) =:= 0 ->
     %% to return from the overlay before the drain completes).
     ok;
 cold_start_indexes(NS, InstanceIds, IndexMap) ->
-    %% Barrier the primary shards FIRST: drain each WAL to end-of-log and apply
-    %% the tail into the projection (and MST), so the trust/rebuild decision and
-    %% any rebuild observe a fully-replayed primary. Without this a `rebuild_sync`
-    %% derives its cell directory (the durable projection via `cell_keys/2` for a
-    %% durable table, else the MST for the ephemeral ETS adapter — see
-    %% `bondy_oplog_cell_utils:primary_cell_directory/4`) while the tail is still
-    %% being applied, yielding an empty or partial index. Best-effort: a missing
-    %% applier just leaves the prior (racy) behaviour, never blocks open.
+    %% Barrier the primary shards FIRST so the trust/rebuild decision and any
+    %% rebuild observe a fully-replayed primary; otherwise `rebuild_sync`
+    %% derives its cell directory while the tail is still being applied and
+    %% yields a partial index. Best-effort: a missing applier never blocks open.
     ok = await_primary_shards(InstanceIds),
     maps:foreach(
         fun(Name, #{sec_shard_count := SecShardCount}) ->
@@ -3654,8 +3538,6 @@ freshen_index_shards(NS, Name, SecShardCount) ->
 %% =============================================================================
 
 %% @private
-%% Resolve an index by name and hand its spec + secondary shard count to
-%% `Fun`. `{error, {unknown_index, _}}` when the table has no such index.
 with_index(Table, IndexName, Fun) ->
     Indexes = maps:get(indexes, Table, #{}),
     case maps:find(IndexName, Indexes) of
@@ -3757,8 +3639,6 @@ max_lag(_, infinity) -> infinity;
 max_lag(A, B) when is_integer(A), is_integer(B) -> erlang:max(A, B).
 
 %% @private
-%% Diagnostic snapshot of one secondary shard's lag, in-flight backlog,
-%% and rebuild flag (for `index_lag/2`).
 shard_lag_info(NS, IndexName, Shard) ->
     Lag = shard_lag(NS, IndexName, Shard),
     {Inflight, NeedsRebuild} =
@@ -3790,9 +3670,6 @@ stale_or_fallback(Opts, IndexName, Lag, FallbackFun) ->
     end.
 
 %% @private
-%% Run a stale-index fallback scan: enumerate the realm's primary cells and
-%% hand them to `RowsFun` (which recomputes terms/columns and produces the
-%% sorted, limited `[{Key, ColumnsMap}]`). Propagates a scan error verbatim.
 primary_scan(Table, Realm, RowsFun) ->
     case primary_cells(Table, Realm) of
         {ok, Cells} -> {ok, RowsFun(Cells)};
@@ -3804,9 +3681,6 @@ cell_terms(Spec, Value) ->
     lists:usort(bondy_oplog_index_spec:terms(Spec, Value)).
 
 %% @private
-%% Equality fallback: enumerate the realm's primary cells, recompute each
-%% value's index terms, and keep the keys whose terms include `NormTerm`.
-%% Returns the same `{Key, ColumnsMap}` shape as `index_get/5`.
 primary_scan_eq(Table, Realm, Spec, NormTerm, Opts) ->
     Limit = maps:get(limit, Opts, bondy_oplog_core:default_range_limit()),
     primary_scan(Table, Realm, fun(Cells) ->

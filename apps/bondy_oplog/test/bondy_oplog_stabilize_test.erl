@@ -78,7 +78,7 @@ removal_produces_a_reclaimable_state_test() ->
     ?assertEqual(discard, ?M:stabilize(21, Cleared)).
 
 %% -----------------------------------------------------------------------------
-%% Flags (BONDY_DB_RECLAMATION_PROOF.md §9)
+%% Flags
 %% -----------------------------------------------------------------------------
 
 -define(EW, bondy_oplog_crdt_ew_flag).

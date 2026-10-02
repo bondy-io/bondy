@@ -56,18 +56,10 @@ cold_replay_full_fold() ->
     try
         ok = append_n(Id, <<"k">>, 3),
         ok = bondy_oplog_test_projection:drain(Id),
-        %% Force a fresh replay: commit_now/1 already advanced the
-        %% watermark to the post-install root, so we have to bypass
-        %% that by clobbering it via a dummy MST root - but since the
-        %% test cannot reach into state, we instead drive the public
-        %% API: stop the instance and start a new one against the same
-        %% (persistent) WAL. For an ETS-backed instance this isn't
-        %% wired in this test harness, so we exercise the cold-replay
-        %% path through a different lens: by triggering an explicit
-        %% replay BEFORE any commit has advanced the watermark. The
-        %% drain above empties the cast queue but leaves the instance
-        %% free to apply more events; the explicit
-        %% replay observes whatever root is live.
+        %% The cold-replay path without a restart: this explicit replay runs
+        %% BEFORE any commit has advanced the watermark. The drain above
+        %% drains the cast queue but leaves the instance free to apply more
+        %% events, so the replay observes whatever root is live.
         ok = bondy_oplog_applier:replay_cell_events(Applier),
         ok = bondy_oplog_test_projection:drain(Id),
         Events = drain_telemetry(SubRef),

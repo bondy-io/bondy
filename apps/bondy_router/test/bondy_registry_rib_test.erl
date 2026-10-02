@@ -459,9 +459,9 @@ concurrent_writers(Tab) ->
     EA = entry(registration, ?EXACT_MATCH, ?INVOKE_SINGLE, Uri),
     EB = entry(registration, ?EXACT_MATCH, ?INVOKE_SINGLE, Uri),
     Self = self(),
-    ok = meck:new(bondy_oplog_hlc, [passthrough, no_link]),
+    ok = meck:new(bondy_hlc, [passthrough, no_link]),
     try
-        ok = meck:expect(bondy_oplog_hlc, now, fun(Clock) ->
+        ok = meck:expect(bondy_hlc, now, fun(Clock) ->
             case get(hold_at_stamp) of
                 undefined ->
                     ok;
@@ -495,7 +495,7 @@ concurrent_writers(Tab) ->
             {ok, {#{count := 2}, _}}, bondy_db:read(Table, ?REALM, Key)
         )
     after
-        meck:unload(bondy_oplog_hlc),
+        meck:unload(bondy_hlc),
         _ = bondy_registry_rib:on_entry_removed(self(), Tab, EA),
         _ = bondy_registry_rib:on_entry_removed(self(), Tab, EB)
     end.

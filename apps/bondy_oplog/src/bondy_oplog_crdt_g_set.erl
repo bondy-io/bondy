@@ -60,7 +60,7 @@ can switch with no data migration.
 
 -type elem() :: binary().
 -type set_t() :: ordsets:ordset(elem()).
--type state() :: {set_t(), bondy_oplog_hlc:hlc()}.
+-type state() :: {set_t(), bondy_hlc:hlc()}.
 -type op() :: {add, elem()}.
 
 -export_type([state/0, op/0, elem/0]).
@@ -112,7 +112,7 @@ apply_op({Set, H0}, {add, Elem}, Key) when is_binary(Elem) ->
 
 to_value({Set, _H}) -> Set.
 
--spec hlc(state()) -> bondy_oplog_hlc:hlc().
+-spec hlc(state()) -> bondy_hlc:hlc().
 
 hlc({_S, H}) -> H.
 

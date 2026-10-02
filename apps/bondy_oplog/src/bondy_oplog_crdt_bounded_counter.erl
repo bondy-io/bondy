@@ -112,7 +112,7 @@ whole group is absorbed.
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 
--type state() :: {non_neg_integer(), bondy_oplog_hlc:hlc()}.
+-type state() :: {non_neg_integer(), bondy_hlc:hlc()}.
 -type op() :: {inc, pos_integer()} | {dec, pos_integer()}.
 
 -export_type([state/0, op/0]).
@@ -170,7 +170,7 @@ query(value, {V, _H}) ->
 to_value({V, _H}) ->
     V.
 
--spec hlc(state()) -> bondy_oplog_hlc:hlc().
+-spec hlc(state()) -> bondy_hlc:hlc().
 
 hlc({_V, H}) ->
     H.

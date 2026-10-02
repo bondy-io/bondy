@@ -250,12 +250,11 @@ prop_subscription_delivers_matches() ->
         end
     ).
 
-%% D2 — Cache coherence post-§3.6. `write_through/4` no longer folds
-%% the event into the cached value (no fold currently exports
-%% `apply_value_delta/2`); it **invalidates** the cache entry so the
-%% next read repopulates from the projection (which still holds the
-%% pre-event state, because this test never drives the applier). We
-%% therefore assert two things:
+%% D2 — Cache coherence (§3.6). `bondy_oplog_core:write_through/4`
+%% **invalidates** the cache entry rather than folding the event into the
+%% cached value; the next read repopulates from the projection, which here
+%% still holds the pre-event state because this test never drives the
+%% applier. We therefore assert two things:
 %%
 %% 1. After write_through, the cache is empty (the writer's
 %%    in-flight RYOW is delegated to the next read; the underlying
@@ -533,7 +532,7 @@ build_lineage(Events) ->
     ),
     %% Lineage maps each HLC to the user-facing value the reader would
     %% observe after folding the prefix of events ending at that HLC.
-    %% Step 2's read API returns `to_value(State)`, not the raw state.
+    %% The read API returns `to_value(State)`, not the raw state.
     {Map, _} = lists:foldl(
         fun(E, {Acc, Prev}) ->
             New = bondy_oplog_crdt_lww_register:apply_op(Prev, E, undefined),

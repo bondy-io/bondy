@@ -75,6 +75,45 @@ partisan_gen_server:call(
 | `{get_catalogue_snapshot_next, Cursor}`  | `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {done, []}}` \| `{error, cursor_expired}` |
 
 Errors propagate as `{error, Reason}` (e.g. `{instance_not_running, Id}`).
+## Read semantics
+
+`get_root` and `{get_pages, Set}` do not await the local applier's drain.
+Both read the same in-memory MST, so the advertised root and the pages served
+are mutually consistent even while a just-appended local event is still
+draining, and the next round picks that event up. Awaiting the
+drain would put `get_root` over the sync timeout whenever the applier is busy
+under AAE load, leaving a peer that had lost a shard unable to heal from this
+node. Both replies also carry this node's keying-topology fingerprint, so the
+initiator can confirm the two nodes key data the same way before pulling.
+
+`get_root` answers `bondy_oplog_instance:aae_root/1`, which applies the
+integrity guard, rather than the raw root. The two `undefined` cases stay
+distinct on the wire: a genuinely empty tree — fully compacted or never
+written — answers `undefined`, which the joiner and the fully-compacted-shard
+convergence path depend on, while a live root the guard refuses answers an
+error, failing the session benignly for a retry. Collapsing them lets the
+initiator read a dangling window as "the peer's tree is empty", a complete
+round with nothing to pull, and the frontier-gap check then returns a false
+standing-gap verdict on every round of that window.
+
+`get_frontier` answers the applied-frontier version vector, `#{Origin => max
+Seq}`, read lock-free from the registry. Equal frontiers across nodes mean
+the same op-set has been applied, because causal delivery makes a per-origin
+max sequence identify the applied prefix, and the vector is
+compaction-invariant. Unlike `get_root` it is an
+installed-consistency barrier, since the answered vector is the initiator's
+evidence base for the gap check and must therefore count only what the tree
+can already ship. On drain timeout the reply is an error and the initiator
+degrades to `#{}`, skipping both adoption and the gap check for that round.
+
+`get_origins` and `get_retired` are node-level: this node's view of the
+replicated grow-only retirement set. A peer unions the answer in, which is the
+whole of the replication — the set only grows, so there is nothing to order
+and nothing to reconcile. `get_retired` is also the reap's precondition. A
+replica drops a retired origin's frontier entry only once every member's
+answer contains that origin, so a peer that cannot answer blocks the reap
+rather than licensing it.
+
 """).
 
 -export([start_link/0]).
@@ -129,8 +168,8 @@ child_spec() ->
 
 ?DOC("""
 Locally dispatches a sync `Request` to the instance identified by
-`InstanceId`. Read-only requests use the lock-free instance API and
-do not round-trip the instance gen_server.
+`InstanceId`. Read-only requests do not await the applier's drain, except
+`get_frontier`, which is an installed-consistency barrier.
 """).
 -spec dispatch(instance_id(), bondy_oplog_transport:request()) ->
     {ok, term()} | {error, term()}.
@@ -140,39 +179,10 @@ dispatch(InstanceId, get_root) when is_binary(InstanceId) ->
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            %% We do NOT await the local applier's drain before reading the
-            %% root. AAE is eventually consistent, and `root_hash/1` and
-            %% `get_pages/2` both read the same in-memory MST, so the root we
-            %% advertise and the pages we serve are mutually consistent even if
-            %% a just-appended local event is still draining — the next sync
-            %% round picks it up. Blocking on `await_apply/1` here is what made
-            %% `get_root` (and `get_pages`) exceed the 5s sync timeout whenever
-            %% the applier was busy under AAE load, so a peer that had lost a
-            %% shard could never heal from us. Reply with the current root,
-            %% plus this node's keying-topology fingerprint so the initiator can
-            %% verify both nodes key data the same way before pulling pages.
-            %%
-            %% `aae_root/1` (not `root_hash/1`) applies the integrity guard:
-            %% if our root is dangling (a page it references is missing —
-            %% transiently normal under the truncate+page-GC churn) it
-            %% answers `undefined`, so the peer pulls nothing unservable
-            %% from us and we heal via our own pull / replay.
-            %%
-            %% A guard-tripped `undefined` MUST NOT be advertised as the
-            %% root, because the initiator rightly treats an `undefined`
-            %% peer root as "peer's tree is genuinely empty" — a COMPLETE
-            %% round with nothing to pull, which the frontier-gap check
-            %% then judges against our honest applied frontier. During a
-            %% dangling window that manufactured a false standing-gap
-            %% verdict on every such round. Distinguish the two: a live
-            %% root that the
-            %% guard refuses is answered as an ERROR — the session fails
-            %% benignly and retries next round — while a genuinely empty
-            %% tree (`root_hash/1` = `undefined`: fully compacted or never
-            %% written) keeps the `undefined` answer that the joiner /
-            %% fully-compacted-shard convergence path depends on. The two
-            %% reads race harmlessly: a tree that empties in between
-            %% answers an error once and empty on the retry.
+            %% No drain await here, and `aae_root/1` rather than the raw
+            %% root, so the integrity guard applies. A root the guard refuses
+            %% answers an ERROR — `undefined` is reserved for a genuinely
+            %% empty tree, and collapsing the two manufactures a standing gap.
             case bondy_oplog_instance:aae_root(InstanceId) of
                 undefined ->
                     case bondy_oplog_instance:root_hash(InstanceId) of
@@ -196,31 +206,13 @@ dispatch(InstanceId, get_frontier) when is_binary(InstanceId) ->
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            %% The applied-frontier version vector convergence oracle:
-            %% `#{Origin => max Seq}`. Equal frontiers across nodes ⇒ the same
-            %% op-set has been applied ⇒ converged (causal delivery makes a
-            %% per-origin max Seq identify the applied prefix), and it is
-            %% compaction-invariant.
-            %%
-            %% INSTALLED-CONSISTENCY BARRIER (unlike `get_root', which stays
-            %% lock-free): the answered frontier is the initiator's evidence
-            %% base for the frontier-GAP check, so everything it counts must
-            %% already be in the tree the round completes against. The VV
-            %% advances at the projection write, which the drain performs
-            %% BEFORE the MST install, so a lock-free read counts events the
-            %% tree cannot yet ship — ordinary install lag read as a gap.
-            %%
-            %% THE ORDER IS LOAD-BEARING: snapshot the VV FIRST, then drain,
-            %% then answer the SNAPSHOT. Every event the snapshot counts had
-            %% its projection write done at snapshot time, so it is already
-            %% in the overlay when the drain starts and installed by the time
-            %% we answer. Draining first and reading after leaves a window in
-            %% which events applied mid-call are counted but not yet
-            %% installed when the round grabs its root — a standing
-            %% off-by-one gap on nearly every round under sustained writes.
-            %%
-            %% On drain timeout answer an error: the initiator degrades to
-            %% `#{}', skipping both adoption and the gap check for the round.
+            %% The order is the mechanism: snapshot the vector FIRST, then
+            %% drain, then answer the SNAPSHOT. Everything the snapshot
+            %% counts had its projection write done at snapshot time, so it
+            %% is installed by the time we answer. Reading after the drain
+            %% instead counts events applied mid-call that the round's root
+            %% cannot yet carry — an off-by-one gap on nearly every round
+            %% under sustained writes.
             Frontier = bondy_oplog_instance:frontier(InstanceId),
             case bondy_oplog_instance:await_apply(InstanceId) of
                 ok ->
@@ -259,42 +251,19 @@ dispatch(InstanceId, get_origins) when is_binary(InstanceId) ->
     %% the retirement pass treats as member-unreachable — fail-closed.
     {ok, bondy_oplog_origin_retirement:local_origins()};
 dispatch(InstanceId, get_retired) when is_binary(InstanceId) ->
-    %% NODE-level, like `get_origins`: this node's view of the replicated
-    %% grow-only retirement set. Peers pull it and union it in, which is the
-    %% whole of the replication — the set only grows, so there is nothing to
-    %% order and nothing to reconcile.
-    %%
-    %% It is also the reap's precondition: a replica drops a retired
-    %% origin's frontier entry only once EVERY member's answer contains that
-    %% origin, so a mixed-version peer answering `{error, {dispatch_failed,
-    %% _}}` blocks the reap rather than licensing it.
     {ok, bondy_oplog_origin_bans:retired()};
 dispatch(InstanceId, {get_pages, Hashes}) when is_binary(InstanceId) ->
     do_get_pages(InstanceId, Hashes);
 dispatch(InstanceId, {get_pages, _Peer, _PeerRoot, Hashes}) when
     is_binary(InstanceId)
 ->
-    %% Reciprocal form. The requester's peer id and root ride along so that a
-    %% responder learns, for free, what the requester holds — the input a
-    %% stability oracle needs (see BONDY_DB_DELETE_DESIGN.md §4.6).
-    %%
-    %% We do NOT act on it here. Two hazards, both measured:
-    %%
-    %%  1. Root inequality is not "I am behind". While A bulk-pulls from B the
-    %%     roots differ on *every* round, so triggering on inequality turns one
-    %%     bulk pull into a storm of reverse sessions.
-    %%  2. Those sessions consume slots from the node-wide `aae_max_concurrency`
-    %%     cap (default 3), starving the sessions that were making progress.
-    %%     Reciprocity then *slows* convergence — `bondy_frontier_cluster_SUITE`
-    %%     fails on `asymmetric_compaction_keeps_oracle_in_sync` with a
-    %%     convergence timeout.
-    %%
-    %% Serving pages must also stay cheap: an `is-behind` test via `missing_set`
-    %% is O(diff) and this is the hot path.
-    %%
-    %% Wiring the trigger therefore needs a genuine is-behind predicate and a
-    %% budget that does not compete with scheduled sync. Until then the wire
-    %% carries the information and nothing acts on it.
+    %% The requester's peer id and root ride along, so a responder learns for
+    %% free what the requester holds. Nothing acts on it: root inequality is
+    %% not "I am behind" — during a bulk pull the roots differ on every round,
+    %% so a reciprocal trigger becomes a storm of reverse sessions that
+    %% starves the node-wide `aae_max_concurrency` cap and slows convergence
+    %% (`bondy_oplog_reciprocal_sync_test`). Acting on it needs a real
+    %% is-behind predicate and a budget of its own.
     do_get_pages(InstanceId, Hashes);
 dispatch(InstanceId, get_catalogue_snapshot_init) when
     is_binary(InstanceId)
@@ -372,16 +341,14 @@ do_get_pages(InstanceId, Hashes) ->
     end.
 
 %% @private
-%% Pack pages into a response no larger than the sync byte ceiling (derived from
-%% Partisan's frame cap), so the reply never trips `max_message_size` and drops
-%% the peer. Pages beyond the ceiling are left out; the requester merges what it
-%% gets and re-derives its `missing_set` next round, so a capped response just
-%% costs one more round. At least one fitting page is always included, so the
-%% caller never sees an (error-signalling) empty map while progress is possible.
-%% A single page whose serialized size alone exceeds the ceiling cannot be
-%% delivered within the frame cap at all: it is skipped and reported, so it never
-%% poisons the peer connection — it simply cannot replicate until the cap is
-%% raised above it.
+%% Packs pages into a reply no larger than the sync byte ceiling (derived from
+%% Partisan's frame cap), so a reply never trips `max_message_size` and drops
+%% the peer. What does not fit costs one more round: the requester merges what
+%% it gets and re-derives its `missing_set`. At least one fitting page is
+%% always included, so an empty map keeps its error meaning. A page larger
+%% than the ceiling on its own is skipped and reported rather than allowed to
+%% poison the peer connection; it cannot replicate until the cap is raised
+%% above it.
 cap_pages(InstanceId, Pages) ->
     MaxBytes = bondy_oplog_config:sync_max_response_bytes(),
     {Capped, _Used} = maps:fold(
@@ -403,7 +370,6 @@ cap_pages(InstanceId, Pages) ->
                 Used + Size =< MaxBytes ->
                     {Acc#{Hash => Page}, Used + Size};
                 true ->
-                    %% Ceiling reached; leave the rest for the next round.
                     Keep
             end
         end,

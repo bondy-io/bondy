@@ -23,7 +23,7 @@ the instance, the WAL writer, and the WAL scrubber.
 
 It owns four jobs:
 
-1. Drain events from the WAL (via `bondy_oplog_wal_reader`).
+1. Drain events from the WAL (via `bondy_log_reader`).
 2. Re-verify their signatures (defence-in-depth against WAL
    tampering — locals were signed at append time in the instance).
 3. Apply each event to the projection through the per-cell kernel
@@ -531,9 +531,9 @@ Implementation:
   `evict_overlay_batch/2`, `backpressure_admit/2`; `fused_apply_batch/2`
   (the fused inline twin of this chapter). Signing at append time calls
   the validator's `sign_event/2` callback (below).
-- `bondy_oplog_wal_reader.erl` — the WAL drain cursor.
+- `bondy_log_reader.erl` — the WAL drain cursor.
 - `bondy_oplog_wal.erl` — `set_committed_segment/2`, `await_durable/3`.
-- `bondy_oplog_wal_state.erl` — `write_consumer_offset/2`, the durable
+- `bondy_log_state.erl` — `write_consumer_offset/2`, the durable
   consumer offset.
 - `bondy_oplog_db_overlay.erl` — overlay key shape and per-row
   delete.

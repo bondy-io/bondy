@@ -3,10 +3,9 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Fused-writer rollout, Step 1: the ephemeral `fused` flag is wired
-%% end-to-end (provisioning only, no behaviour change). Pins: a table
-%% defaults to NOT fused; an ephemeral (ets projection) table may opt in
-%% and the flag is recorded in both `bondy_db:info/1` and the per-instance
+%% The ephemeral `fused` flag, wired end-to-end (provisioning only). Pins: a
+%% table defaults to NOT fused; an ephemeral (ets projection) table may opt
+%% in and the flag is recorded in both `bondy_db:info/1` and the per-instance
 %% `bondy_oplog_registry`; and `fused => true` is refused on a durable
 %% (leveled) projection — the durable two-process pipeline must stay split.
 

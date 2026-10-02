@@ -252,7 +252,7 @@ compacted_cells_still_reaped() ->
     end.
 
 %% =============================================================================
-%% Origin retirement (Step 7) — reap-by-complement
+%% Origin retirement — reap-by-complement
 %% =============================================================================
 
 %% A replica departs for good (its instances stop; nothing claims its origin

@@ -3,20 +3,17 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_oplog_wal_codec).
+-module(bondy_log_codec).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
--include("bondy_oplog.hrl").
--include("bondy_oplog_wal.hrl").
+-include("bondy_log.hrl").
 
--moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Pure body codec: compresses / decompresses and encrypts / decrypts the
 encoded batch body that sits inside a WAL frame.
 
-Sits between `bondy_oplog_wal` (writer) / `bondy_oplog_wal_reader` /
-`bondy_oplog_wal_recovery` and `bondy_oplog_wal_frame`. The frame
+Sits between `bondy_log_wal` (writer) / `bondy_log_reader` /
+`bondy_log_recovery` and `bondy_log_frame`. The frame
 module owns the envelope (Magic, FrameLen, CRC, FrameVersion, Flags);
 the codec owns the body bytes — choosing whether to compress and / or
 encrypt them, which algorithm to use, and how to reverse the
@@ -48,7 +45,7 @@ The leading algorithm byte in each envelope decouples the *capability*
 advertised by the flag from the *algorithm* used to apply it, so a
 writer can swap implementations later (zlib → lz4 → …, AES-256-GCM →
 ChaCha20-Poly1305 → …) without a wire-format break. Algorithm ids
-live in `bondy_oplog_wal.hrl`:
+live in `bondy_log.hrl`:
 
 | Flag | Id | Algorithm | Status |
 |---|---|---|---|
@@ -111,7 +108,7 @@ verified — a malformed envelope cannot escape the codec.
 
 When `body_encryption = {enabled, Registry}` is configured on the
 writer, `Registry` is a module implementing
-`bondy_oplog_wal_key_registry`. The writer calls `Registry:current_
+`bondy_log_key_registry`. The writer calls `Registry:current_
 key/0` once per encrypted frame; readers and recovery call
 `Registry:lookup_key/1` once per encrypted frame they decode. Old
 frames stay readable as long as their `KeyId` is still resolvable —
@@ -120,10 +117,14 @@ attempting recovery.
 
 ## Telemetry
 
+Event names are `Prefix ++ [codec, Op]`, where `Prefix` is the
+`telemetry_prefix` opt (default `[bondy_log]`; the oplog WAL passes its
+own, so its events keep their historical names).
+
 Per encode that actually compressed:
 
 ```
-[bondy_oplog, wal, codec, compress]
+Prefix ++ [codec, compress]
   measurements: input_bytes, output_bytes, duration_us
   metadata:     instance_id, algorithm
 ```
@@ -131,7 +132,7 @@ Per encode that actually compressed:
 Per decode that actually decompressed:
 
 ```
-[bondy_oplog, wal, codec, decompress]
+Prefix ++ [codec, decompress]
   measurements: input_bytes, output_bytes, duration_us
   metadata:     instance_id, algorithm
 ```
@@ -139,11 +140,11 @@ Per decode that actually decompressed:
 Per encrypted frame (encode and decode):
 
 ```
-[bondy_oplog, wal, codec, encrypt]
+Prefix ++ [codec, encrypt]
   measurements: input_bytes, output_bytes, duration_us
   metadata:     instance_id, key_id, algorithm
 
-[bondy_oplog, wal, codec, decrypt]
+Prefix ++ [codec, decrypt]
   measurements: input_bytes, output_bytes, duration_us, tag_mismatches
   metadata:     instance_id, key_id, algorithm
 ```
@@ -159,41 +160,56 @@ This module performs no file I/O and holds no state. It is safe to
 call from any context that has a body in hand — writer, reader,
 recovery, or test fixture. Key registry callbacks must be free of
 process-bound side effects for the same reason.
-""").
+""".
 
--define(FLAG_COMPRESSED, ?BONDY_OPLOG_WAL_FRAME_FLAG_COMPRESSED).
--define(FLAG_ENCRYPTED, ?BONDY_OPLOG_WAL_FRAME_FLAG_ENCRYPTED).
--define(ALGO_ZLIB, ?BONDY_OPLOG_WAL_CODEC_ALGO_ZLIB).
--define(CIPHER_AES_256_GCM, ?BONDY_OPLOG_WAL_CODEC_CIPHER_AES_256_GCM).
--define(IV_BYTES, ?BONDY_OPLOG_WAL_CODEC_IV_BYTES).
--define(TAG_BYTES, ?BONDY_OPLOG_WAL_CODEC_TAG_BYTES).
--define(KEY_BYTES, ?BONDY_OPLOG_WAL_CODEC_KEY_BYTES).
+-define(FLAG_COMPRESSED, ?BONDY_LOG_FRAME_FLAG_COMPRESSED).
+-define(FLAG_ENCRYPTED, ?BONDY_LOG_FRAME_FLAG_ENCRYPTED).
+-define(ALGO_ZLIB, ?BONDY_LOG_CODEC_ALGO_ZLIB).
+-define(CIPHER_AES_256_GCM, ?BONDY_LOG_CODEC_CIPHER_AES_256_GCM).
+-define(IV_BYTES, ?BONDY_LOG_CODEC_IV_BYTES).
+-define(TAG_BYTES, ?BONDY_LOG_CODEC_TAG_BYTES).
+-define(KEY_BYTES, ?BONDY_LOG_CODEC_KEY_BYTES).
 -define(ENCRYPT_HEADER_BYTES,
-    ?BONDY_OPLOG_WAL_CODEC_ENCRYPT_HEADER_BYTES
+    ?BONDY_LOG_CODEC_ENCRYPT_HEADER_BYTES
 ).
 -define(MIN_BYTES_DEFAULT,
-    ?BONDY_OPLOG_WAL_BODY_COMPRESSION_MIN_BYTES_DEFAULT
+    ?BONDY_LOG_BODY_COMPRESSION_MIN_BYTES_DEFAULT
 ).
 
+%% Opaque to the codec: the owning log's identity, surfaced only as
+%% telemetry metadata.
+-type instance_id() :: binary().
 -type algorithm() :: none | zlib | lz4.
 -type encryption() :: disabled | {enabled, module()}.
+
+-type telemetry_prefix() :: [atom(), ...].
 
 -type encode_opts() :: #{
     body_compression => algorithm(),
     body_compression_min_bytes => pos_integer(),
     body_encryption => encryption(),
-    instance_id => instance_id() | undefined
+    instance_id => instance_id() | undefined,
+    telemetry_prefix => telemetry_prefix()
 }.
 
 -type decode_opts() :: #{
     body_encryption => encryption(),
-    instance_id => instance_id() | undefined
+    instance_id => instance_id() | undefined,
+    telemetry_prefix => telemetry_prefix()
 }.
+
+%% What the emitters need, resolved once per call from the opts.
+-type tel() :: #{
+    prefix := telemetry_prefix(),
+    instance_id := instance_id() | undefined
+}.
+
+-define(DEFAULT_TELEMETRY_PREFIX, [bondy_log]).
 
 -type decode_error() ::
     {unknown_codec, byte()}
     | {unknown_cipher, byte()}
-    | {missing_key, bondy_oplog_wal_key_registry:key_id()}
+    | {missing_key, bondy_log_key_registry:key_id()}
     | decompress_failed
     | decrypt_failed
     | truncated_envelope.
@@ -214,14 +230,14 @@ process-bound side effects for the same reason.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Encodes `Body` per `Opts`. Returns `{Flags, EncodedBody}` where:
 
 - `Flags` is the codec-contributed portion of the frame's `Flags`
   field — `0` when the body is written uncompressed, or
-  `?BONDY_OPLOG_WAL_FRAME_FLAG_COMPRESSED` when the codec actually
+  `?BONDY_LOG_FRAME_FLAG_COMPRESSED` when the codec actually
   compressed it.
-- `EncodedBody` is iodata suitable for `bondy_oplog_wal_frame:encode/2`.
+- `EncodedBody` is iodata suitable for `bondy_log_frame:encode/2`.
 
 `Opts`:
 
@@ -232,7 +248,8 @@ Encodes `Body` per `Opts`. Returns `{Flags, EncodedBody}` where:
   below this threshold are written uncompressed even when compression
   is enabled. Default 256 bytes.
 - `instance_id` — surfaced as telemetry metadata. Optional.
-""").
+- `telemetry_prefix` — the event-name prefix. Default `[bondy_log]`.
+""".
 -spec encode_body(iodata(), encode_opts()) ->
     {non_neg_integer(), iodata()}.
 
@@ -262,7 +279,7 @@ maybe_compress(Body, Opts) ->
             try_compress(Body, Algo, Min, Opts)
     end.
 
-?DOC("""
+-doc """
 Decodes the codec envelope of a frame body.
 
 `Flags` is the full `Flags` value carried by the frame; the codec
@@ -275,18 +292,18 @@ the compressed payload; a missing or unknown algorithm byte produces
 a typed error rather than a crash.
 
 `Opts` is optional; same shape as `encode_body/2`'s, but only
-`instance_id` is read (for telemetry metadata).
-""").
+`instance_id` and `telemetry_prefix` are read (for telemetry).
+""".
 -spec decode_body(binary(), non_neg_integer()) ->
     {ok, binary()} | {error, decode_error()}.
 
 decode_body(Body, Flags) ->
     decode_body(Body, Flags, #{}).
 
-?DOC("""
+-doc """
 Variant of `decode_body/2` that accepts an opts map for telemetry
-metadata (currently only `instance_id` is read).
-""").
+(`instance_id`, `telemetry_prefix`) and the `body_encryption` config.
+""".
 -spec decode_body(binary(), non_neg_integer(), map()) ->
     {ok, binary()} | {error, decode_error()}.
 
@@ -321,21 +338,20 @@ decode_compressed(<<>>, _Flags, _Opts) ->
     %% failure rather than an exception.
     {error, truncated_envelope};
 decode_compressed(<<Algo:8, Payload/binary>>, _Flags, Opts) ->
-    InstanceId = maps:get(instance_id, Opts, undefined),
     case algo_atom(Algo) of
         {ok, AlgoAtom} ->
-            decompress(AlgoAtom, Payload, byte_size(Payload), InstanceId);
+            decompress(AlgoAtom, Payload, byte_size(Payload), tel(Opts));
         {error, _} = E ->
             E
     end.
 
-?DOC("""
+-doc """
 Validates a `body_compression` opt at startup. Returns `ok` for
 `none` and `zlib`; returns `{error, {unsupported_codec, lz4}}` for
 `lz4` (reserved id; requires an LZ4 NIF that is not built into the
 project today). Any other value is `{error, {invalid_opt,
 body_compression, V}}`.
-""").
+""".
 -spec validate_algorithm(term()) ->
     ok
     | {error, {invalid_opt, body_compression, term()}}
@@ -346,17 +362,17 @@ validate_algorithm(zlib) -> ok;
 validate_algorithm(lz4) -> {error, {unsupported_codec, lz4}};
 validate_algorithm(V) -> {error, {invalid_opt, body_compression, V}}.
 
-?DOC("""
+-doc """
 Validates a `body_encryption` opt at startup. Returns `ok` for
 `disabled` and for `{enabled, Module}` when `Module` exports the
-`bondy_oplog_wal_key_registry` callbacks and the module's
+`bondy_log_key_registry` callbacks and the module's
 `current_key/0` returns a well-formed `{KeyId, Key}` pair (`KeyId`
 in `0..16#FFFF`, `Key` a 32-byte binary). Otherwise returns a typed
 `{invalid_opt, body_encryption, _}` or `{key_registry_*, _}` error.
 The startup check is a one-time cost that catches misconfiguration
 before any frame is written; bad keys at runtime still come back as
 `{missing_key, _}` from `decode_body/3`.
-""").
+""".
 -spec validate_encryption(term()) ->
     ok
     | {error, {invalid_opt, body_encryption, term()}}
@@ -416,8 +432,7 @@ try_compress(Body, Algo, Min, Opts) ->
         true ->
             {0, Body};
         false ->
-            InstanceId = maps:get(instance_id, Opts, undefined),
-            compress_now(Body, InSize, Algo, InstanceId)
+            compress_now(Body, InSize, Algo, tel(Opts))
     end.
 
 %% @private
@@ -427,7 +442,7 @@ try_compress(Body, Algo, Min, Opts) ->
 %% branches emit telemetry only when compression actually ran; the
 %% fallback path emits an event with the negative ratio so operators
 %% can see that the writer attempted compression and rejected it.
-compress_now(Body, InSize, zlib, InstanceId) ->
+compress_now(Body, InSize, zlib, Tel) ->
     T0 = erlang:monotonic_time(microsecond),
     %% Z_DEFAULT_COMPRESSION lets zlib pick a balanced level; the
     %% level isn't a per-instance knob — the lz4 swap-out point would
@@ -449,7 +464,7 @@ compress_now(Body, InSize, zlib, InstanceId) ->
         T1 = erlang:monotonic_time(microsecond),
         case OutSize < InSize of
             true ->
-                emit_compress(InstanceId, zlib, InSize, OutSize, T1 - T0),
+                emit_compress(Tel, zlib, InSize, OutSize, T1 - T0),
                 {?FLAG_COMPRESSED, Envelope};
             false ->
                 %% Compression didn't help — keep the raw body.
@@ -460,7 +475,7 @@ compress_now(Body, InSize, zlib, InstanceId) ->
     end.
 
 %% @private
-decompress(zlib, Payload, InSize, InstanceId) ->
+decompress(zlib, Payload, InSize, Tel) ->
     T0 = erlang:monotonic_time(microsecond),
     Z = zlib:open(),
     try
@@ -468,9 +483,7 @@ decompress(zlib, Payload, InSize, InstanceId) ->
         Out = iolist_to_binary(zlib:inflate(Z, Payload)),
         ok = zlib:inflateEnd(Z),
         T1 = erlang:monotonic_time(microsecond),
-        emit_decompress(
-            InstanceId, zlib, InSize, byte_size(Out), T1 - T0
-        ),
+        emit_decompress(Tel, zlib, InSize, byte_size(Out), T1 - T0),
         {ok, Out}
     catch
         error:_ ->
@@ -484,51 +497,59 @@ algo_atom(?ALGO_ZLIB) -> {ok, zlib};
 algo_atom(Other) -> {error, {unknown_codec, Other}}.
 
 %% @private
-emit_compress(InstanceId, Algo, In, Out, Dur) ->
+-spec tel(map()) -> tel().
+tel(Opts) ->
+    #{
+        prefix => maps:get(telemetry_prefix, Opts, ?DEFAULT_TELEMETRY_PREFIX),
+        instance_id => maps:get(instance_id, Opts, undefined)
+    }.
+
+%% @private
+emit_compress(#{prefix := Prefix} = Tel, Algo, In, Out, Dur) ->
     telemetry:execute(
-        [bondy_oplog, wal, codec, compress],
+        Prefix ++ [codec, compress],
         #{input_bytes => In, output_bytes => Out, duration_us => Dur},
-        meta(InstanceId, Algo)
+        meta(Tel, Algo)
     ).
 
 %% @private
-emit_decompress(InstanceId, Algo, In, Out, Dur) ->
+emit_decompress(#{prefix := Prefix} = Tel, Algo, In, Out, Dur) ->
     telemetry:execute(
-        [bondy_oplog, wal, codec, decompress],
+        Prefix ++ [codec, decompress],
         #{input_bytes => In, output_bytes => Out, duration_us => Dur},
-        meta(InstanceId, Algo)
+        meta(Tel, Algo)
     ).
 
 %% @private
-emit_encrypt(InstanceId, KeyId, In, Out, Dur) ->
+emit_encrypt(#{prefix := Prefix} = Tel, KeyId, In, Out, Dur) ->
     telemetry:execute(
-        [bondy_oplog, wal, codec, encrypt],
+        Prefix ++ [codec, encrypt],
         #{input_bytes => In, output_bytes => Out, duration_us => Dur},
-        meta(InstanceId, aes_256_gcm, KeyId)
+        meta(Tel, aes_256_gcm, KeyId)
     ).
 
 %% @private
-emit_decrypt(InstanceId, KeyId, In, Out, Dur, TagMismatches) ->
+emit_decrypt(#{prefix := Prefix} = Tel, KeyId, In, Out, Dur, TagMismatches) ->
     telemetry:execute(
-        [bondy_oplog, wal, codec, decrypt],
+        Prefix ++ [codec, decrypt],
         #{
             input_bytes => In,
             output_bytes => Out,
             duration_us => Dur,
             tag_mismatches => TagMismatches
         },
-        meta(InstanceId, aes_256_gcm, KeyId)
+        meta(Tel, aes_256_gcm, KeyId)
     ).
 
 %% @private
-meta(undefined, Algo) ->
+meta(#{instance_id := undefined}, Algo) ->
     #{algorithm => Algo};
-meta(InstanceId, Algo) ->
+meta(#{instance_id := InstanceId}, Algo) ->
     #{instance_id => InstanceId, algorithm => Algo}.
 
 %% @private
-meta(InstanceId, Algo, KeyId) ->
-    (meta(InstanceId, Algo))#{key_id => KeyId}.
+meta(Tel, Algo, KeyId) ->
+    (meta(Tel, Algo))#{key_id => KeyId}.
 
 %% =============================================================================
 %% Encrypt / decrypt
@@ -542,7 +563,7 @@ meta(InstanceId, Algo, KeyId) ->
 %% Returns the on-wire envelope as a binary; the caller composes it
 %% with the frame header.
 encrypt_now(Body, Registry, Opts) ->
-    InstanceId = maps:get(instance_id, Opts, undefined),
+    Tel = tel(Opts),
     {KeyId, Key} = Registry:current_key(),
     IV = crypto:strong_rand_bytes(?IV_BYTES),
     BodyBin = iolist_to_binary(Body),
@@ -554,13 +575,7 @@ encrypt_now(Body, Registry, Opts) ->
     Envelope =
         <<?CIPHER_AES_256_GCM:8, KeyId:16/big-unsigned, IV/binary, Tag/binary,
             Ciphertext/binary>>,
-    emit_encrypt(
-        InstanceId,
-        KeyId,
-        byte_size(BodyBin),
-        byte_size(Envelope),
-        T1 - T0
-    ),
+    emit_encrypt(Tel, KeyId, byte_size(BodyBin), byte_size(Envelope), T1 - T0),
     Envelope.
 
 %% @private
@@ -593,7 +608,7 @@ decrypt_aes_gcm(KeyId, IV, Tag, Ciphertext, Opts) ->
 
 %% @private
 do_decrypt_aes_gcm(Key, KeyId, IV, Tag, Ciphertext, Opts) ->
-    InstanceId = maps:get(instance_id, Opts, undefined),
+    Tel = tel(Opts),
     T0 = erlang:monotonic_time(microsecond),
     Result = crypto:crypto_one_time_aead(
         aes_256_gcm, Key, IV, Ciphertext, <<>>, Tag, false
@@ -602,18 +617,11 @@ do_decrypt_aes_gcm(Key, KeyId, IV, Tag, Ciphertext, Opts) ->
     Dur = T1 - T0,
     case Result of
         error ->
-            emit_decrypt(
-                InstanceId, KeyId, byte_size(Ciphertext), 0, Dur, 1
-            ),
+            emit_decrypt(Tel, KeyId, byte_size(Ciphertext), 0, Dur, 1),
             {error, decrypt_failed};
         Plaintext when is_binary(Plaintext) ->
             emit_decrypt(
-                InstanceId,
-                KeyId,
-                byte_size(Ciphertext),
-                byte_size(Plaintext),
-                Dur,
-                0
+                Tel, KeyId, byte_size(Ciphertext), byte_size(Plaintext), Dur, 0
             ),
             {ok, Plaintext}
     end.

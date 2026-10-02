@@ -185,7 +185,6 @@ sign_event(Event, #state{} = State) ->
         [PrivKey, ed25519]
     ),
     Signed = bondy_oplog_event:set_signature(EventWithPrev, Signature),
-    %% Advance our own chain tail.
     NewLastHash = (State#state.last_hash)#{
         Origin => event_hash(Signed)
     },
@@ -278,7 +277,6 @@ verify_with_key(Event, Origin, PubKey, State) ->
                 false ->
                     {error, invalid_signature};
                 true ->
-                    %% Signature checks; now validate the chain.
                     verify_chain(Event, Origin, State)
             end
     end.

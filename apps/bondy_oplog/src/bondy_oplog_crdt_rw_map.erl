@@ -85,7 +85,7 @@ raises `{badarg, _}`, per `bondy_oplog_crdt_rw_nested_core`).
 -type cell() :: bondy_oplog_crdt_rw_core:cell().
 -type entries() :: #{map_key() => cell()}.
 -type context() :: bondy_dvvset:vector().
--type state() :: {entries(), context(), bondy_oplog_hlc:hlc()}.
+-type state() :: {entries(), context(), bondy_hlc:hlc()}.
 -type op() ::
     {put, map_key(), map_value()}
     | {apply, map_key(), module(), term()}
@@ -239,7 +239,7 @@ reap_origins({Entries, CC, Hlc}, Retired) ->
             {{Entries, CC1, Hlc}, lists:usort(Reaped)}
     end.
 
--spec hlc(state()) -> bondy_oplog_hlc:hlc().
+-spec hlc(state()) -> bondy_hlc:hlc().
 
 hlc({_Entries, _CC, Hlc}) ->
     Hlc.

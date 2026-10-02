@@ -5,14 +5,12 @@
 
 %% Dead-origin VV reaping (`bondy_oplog_instance:reap_origins/2`) on a
 %% **fused** local instance — the fused mirror of
-%% `bondy_oplog_reap_origins_e2e_test.erl`. A fused instance has no
-%% separate applier process, so `reap_origins/2` previously always
-%% returned `{error, applier_unavailable}` for it, permanently:
-%% `bondy_oplog_origin_retirement.erl` calls it generically on every
-%% membership event and only logs a warning + retries forever, silently.
-%% `bondy_oplog_cell_utils:reap/4` (shared with the applier) now runs
-%% in-process on the fused instance, guarded by the same
-%% `bondy_oplog_ctx_guard` the applier uses.
+%% `bondy_oplog_reap_origins_e2e_test.erl`. A fused instance has no separate
+%% applier process, so `reap_origins/2` must run `bondy_oplog_cell_utils:
+%% reap/4` in-process under the same `bondy_oplog_ctx_guard` the applier
+%% uses. An applier-only path answers `{error, applier_unavailable}` for it
+%% permanently, and `bondy_oplog_origin_retirement.erl` — which calls it
+%% generically on every membership event — only logs a warning and retries.
 %%
 %% The scenario: a fused local instance and a plain (non-fused) peer
 %% instance converge on a cell, then the local side dominates — the peer

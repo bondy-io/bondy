@@ -3,9 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Step 8 of BONDY_DB_RECLAMATION_PLAN.md (built alongside Step 0b, as the
-%% plan directs) — the A3 property on which the entire Canteen→POLog upgrade
-%% rests (Case 2 of the Theorem in BONDY_DB_RECLAMATION_PROOF.md):
+%% The A3 property on which the entire Canteen→POLog upgrade rests:
 %%
 %%   After delivering an event with HLC `h`, every subsequently created local
 %%   event has HLC `> h` — on EVERY delivery path.
@@ -223,7 +221,7 @@ prop_bootstrap_absorbs() ->
 %% =============================================================================
 
 far_hlc(OffsetMs) ->
-    bondy_oplog_hlc:encode(
+    bondy_hlc:encode(
         erlang:system_time(millisecond) + OffsetMs, 0
     ).
 

@@ -9,12 +9,11 @@
 %%
 %% ## What is being pinned, and why a test rather than a benchmark
 %%
-%% Both used to page with `bondy_oplog_core:range_all/5`, which scatters each
+%% Neither may page with `bondy_oplog_core:range_all/5`, which scatters each
 %% page to EVERY shard and k-way merges the results. Per-shard calls take the
 %% caller's `limit` verbatim, so a page of `limit` rows costs
-%% `shard_count x limit` row decodes and throws the rest away. Draining a band
-%% is then `O(N x shards)` — with the shipped default of 16 shards, sixteen
-%% reads per row returned.
+%% `shard_count x limit` row decodes and throws the rest away, and draining a
+%% band is `O(N x shards)`.
 %%
 %% That is invisible to every correctness test: the results were complete,
 %% ordered and deduplicated the whole time. It is also invisible to a wall

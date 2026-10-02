@@ -333,9 +333,9 @@ mux_shard_both_tables_compact_together() ->
 %% retention window, so a joining/lagging peer's ONLY complete source is
 %% the snapshot stream). Mirrors
 %% `bondy_oplog_applier_multiplex_test:install_catalogue_batch_routes_by_bucket/0`
-%% with FUSED source and target: previously the producer answered
-%% `{ok, no_snapshot}` for any fused instance (it resolved the projection
-%% target via the applier pid) and the installer refused outright with
+%% with FUSED source and target: a producer resolving the projection target
+%% through the applier pid answers `{ok, no_snapshot}` for any fused
+%% instance, and an installer keyed the same way refuses with
 %% `fused_bootstrap_unsupported`.
 fused_catalogue_bootstrap_roundtrip() ->
     %% Source: a fused mux instance with two buckets and retention (the
@@ -1468,7 +1468,7 @@ register_shard_with_bucket(NS, InstanceId, Bucket, CrdtModule, CrdtOpts) ->
 %% ms is forced past `Key`'s before writing; the precondition is asserted
 %% rather than assumed.
 compact_above(Local, Key) ->
-    {KeyMs, _} = bondy_oplog_hlc:decode(bondy_oplog_event:key_hlc(Key)),
+    {KeyMs, _} = bondy_hlc:decode(bondy_oplog_event:key_hlc(Key)),
     wait_past_ms(KeyMs),
     _ = bondy_oplog:append(Local, {cell_apply, ?B, <<"own">>, {inc, 1}}),
     _ = bondy_oplog:append(Local, {cell_apply, ?B, <<"own">>, {inc, 1}}),

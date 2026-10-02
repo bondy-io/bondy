@@ -86,10 +86,10 @@ unregistered_shard_returns_no_snapshot() ->
     ),
     teardown(Id).
 
-%% A cell whose frame alone exceeds the response ceiling used to be reported to
-%% metrics and ADVANCED PAST -- lost permanently, while the bootstrap still
-%% adopted the peer's frontier so the oracle read CONVERGED. It must now be
-%% shipped as parts that reassemble to the identical frame.
+%% A cell whose frame alone exceeds the response ceiling must be shipped as
+%% parts that reassemble to the identical frame. Reporting it to metrics and
+%% ADVANCING PAST it loses it permanently while the bootstrap still adopts
+%% the peer's frontier, so the oracle reads CONVERGED.
 %%
 %% Exercises the whole path the unit tests cannot: the cursor's `pending`
 %% threading across rounds, the wire envelope, and the receiver's reassembly.

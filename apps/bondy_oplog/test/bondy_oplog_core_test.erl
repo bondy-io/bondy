@@ -169,8 +169,8 @@ write_through_invalidates_existing_cache_entry() ->
     NS = mk_ns(),
     {Setup, #{cache_handle := CH}} =
         setup_shard(NS, primary, 0, 1, lww_register),
-    %% Pre-populate the cache. After §3.6 the write-through path
-    %% invalidates rather than folding (no fold currently exports
+    %% Pre-populate the cache. The write-through path invalidates rather
+    %% than folding (§3.6); the next read repopulates via HEAD.
     %% `apply_value_delta/2`); the next read repopulates via HEAD.
     ok = bondy_oplog_cache_ets:fill(
         CH, ?B, <<"k">>, {<<"v1">>, 5}, bondy_oplog_cache_ets:ticket(CH)

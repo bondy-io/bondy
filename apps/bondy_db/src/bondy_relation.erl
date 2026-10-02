@@ -343,9 +343,6 @@ decode_cursor(#relation{schema_hash = Hash}, Bin) when is_binary(Bin) ->
 %% =============================================================================
 
 %% @private
-%% Gather at least `Target` accepted rows (or exhaust the band), pulling
-%% scatter chunks and advancing the open window past the last raw key of
-%% each chunk. Returns the accumulator newest-first.
 collect(#relation{table = Table} = Relation, Realm, Lo, Hi, Target, Acc) ->
     Chunk = erlang:max(Target, ?CHUNK_MIN),
     RangeOpts = #{limit => Chunk},
@@ -366,10 +363,6 @@ collect(#relation{table = Table} = Relation, Realm, Lo, Hi, Target, Acc) ->
     end.
 
 %% @private
-%% Decode a chunk, dropping rejected rows. Returns the accumulator extended
-%% (newest first) with accepted `{Key, Tuple}` pairs, and the raw key of the
-%% last row in the chunk (for window advancement; `undefined` for an empty
-%% chunk, which only occurs at band exhaustion where it is unused).
 decode_rows(#relation{decode = Decode}, Rows, Acc0) ->
     lists:foldl(
         fun({Key, _Value, _Hlc} = Row, {Acc, _Last}) ->
@@ -420,11 +413,6 @@ finalize_page(Relation, Accepted, Limit) ->
 %% =============================================================================
 
 %% @private
-%% Walk `Shards` (already in scan order) filling the page one shard at a time,
-%% stopping as soon as `Target` accepted rows are gathered. The first shard
-%% resumes from `(Lo, Hi)` (the cursor's intra-shard window); every later shard
-%% starts from the full per-shard band. The accumulator is newest-first and
-%% each entry is tagged with the shard it came from (so the cursor can name it).
 collect_partition(_Relation, _Realm, [], _Lo, _Target, Acc) ->
     {ok, Acc};
 collect_partition(Relation, Realm, [Shard | Rest], Lo, Target, Acc) ->
@@ -439,11 +427,6 @@ collect_partition(Relation, Realm, [Shard | Rest], Lo, Target, Acc) ->
     end.
 
 %% @private
-%% Page a single shard with a bounded `range/5` forced onto `Shard`, advancing
-%% the intra-shard window past each chunk's last raw key, until either the
-%% global `Target` is reached (`{filled, Acc}`) or the shard's band is
-%% exhausted (`{exhausted, Acc}`). Mirrors `collect/7` but single-shard and
-%% shard-tagging, so a chunk's over-fetch absorbs the decoder's rejected rows.
 collect_shard(
     #relation{table = Table} = Relation, Realm, Shard, Lo, Target, Acc
 ) ->
@@ -476,9 +459,6 @@ collect_shard(
     end.
 
 %% @private
-%% Decode a single shard's chunk, dropping rejected rows. Returns the
-%% accumulator extended (newest first) with accepted `{Shard, Key, Tuple}`
-%% triples, and the raw key of the last row (for intra-shard advancement).
 decode_rows_p(#relation{decode = Decode}, Shard, Rows, Acc0) ->
     lists:foldl(
         fun({Key, _Value, _Hlc} = Row, {Acc, _Last}) ->

@@ -133,20 +133,14 @@ mst_cell_directory(Id) ->
         undefined ->
             [];
         MST ->
-            %% A sealed pack is read through a raw file descriptor bound to
-            %% the instance gen_server that opened it; folding such a store
-            %% from any other process raises `not_on_controlling_process` —
-            %% which crashed the applier, and with it the whole instance
-            %% subtree, the first time a durable pack-backed instance without
-            %% an enumerable adapter reached a GC sweep. The store declares
-            %% the constraint (`process_bound_reads`), so the dispatch is on
-            %% the declared property, not on the backend's identity or on a
-            %% caught exception.
-            %%
-            %% Memory backends fold here, in the caller: their pages are
-            %% process-independent, and `sweep/6` runs in the applier on the
-            %% ordinary path — routing those folds through the instance would
-            %% serialise every sweep against the append path for no benefit.
+            %% A sealed pack is read through a raw fd bound to the instance
+            %% gen_server that opened it; folding it from another process
+            %% raises `not_on_controlling_process` and crashes the applier,
+            %% and with it the instance subtree. The store DECLARES the
+            %% constraint, so the dispatch is on that property, not the
+            %% backend's identity or a caught exception. Memory backends fold
+            %% here in the caller: their pages are process-independent, and
+            %% routing them through the instance would serialise every sweep.
             case process_bound_reads(MST) of
                 true ->
                     owner_cell_directory(Id, MST);
@@ -617,7 +611,6 @@ sweep_members(
     end.
 
 %% @private
-%% Where this member stands relative to the resume cursor.
 member_start(_MKey, undefined) ->
     {sweep, undefined};
 member_start(MKey, {MKey, _CellKey} = Cursor) ->
@@ -757,21 +750,13 @@ apply_stabilize(
             end;
         {keep, Reduced} ->
             %% Causal-stabilization reduction (arXiv:1710.04469 §7.2.1): the
-            %% cell's value survives; its state sheds representation that only
-            %% served to order it against operations that can no longer
-            %% arrive (e.g. a struct field's stable per-origin sub-op runs
-            %% folded into synthetic ops). A value-preserving frame rewrite —
-            %% same Hlc, same value column, smaller state bytes — exactly as
-            %% the dead-origin reap performs, behind the SAME overlay fence
-            %% as `discard`: a WAL-pended event for this cell may be one the
-            %% reduction's license did not account for (its stamped context
-            %% may select among the very dots being folded), so the cell is
-            %% left for a later pass until the applier has drained it.
-            %%
-            %% Unlike the reap, no `bondy_oplog_ctx_guard` co-eviction: the
-            %% `stabilize/2` contract forbids the reduction from shrinking
-            %% the cell's causal context, so the stamp-site guard never sees
-            %% a regression.
+            %% cell's value survives while its state sheds representation
+            %% that only ordered it against operations that can no longer
+            %% arrive. A value-preserving frame rewrite — same Hlc, same
+            %% value, fewer state bytes — behind the SAME overlay fence as
+            %% `discard`, since a WAL-pended event for this cell may be one
+            %% the reduction's license did not account for. No ctx-guard
+            %% co-eviction: `stabilize/2` cannot shrink the causal context.
             case overlay_clear(Overlay, Bucket, Key) of
                 true ->
                     write_reduced_cell(
@@ -871,7 +856,6 @@ bump(Key, Acc) ->
     maps:update_with(Key, fun(X) -> X + 1 end, Acc).
 
 %% @private
-%% Drop a just-deleted cell from the sweep accumulator's stamp-site guard.
 forget_cell(#{ctx_guard := Guard} = Acc, Bucket, Key) ->
     Acc#{ctx_guard := bondy_oplog_ctx_guard:forget(Guard, [{Bucket, Key}])}.
 

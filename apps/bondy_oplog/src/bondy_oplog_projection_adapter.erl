@@ -190,30 +190,24 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -callback head(handle(), bucket(), Key :: term()) ->
     {ok, HeadBytes :: binary()} | not_found.
 
-%% Wipe an index's cells from the handle's keyspace (used by the
-%% secondary-index rebuild before a re-fold, to drop orphaned terms). `Scope`
-%% is a `clear_scope()` descriptor: `{suffix, IndexName}` wipes every bucket
-%% ending with that index's suffix (correct on a single-table handle), while
-%% `{entity, EntityType, IndexName}` additionally confines the wipe to one
-%% entity type (required on a handle that co-locates several tables —
-%% `shared_shards`, `single_bookie` — so a sibling table sharing the same
-%% `IndexName` is not corrupted). Optional: the rebuild guards the call with
-%% `function_exported(Adapter, clear, 2)` and degrades to live-term re-puts
-%% when absent.
+%% Wipe an index's cells from the handle's keyspace, used by the secondary-index
+%% rebuild before a re-fold to drop orphaned terms. `Scope` is a `clear_scope()`
+%% descriptor — see that type for which backend needs which form. Optional: the
+%% rebuild guards the call with `function_exported(Adapter, clear, 2)` and
+%% degrades to live-term re-puts when absent.
 -callback clear(handle(), Scope :: clear_scope()) -> ok.
 
 %% Enumerate every `{Bucket, Key}` primary cell in `Scope` — the authoritative,
 %% COMPLETE cell directory the secondary-index rebuild folds over for a DURABLE
-%% table. `Scope` is a `cell_keys_scope()`: `{entity, ET}` on a co-located
-%% backend (enumerate only `ET`'s buckets), `all_primary` on a dedicated-Bookie
-%% backend (every non-index bucket). The projection is the durable materialised
-%% state; deriving the directory from the MST instead would miss every
-%% already-compacted (or crash-lost) cell (the MST is truncated below the
-%% compaction watermark), leaving a half-built index marked trusted. A durable
+%% table. `Scope` is a `cell_keys_scope()`; see that type for which backend
+%% needs which form. The projection is the durable materialised state, and
+%% deriving the directory from the MST instead would miss every
+%% already-compacted (or crash-lost) cell — the MST is truncated below the
+%% compaction watermark — leaving a half-built index marked trusted. A durable
 %% adapter (leveled) MUST export it; an ephemeral one (ETS) omits it and
 %% `bondy_oplog_cell_utils:primary_cell_directory/4` falls back to the MST walk,
-%% correct only for the ephemeral/peer-synced path (e.g. the registry). Probe
-%% with `cell_keys_exported/1`.
+%% correct only for the ephemeral/peer-synced path. Probe with
+%% `cell_keys_exported/1`.
 -callback cell_keys(handle(), Scope :: cell_keys_scope()) ->
     [{bucket(), Key :: term()}].
 

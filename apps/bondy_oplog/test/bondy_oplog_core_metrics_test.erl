@@ -165,11 +165,8 @@ freshness_lag_is_reported() ->
 %% set the auth freshness fence evaluates
 %% (`bondy_oplog_core:ensure_fresh/2` -> `primary_shards_for/1`). Nothing ever
 %% bumps a secondary index shard's AE atomic — only `{NS, primary, Shard}` is
-%% an `ae_target` — so including one made the gauge grow with wall clock on a
-%% healthy cluster and disagree with the fence it was read against.
-%%
-%% Measured on a live 2-node cluster before the fix: primary 0.06s while the
-%% namespace's `by_resource` index reported 343s and climbing.
+%% an `ae_target` — so including one makes the gauge grow with wall clock on a
+%% healthy cluster and disagree with the fence it is read against.
 %%
 %% The primary here is FRESH (bumped now) and the secondary is left at the
 %% sentinel, so the two answers differ by nine orders of magnitude and the

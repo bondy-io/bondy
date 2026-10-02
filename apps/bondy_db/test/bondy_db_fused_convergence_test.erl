@@ -3,8 +3,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Fused-writer rollout, Step 4: cross-node convergence for `fused` ephemeral
-%% instances. A fused instance has NO applier, so the peer-merge projection
+%% Cross-node convergence for `fused` ephemeral instances.
+%% A fused instance has NO applier, so the peer-merge projection
 %% replay that the applier normally runs (after `integrate_peer_root`) runs
 %% INLINE in the instance. These tests prove a fused replica makes
 %% peer-authored events visible to `bondy_db:read/3` after a real MST `sync`

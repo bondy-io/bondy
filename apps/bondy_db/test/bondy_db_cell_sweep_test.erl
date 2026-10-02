@@ -112,7 +112,7 @@ sweep_below_hlc_reclaims_nothing(T) ->
     %% Still hidden from readers, still retained.
     ?assertEqual({error, not_found}, bondy_db:read(T, ?REALM, K)).
 
-%% Step 4 — the bound and the cursor. Eight tombstones swept in batches of
+%% The bound and the cursor. Eight tombstones swept in batches of
 %% three reclaim exactly what one unbounded call would, no single call scans
 %% more than the bound (the bound IS the latency mechanism: the sweep runs
 %% inside the applier, the sole projection writer, so cells-per-call is what
@@ -499,10 +499,11 @@ mux_cell_sweep_test_() ->
         ]
     end}.
 
-%% Step 4 on the multiplexed shape: with `max_cells => 1` the cursor must
-%% cross MEMBER (table) boundaries — tombstones in two different tables are
-%% both reclaimed, one cell per call, while the foreign-kernel table's live
-%% cell survives. Members already swept are skipped without re-enumeration.
+%% The same bound on the multiplexed shape: with `max_cells => 1` the cursor
+%% must cross MEMBER (table) boundaries — tombstones in two different tables
+%% are both reclaimed, one cell per call, while the foreign-kernel table's
+%% live cell survives. Members already swept are skipped without
+%% re-enumeration.
 bounded_sweep_across_members(T1, T2, T3) ->
     K1 = <<"bm_doomed1">>,
     K3 = <<"bm_doomed3">>,
@@ -552,9 +553,9 @@ reclamation_is_per_bucket(T1, T2, T3) ->
 
     {ok, Stats} = sweep(T1, far_future(T1)),
     %% BOTH tombstones are reclaimed — the founding table's AND the
-    %% non-founding table's, each through its own ctx. Before the fix the
-    %% non-founding tombstone was never even enumerated: reclamation
-    %% silently did nothing for every table but the founding one.
+    %% non-founding table's, each through its own ctx. A sweep carrying only
+    %% the founding table's ctx never enumerates the other one, and reclaims
+    %% nothing for it without failing.
     ?assert(maps:get(discarded, Stats) >= 2),
     ?assertEqual({error, not_found}, bondy_db:read(T1, ?REALM, K1)),
     ?assertEqual({error, not_found}, bondy_db:read(T3, ?REALM, K3)),

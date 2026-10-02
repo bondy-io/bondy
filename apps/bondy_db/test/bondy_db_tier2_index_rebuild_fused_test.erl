@@ -5,14 +5,12 @@
 
 %% Secondary-index rebuild (`bondy_db:rebuild_index/2`) on a **fused** table
 %% — the fused mirror of `bondy_db_tier2_index_rebuild_test.erl`.
-%% `bondy_oplog_index_rebuild:refold_primary/1` previously dispatched only
-%% to the applier: for a fused instance (which has none by design) it fell
-%% into the "applier restarting, will self-resolve" branch — WRONG for
-%% fused (permanent, not transient) — so the rebuild silently no-oped: the
-%% rebuild orchestrator wipes the target index shard first, and the never-
-%% dispatched re-derive step left it empty forever. `bondy_oplog_
-%% cell_reindex:reindex/3` (new, shared with the applier) now runs the
-%% actual re-derive in-process on the fused instance.
+%% `bondy_oplog_index_rebuild:refold_primary/1` must run the re-derive
+%% in-process through `bondy_oplog_cell_reindex:reindex/3` rather than
+%% dispatching to the applier: a fused instance has no applier by design, so
+%% an applier-only dispatch takes the "applier restarting, will self-resolve"
+%% branch — permanent here, not transient — and the rebuild no-ops silently,
+%% leaving the index shard the orchestrator wiped first empty forever.
 -module(bondy_db_tier2_index_rebuild_fused_test).
 
 -include_lib("eunit/include/eunit.hrl").

@@ -33,6 +33,27 @@ handles_are_unique_test() ->
     ],
     ?assertEqual(lists:sort(Handles), lists:usort(Handles)).
 
+%% A catalogue string reaches a client through `to_map/1` and an operator's
+%% terminal, so a mojibake byte in one is a defect. This is the check the
+%% types cannot make: a codepoint above 255 in a plain `<<"...">>` literal
+%% is truncated to one byte, which is still a binary and still decodes as
+%% UTF-8 — as a control character. `~""` and `/utf8` are the spellings that
+%% carry it whole.
+catalogue_strings_are_printable_test() ->
+    Bad = [
+        {T, Key}
+     || T <- bondy_error:types(),
+        Key <- [message, description],
+        not printable(maps:get(Key, bondy_error:catalogue(T)))
+    ],
+    ?assertEqual([], Bad).
+
+printable(Bin) ->
+    case unicode:characters_to_list(Bin, utf8) of
+        Chars when is_list(Chars) -> lists:all(fun(C) -> C >= 32 end, Chars);
+        _ -> false
+    end.
+
 catalogue_fields_are_binaries_test() ->
     [
         begin

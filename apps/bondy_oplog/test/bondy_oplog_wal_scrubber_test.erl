@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Integrity-scrubber tests for `bondy_oplog_wal_scrubber`.
+%% Integrity-scrubber tests for `bondy_log_scrubber`.
 %%
 %% Tests cover:
 %%
@@ -45,17 +45,13 @@ setup() ->
 %% a row to update. Without this the scrubber's registry lookup
 %% returns `undefined` and the run is a no-op. The instance gen_server
 %% would populate these fields in a full subtree start; the scrubber
-%% only reads `wal_pid`, so the other slots can carry sentinel values —
-%% except `instance_pid`, which the WAL writer CALLS at its own `init/1`
-%% (`bondy_oplog_instance:seed_seq/2`, before it publishes `wal_pid`). The
-%% test process cannot stand in for it: it is blocked in `start_link/2`
-%% while the writer initialises, so the call would deadlock until the
-%% `proc_lib` timeout. The stub is therefore a process that answers every
-%% `gen_server:call` with `ok`.
+%% only reads `wal_pid`, so the other slots carry sentinel values. The
+%% writer never calls `instance_pid` (its retained maximum travels back
+%% through `bondy_oplog_wal:open/2`), so the test process can stand in.
 register_stub(InstanceId) ->
     bondy_oplog_registry:register(#{
         instance_id => InstanceId,
-        instance_pid => spawn(fun instance_stub/0),
+        instance_pid => self(),
         origin => origin(),
         mst => undefined,
         watermark => undefined,
@@ -110,15 +106,6 @@ is_stub_id(<<"scrubber-test-", _/binary>>) -> true;
 is_stub_id(_) -> false.
 
 %% The stand-in for the instance gen_server: acknowledges every call.
-instance_stub() ->
-    receive
-        {'$gen_call', From, _} ->
-            gen_server:reply(From, ok),
-            instance_stub();
-        _ ->
-            instance_stub()
-    end.
-
 scrubber_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {timeout, 15, fun clean_walk_no_alert/0},
@@ -188,7 +175,7 @@ mk_event(Hlc, Seq) ->
     bondy_oplog_event:new(Key, {op, Seq}, undefined).
 
 append1(Pid, HLC, Seq) ->
-    Hlc = bondy_oplog_hlc:now(HLC),
+    Hlc = bondy_hlc:now(HLC),
     {ok, _, Pos} = bondy_oplog_wal:append(Pid, mk_event(Hlc, Seq)),
     Pos.
 
@@ -201,7 +188,7 @@ seed(Id, NEvents) ->
     Dir = mktemp_dir(),
     Opts = (base_opts())#{dir => Dir},
     {ok, Pid} = bondy_oplog_wal:start_link(Id, Opts),
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Positions = [append1(Pid, HLC, Seq) || Seq <- lists:seq(0, NEvents - 1)],
     {Pid, Dir, Positions}.
 
@@ -211,7 +198,7 @@ instance_dir(Dir, Id) ->
 seg_path(Dir, Id, SegId) ->
     filename:join(
         instance_dir(Dir, Id),
-        bondy_oplog_wal_segment:filename(SegId)
+        bondy_log_segment:filename(SegId)
     ).
 
 corrupt_frame_body(Path, OnDiskOff) ->
@@ -281,7 +268,11 @@ collect_run_events(Tag, TimeoutMs, Acc) ->
     end.
 
 start_scrubber(Id) ->
-    {ok, SPid} = bondy_oplog_wal_scrubber:start_link(#{instance_id => Id}),
+    {ok, SPid} = bondy_log_scrubber:start_link(#{
+        instance_id => Id,
+        adapter => bondy_oplog_log_adapter,
+        telemetry_prefix => [bondy_oplog, wal]
+    }),
     SPid.
 
 %% =============================================================================
@@ -295,7 +286,7 @@ clean_walk_no_alert() ->
         SPid = start_scrubber(Id),
         H = attach_telemetry(clean_walk_no_alert),
         try
-            {ok, Summary} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, Summary} = bondy_log_scrubber:scrub_now(SPid),
             ?assertEqual(0, maps:get(alerts_raised, Summary)),
             Events = collect_scrub_events(clean_walk_no_alert),
             %% Every emitted event must be `ok`.
@@ -309,7 +300,7 @@ clean_walk_no_alert() ->
             )
         after
             detach_telemetry(H),
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid),
@@ -333,7 +324,7 @@ bit_flip_raises_bad_crc() ->
         SPid = start_scrubber(Id),
         H = attach_telemetry(bit_flip_raises_bad_crc),
         try
-            {ok, Summary} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, Summary} = bondy_log_scrubber:scrub_now(SPid),
             ?assert(maps:get(alerts_raised, Summary) >= 1),
             Events = collect_scrub_events(bit_flip_raises_bad_crc),
             %% Find the alert event for SegId0.
@@ -350,7 +341,7 @@ bit_flip_raises_bad_crc() ->
             ?assert(lists:keymember(SegId0, 1, Alerts2))
         after
             detach_telemetry(H),
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid1),
@@ -370,7 +361,7 @@ magic_zero_raises_bad_magic() ->
         SPid = start_scrubber(Id),
         H = attach_telemetry(magic_zero_raises_bad_magic),
         try
-            {ok, _} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, _} = bondy_log_scrubber:scrub_now(SPid),
             Events = collect_scrub_events(magic_zero_raises_bad_magic),
             Alerts = [
                 {M, Md}
@@ -385,7 +376,7 @@ magic_zero_raises_bad_magic() ->
             ?assertEqual(bad_magic, Reason)
         after
             detach_telemetry(H),
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid1),
@@ -402,10 +393,10 @@ alert_persists_across_restart() ->
         Id, (base_opts())#{dir => Dir, recovery_mode => strict}
     ),
     SPid1 = start_scrubber(Id),
-    {ok, _} = bondy_oplog_wal_scrubber:scrub_now(SPid1),
+    {ok, _} = bondy_log_scrubber:scrub_now(SPid1),
     Alerts1 = maps:get(scrubber_alerts, bondy_oplog_wal:info(Pid1)),
     ?assert(lists:keymember(SegId0, 1, Alerts1)),
-    bondy_oplog_wal_scrubber:stop(SPid1),
+    bondy_log_scrubber:stop(SPid1),
     ok = bondy_oplog_wal:close(Pid1),
     %% Restart the writer; the manifest must still carry the alert.
     {ok, Pid2} = bondy_oplog_wal:start_link(
@@ -432,10 +423,10 @@ already_alerted_segment_is_skipped() ->
         SPid = start_scrubber(Id),
         try
             %% First pass marks the alert.
-            {ok, _} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, _} = bondy_log_scrubber:scrub_now(SPid),
             %% Second pass should report a skipped outcome for SegId0.
             H = attach_telemetry(already_alerted_segment_is_skipped),
-            {ok, _} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, _} = bondy_log_scrubber:scrub_now(SPid),
             Events = collect_scrub_events(already_alerted_segment_is_skipped),
             detach_telemetry(H),
             Skipped = [
@@ -449,7 +440,7 @@ already_alerted_segment_is_skipped() ->
             [SkipMd] = Skipped,
             ?assertEqual(skipped, maps:get(outcome, SkipMd))
         after
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid1),
@@ -468,7 +459,7 @@ clear_alert_then_rescrub() ->
     try
         SPid = start_scrubber(Id),
         try
-            {ok, _} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, _} = bondy_log_scrubber:scrub_now(SPid),
             ?assert(
                 lists:keymember(
                     SegId0,
@@ -488,7 +479,7 @@ clear_alert_then_rescrub() ->
                 ]
             )
         after
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid1),
@@ -503,7 +494,7 @@ head_segment_is_never_walked() ->
         SPid = start_scrubber(Id),
         H = attach_telemetry(head_segment_is_never_walked),
         try
-            {ok, Summary} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, Summary} = bondy_log_scrubber:scrub_now(SPid),
             ?assertEqual(0, maps:get(segments_walked, Summary)),
             ?assertEqual(0, maps:get(alerts_raised, Summary)),
             Events = collect_scrub_events(head_segment_is_never_walked),
@@ -516,7 +507,7 @@ head_segment_is_never_walked() ->
             ?assertEqual([], EventsForHead)
         after
             detach_telemetry(H),
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid),
@@ -553,7 +544,7 @@ manual_trigger_emits_run_event() ->
         SPid = start_scrubber(Id),
         H = attach_run_telemetry(manual_trigger_emits_run_event),
         try
-            {ok, _} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, _} = bondy_log_scrubber:scrub_now(SPid),
             RunEvents = collect_run_events(
                 manual_trigger_emits_run_event, 100
             ),
@@ -569,7 +560,7 @@ manual_trigger_emits_run_event() ->
             ?assert(maps:get(duration_us, M) >= 0)
         after
             detach_telemetry(H),
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid),
@@ -588,7 +579,7 @@ run_event_aggregates_segment_counters() ->
         HSeg = attach_telemetry(run_event_aggregates_segment_counters),
         HRun = attach_run_telemetry(run_event_aggregates_segment_counters),
         try
-            {ok, _} = bondy_oplog_wal_scrubber:scrub_now(SPid),
+            {ok, _} = bondy_log_scrubber:scrub_now(SPid),
             SegEvents = collect_scrub_events(
                 run_event_aggregates_segment_counters
             ),
@@ -611,7 +602,7 @@ run_event_aggregates_segment_counters() ->
         after
             detach_telemetry(HSeg),
             detach_telemetry(HRun),
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid),
@@ -627,9 +618,12 @@ periodic_ticks_fire_and_rearm() ->
     Id = instance_id(),
     {Pid, Dir, _Positions} = seed(Id, 4),
     try
-        {ok, SPid} = bondy_oplog_wal_scrubber:start_link(
-            #{instance_id => Id, interval_ms => 50}
-        ),
+        {ok, SPid} = bondy_log_scrubber:start_link(#{
+            instance_id => Id,
+            adapter => bondy_oplog_log_adapter,
+            telemetry_prefix => [bondy_oplog, wal],
+            interval_ms => 50
+        }),
         H = attach_run_telemetry(periodic_ticks_fire_and_rearm),
         try
             %% Wait up to 1s for at least 2 tick events. The 50ms
@@ -643,7 +637,7 @@ periodic_ticks_fire_and_rearm() ->
             ?assert(lists:all(fun(T) -> T =:= tick end, Triggers))
         after
             detach_telemetry(H),
-            bondy_oplog_wal_scrubber:stop(SPid)
+            bondy_log_scrubber:stop(SPid)
         end
     after
         bondy_oplog_wal:close(Pid),

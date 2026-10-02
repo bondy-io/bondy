@@ -185,15 +185,14 @@ Apply a single operation with the write's causal `Context` (the event
 ) -> NewState :: term().
 
 apply_op(Mod, State, {batch, Ops}, Key, Context) when is_list(Ops) ->
-    %% Expand a packed batch: fold each inner op onto the state in list
-    %% order, all sharing this one event's key (dot) and observed context.
-    %% This single clause covers the eager write path (called directly by
-    %% the cell kernel) AND the `interpret_cog/3` read/compaction path
-    %% (which folds `apply_op/5` per event), so the substrate stores and
-    %% replicates the batch as one opaque event and expands it identically
-    %% everywhere state is computed. The shared dot/context makes the inner
-    %% ops mutually-concurrent (they do not observe each other); list order
-    %% only disambiguates repeated writes to the same sub-key.
+    %% Expand a packed batch: fold each inner op onto the state in list order,
+    %% all sharing this one event's key (dot) and observed context. The single
+    %% clause covers both the eager write path and the `interpret_cog/3`
+    %% read/compaction path, so the substrate stores and replicates the batch
+    %% as one opaque event and expands it identically everywhere state is
+    %% computed. The shared dot and context make the inner ops mutually
+    %% concurrent — they do not observe each other — and list order only
+    %% disambiguates repeated writes to the same sub-key.
     lists:foldl(
         fun(Op, S) -> apply_op(Mod, S, Op, Key, Context) end,
         State,

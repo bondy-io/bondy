@@ -1,0 +1,30 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2023 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_log, [
+    {description,
+        "Append-only log core shared by the oplog (the replicated "
+        "operation log) and Bondy Streams: segment writer with group-commit "
+        "fsync, rotation, sparse index, manifest, recovery, reader and "
+        "scrubber, parameterised by a log adapter (record, identity and "
+        "directory behaviours)."},
+    {vsn, "0.1.0"},
+    {registered, []},
+    %% Library app: the writer and scrubber are gen_servers started under
+    %% the consumer's supervisor; no supervision tree of its own, no `mod`.
+    {applications, [
+        kernel,
+        stdlib,
+        crypto,
+        telemetry,
+        %% `bondy_mst_io` owns the datasync / rename / fsync_dir seams every
+        %% durability point in the storage stack funnels through.
+        bondy_mst
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

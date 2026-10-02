@@ -153,17 +153,17 @@ fail_closed_invalid_key_size(_Config) ->
 
 works_as_wal_key_registry(_Config) ->
     %% The keyring is the production implementation of the
-    %% `bondy_oplog_wal_key_registry` behaviour: the WAL codec accepts it and a
+    %% `bondy_log_key_registry` behaviour: the WAL codec accepts it and a
     %% body round-trips through encrypt/decrypt using current_key/0 + lookup_key/1.
     configure_env_key(new_key()),
     ?assertEqual(
-        ok, bondy_oplog_wal_codec:validate_encryption({enabled, bondy_keyring})
+        ok, bondy_log_codec:validate_encryption({enabled, bondy_keyring})
     ),
     Opts = #{body_encryption => {enabled, bondy_keyring}},
     Body = <<"a wal frame body", 0, 1, 2, 255>>,
-    {Flags, Envelope} = bondy_oplog_wal_codec:encode_body(Body, Opts),
+    {Flags, Envelope} = bondy_log_codec:encode_body(Body, Opts),
     Bin = iolist_to_binary(Envelope),
     ?assertNotEqual(Body, Bin),
     ?assertEqual(
-        {ok, Body}, bondy_oplog_wal_codec:decode_body(Bin, Flags, Opts)
+        {ok, Body}, bondy_log_codec:decode_body(Bin, Flags, Opts)
     ).

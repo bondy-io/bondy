@@ -24,7 +24,7 @@ Sits between the per-instance WAL writer and the per-instance
   backend resumes from the WAL's own committed consumer offset (see
   `start_pos_from_consumer_offset/1`); a volatile (ets/map) backend
   replays from `beginning` to rebuild its lost MST. Then open a
-  non-following `bondy_oplog_wal_reader` there. The WAL is just a byte
+  non-following `bondy_log_reader` there. The WAL is just a byte
   log positioned by a cursor — it never depends on MST state.
 - Drain the reader in batches. For each event in the batch the
   applier re-verifies the stored signature (defence-in-depth against
@@ -175,8 +175,8 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     instance_pid :: pid(),
     wal_pid :: pid(),
     wal_dir :: file:filename_all(),
-    iter :: bondy_oplog_wal_reader:t() | undefined,
-    consumer_offset :: bondy_oplog_wal_state:consumer_offset(),
+    iter :: bondy_log_reader:t() | undefined,
+    consumer_offset :: bondy_log_state:consumer_offset(),
     %% Number of events applied since the last `commit/1`. Used to
     %% batch consumer.offset writes — flushed at `commit_every` or
     %% when the reader returns `end_of_log`.
@@ -811,7 +811,7 @@ Returns a summary. A cell whose projection value cannot be read is skipped and
 counted, never treated as reclaimable: absence of evidence is not evidence of
 staleness.
 """.
--spec sweep_stable_cells(pid(), bondy_oplog_hlc:hlc()) ->
+-spec sweep_stable_cells(pid(), bondy_hlc:hlc()) ->
     {ok, #{
         scanned := non_neg_integer(),
         discarded := non_neg_integer(),
@@ -848,7 +848,7 @@ need no new invariant.
 """.
 -spec sweep_stable_cells(
     pid(),
-    bondy_oplog_hlc:hlc(),
+    bondy_hlc:hlc(),
     Opts :: #{
         max_cells => pos_integer() | infinity,
         cursor => undefined | term()
@@ -1760,12 +1760,12 @@ terminate(_Reason, #state{
     uncommitted = N
 }) ->
     case N > 0 of
-        true -> _ = bondy_oplog_wal_state:write_consumer_offset(Dir, CO);
+        true -> _ = bondy_log_state:write_consumer_offset(Dir, CO);
         false -> ok
     end,
     case Iter of
         undefined -> ok;
-        _ -> bondy_oplog_wal_reader:close(Iter)
+        _ -> bondy_log_reader:close(Iter)
     end,
     ok.
 
@@ -1815,7 +1815,7 @@ missing_sibling(_, _, _) -> none.
 resume_position(MstLast, Watermark) ->
     case resume_hlc(MstLast, Watermark) of
         undefined -> beginning;
-        HLC -> {hlc, HLC}
+        HLC -> {key, HLC}
     end.
 
 %% @private
@@ -1882,9 +1882,9 @@ reserve_install_slot(#state{install_in_flight = Ref}) ->
 %% for its own consumer. A missing file yields the fresh sentinel
 %% (`commit_count = 0`), which resumes from `beginning`.
 read_consumer_offset(WalDir) ->
-    case bondy_oplog_wal_state:read_consumer_offset(WalDir) of
+    case bondy_log_state:read_consumer_offset(WalDir) of
         {ok, CO} -> CO;
-        {error, _} -> bondy_oplog_wal_state:new_consumer_offset()
+        {error, _} -> bondy_log_state:new_consumer_offset()
     end.
 
 %% @private
@@ -1899,25 +1899,25 @@ read_consumer_offset(WalDir) ->
 %% the MST is what makes the drain's correctness independent of the MST root's
 %% durability schedule (e.g. async seal).
 start_pos_from_consumer_offset(CO) ->
-    case bondy_oplog_wal_state:commit_count(CO) of
+    case bondy_log_state:commit_count(CO) of
         0 ->
             beginning;
         _ ->
-            {offset, bondy_oplog_wal_state:committed_segment(CO),
-                bondy_oplog_wal_state:committed_frame_offset(CO)}
+            {offset, bondy_log_state:committed_segment(CO),
+                bondy_log_state:committed_frame_offset(CO)}
     end.
 
 %% @private
 %% The committed `{Segment, FrameOffset}` of a consumer offset, or
 %% `undefined` when nothing was ever committed.
 consumer_offset_pos(CO) ->
-    case bondy_oplog_wal_state:commit_count(CO) of
+    case bondy_log_state:commit_count(CO) of
         0 ->
             undefined;
         _ ->
             {
-                bondy_oplog_wal_state:committed_segment(CO),
-                bondy_oplog_wal_state:committed_frame_offset(CO)
+                bondy_log_state:committed_segment(CO),
+                bondy_log_state:committed_frame_offset(CO)
             }
     end.
 
@@ -2032,9 +2032,9 @@ stall_test_fields(#state{} = S) ->
 %% should not arise in practice, but `beginning` is always a safe floor and
 %% avoids a fail-stop restart loop on a stale offset.
 open_drain_reader(WalP, StartPos) ->
-    case bondy_oplog_wal_reader:open(WalP, StartPos, [{follow, false}]) of
+    case bondy_log_reader:open(WalP, StartPos, [{follow, false}]) of
         {error, {invalid_start, _}} when StartPos =/= beginning ->
-            bondy_oplog_wal_reader:open(WalP, beginning, [{follow, false}]);
+            bondy_log_reader:open(WalP, beginning, [{follow, false}]);
         Result ->
             Result
     end.
@@ -2148,7 +2148,7 @@ collect_frames(Iter, Max) ->
     collect_frames(Iter, Max, [], 0, undefined).
 
 collect_frames(Iter0, Max, AccRev, N, LastPos) ->
-    case bondy_oplog_wal_reader:next(Iter0) of
+    case bondy_log_reader:next(Iter0) of
         {ok, Batch, _Hlcs, NextPos, NewIter} ->
             N1 = N + length(Batch),
             AccRev1 = [Batch | AccRev],
@@ -3029,10 +3029,10 @@ bump_offset(
     LastHlc,
     Count
 ) ->
-    CO1 = bondy_oplog_wal_state:with_position(CO0, Seg, Off),
-    CO2 = bondy_oplog_wal_state:with_hlc(CO1, LastHlc),
-    Old = bondy_oplog_wal_state:commit_count(CO2),
-    CO3 = bondy_oplog_wal_state:with_commit_count(CO2, Old + 1),
+    CO1 = bondy_log_state:with_position(CO0, Seg, Off),
+    CO2 = bondy_log_state:with_key(CO1, LastHlc),
+    Old = bondy_log_state:commit_count(CO2),
+    CO3 = bondy_log_state:with_commit_count(CO2, Old + 1),
     State#state{consumer_offset = CO3, uncommitted = U + Count}.
 
 %% @private
@@ -3084,9 +3084,9 @@ commit_now(
     %% idempotently (CRDT contract); the cost is one extra RMW per
     %% local event per sync tick, dominated by the sync round-trip
     %% itself.
-    case bondy_oplog_wal_state:write_consumer_offset(Dir, CO) of
+    case bondy_log_state:write_consumer_offset(Dir, CO) of
         ok ->
-            Seg = bondy_oplog_wal_state:committed_segment(CO),
+            Seg = bondy_log_state:committed_segment(CO),
             ok = notify_committed_segment(InstanceId, WalPid, Seg),
             ok = bump_ae_targets(State),
             note_drain_progress(State#state{uncommitted = 0});
@@ -3173,7 +3173,7 @@ arm_idle_waiter(#state{idle_waiter = Ref} = State) when is_reference(Ref) ->
     %% Already parked — don't spawn a second helper.
     State;
 arm_idle_waiter(#state{iter = Iter, wal_pid = WalPid} = State) ->
-    {Seg, Off} = bondy_oplog_wal_reader:position(Iter),
+    {Seg, Off} = bondy_log_reader:position(Iter),
     {_Pid, MRef} = spawn_monitor(fun() ->
         _ = bondy_oplog_wal:await_durable(
             WalPid, {Seg, Off + 1}, ?AWAIT_DURABLE_TIMEOUT_MS

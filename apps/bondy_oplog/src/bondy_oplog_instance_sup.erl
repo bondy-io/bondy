@@ -22,7 +22,7 @@ Holds the processes that together implement one running instance:
 | 1 | `bondy_oplog_instance`     | MST owner, validator, public API entry point |
 | 2 | `bondy_oplog_wal`          | Per-instance write-ahead log writer |
 | 3 | `bondy_oplog_applier`      | Reads the WAL and feeds the instance |
-| 4 | `bondy_oplog_wal_scrubber` | Periodic CRC integrity check on sealed segments |
+| 4 | `bondy_log_scrubber` | Periodic CRC integrity check on sealed segments |
 
 `one_for_all` because the first three are interdependent: an instance
 with a dead WAL cannot serve writes, and a WAL with no applier
@@ -34,11 +34,15 @@ in exchange for the simplicity of a single strategy.
 
 Start order matters: the instance creates its registry row before the
 WAL writes `wal_pid` and before the applier writes `applier_pid`. The
-WAL is up before the applier opens its reader; the applier resolves
-the WAL pid and instance pid from the registry at init time. The
-scrubber is started last and resolves the WAL pid from the registry
-lazily on each scrub run, so it has no init-time dependency on its
-peers.
+WAL child is started through `start_wal/3`, which opens the writer and
+then hands the instance the retained WAL's own-origin maximum
+(`bondy_oplog_instance:wal_opened/3`) — the instance seeds its seq
+counter from it and only then opens minting; the WAL never calls the
+instance. The WAL is up before the applier opens its reader; the
+applier resolves the WAL pid and instance pid from the registry at init
+time. The scrubber is started last and resolves the WAL pid from the
+registry lazily on each scrub run, so it has no init-time dependency on
+its peers.
 
 ## Children start in the caller
 
@@ -58,6 +62,7 @@ the order across a restart.
 
 -export([start_link/1]).
 -export([start_children/3]).
+-export([start_wal/3]).
 -export([init/1]).
 
 -export([wal_pid/1]).
@@ -119,12 +124,44 @@ applier_pid(SupPid) when is_pid(SupPid) ->
     find_child(SupPid, bondy_oplog_applier).
 
 ?DOC("""
-Returns the pid of the per-instance `bondy_oplog_wal_scrubber` child.
+Returns the pid of the per-instance `bondy_log_scrubber` child.
 """).
 -spec scrubber_pid(pid()) -> pid() | undefined.
 
 scrubber_pid(SupPid) when is_pid(SupPid) ->
-    find_child(SupPid, bondy_oplog_wal_scrubber).
+    find_child(SupPid, bondy_log_scrubber).
+
+?DOC("""
+Child start function for the WAL sibling. Opens the writer, then tells
+the instance (child 1, already running) the WAL pid and the retained
+WAL's own-origin `max_seq` via `bondy_oplog_instance:wal_opened/3`; the
+in-memory backend retains nothing and reports 0.
+
+Runs in the supervisor process while it is blocked in the child start. An
+exit
+from the instance call (it died between its start and this one) is
+caught by the supervisor as a failed child start; the one_for_all
+strategy then restarts the subtree.
+""").
+-spec start_wal(instance_id(), module(), bondy_oplog_wal:opts()) ->
+    {ok, pid()} | {error, term()}.
+
+start_wal(InstanceId, bondy_oplog_wal, WalOpts) ->
+    case bondy_oplog_wal:open(InstanceId, WalOpts) of
+        {ok, Pid, #{max_seq := MaxSeq}} ->
+            ok = bondy_oplog_instance:wal_opened(InstanceId, Pid, MaxSeq),
+            {ok, Pid};
+        {error, _} = Error ->
+            Error
+    end;
+start_wal(InstanceId, bondy_oplog_wal_mem, WalOpts) ->
+    case bondy_oplog_wal_mem:start_link(InstanceId, WalOpts) of
+        {ok, Pid} ->
+            ok = bondy_oplog_instance:wal_opened(InstanceId, Pid, 0),
+            {ok, Pid};
+        {error, _} = Error ->
+            Error
+    end.
 
 %% =============================================================================
 %% supervisor CALLBACKS
@@ -169,7 +206,7 @@ child_specs(InstanceId, Opts) ->
         modules => [bondy_oplog_instance]
     },
     WalOpts = wal_opts(InstanceId, Opts),
-    %% Ephemeral ETS WAL (task #50): a fused ephemeral instance may opt into an
+    %% Ephemeral ETS WAL: a fused ephemeral instance may opt into an
     %% in-memory WAL backend (`wal_backend => mem`) that drops the fsync from
     %% the ack path — see `bondy_oplog_wal_mem`. It is gated on `fused` (the mem
     %% reader is only dispatched on the fused drain path) and carries no sealed
@@ -183,7 +220,7 @@ child_specs(InstanceId, Opts) ->
         end,
     WalSpec = #{
         id => bondy_oplog_wal,
-        start => {WalMod, start_link, [InstanceId, WalOpts]},
+        start => {?MODULE, start_wal, [InstanceId, WalMod, WalOpts]},
         restart => permanent,
         shutdown => 30000,
         type => worker,
@@ -200,14 +237,14 @@ child_specs(InstanceId, Opts) ->
     },
     ScrubberOpts = scrubber_opts(InstanceId, Opts),
     ScrubberSpec = #{
-        id => bondy_oplog_wal_scrubber,
-        start => {bondy_oplog_wal_scrubber, start_link, [ScrubberOpts]},
+        id => bondy_log_scrubber,
+        start => {bondy_log_scrubber, start_link, [ScrubberOpts]},
         restart => permanent,
         shutdown => 5000,
         type => worker,
-        modules => [bondy_oplog_wal_scrubber]
+        modules => [bondy_log_scrubber]
     },
-    %% Ephemeral fused-writer mode (fused-writer rollout, Step 3): the
+    %% Ephemeral fused-writer mode: the
     %% instance gen_server drains the WAL + installs inline ITSELF, so a
     %% separate applier would double-drain the WAL. Omit it. `fused` is
     %% default-off, so every durable (and non-fused ephemeral) instance
@@ -363,7 +400,11 @@ applier_opts(InstanceId, Opts) ->
 %% disabled (`interval_ms = 0`) so untouched configurations do no I/O.
 scrubber_opts(InstanceId, Opts) ->
     Scrubber0 = maps:get(scrubber, Opts, #{}),
-    Scrubber0#{instance_id => InstanceId}.
+    Scrubber0#{
+        instance_id => InstanceId,
+        adapter => bondy_oplog_log_adapter,
+        telemetry_prefix => [bondy_oplog, wal]
+    }.
 
 %% @private
 %% Resolve the `origin` opt and inject it into the opts map so every

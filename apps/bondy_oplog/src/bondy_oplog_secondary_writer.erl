@@ -130,8 +130,6 @@ projection-handle owner keeps it.
     %% Buffered ops since the last flush, each tagged with its stream, in
     %% reverse arrival order (`group_by/2` restores per-stream order at flush).
     buffer = [] :: [{stream(), op()}],
-    %% Outstanding coalescing timer, or `undefined` when the buffer is
-    %% empty / just flushed.
     flush_timer = undefined :: undefined | reference(),
     coalesce_ms :: non_neg_integer()
 }).

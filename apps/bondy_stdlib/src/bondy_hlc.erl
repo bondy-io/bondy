@@ -3,14 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_oplog_hlc).
+-module(bondy_hlc).
 
--include("bondy_doc.hrl").
--include("bondy_oplog.hrl").
+-include("bondy_hlc.hrl").
 
--moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
-A Hybrid Logical Clock (HLC) for the MST event-store replication layer.
+-moduledoc """
+A Hybrid Logical Clock (HLC): the clock the oplog keys its events with
+and the stream log stamps its records with.
 
 An HLC produces a strictly monotonic 64-bit integer that closely tracks
 wall-clock time and never regresses within a replica, even across:
@@ -43,13 +42,18 @@ A clock value is held in an `atomics` array and updated with
 `compare_exchange/4`. `now/1` and `update/2` are wait-free for the
 common case (no contention) and lock-free under contention.
 
-## Origin scope
+## Scope
 
-An HLC instance is **per replica** (per Origin), not per CRDT instance.
-Multiple `bondy_oplog_instance` processes that share the
-same Origin must share the same HLC instance to preserve per-origin
-monotonicity of `{HLC, Seq}` event keys.
-""").
+An instance is one clock; values from one instance are strictly
+increasing in the order `now/1` and `update/2` return them, and only in
+that order. Two callers minting from one instance in two processes get
+distinct, increasing values, but nothing orders what they do with them
+afterwards. The oplog keeps one instance per replica (per origin) shared
+by every `bondy_oplog_instance` of that origin, so per-origin `{HLC, Seq}`
+event keys are monotonic; a stream log keeps one instance per
+(stream, node) log in the single process that writes it, so record stamps
+are monotonic in append order (`bondy_log_record`).
+""".
 
 -record(?MODULE, {
     atomic :: atomics:atomics_ref()
@@ -73,20 +77,20 @@ monotonicity of `{HLC, Seq}` event keys.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Creates a new HLC initialised to zero. The first `now/1` call will produce
 an HLC at least equal to the current wall-clock millisecond.
-""").
+""".
 -spec new() -> t().
 
 new() ->
     new(0).
 
-?DOC("""
+-doc """
 Creates a new HLC initialised to `Seed`. Useful when restoring from
 persisted state — `Seed` is typically the highest HLC the replica has
 ever observed locally.
-""").
+""".
 -spec new(Seed :: hlc()) -> t().
 
 new(Seed) when is_integer(Seed), Seed >= 0 ->
@@ -94,47 +98,47 @@ new(Seed) when is_integer(Seed), Seed >= 0 ->
     ok = atomics:put(Ref, 1, Seed),
     #?MODULE{atomic = Ref}.
 
-?DOC("""
+-doc """
 Returns the next HLC value, advancing the clock atomically. Strictly
 greater than the previous value returned by `now/1` or `update/2`.
-""").
+""".
 -spec now(t()) -> hlc().
 
 now(#?MODULE{atomic = Ref}) ->
     cas(Ref, fun local_next/2).
 
-?DOC("""
+-doc """
 Advances the local HLC to dominate `Peer`, then returns the new value.
 Used on receipt of a remote event so subsequent local events are
 guaranteed to sort after the peer event.
-""").
+""".
 -spec update(t(), Peer :: hlc()) -> hlc().
 
 update(#?MODULE{atomic = Ref}, Peer) when is_integer(Peer), Peer >= 0 ->
     cas(Ref, fun(Old, Wall) -> peer_next(Old, Wall, Peer) end).
 
-?DOC("""
+-doc """
 Returns the current HLC without advancing it.
-""").
+""".
 -spec peek(t()) -> hlc().
 
 peek(#?MODULE{atomic = Ref}) ->
     atomics:get(Ref, 1).
 
-?DOC("""
+-doc """
 Decodes a packed HLC into its `{Physical, Logical}` components.
-""").
+""".
 -spec decode(hlc()) -> {non_neg_integer(), non_neg_integer()}.
 
 decode(HLC) when is_integer(HLC), HLC >= 0 ->
     {
-        HLC bsr ?BONDY_OPLOG_HLC_LOGICAL_BITS,
-        HLC band ?BONDY_OPLOG_HLC_LOGICAL_MASK
+        HLC bsr ?BONDY_HLC_LOGICAL_BITS,
+        HLC band ?BONDY_HLC_LOGICAL_MASK
     }.
 
-?DOC("""
+-doc """
 Encodes a `{Physical, Logical}` pair into a packed HLC value.
-""").
+""".
 -spec encode(non_neg_integer(), non_neg_integer()) -> hlc().
 
 encode(Physical, Logical) when
@@ -142,9 +146,9 @@ encode(Physical, Logical) when
     Physical >= 0,
     is_integer(Logical),
     Logical >= 0,
-    Logical =< ?BONDY_OPLOG_HLC_LOGICAL_MAX
+    Logical =< ?BONDY_HLC_LOGICAL_MAX
 ->
-    (Physical bsl ?BONDY_OPLOG_HLC_LOGICAL_BITS) bor Logical.
+    (Physical bsl ?BONDY_HLC_LOGICAL_BITS) bor Logical.
 
 %% =============================================================================
 %% PRIVATE
@@ -195,7 +199,7 @@ peer_next(Old, Wall, Peer) ->
 %% @private
 %% Increment the logical counter, advancing physical on overflow so that
 %% the result still strictly dominates `(Phys, Log)`.
-bump_logical(Phys, Log) when Log < ?BONDY_OPLOG_HLC_LOGICAL_MAX ->
+bump_logical(Phys, Log) when Log < ?BONDY_HLC_LOGICAL_MAX ->
     encode(Phys, Log + 1);
 bump_logical(Phys, _) ->
     encode(Phys + 1, 0).

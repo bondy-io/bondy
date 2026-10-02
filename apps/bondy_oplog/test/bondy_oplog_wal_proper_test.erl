@@ -20,6 +20,7 @@
 -include("bondy_oplog.hrl").
 -include("bondy_oplog_wal.hrl").
 
+-define(MAGIC, ?BONDY_OPLOG_WAL_FRAME_MAGIC).
 -define(HEADER, ?BONDY_OPLOG_WAL_FRAME_HEADER_BYTES).
 -define(SEG_HEADER, ?BONDY_OPLOG_WAL_SEGMENT_HEADER_BYTES).
 %% The encoder defaults to v2 (`?BONDY_OPLOG_WAL_FRAME_VERSION`), so
@@ -73,9 +74,9 @@ prop_frame_roundtrip() ->
         {binary(), known_flags()},
         begin
             Frame = iolist_to_binary(
-                bondy_oplog_wal_frame:encode(Body, [{flags, Flags}])
+                bondy_log_frame:encode(Body, [{magic, ?MAGIC}, {flags, Flags}])
             ),
-            case bondy_oplog_wal_frame:decode(Frame) of
+            case bondy_log_frame:decode(Frame, [{magic, ?MAGIC}]) of
                 {ok, Decoded, #{flags := F}} ->
                     Decoded =:= Body andalso F =:= Flags;
                 _ ->
@@ -99,9 +100,11 @@ prop_frame_bit_flip_detection() ->
             {B, choose(32, (?HEADER + byte_size(B)) * 8 - 1)}
         ),
         begin
-            Frame = iolist_to_binary(bondy_oplog_wal_frame:encode(Body)),
+            Frame = iolist_to_binary(
+                bondy_log_frame:encode(Body, [{magic, ?MAGIC}])
+            ),
             Corrupt = flip_bit(Frame, BitIdx),
-            case bondy_oplog_wal_frame:decode(Corrupt) of
+            case bondy_log_frame:decode(Corrupt, [{magic, ?MAGIC}]) of
                 {ok, _, _} -> false;
                 {error, _} -> true
             end
@@ -137,9 +140,9 @@ prop_codec_roundtrip() ->
                 body_compression_min_bytes => MinBytes
             },
             {Flags, Encoded} =
-                bondy_oplog_wal_codec:encode_body(Body, Opts),
+                bondy_log_codec:encode_body(Body, Opts),
             EncodedBin = iolist_to_binary(Encoded),
-            case bondy_oplog_wal_codec:decode_body(EncodedBin, Flags) of
+            case bondy_log_codec:decode_body(EncodedBin, Flags) of
                 {ok, Decoded} -> Decoded =:= Body;
                 _ -> false
             end
@@ -158,7 +161,7 @@ prop_codec_encrypt_roundtrip() ->
         begin
             Opts0 = #{
                 body_encryption =>
-                    {enabled, bondy_oplog_wal_codec_test}
+                    {enabled, bondy_log_codec_test}
             },
             Opts =
                 case WithCompression of
@@ -171,10 +174,10 @@ prop_codec_encrypt_roundtrip() ->
                         Opts0
                 end,
             {Flags, Encoded} =
-                bondy_oplog_wal_codec:encode_body(Body, Opts),
+                bondy_log_codec:encode_body(Body, Opts),
             EncodedBin = iolist_to_binary(Encoded),
             case
-                bondy_oplog_wal_codec:decode_body(
+                bondy_log_codec:decode_body(
                     EncodedBin, Flags, Opts
                 )
             of
@@ -190,7 +193,7 @@ prop_codec_encrypt_roundtrip() ->
 %% that makes the encryption envelope the integrity boundary: a
 %% modified frame body cannot escape the codec.
 prop_codec_ciphertext_bit_flip_detection() ->
-    Opts = #{body_encryption => {enabled, bondy_oplog_wal_codec_test}},
+    Opts = #{body_encryption => {enabled, bondy_log_codec_test}},
     ?FORALL(
         {Body, BitIdx},
         ?LET(
@@ -200,7 +203,7 @@ prop_codec_ciphertext_bit_flip_detection() ->
         ),
         begin
             {?BONDY_OPLOG_WAL_FRAME_FLAG_ENCRYPTED, Encoded} =
-                bondy_oplog_wal_codec:encode_body(Body, Opts),
+                bondy_log_codec:encode_body(Body, Opts),
             Bin = iolist_to_binary(Encoded),
             %% Flip a bit anywhere in the post-header region
             %% (ciphertext or tag — both must reject).
@@ -213,7 +216,7 @@ prop_codec_ciphertext_bit_flip_detection() ->
                     Idx = 31 * 8 + (BitIdx rem TotalBits),
                     Corrupted = flip_bit(Bin, Idx),
                     case
-                        bondy_oplog_wal_codec:decode_body(
+                        bondy_log_codec:decode_body(
                             Corrupted,
                             ?BONDY_OPLOG_WAL_FRAME_FLAG_ENCRYPTED,
                             Opts
@@ -246,10 +249,10 @@ prop_idx_v2_seek_matches_v1_on_point_ranges() ->
         begin
             Sorted = lists:usort(Hlcs),
             Entries = [{H, H, H * 100} || H <- Sorted],
-            Handle = bondy_oplog_wal_idx:from_entries(Entries),
+            Handle = bondy_log_idx:from_entries(Entries),
             lists:all(
                 fun(T) ->
-                    Got = bondy_oplog_wal_idx:seek(Handle, T),
+                    Got = bondy_log_idx:seek(Handle, T),
                     Want = reference_v1_seek(Sorted, T),
                     Got =:= Want
                 end,
@@ -274,8 +277,8 @@ prop_idx_v2_seek_in_range_returns_that_entry() ->
         begin
             {Entries, TargetIdx, T} = Spec,
             {_, _, ExpectedOffset} = lists:nth(TargetIdx, Entries),
-            Handle = bondy_oplog_wal_idx:from_entries(Entries),
-            bondy_oplog_wal_idx:seek(Handle, T) =:= {ok, ExpectedOffset}
+            Handle = bondy_log_idx:from_entries(Entries),
+            bondy_log_idx:seek(Handle, T) =:= {ok, ExpectedOffset}
         end
     ).
 
@@ -342,15 +345,15 @@ prop_frame_v1_v2_decoder_equivalence() ->
         binary(),
         begin
             V1Frame = iolist_to_binary(
-                bondy_oplog_wal_frame:encode(Body, [{version, 1}])
+                bondy_log_frame:encode(Body, [{magic, ?MAGIC}, {version, 1}])
             ),
             V2Frame = iolist_to_binary(
-                bondy_oplog_wal_frame:encode(Body, [{version, 2}])
+                bondy_log_frame:encode(Body, [{magic, ?MAGIC}, {version, 2}])
             ),
             case
                 {
-                    bondy_oplog_wal_frame:decode(V1Frame),
-                    bondy_oplog_wal_frame:decode(V2Frame)
+                    bondy_log_frame:decode(V1Frame, [{magic, ?MAGIC}]),
+                    bondy_log_frame:decode(V2Frame, [{magic, ?MAGIC}])
                 }
             of
                 {
@@ -379,7 +382,7 @@ prop_wal_single_event_roundtrip() ->
         N,
         choose(1, 50),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             %% Pick a cap that yields ~3 events per segment on average.
             MaxBytes = ?SEG_HEADER + estimated_frame_size() * 3,
@@ -417,7 +420,7 @@ prop_wal_hlc_monotonicity() ->
         N,
         choose(1, 50),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             {ok, Pid} = bondy_oplog_wal:start_link(
                 instance_id(),
@@ -450,7 +453,7 @@ prop_wal_roundtrip() ->
         N,
         choose(1, 50),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             MaxBytes = ?SEG_HEADER + estimated_frame_size() * 3,
             {ok, Pid} = bondy_oplog_wal:start_link(
@@ -462,7 +465,7 @@ prop_wal_roundtrip() ->
                 }
             ),
             [{ok, _, _} = bondy_oplog_wal:append(Pid, E) || E <- Events],
-            {ok, Iter} = bondy_oplog_wal_reader:open(Pid, beginning),
+            {ok, Iter} = bondy_log_reader:open(Pid, beginning),
             Recovered = drain_reader(Iter, []),
             ok = bondy_oplog_wal:close(Pid),
             Recovered =:= Events
@@ -490,7 +493,7 @@ prop_index_consistency() ->
         N,
         choose(1, 50),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             MaxBytes = ?SEG_HEADER + estimated_frame_size() * 3,
             %% Tighten the index interval so the workload reliably
@@ -526,9 +529,9 @@ check_index_consistency(Dir, InstanceId, HeadSeg) ->
 
 check_segment_index(Dir, InstanceId, SegId) ->
     IdxPath = filename:join(
-        [Dir, InstanceId, bondy_oplog_wal_idx:filename(SegId)]
+        [Dir, InstanceId, bondy_log_idx:filename(SegId)]
     ),
-    case bondy_oplog_wal_idx:read_file(IdxPath) of
+    case bondy_log_idx:read_file(IdxPath) of
         {ok, []} ->
             %% An empty index is only legal for an empty segment (e.g.,
             %% a head segment created by rotation but never appended
@@ -550,17 +553,17 @@ check_segment_index(Dir, InstanceId, SegId) ->
 
 check_entry(Dir, InstanceId, SegId, {FirstHlc, _LastHlc, Offset}) ->
     SegPath = filename:join(
-        [Dir, InstanceId, bondy_oplog_wal_segment:filename(SegId)]
+        [Dir, InstanceId, bondy_log_segment:filename(SegId)]
     ),
     case file:read_file(SegPath) of
         {ok, Bin} when byte_size(Bin) >= Offset + ?HEADER ->
             <<_:Offset/binary, Header:?HEADER/binary, _/binary>> = Bin,
-            case bondy_oplog_wal_frame:decode_header(Header) of
+            case bondy_log_frame:decode_header(Header, [{magic, ?MAGIC}]) of
                 {ok, #{frame_len := FrameLen}} when
                     byte_size(Bin) >= Offset + FrameLen
                 ->
                     <<_:Offset/binary, Frame:FrameLen/binary, _/binary>> = Bin,
-                    case bondy_oplog_wal_frame:decode(Frame) of
+                    case bondy_log_frame:decode(Frame, [{magic, ?MAGIC}]) of
                         {ok, Body, _Meta} ->
                             case binary_to_term(Body, [safe]) of
                                 [Event | _] ->
@@ -581,7 +584,7 @@ check_entry(Dir, InstanceId, SegId, {FirstHlc, _LastHlc, Offset}) ->
 
 seg_is_empty(Dir, InstanceId, SegId) ->
     SegPath = filename:join(
-        [Dir, InstanceId, bondy_oplog_wal_segment:filename(SegId)]
+        [Dir, InstanceId, bondy_log_segment:filename(SegId)]
     ),
     case file:read_file_info(SegPath) of
         {ok, FI} ->
@@ -605,7 +608,7 @@ prop_truncation_safety() ->
         {N, ChopBytes},
         ?LET(NN, choose(2, 20), {NN, choose(0, max(1, NN * 30))}),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -615,7 +618,7 @@ prop_truncation_safety() ->
                 [
                     Dir,
                     instance_id(),
-                    bondy_oplog_wal_segment:filename(0)
+                    bondy_log_segment:filename(0)
                 ]
             ),
             {ok, Size} = file_size(SegPath),
@@ -655,7 +658,7 @@ prop_manifest_atomicity() ->
         N,
         choose(1, 10),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -695,7 +698,7 @@ prop_consumer_offset_clamping() ->
             {NN, choose(0, 99), choose(0, 1_000_000)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -727,13 +730,13 @@ prop_consumer_offset_clamping() ->
                 instance_id(), Opts
             ),
             ok = bondy_oplog_wal:close(P2),
-            {ok, Clamped} = bondy_oplog_wal_state:read_consumer_offset(InstDir),
+            {ok, Clamped} = bondy_log_state:read_consumer_offset(InstDir),
             ClampedSeg =
-                bondy_oplog_wal_state:committed_segment(
+                bondy_log_state:committed_segment(
                     Clamped
                 ),
             ClampedOff =
-                bondy_oplog_wal_state:committed_frame_offset(
+                bondy_log_state:committed_frame_offset(
                     Clamped
                 ),
             %% Clamped segment is live (post-clamp it must be ≤ head;
@@ -778,7 +781,7 @@ prop_await_durable_correctness() ->
         N,
         choose(1, 20),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -847,7 +850,7 @@ prop_batch_atomicity() ->
         BatchSizes,
         non_empty(list(choose(1, 8))),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Batches = generate_batches(HLC, BatchSizes),
             %% Rotation-friendly cap so multi-segment trials are
             %% reachable. Let the writer default-clamp `max_batch_bytes`
@@ -896,7 +899,7 @@ prop_retention_safety() ->
         Ops,
         retention_ops_gen(),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             MinLive = 1,
             MaxBytes = ?SEG_HEADER + estimated_frame_size() * 2,
             Opts = #{
@@ -971,7 +974,7 @@ step_op(Pid, HLC, {watermark_advance, Delta}, _SeqRef, WB, _CB, MinLive) ->
     Pre = snapshot_state(Pid),
     %% Bound the watermark to a value derived from current HLC so it
     %% stays plausible across long sequences.
-    Now = bondy_oplog_hlc:now(HLC),
+    Now = bondy_hlc:now(HLC),
     Cur = counters:get(WB, 1),
     Floor = max(Cur, Now - 1000),
     NewBase = Floor + Delta,
@@ -990,7 +993,7 @@ do_appends(_Pid, _HLC, _SeqRef, 0) ->
 do_appends(Pid, HLC, SeqRef, N) when N > 0 ->
     counters:add(SeqRef, 1, 1),
     Seq = counters:get(SeqRef, 1),
-    Hlc = bondy_oplog_hlc:now(HLC),
+    Hlc = bondy_hlc:now(HLC),
     Key = bondy_oplog_event:key(Hlc, origin(), Seq),
     Event = bondy_oplog_event:new(Key, {op, Hlc}, undefined),
     {ok, _, _} = bondy_oplog_wal:append(Pid, Event),
@@ -1101,14 +1104,14 @@ base_wal_opts(Dir, Extra) ->
 %% fit them all) or we hit `{error, wal_full}` (the expected outcome
 %% under a tight cap). Returns a tagged outcome the caller inspects.
 run_wal_full_outcome(Pid, NEvents) ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     append_until_full(Pid, HLC, NEvents, 0).
 
 %% @private
 append_until_full(_Pid, _HLC, 0, Count) ->
     {fit, Count};
 append_until_full(Pid, HLC, N, Count) ->
-    Hlc = bondy_oplog_hlc:now(HLC),
+    Hlc = bondy_hlc:now(HLC),
     Key = bondy_oplog_event:key(Hlc, origin(), Count + 1),
     Event = bondy_oplog_event:new(Key, {op, Hlc}, undefined),
     case bondy_oplog_wal:append(Pid, Event) of
@@ -1160,7 +1163,7 @@ wal_full_invariant(_Pid, {unexpected_error, _}) ->
 %%       truncated head_offset.
 %%
 %% The "halt at first bad frame" semantics in v1 are deliberate (no
-%% Magic-rescan, see WAL_DESIGN §17); P4 pins them down.
+%% Magic-rescan); P4 pins them down.
 prop_bit_flip_magic() ->
     ?FORALL(
         {N, K, BitInMagic},
@@ -1170,7 +1173,7 @@ prop_bit_flip_magic() ->
             {NN, choose(0, NN - 1), choose(0, 31)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -1255,7 +1258,7 @@ prop_rotation_atomicity() ->
         N,
         choose(1, 20),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             %% Big segment cap — keep everything in segment 0 so we can
             %% deterministically construct the orphan as segment 1.
@@ -1273,7 +1276,7 @@ prop_rotation_atomicity() ->
             %% NOT in the manifest's live_segments. Recovery must drop it.
             InstDir = filename:join(Dir, instance_id()),
             OrphanPath = filename:join(
-                InstDir, bondy_oplog_wal_segment:filename(HeadSeg + 1)
+                InstDir, bondy_log_segment:filename(HeadSeg + 1)
             ),
             ok = file:write_file(
                 OrphanPath, <<"orphan-partial-rotation">>
@@ -1336,7 +1339,7 @@ prop_partial_write() ->
                 choose(1, 200)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -1405,7 +1408,7 @@ prop_partial_write() ->
     ).
 
 %% =============================================================================
-%% PR2 (WAL_DESIGN_V2.md) — rescan recovery
+%% Rescan recovery
 %% =============================================================================
 
 %% Property: in `rescan` mode, a single byte flip inside the body of
@@ -1428,7 +1431,7 @@ prop_rescan_recovery() ->
             {NN, choose(0, NN - 1), choose(20, 80)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -1521,7 +1524,7 @@ prop_concurrent_reader_safety() ->
         {N, R},
         {choose(5, 30), choose(1, 4)},
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -1598,7 +1601,7 @@ run_concurrent_writer(Pid, Events) ->
 %% catching protocol errors as a property failure (the writer must
 %% never crash a concurrent reader).
 run_concurrent_reader(Pid) ->
-    case bondy_oplog_wal_reader:open(Pid, beginning) of
+    case bondy_log_reader:open(Pid, beginning) of
         {ok, Iter} ->
             drain_reader(Iter, []);
         {error, _} ->
@@ -1653,7 +1656,7 @@ prop_failed_fsync() ->
         N,
         choose(2, 12),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -1744,7 +1747,7 @@ prop_failed_fsync_batched() ->
         N,
         choose(2, 8),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -1834,7 +1837,7 @@ prop_rename_failure() ->
         N,
         choose(3, 15),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             %% Tight cap so we rotate after the first frame.
             Opts = #{
@@ -1982,7 +1985,7 @@ prop_multiproc_convergence() ->
             {NN, choose(1, NN - 1), choose(0, 3)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_oplog_hlc:new(),
+            HLC = bondy_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -2164,7 +2167,7 @@ origin() ->
 generate_events(HLC, N) ->
     [
         begin
-            Hlc = bondy_oplog_hlc:now(HLC),
+            Hlc = bondy_hlc:now(HLC),
             Key = bondy_oplog_event:key(Hlc, origin(), Seq),
             bondy_oplog_event:new(Key, {op, Hlc}, undefined)
         end
@@ -2317,7 +2320,7 @@ scan_all_segments_grouped(Dir, InstanceId, HeadSegId) ->
 
 scan_segment(Dir, InstanceId, SegId) ->
     Path = filename:join(
-        [Dir, InstanceId, bondy_oplog_wal_segment:filename(SegId)]
+        [Dir, InstanceId, bondy_log_segment:filename(SegId)]
     ),
     {ok, Bin} = file:read_file(Path),
     <<_:?SEG_HEADER/binary, Frames/binary>> = Bin,
@@ -2325,7 +2328,7 @@ scan_segment(Dir, InstanceId, SegId) ->
 
 scan_segment_grouped(Dir, InstanceId, SegId) ->
     Path = filename:join(
-        [Dir, InstanceId, bondy_oplog_wal_segment:filename(SegId)]
+        [Dir, InstanceId, bondy_log_segment:filename(SegId)]
     ),
     {ok, Bin} = file:read_file(Path),
     <<_:?SEG_HEADER/binary, Frames/binary>> = Bin,
@@ -2335,7 +2338,7 @@ scan_frames(<<>>) ->
     [];
 scan_frames(<<_:32, FrameLen:32, _/binary>> = Bin) ->
     <<Frame:FrameLen/binary, Rest/binary>> = Bin,
-    {ok, Body, _} = bondy_oplog_wal_frame:decode(Frame),
+    {ok, Body, _} = bondy_log_frame:decode(Frame, [{magic, ?MAGIC}]),
     Batch = binary_to_term(Body, [safe]),
     Batch ++ scan_frames(Rest).
 
@@ -2343,7 +2346,7 @@ scan_frames_grouped(<<>>) ->
     [];
 scan_frames_grouped(<<_:32, FrameLen:32, _/binary>> = Bin) ->
     <<Frame:FrameLen/binary, Rest/binary>> = Bin,
-    {ok, Body, _} = bondy_oplog_wal_frame:decode(Frame),
+    {ok, Body, _} = bondy_log_frame:decode(Frame, [{magic, ?MAGIC}]),
     Batch = binary_to_term(Body, [safe]),
     [Batch | scan_frames_grouped(Rest)].
 
@@ -2354,7 +2357,7 @@ generate_batches(_HLC, []) ->
 generate_batches(HLC, [Size | Sizes]) ->
     Batch = [
         begin
-            Hlc = bondy_oplog_hlc:now(HLC),
+            Hlc = bondy_hlc:now(HLC),
             Key = bondy_oplog_event:key(Hlc, origin(), Seq),
             bondy_oplog_event:new(Key, {op, Hlc}, undefined)
         end
@@ -2365,14 +2368,14 @@ generate_batches(HLC, [Size | Sizes]) ->
 %% Drains a bounded (non-follow) reader to a flat list of events. Used
 %% by `prop_wal_roundtrip/0`.
 drain_reader(Iter, Acc) ->
-    case bondy_oplog_wal_reader:next(Iter) of
+    case bondy_log_reader:next(Iter) of
         {ok, Batch, _Hlcs, _Pos, NewIter} ->
             drain_reader(NewIter, Acc ++ Batch);
         end_of_log ->
-            ok = bondy_oplog_wal_reader:close(Iter),
+            ok = bondy_log_reader:close(Iter),
             Acc;
         {error, _} = E ->
-            ok = bondy_oplog_wal_reader:close(Iter),
+            ok = bondy_log_reader:close(Iter),
             E
     end.
 
@@ -2380,7 +2383,7 @@ drain_reader(Iter, Acc) ->
 
 %% Reads every appended event from the WAL via a fresh reader.
 read_all_events(Pid) ->
-    {ok, Iter} = bondy_oplog_wal_reader:open(Pid, beginning),
+    {ok, Iter} = bondy_log_reader:open(Pid, beginning),
     drain_reader(Iter, []).
 
 %% Returns `{ok, NonNegInteger}` with the file's byte size, or
@@ -2440,7 +2443,7 @@ frame_extent(K, Positions, HeadOffsetAfter) ->
 %% manipulate segment bytes directly (P4 magic flip, P5/P13 truncation).
 seg_path(Dir, SegId) ->
     filename:join(
-        [Dir, instance_id(), bondy_oplog_wal_segment:filename(SegId)]
+        [Dir, instance_id(), bondy_log_segment:filename(SegId)]
     ).
 
 %% Append every event in `Events` through `Pid`, capture the

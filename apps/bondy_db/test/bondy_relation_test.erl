@@ -23,9 +23,9 @@
 %%      `limit` accepted rows, and rejected rows never surface.
 %%   3. `fold/4` streams every accepted row exactly once in bounded memory,
 %%      ordered per the relation's MODE — a set for `partition`, exact key
-%%      order for `global`. It used to scatter regardless of mode, so a
-%%      `partition` relation's fold cost O(rows x shards) while the `list/3`
-%%      beside it cost O(rows).
+%%      order for `global`. Scattering regardless of mode costs a
+%%      `partition` relation's fold O(rows x shards) against the O(rows) of
+%%      the `list/3` beside it.
 %%   4. Cursor encode/decode round-trips and rejects stale/malformed cursors,
 %%      including a cursor minted under the other mode.
 %%   5. The default mode (no `mode` opt) is `partition`.

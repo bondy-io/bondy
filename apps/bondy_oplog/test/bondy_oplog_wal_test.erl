@@ -70,7 +70,7 @@ with_wal(Opts, Fun) ->
 
 %% Builds an event with `Hlc` and a deterministic `Seq`. Each test that
 %% wants strictly-monotonic events should source `Hlc` from a single
-%% `bondy_oplog_hlc:t()` instance via `bondy_oplog_hlc:now/1`.
+%% `bondy_hlc:t()` instance via `bondy_hlc:now/1`.
 mk_event(Hlc, Seq) ->
     Key = bondy_oplog_event:key(Hlc, origin(), Seq),
     bondy_oplog_event:new(Key, {op, Hlc}, undefined).
@@ -104,6 +104,43 @@ open_creates_dir_and_segment_test() ->
         ?assertEqual(per_write, maps:get(fsync_mode, Info))
     end).
 
+%% `open/2` returns the recovery-time `max_seq` next to the pid: 0 on a
+%% fresh WAL, the largest appended seq after a close-and-reopen. The
+%% truncated-tail case (a frame that must NOT count) is
+%% `bondy_oplog_wal_recovery_test:open_max_seq_excludes_truncated_tail_test`.
+open_returns_max_seq_test() ->
+    HLC = bondy_hlc:new(),
+    Dir = mktemp_dir(),
+    try
+        Opts = #{dir => Dir, origin => origin()},
+        {ok, P1, Info1} = bondy_oplog_wal:open(instance_id(), Opts),
+        ?assertMatch(
+            #{
+                max_seq := 0,
+                head_pos := {0, ?SEG_HEADER},
+                durable_pos := {0, ?SEG_HEADER}
+            },
+            Info1
+        ),
+        %% Out-of-order seqs: the maximum, not the last, must be reported.
+        Seqs = [3, 7, 5],
+        _ = [
+            {ok, _, _} = bondy_oplog_wal:append(
+                P1, mk_event(bondy_hlc:now(HLC), Seq)
+            )
+         || Seq <- Seqs
+        ],
+        {SegBefore, OffBefore} = bondy_oplog_wal:durable_position(P1),
+        ok = bondy_oplog_wal:close(P1),
+        {ok, P2, Info2} = bondy_oplog_wal:open(instance_id(), Opts),
+        ?assertEqual(7, maps:get(max_seq, Info2)),
+        ?assertEqual({SegBefore, OffBefore}, maps:get(head_pos, Info2)),
+        ?assertEqual({SegBefore, OffBefore}, maps:get(durable_pos, Info2)),
+        ok = bondy_oplog_wal:close(P2)
+    after
+        rmrf(Dir)
+    end.
+
 %% `init/1` returns `{stop, Reason}` to refuse a bad open. The linked
 %% caller (the test process) receives both the proc_lib `{error, _}`
 %% reply AND a linked EXIT signal — trap exits while we exercise these
@@ -127,7 +164,7 @@ expect_open_error(Expected, Fun) ->
 %% reopen, verify state is restored. Per-write fsync means everything
 %% appended before close survives.
 reopen_recovers_clean_wal_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
@@ -135,7 +172,7 @@ reopen_recovers_clean_wal_test() ->
         %% Append a handful of events, capture HLCs.
         Hlcs = [
             begin
-                E = mk_event(bondy_oplog_hlc:now(HLC), Seq),
+                E = mk_event(bondy_hlc:now(HLC), Seq),
                 {ok, H, _} = bondy_oplog_wal:append(P1, E),
                 H
             end
@@ -154,15 +191,15 @@ reopen_recovers_clean_wal_test() ->
             maps:get(head_offset, InfoAfter)
         ),
         ?assertEqual(
-            maps:get(first_hlc, InfoBefore),
-            maps:get(first_hlc, InfoAfter)
+            maps:get(first_key, InfoBefore),
+            maps:get(first_key, InfoAfter)
         ),
         ?assertEqual(
-            maps:get(last_hlc, InfoBefore),
-            maps:get(last_hlc, InfoAfter)
+            maps:get(last_key, InfoBefore),
+            maps:get(last_key, InfoAfter)
         ),
         %% Continue appending after reopen; new HLC must be > all prior.
-        E2 = mk_event(bondy_oplog_hlc:now(HLC), 6),
+        E2 = mk_event(bondy_hlc:now(HLC), 6),
         {ok, H6, _} = bondy_oplog_wal:append(P2, E2),
         ?assert(H6 > lists:last(Hlcs)),
         ok = bondy_oplog_wal:close(P2)
@@ -217,15 +254,15 @@ single_append_test() ->
         ?assertEqual(?SEG_HEADER, Offset),
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(1, maps:get(append_count, Info)),
-        ?assertEqual(1, maps:get(first_hlc, Info)),
-        ?assertEqual(1, maps:get(last_hlc, Info)),
+        ?assertEqual(1, maps:get(first_key, Info)),
+        ?assertEqual(1, maps:get(last_key, Info)),
         %% Raw scan confirms the frame is on disk and decodes.
         Events = scan_segment(Dir, 0),
         ?assertEqual([E], Events)
     end).
 
 append_1000_events_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     with_wal(#{}, fun(Pid, Dir) ->
         Events = generate_events(HLC, 1000, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -246,7 +283,7 @@ append_1000_events_test() ->
     end).
 
 hlc_returned_matches_event_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 5, 1),
         Pairs = [
@@ -271,7 +308,7 @@ rotation_creates_new_segment_test() ->
     %% A small event encodes to ~50–80 bytes of frame; setting the cap
     %% just above one frame guarantees rotation on the second append.
     %% We use 200 bytes so 1 event fits but 2 do not.
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     with_wal(#{max_segment_bytes => 200}, fun(Pid, Dir) ->
         Events = generate_events(HLC, 4, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -288,7 +325,7 @@ rotation_creates_new_segment_test() ->
                         [
                             Dir,
                             instance_id(),
-                            bondy_oplog_wal_segment:filename(S)
+                            bondy_log_segment:filename(S)
                         ]
                     )
                 )
@@ -303,14 +340,14 @@ rotation_creates_new_segment_test() ->
     end).
 
 manifest_updated_after_rotation_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     with_wal(#{max_segment_bytes => 200}, fun(Pid, Dir) ->
         Events = generate_events(HLC, 3, 1),
         [bondy_oplog_wal:append(Pid, E) || E <- Events],
         InstanceDir = filename:join(Dir, instance_id()),
-        {ok, M} = bondy_oplog_wal_manifest:read(InstanceDir),
-        ?assertEqual(2, bondy_oplog_wal_manifest:current_segment(M)),
-        Live = bondy_oplog_wal_manifest:live_segments(M),
+        {ok, M} = bondy_log_manifest:read(InstanceDir),
+        ?assertEqual(2, bondy_log_manifest:current_segment(M)),
+        Live = bondy_log_manifest:live_segments(M),
         ?assertEqual([0, 1, 2], [Id || {Id, _} <- Live]),
         %% Segment 0 and 1 are now sealed; their first_hlc fields
         %% should be the HLC of their single event (the events were
@@ -328,7 +365,7 @@ manifest_updated_after_rotation_test() ->
     end).
 
 rotation_resets_offset_test() ->
-    HLC = bondy_oplog_hlc:new(),
+    HLC = bondy_hlc:new(),
     with_wal(#{max_segment_bytes => 200}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 3, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -369,7 +406,7 @@ close_is_idempotent_test() ->
 generate_events(_HLC, 0, _) ->
     [];
 generate_events(HLC, N, Seq) ->
-    Hlc = bondy_oplog_hlc:now(HLC),
+    Hlc = bondy_hlc:now(HLC),
     [mk_event(Hlc, Seq) | generate_events(HLC, N - 1, Seq + 1)].
 
 is_strictly_increasing([_]) ->
@@ -380,12 +417,12 @@ is_strictly_increasing(_) ->
     false.
 
 %% Reads a segment file, skips the 48-byte segment header, walks the
-%% frame stream using `bondy_oplog_wal_frame:decode/1`, and returns the
+%% frame stream using `bondy_log_frame:decode/2`, and returns the
 %% decoded events (each frame body is a one-element list under the
 %% current single-event batch-of-1 framing).
 scan_segment(Dir, SegId) ->
     Path = filename:join(
-        [Dir, instance_id(), bondy_oplog_wal_segment:filename(SegId)]
+        [Dir, instance_id(), bondy_log_segment:filename(SegId)]
     ),
     {ok, Bin} = file:read_file(Path),
     <<_:?SEG_HEADER/binary, Frames/binary>> = Bin,
@@ -399,6 +436,6 @@ scan_frames(Bin) when byte_size(Bin) < ?FRAME_HEADER ->
     error({trailing_bytes, byte_size(Bin)});
 scan_frames(<<?MAGIC:32, FrameLen:32, _/binary>> = Bin) ->
     <<Frame:FrameLen/binary, Rest/binary>> = Bin,
-    {ok, Body, _} = bondy_oplog_wal_frame:decode(Frame),
+    {ok, Body, _} = bondy_log_frame:decode(Frame, [{magic, ?MAGIC}]),
     [Event] = binary_to_term(Body),
     [Event | scan_frames(Rest)].

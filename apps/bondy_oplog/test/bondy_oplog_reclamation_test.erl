@@ -3,15 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Step 3 of BONDY_DB_RECLAMATION_PLAN.md — the stability-point chain and the
-%% reclamation façade:
+%% The stability-point chain and the reclamation façade:
 %%
 %%   reclamation_members() → confirmed_peer_states/2 → compute_frontier_for/2
 %%     → is_key guard → key_hlc → StableHlc → sweep_stable_cells/2
 %%
 %% Covers the four chain outcomes (solo, fully confirmed, partially confirmed,
 %% non-event frontier), asserts the derived StableHlc against a HAND-COMPUTED
-%% frontier (not against itself), and pins the Step 2 "in effect" contract:
+%% frontier (not against itself), and pins the "in effect" contract:
 %% an unavailable membership service reclaims NOTHING while genuine solo
 %% reclaims maximally.
 %% =============================================================================
@@ -89,7 +88,7 @@ solo_reclaims_the_tail_tombstone() ->
     teardown(Id).
 
 %% -----------------------------------------------------------------------------
-%% Membership unavailable ≠ solo — the Step 2 "in effect" contract
+%% Membership unavailable ≠ solo — the "in effect" contract
 %% -----------------------------------------------------------------------------
 
 membership_error_reclaims_nothing() ->
@@ -251,7 +250,7 @@ non_event_frontier_is_a_named_error() ->
     ).
 
 %% -----------------------------------------------------------------------------
-%% Step 6 — observability: a stall must be visible within ONE interval
+%% Observability: a stall must be visible within ONE interval
 %% -----------------------------------------------------------------------------
 %%
 %% Reclamation fails silently in both directions, so a member that never
@@ -259,7 +258,7 @@ non_event_frontier_is_a_named_error() ->
 %% "killed member" case) must surface within one scheduler interval as BOTH
 %% the reclamation-level stall event (naming the missing members) and the
 %% scheduler-level trigger outcome. A stall that cannot be seen is the
-%% failure mode Step 6 exists for.
+%% failure mode this case exists for.
 
 stall_is_observable_within_one_interval() ->
     Id = start_instance(),

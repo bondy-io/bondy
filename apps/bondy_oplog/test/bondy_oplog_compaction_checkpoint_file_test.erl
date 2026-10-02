@@ -296,7 +296,7 @@ checkpoint_naming_an_unknown_atom_is_not_corrupt_test() ->
         Bin = checkpoint_bytes_naming_a_novel_atom(),
 
         %% The fixture is only meaningful if it really does name an atom this
-        %% node has never created. Assert that before asserting the fix.
+        %% node has never created. Assert that before asserting the refusal.
         ?assertError(badarg, binary_to_term(Bin, [safe])),
 
         Path = checkpoint_path(Dir, Id),

@@ -6,11 +6,11 @@
 %% Range tests for `bondy_oplog_projection_ets`.
 %%
 %% `range/5` is the only callback with a non-obvious cost, and it is the one
-%% every band-paging caller re-enters with a rising `Low`. It used to express
-%% both bounds as match-spec GUARDS over an unbound key, which an
-%% `ordered_set` cannot narrow on: each call re-traversed the bucket from its
-%% first key, so paging a band of N rows cost O(N^2 / limit). It now probes
-%% `Low` and steps forward with `ets:next_lookup/2`.
+%% every band-paging caller re-enters with a rising `Low`. It probes `Low` and
+%% steps forward with `ets:next_lookup/2`. Expressing both bounds as
+%% match-spec GUARDS over an unbound key, which an `ordered_set` cannot narrow
+%% on, re-traverses the bucket from its first key on every call — paging a
+%% band of N rows for O(N^2 / limit).
 %%
 %% Two groups:
 %%
@@ -201,15 +201,12 @@ range_non_positive_limit_is_empty(Tab) ->
 
 range_cost_is_flat_in_low(Tab) ->
     {timeout, 60, fun() ->
-        %% The regression this replaces, stated as a property of which rows
-        %% are visited: a page taken near the END of a bucket must not visit
-        %% the rows before it. Reductions are the oracle because ETS charges
-        %% traversal to the calling process, so they count rows touched
-        %% rather than machine speed.
-        %%
-        %% The guarded-select form scored ~0.95*N here. The bound is N/10 —
-        %% loose enough that it is not a benchmark, tight enough that
-        %% anything which re-traverses the prefix fails it.
+        %% Stated as a property of which rows are visited: a page taken near
+        %% the END of a bucket must not visit the rows before it. Reductions
+        %% are the oracle because ETS charges traversal to the calling
+        %% process, so they count rows touched rather than machine speed. The
+        %% bound is N/10 — loose enough not to be a benchmark, tight enough
+        %% that anything re-traversing the prefix fails it.
         N = 50_000,
         Limit = 100,
         ok = put_keys(Tab, ?B, [key_n(I) || I <- lists:seq(1, N)]),

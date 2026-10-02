@@ -3,20 +3,18 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_oplog_wal_reader).
+-module(bondy_log_reader).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
--include("bondy_oplog.hrl").
--include("bondy_oplog_wal.hrl").
+-include("bondy_log.hrl").
 
--moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 WAL reader / iterator.
 
 The reader is the consumer side of the WAL: it walks the on-disk
 frame stream forward, one frame (one batch) at a time, across segment
-boundaries, and is the path the applier uses to consume events.
+boundaries; a log's consumer (the oplog applier, a stream server)
+drains through it.
 
 Two cooperating reader contracts are supported in v1:
 
@@ -26,18 +24,13 @@ Two cooperating reader contracts are supported in v1:
   bootstrap.
 - **Tail-follow** (`follow = true`). The reader blocks (poll-loop) when
   it reaches the head, and resumes the moment the writer publishes
-  more bytes. This is the applier's mode.
+  more bytes. This is a draining consumer's mode.
 
 The reader is wait-free against the writer: it never sends the writer
 a message during steady-state iteration. Coordination is via the
 writer's `head_pos_ref` atomics ref (slot 1 = head segment id, slot 2 =
 head offset within that segment), obtained once via
-`bondy_oplog_wal:reader_view/1` at open.
-
-This module is exported directly so the test suite and the applier
-can build against it; the public entry points will be re-exported
-from `bondy_oplog_wal` once the API stabilises with the applier
-integration.
+`bondy_log_wal:reader_view/1` at open.
 
 ### Cross-segment iteration
 
@@ -55,34 +48,28 @@ When the reader exhausts its current segment's frames, it advances to
 
 `next/1` always returns a `{Segment, NextOffset}` pair where
 `NextOffset` is the byte position of the *next* frame's header — i.e.
-a frame boundary. The applier persists this offset back to the WAL via
-`commit/3`; guaranteeing the boundary means recovery clamping can
-rely on `committed_frame_offset` being a real frame start.
+a frame boundary. A consumer persists this offset as its commit point
+(`bondy_log_state:write_consumer_offset/2`); guaranteeing the boundary
+means recovery clamping can rely on the committed offset being a real
+frame start.
+""".
 
-### Known limitations
-
-- Multi-instance addressing: callers currently pass the writer Pid;
-  this will become an `InstanceId` lookup once the per-instance
-  supervisor lands alongside the applier.
-""").
-
--define(SEG_HEADER_BYTES, ?BONDY_OPLOG_WAL_SEGMENT_HEADER_BYTES).
--define(FRAME_HEADER_BYTES, ?BONDY_OPLOG_WAL_FRAME_HEADER_BYTES).
+-define(SEG_HEADER_BYTES, ?BONDY_LOG_SEGMENT_HEADER_BYTES).
+-define(FRAME_HEADER_BYTES, ?BONDY_LOG_FRAME_HEADER_BYTES).
 -define(DEFAULT_POLL_INTERVAL_MS, 5).
 -define(MAX_POLL_INTERVAL_MS, 200).
 
 -record(iter, {
     writer_pid :: pid(),
-    instance_id :: instance_id(),
+    instance_id :: bondy_log_wal:instance_id(),
     dir :: file:filename_all(),
-    origin :: bondy_oplog_origin:t(),
     head_pos_ref :: atomics:atomics_ref(),
     follow :: boolean(),
     poll_interval_ms :: pos_integer(),
     %% Position within the WAL. `fd` is the open file descriptor for
     %% `segment_id`; `offset` is the byte at which the next frame
     %% header is expected.
-    segment_id :: bondy_oplog_wal_segment:segment_id(),
+    segment_id :: bondy_log_segment:segment_id(),
     fd :: file:fd(),
     offset :: non_neg_integer(),
     %% Cached `prim_file:position(Fd, eof)` for the current segment,
@@ -93,38 +80,48 @@ rely on `committed_frame_offset` being a real frame start.
     %% then close before bumping the head atomic), so this value is
     %% safe to cache across the segment's lifetime in the reader.
     sealed_size :: non_neg_integer() | undefined,
-    %% HLC seek bookkeeping. Set when `{hlc, T}` is the start position;
-    %% `next/1` keeps decoding frames until the batch's first HLC is
+    %% key seek bookkeeping. Set when `{key, T}` is the start position;
+    %% `next/1` keeps decoding frames until the batch's first key is
     %% `>= seek_target`, then stops filtering. `undefined` for
     %% `beginning` / `tail` / `{offset, _, _}` starts.
-    seek_target :: bondy_oplog_hlc:hlc() | undefined,
-    %% Upper bound for `{hlc_upper_bound, T}` opt. If set, frames whose
-    %% first HLC is `> hlc_upper_bound` terminate the reader as if it
+    seek_target :: bondy_log_record:key() | undefined,
+    %% Upper bound for `{key_upper_bound, T}` opt. If set, frames whose
+    %% first key is `> key_upper_bound` terminate the reader as if it
     %% had hit end_of_log. `undefined` means no upper bound.
-    hlc_upper_bound :: bondy_oplog_hlc:hlc() | undefined,
+    key_upper_bound :: bondy_log_record:key() | undefined,
     %% Body-encryption config inherited from the writer's
     %% `reader_view/1` map. `disabled` skips the decrypt branch;
     %% `{enabled, Module}` lets the codec resolve frame `KeyId`s via
     %% `Module:lookup_key/1`. The reader does not call `current_key/0`
     %% — historic frames carry the id they were written with.
-    body_encryption :: bondy_oplog_wal_codec:encryption()
+    body_encryption :: bondy_log_codec:encryption(),
+    %% The writer's log adapter, its frame magic and the identity context
+    %% the writer was opened with, inherited from `reader_view/1`: bodies
+    %% are decoded and keyed by the adapter, frame headers are sniffed for
+    %% its magic, and every segment header is verified against the
+    %% identity before the segment is read.
+    adapter :: module(),
+    frame_magic :: bondy_log_frame:magic(),
+    identity_ctx :: bondy_log_identity:ctx(),
+    %% The writer's telemetry prefix, for the codec's decode events.
+    telemetry_prefix :: [atom(), ...]
 }).
 
 -type t() :: #iter{}.
--type segment_id() :: bondy_oplog_wal_segment:segment_id().
+-type segment_id() :: bondy_log_segment:segment_id().
 -type offset() :: non_neg_integer().
 -type position() :: {segment_id(), offset()}.
 -type start_position() ::
     beginning
     | tail
     | {offset, segment_id(), offset()}
-    | {hlc, bondy_oplog_hlc:hlc()}.
+    | {key, bondy_log_record:key()}.
 -type reader_opt() ::
     {follow, boolean()}
     | {poll_interval_ms, pos_integer()}
-    | {hlc_upper_bound, bondy_oplog_hlc:hlc()}.
+    | {key_upper_bound, bondy_log_record:key()}.
 -type next_result() ::
-    {ok, Batch :: [bondy_oplog_event:t()], Hlcs :: [bondy_oplog_hlc:hlc()],
+    {ok, Batch :: [bondy_log_record:t()], Keys :: [bondy_log_record:key()],
         Pos :: position(), NewIter :: t()}
     | end_of_log
     | {error, term()}.
@@ -144,14 +141,14 @@ rely on `committed_frame_offset` being a real frame start.
 %% API
 %% =============================================================================
 
-?DOC("Equivalent to `open(Writer, Start, [])`.").
--spec open(bondy_oplog_wal:wal(), start_position()) ->
+-doc "Equivalent to `open(Writer, Start, [])`.".
+-spec open(bondy_log_wal:wal(), start_position()) ->
     {ok, t()} | {error, term()}.
 
 open(Writer, Start) ->
     open(Writer, Start, []).
 
-?DOC("""
+-doc """
 Opens an iterator over the WAL owned by `Writer`.
 
 `Start` selects the starting frame:
@@ -164,57 +161,66 @@ Opens an iterator over the WAL owned by `Writer`.
   responsible for choosing a real frame start; passing an offset
   mid-frame returns `{error, crc_mismatch}` or `{error, bad_magic}` on
   the next `next/1`.
-- `{hlc, T}` — start at the first frame whose first event's HLC is
+- `{key, T}` — start at the first frame whose first event's key is
   `>= T`. The candidate segment is identified via the writer's
-  manifest `first_hlc` values (sealed segments) + the writer's live
-  `head_first_hlc`; the segment's `.qidx` (or, for the head segment,
+  manifest `first_key` values (sealed segments) + the writer's live
+  `head_first_key`; the segment's `.qidx` (or, for the head segment,
   the writer's in-memory accumulator) is binary-searched for the
   largest entry `<= T`; the reader then forward-scans, decoding each
-  frame to find the first one with `first_hlc >= T`. Subsequent
+  frame to find the first one with `first_key >= T`. Subsequent
   `next/1` calls return frames without filtering.
+
+  This start is exact — every record with key `>= T` is delivered —
+  only for an adapter whose keys are globally monotonic in append
+  order (`bondy_log_record`); the writer enforces key order within a
+  frame, not across frames. For an adapter whose concurrent appenders
+  can land frames out of key order, the index seek may start after a
+  frame holding keys `>= T`, and a caller resuming by key would miss
+  it. A consumer that needs an exact resume keeps a byte position
+  (`{offset, Seg, Off}` from `position/1`), which is how the oplog's
+  consumer resumes.
 
 `Opts`:
 - `{follow, true|false}` — defaults to `false`. When `true`, `next/1`
   blocks on the head segment instead of returning `end_of_log`.
 - `{poll_interval_ms, pos_integer()}` — defaults to 5. Initial poll
   interval used in follow mode; the reader backs off geometrically
-  up to 200 ms while waiting for new data so a quiescent applier
+  up to 200 ms while waiting for new data so a quiescent consumer
   does not burn a core.
-- `{hlc_upper_bound, hlc()}` — when set, the reader treats a frame
-  whose first event's HLC is `> hlc_upper_bound` as the end of the
+- `{key_upper_bound, key()}` — when set, the reader treats a frame
+  whose first event's key is `> key_upper_bound` as the end of the
   log: `next/1` returns `end_of_log` instead of the frame. Useful
-  for HLC-bounded scans (e.g., snapshot bootstrap).
+  for key-bounded scans (e.g., snapshot bootstrap).
 
 Errors:
 - `{not_supported, _}` — the start position or option is not yet
   implemented in this phase.
 - `{enoent, _}` — the segment file named by `Start` does not exist.
 - `{invalid_start, _}` — the start position is structurally invalid
-  (negative offset, offset below the segment header, HLC seek on
+  (negative offset, offset below the segment header, key seek on
   empty WAL, etc.).
-""").
--spec open(bondy_oplog_wal:wal(), start_position(), [reader_opt()]) ->
+""".
+-spec open(bondy_log_wal:wal(), start_position(), [reader_opt()]) ->
     {ok, t()} | {error, term()}.
 
 open(Writer, Start, Opts) when is_pid(Writer), is_list(Opts) ->
     do_open(Writer, Start, Opts).
 
-?DOC("""
+-doc """
 Returns the iterator's current position `{Segment, Offset}` — the byte
-offset of the next frame to be read. Useful for tests and for the
-applier's commit point.
-""").
+offset of the next frame to be read: a consumer's commit point.
+""".
 -spec position(t()) -> position().
 
 position(#iter{segment_id = Seg, offset = Off}) ->
     {Seg, Off}.
 
-?DOC("""
+-doc """
 Reads the next batch frame.
 
-Returns `{ok, Batch, Hlcs, {Segment, NextOffset}, NewIter}` on success,
+Returns `{ok, Batch, Keys, {Segment, NextOffset}, NewIter}` on success,
 where `Batch` is the list of events in the frame's batch (length ≥ 1)
-and `Hlcs` is the parallel list of HLCs. `NextOffset` is a frame
+and `Keys` is the parallel list of keys. `NextOffset` is a frame
 boundary — the byte offset of the *next* frame's header, ready to be
 passed to a subsequent `commit/3`.
 
@@ -227,13 +233,13 @@ Returns `{error, Reason}` on a frame integrity failure (CRC mismatch,
 unknown flag, etc.) or an I/O failure. The reader does **not** attempt
 to recover — recovery is the writer's open-time job. The caller may
 choose to `close/1` and reopen at a known-good offset.
-""").
+""".
 -spec next(t()) -> next_result().
 
 next(#iter{} = Iter) ->
     do_next(Iter).
 
-?DOC("""
+-doc """
 Closes the iterator and releases its file descriptor.
 
 Effectively idempotent: calling `close/1` a second time issues a
@@ -241,7 +247,7 @@ second `prim_file:close/1` on the same descriptor; the OS returns
 `ebadf` which we discard, so the call still returns `ok`. A caller
 that wants a strict single-close should drop its handle on first
 close.
-""").
+""".
 -spec close(t()) -> ok.
 
 close(#iter{fd = undefined}) ->
@@ -260,20 +266,20 @@ do_open(Writer, Start, Opts) ->
     Poll = proplists:get_value(
         poll_interval_ms, Opts, ?DEFAULT_POLL_INTERVAL_MS
     ),
-    UpperBound = proplists:get_value(hlc_upper_bound, Opts, undefined),
-    View = bondy_oplog_wal:reader_view(Writer),
+    UpperBound = proplists:get_value(key_upper_bound, Opts, undefined),
+    View = bondy_log_wal:reader_view(Writer),
     Dir = maps:get(dir, View),
     InstanceId = maps:get(instance_id, View),
-    Origin = maps:get(origin, View),
+    Adapter = maps:get(adapter, View),
+    Ctx = maps:get(identity, View),
     case resolve_start(Start, View) of
         {ok, SegId, Off, SeekTarget} ->
-            case open_segment(Dir, InstanceId, Origin, SegId) of
+            case open_segment(Dir, Adapter, Ctx, SegId) of
                 {ok, Fd} ->
                     {ok, #iter{
                         writer_pid = Writer,
                         instance_id = InstanceId,
                         dir = Dir,
-                        origin = Origin,
                         head_pos_ref = maps:get(head_pos_ref, View),
                         follow = Follow,
                         poll_interval_ms = Poll,
@@ -282,9 +288,13 @@ do_open(Writer, Start, Opts) ->
                         offset = Off,
                         sealed_size = undefined,
                         seek_target = SeekTarget,
-                        hlc_upper_bound = UpperBound,
+                        key_upper_bound = UpperBound,
                         body_encryption =
-                            maps:get(body_encryption, View, disabled)
+                            maps:get(body_encryption, View, disabled),
+                        adapter = Adapter,
+                        frame_magic = Adapter:frame_magic(),
+                        identity_ctx = Ctx,
+                        telemetry_prefix = maps:get(telemetry_prefix, View)
                     }};
                 {error, _} = E ->
                     E
@@ -295,8 +305,8 @@ do_open(Writer, Start, Opts) ->
 
 %% @private
 %% All branches return `{ok, SegId, Offset, SeekTarget}` on success
-%% where `SeekTarget` is `undefined` except for `{hlc, T}` starts. The
-%% reader's `next/1` filters frames whose first HLC is `< SeekTarget`
+%% where `SeekTarget` is `undefined` except for `{key, T}` starts. The
+%% reader's `next/1` filters frames whose first key is `< SeekTarget`
 %% until it lands on the first qualifying frame, then clears the
 %% target.
 resolve_start(beginning, View) ->
@@ -328,26 +338,26 @@ resolve_start({offset, Seg, Off}, View) when
                     {error, {invalid_start, {unknown_segment, Seg}}}
             end
     end;
-resolve_start({hlc, T}, View) when is_integer(T), T >= 0 ->
-    resolve_hlc_start(T, View);
+resolve_start({key, T}, View) when is_integer(T), T >= 0 ->
+    resolve_key_start(T, View);
 resolve_start(Other, _View) ->
     {error, {invalid_start, Other}}.
 
 %% @private
 live_segment_ids(View) ->
-    [Id || {Id, _FirstHlc} <- maps:get(live_segments, View)].
+    [Id || {Id, _FirstKey} <- maps:get(live_segments, View)].
 
 %% @private
-%% Resolves a `{hlc, T}` start to a concrete `{SegId, Offset}` pair plus
+%% Resolves a `{key, T}` start to a concrete `{SegId, Offset}` pair plus
 %% the seek target the reader uses to filter the first batch of frames
 %% it decodes.
 %%
 %% 1. Pick the candidate segment by walking `live_segments` (with the
-%%    head segment patched in from `head_first_hlc`) and selecting the
-%%    largest segment whose `FirstHlc <= T`.
+%%    head segment patched in from `head_first_key`) and selecting the
+%%    largest segment whose `FirstKey <= T`.
 %% 2. Within that segment, binary-search the `.qidx` (for sealed
 %%    segments) or the writer's in-memory accumulator (for the head
-%%    segment) for the largest entry `HLC <= T`. The returned byte
+%%    segment) for the largest entry `key <= T`. The returned byte
 %%    offset is the seek's starting frame.
 %% 3. If the index has no entry `<= T` (the segment's frames have all
 %%    been written since the last sparse boundary), fall back to
@@ -355,15 +365,15 @@ live_segment_ids(View) ->
 %%    find the first frame `>= T` (the writer indexes the first frame
 %%    of every segment, so the only path here is a defensive one for
 %%    rebuilt or external indexes that omitted the first entry).
-resolve_hlc_start(T, View) ->
+resolve_key_start(T, View) ->
     Current = maps:get(current_segment, View),
-    HeadFirstHlc = maps:get(head_first_hlc, View),
-    LiveWithHead = patch_head_first_hlc(
-        maps:get(live_segments, View), Current, HeadFirstHlc
+    HeadFirstKey = maps:get(head_first_key, View),
+    LiveWithHead = patch_head_first_key(
+        maps:get(live_segments, View), Current, HeadFirstKey
     ),
-    case select_segment_for_hlc(LiveWithHead, T) of
+    case select_segment_for_key(LiveWithHead, T) of
         none ->
-            %% T is below every segment's FirstHlc. Start at the
+            %% T is below every segment's FirstKey. Start at the
             %% earliest live segment with a seek target of T so the
             %% reader still respects the lower bound (returns the
             %% first frame >= T).
@@ -385,29 +395,29 @@ resolve_hlc_start(T, View) ->
     end.
 
 %% @private
-%% Replaces the head-segment entry's `FirstHlc` with the writer's live
+%% Replaces the head-segment entry's `FirstKey` with the writer's live
 %% value. The manifest entry for the head segment carries `undefined`
-%% until the next rotation; reusing that here would make HLC seek miss
+%% until the next rotation; reusing that here would make key seek miss
 %% the head segment whenever it actually has events.
-patch_head_first_hlc(Live, Current, HeadFirstHlc) ->
+patch_head_first_key(Live, Current, HeadFirstKey) ->
     [
         case Id of
-            Current -> {Id, HeadFirstHlc};
+            Current -> {Id, HeadFirstKey};
             _ -> {Id, FH}
         end
      || {Id, FH} <- Live
     ].
 
 %% @private
-%% Returns `{ok, SegId}` for the largest segment with `FirstHlc <= T`,
-%% or `none` if every segment's `FirstHlc > T`. Segments with
-%% `FirstHlc = undefined` (e.g., the head segment before any append) are
+%% Returns `{ok, SegId}` for the largest segment with `FirstKey <= T`,
+%% or `none` if every segment's `FirstKey > T`. Segments with
+%% `FirstKey = undefined` (e.g., the head segment before any append) are
 %% skipped — they have no events to satisfy any seek.
 %%
 %% Single-pass max via foldl: O(N) and indifferent to incoming order,
 %% so this stays correct under any future re-ordering of
 %% `live_segments` in the writer's `reader_view/1`.
-select_segment_for_hlc(Live, T) ->
+select_segment_for_key(Live, T) ->
     Pick = lists:foldl(
         fun
             ({Id, FH}, none) when is_integer(FH), FH =< T ->
@@ -430,18 +440,18 @@ select_segment_for_hlc(Live, T) ->
 %% @private
 %% Seeks within a segment using either the on-disk `.qidx` (sealed
 %% segment) or the writer's in-memory accumulator (head segment).
-%% Returns the same shape as `bondy_oplog_wal_idx:seek/2`, except
+%% Returns the same shape as `bondy_log_idx:seek/2`, except
 %% additionally `{error, Reason}` from a non-enoent file-open failure.
 index_seek(SegId, T, View, CurrentSeg) when SegId =:= CurrentSeg ->
     Entries = maps:get(head_idx_entries, View, []),
-    Handle = bondy_oplog_wal_idx:from_entries(Entries),
-    bondy_oplog_wal_idx:seek(Handle, T);
+    Handle = bondy_log_idx:from_entries(Entries),
+    bondy_log_idx:seek(Handle, T);
 index_seek(SegId, T, View, _CurrentSeg) ->
     Dir = maps:get(dir, View),
-    Path = filename:join(Dir, bondy_oplog_wal_idx:filename(SegId)),
-    case bondy_oplog_wal_idx:open(Path) of
+    Path = filename:join(Dir, bondy_log_idx:filename(SegId)),
+    case bondy_log_idx:open(Path) of
         {ok, Handle} ->
-            bondy_oplog_wal_idx:seek(Handle, T);
+            bondy_log_idx:seek(Handle, T);
         {error, enoent} ->
             %% No `.qidx` for a sealed segment — the recovery rebuild
             %% hasn't run, or the writer crashed before flushing. Fall
@@ -453,20 +463,16 @@ index_seek(SegId, T, View, _CurrentSeg) ->
     end.
 
 %% @private
-%% Opens a segment file read-only and verifies its header against the
-%% reader's expected `InstanceId` / `Origin`. Returns the open fd or
-%% closes-and-returns on any header / verify failure.
-open_segment(Dir, InstanceId, Origin, SegId) ->
-    Path = filename:join(Dir, bondy_oplog_wal_segment:filename(SegId)),
+%% Opens a segment file read-only and verifies its header identity
+%% through the adapter. Returns the open fd or closes-and-returns on
+%% any header / verify failure.
+open_segment(Dir, Adapter, Ctx, SegId) ->
+    Path = filename:join(Dir, bondy_log_segment:filename(SegId)),
     case prim_file:open(Path, [read, raw, binary]) of
         {ok, Fd} ->
-            case bondy_oplog_wal_segment:read_header(Fd) of
+            case bondy_log_segment:read_header(Fd) of
                 {ok, Header} ->
-                    case
-                        bondy_oplog_wal_segment:verify(
-                            Header, InstanceId, Origin
-                        )
-                    of
+                    case bondy_log_segment:verify(Header, Adapter, Ctx) of
                         ok ->
                             {ok, Fd};
                         {error, _} = E ->
@@ -587,12 +593,12 @@ advance_segment(
         fd = OldFd,
         follow = Follow,
         dir = Dir,
-        instance_id = InstanceId,
-        origin = Origin
+        adapter = Adapter,
+        identity_ctx = Ctx
     } = Iter
 ) ->
     NextSegId = OldSeg + 1,
-    case open_segment(Dir, InstanceId, Origin, NextSegId) of
+    case open_segment(Dir, Adapter, Ctx, NextSegId) of
         {ok, NewFd} ->
             _ = prim_file:close(OldFd),
             do_next(Iter#iter{
@@ -637,7 +643,7 @@ advance_segment(
 %%   policy.
 read_frame(#iter{} = Iter, Kind, Bound) ->
     Off = Iter#iter.offset,
-    case read_frame_header(Iter#iter.fd, Off) of
+    case read_frame_header(Iter#iter.fd, Off, Iter#iter.frame_magic) of
         {ok, FrameLen} ->
             FrameEnd = Off + FrameLen,
             case {FrameEnd =< Bound, Kind} of
@@ -667,17 +673,17 @@ not_enough_bytes_response(#iter{}) ->
     end_of_log.
 
 %% @private
-read_frame_header(Fd, Off) ->
+read_frame_header(Fd, Off, Expected) ->
     case prim_file:pread(Fd, Off, ?FRAME_HEADER_BYTES) of
         {ok, <<Magic:32/big-unsigned, FrameLen:32/big-unsigned, _/binary>>} when
-            Magic =:= ?BONDY_OPLOG_WAL_FRAME_MAGIC,
+            Magic =:= Expected,
             FrameLen >= ?FRAME_HEADER_BYTES
         ->
             {ok, FrameLen};
         {ok, Bin} when byte_size(Bin) < ?FRAME_HEADER_BYTES ->
             not_enough_bytes;
         {ok, <<Magic:32/big-unsigned, _/binary>>} when
-            Magic =/= ?BONDY_OPLOG_WAL_FRAME_MAGIC
+            Magic =/= Expected
         ->
             {error, bad_magic};
         {ok, <<_:32, FrameLen:32, _/binary>>} when
@@ -707,26 +713,22 @@ read_frame_body(
 
 %% @private
 decode_and_advance(#iter{} = Iter, FrameBin, FrameLen, Seg, Off) ->
-    case bondy_oplog_wal_frame:decode(FrameBin) of
+    case bondy_log_frame:decode(FrameBin, [{magic, Iter#iter.frame_magic}]) of
         {ok, RawBody, #{flags := Flags}} ->
             case
-                bondy_oplog_wal_codec:decode_body(
+                bondy_log_codec:decode_body(
                     RawBody, Flags, codec_opts(Iter)
                 )
             of
                 {ok, Body} ->
-                    case decode_batch_body(Body) of
+                    case decode_batch_body(Iter, Body) of
                         {ok, Batch} ->
-                            Hlcs = [
-                                bondy_oplog_event:key_hlc(
-                                    bondy_oplog_event:key(E)
-                                )
-                             || E <- Batch
-                            ],
+                            Mod = Iter#iter.adapter,
+                            Keys = [Mod:key(E) || E <- Batch],
                             NextOff = Off + FrameLen,
                             NewIter = Iter#iter{offset = NextOff},
                             deliver_or_filter(
-                                NewIter, Batch, Hlcs, Seg, NextOff
+                                NewIter, Batch, Keys, Seg, NextOff
                             );
                         {error, _} = E ->
                             E
@@ -739,69 +741,47 @@ decode_and_advance(#iter{} = Iter, FrameBin, FrameLen, Seg, Off) ->
     end.
 
 %% @private
-codec_opts(#iter{instance_id = Id, body_encryption = Enc}) ->
-    #{instance_id => Id, body_encryption => Enc}.
+codec_opts(#iter{
+    instance_id = Id, body_encryption = Enc, telemetry_prefix = Prefix
+}) ->
+    #{instance_id => Id, body_encryption => Enc, telemetry_prefix => Prefix}.
 
 %% @private
-%% Applies the HLC seek-target lower bound and `hlc_upper_bound` opt to a
+%% Applies the key seek-target lower bound and `key_upper_bound` opt to a
 %% just-decoded batch.
 %%
-%% - If `hlc_upper_bound` is set and the batch's first HLC exceeds it,
+%% - If `key_upper_bound` is set and the batch's first key exceeds it,
 %%   return `end_of_log` (the bound makes this frame and everything
 %%   later out of scope for this reader).
-%% - If `seek_target` is set and the batch's first HLC is below it, skip
+%% - If `seek_target` is set and the batch's first key is below it, skip
 %%   the frame and recurse into `do_next/1` so the iter advances. The
 %%   seek target stays in place because later frames in the same
 %%   segment may also be below T (sparse index entries land at frame
-%%   boundaries, not on exact HLCs).
+%%   boundaries, not on exact keys).
 %% - Otherwise clear `seek_target` (one-shot) and deliver the batch.
 deliver_or_filter(
-    #iter{hlc_upper_bound = UB}, _Batch, [FirstHlc | _], _Seg, _NextOff
-) when is_integer(UB), FirstHlc > UB ->
+    #iter{key_upper_bound = UB}, _Batch, [FirstKey | _], _Seg, _NextOff
+) when is_integer(UB), FirstKey > UB ->
     end_of_log;
 deliver_or_filter(
-    #iter{seek_target = T} = Iter, _Batch, [FirstHlc | _], _Seg, _NextOff
-) when is_integer(T), FirstHlc < T ->
+    #iter{seek_target = T} = Iter, _Batch, [FirstKey | _], _Seg, _NextOff
+) when is_integer(T), FirstKey < T ->
     do_next(Iter);
-deliver_or_filter(#iter{seek_target = T} = Iter, Batch, Hlcs, Seg, NextOff) when
+deliver_or_filter(#iter{seek_target = T} = Iter, Batch, Keys, Seg, NextOff) when
     is_integer(T)
 ->
-    %% First qualifying frame reached. Clear the target so subsequent
-    %% `next/1` calls don't re-check (it's monotonically irrelevant
-    %% after this point: the writer assigns HLCs in append order).
-    {ok, Batch, Hlcs, {Seg, NextOff}, Iter#iter{seek_target = undefined}};
-deliver_or_filter(#iter{} = Iter, Batch, Hlcs, Seg, NextOff) ->
-    {ok, Batch, Hlcs, {Seg, NextOff}, Iter}.
+    %% First qualifying frame reached. Clear the target: from here the
+    %% reader delivers in append order without filtering (`open/3`'s
+    %% `{key, T}` contract), whatever later frames' keys are.
+    {ok, Batch, Keys, {Seg, NextOff}, Iter#iter{seek_target = undefined}};
+deliver_or_filter(#iter{} = Iter, Batch, Keys, Seg, NextOff) ->
+    {ok, Batch, Keys, {Seg, NextOff}, Iter}.
 
 %% @private
-%% A frame body is `term_to_binary([Event, ...])`. We accept any
-%% non-empty list of `#bondy_oplog_event{}` records; anything else is a
-%% framing error.
-%%
-%% Deliberately NOT `[safe]`: this reads frames THIS node wrote. Under
-%% `[safe]` an event carrying an atom absent from the VM's atom table at
-%% replay time raises `badarg` and is reported as `{invalid_batch, badarg}` —
-%% i.e. a perfectly good record is misattributed to frame corruption and
-%% silently dropped. `binary_to_term/1` still raises `badarg` on malformed
-%% bytes, so real framing errors are caught exactly as before. Peer-shipped
-%% bytes are decoded under `[safe]` at the wire boundary (`C-2`), which is
-%% where that control belongs.
-decode_batch_body(Body) ->
-    try binary_to_term(Body) of
-        [_ | _] = Batch ->
-            case lists:all(fun is_event/1, Batch) of
-                true -> {ok, Batch};
-                false -> {error, {invalid_batch, non_event}}
-            end;
-        [] ->
-            {error, {invalid_batch, empty}};
-        Other ->
-            {error, {invalid_batch, {non_list, Other}}}
-    catch
-        error:badarg ->
-            {error, {invalid_batch, badarg}}
+%% The body is the record adapter's to decode (`bondy_log_record`); a
+%% body it rejects is a framing error to the reader.
+decode_batch_body(#iter{adapter = Mod}, Body) ->
+    case Mod:decode_body(Body) of
+        {ok, _} = Ok -> Ok;
+        {error, Reason} -> {error, {invalid_batch, Reason}}
     end.
-
-%% @private
-is_event(#bondy_oplog_event{}) -> true;
-is_event(_) -> false.

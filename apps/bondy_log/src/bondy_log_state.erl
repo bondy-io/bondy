@@ -3,27 +3,25 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_oplog_wal_state).
+-module(bondy_log_state).
 
--include("bondy_doc.hrl").
--include("bondy_oplog.hrl").
--include("bondy_oplog_wal.hrl").
+-include("bondy_log.hrl").
 
--moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
-Per-instance persistent-state files for the WAL: the applier's
+-moduledoc """
+Per-instance persistent-state files for the WAL: the consumer's
 `consumer.offset` and the WAL's `snapshot.watermark`.
 
-Both files share the tmp-then-rename atomic-write pattern and use the
-same `bondy_mst_io` primitives (`datasync/1`, `rename/2`,
-`fsync_dir/1`). Keeping them in one module avoids duplicating that
+Both files are written with `bondy_log_io:write_atomic/3` (tmp →
+datasync → rename → fsync dir over the `bondy_mst_io` seams). Keeping
+them in one module avoids duplicating that
 boilerplate.
 
 ## Consumer offset
 
-The applier writes `consumer.offset` to commit the position up to
-which events have been durably applied to the MST. The WAL reads it
-on recovery to resume the applier from a known-good frame boundary.
+The log's consumer writes `consumer.offset` to commit the position up
+to which records have been durably consumed (the oplog applier: applied
+to the MST). The WAL reads it on recovery to clamp it to a known-good
+frame boundary, and the consumer resumes from it.
 
 The on-disk format is a sequence of `file:consult/1`-readable Erlang
 terms, one per line, matching the manifest pattern for debuggability:
@@ -47,9 +45,9 @@ treats a fresh WAL identically to a never-committed-against WAL.
 
 ## Snapshot watermark
 
-The watermark is the highest HLC that has been covered by a
+The watermark is the highest key that has been covered by a
 compaction snapshot. It bounds retention: a segment is only eligible
-for deletion once **all** of its events are HLC-covered by the
+for deletion once **all** of its events are key-covered by the
 watermark.
 
 File format is a single-term, `file:consult/1`-readable Erlang file:
@@ -65,25 +63,34 @@ negligible.
 
 ## Durability
 
-Both files are replaced with `bondy_mst_io:write_file_atomic/2`, and their
-writers have its error contract.
-""").
+Both files use the same four-step durability sequence:
+
+1. Write `<file>.tmp` with the new content.
+2. `datasync` the temp file.
+3. `rename(<file>.tmp, <file>)` — atomic on POSIX.
+4. `datasync` the enclosing directory — required on ext4/xfs.
+
+An interrupted rename leaves either the old or the new content on
+disk, never a partial mix.
+""".
 
 -record(consumer_offset, {
     %% Initially 0 for a fresh WAL; clamped to the first live segment on
     %% recovery if the previously committed segment has been swept.
     committed_segment :: non_neg_integer(),
     %% Byte offset of the START of the next frame to apply. Always a
-    %% frame boundary — the applier never commits mid-frame. On
+    %% frame boundary — a consumer never commits mid-frame. On
     %% recovery, clamped to the largest frame-start offset ≤ the file
     %% value, with `≤ last_valid_offset_of(committed_segment)` enforced.
     committed_frame_offset :: non_neg_integer(),
-    %% HLC of the last applied event. `undefined` for a never-committed
+    %% key of the last applied event. `undefined` for a never-committed
     %% WAL.
-    committed_hlc :: bondy_oplog_hlc:hlc() | undefined,
+    %% The committed record key; `committed_hlc` on disk, the name the
+    %% file had when only the oplog wrote it.
+    committed_key :: bondy_log_record:key() | undefined,
     %% Monotonic counter incremented on every commit. Diagnostic only.
     commit_count :: non_neg_integer(),
-    schema_version = ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_VERSION :: pos_integer()
+    schema_version = ?BONDY_LOG_CONSUMER_OFFSET_VERSION :: pos_integer()
 }).
 
 -type consumer_offset() :: #consumer_offset{}.
@@ -96,54 +103,54 @@ writers have its error contract.
 -export([write_consumer_offset/2]).
 -export([committed_segment/1]).
 -export([committed_frame_offset/1]).
--export([committed_hlc/1]).
+-export([committed_key/1]).
 -export([commit_count/1]).
 -export([with_position/3]).
--export([with_hlc/2]).
+-export([with_key/2]).
 -export([with_commit_count/2]).
 
 %% Snapshot watermark
 -export([read_snapshot_watermark/1]).
 -export([write_snapshot_watermark/2]).
 
--define(SEG_HEADER_BYTES, ?BONDY_OPLOG_WAL_SEGMENT_HEADER_BYTES).
+-define(SEG_HEADER_BYTES, ?BONDY_LOG_SEGMENT_HEADER_BYTES).
 
 %% =============================================================================
 %% CONSUMER OFFSET API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns a fresh consumer offset: segment 0, offset at the segment
-header boundary, no HLC, count zero. This is the "nothing committed
+header boundary, no key, count zero. This is the "nothing committed
 yet" state and is what `read_consumer_offset/1` returns for a missing
 file.
-""").
+""".
 -spec new_consumer_offset() -> consumer_offset().
 
 new_consumer_offset() ->
     #consumer_offset{
         committed_segment = 0,
         committed_frame_offset = ?SEG_HEADER_BYTES,
-        committed_hlc = undefined,
+        committed_key = undefined,
         commit_count = 0
     }.
 
-?DOC("""
+-doc """
 Reads and parses `consumer.offset` from `Dir`.
 
 Returns:
 - `{ok, consumer_offset()}` on success.
 - `{ok, new_consumer_offset()}` when the file is missing — a fresh /
-  never-committed WAL is indistinguishable from one whose applier has
+  never-committed WAL is indistinguishable from one whose consumer has
   never run.
 - `{error, Reason}` for malformed content / unsupported version /
   missing required field.
-""").
+""".
 -spec read_consumer_offset(file:filename_all()) ->
     {ok, consumer_offset()} | {error, term()}.
 
 read_consumer_offset(Dir) ->
-    Path = filename:join(Dir, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_FILENAME),
+    Path = filename:join(Dir, ?BONDY_LOG_CONSUMER_OFFSET_FILENAME),
     case file:consult(Path) of
         {ok, Terms} ->
             parse_consumer_offset_terms(Terms);
@@ -153,37 +160,43 @@ read_consumer_offset(Dir) ->
             E
     end.
 
-?DOC("Replaces the consumer offset in `Dir`; see the moduledoc.").
+-doc """
+Atomically writes `consumer_offset()` to `Dir`. Uses the four-step
+durability sequence (write tmp → datasync → rename → fsync dir).
+""".
 -spec write_consumer_offset(file:filename_all(), consumer_offset()) ->
     ok | {error, term()}.
 
 write_consumer_offset(Dir, #consumer_offset{} = CO) ->
-    bondy_mst_io:write_file_atomic(
-        filename:join(Dir, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_FILENAME),
-        format_consumer_offset(CO)
-    ).
+    TmpPath = filename:join(
+        Dir, ?BONDY_LOG_CONSUMER_OFFSET_TMP_FILENAME
+    ),
+    FinalPath = filename:join(
+        Dir, ?BONDY_LOG_CONSUMER_OFFSET_FILENAME
+    ),
+    bondy_log_io:write_atomic(FinalPath, format_consumer_offset(CO), #{
+        tmp_path => TmpPath
+    }).
 
-?DOC("Returns the committed segment id.").
+-doc "Returns the committed segment id.".
 -spec committed_segment(consumer_offset()) -> non_neg_integer().
 committed_segment(#consumer_offset{committed_segment = S}) -> S.
 
-?DOC("Returns the committed frame-start byte offset within the segment.").
+-doc "Returns the committed frame-start byte offset within the segment.".
 -spec committed_frame_offset(consumer_offset()) -> non_neg_integer().
 committed_frame_offset(#consumer_offset{committed_frame_offset = O}) -> O.
 
-?DOC(
-    "Returns the committed HLC, or `undefined` if nothing was ever committed."
-).
--spec committed_hlc(consumer_offset()) -> bondy_oplog_hlc:hlc() | undefined.
-committed_hlc(#consumer_offset{committed_hlc = H}) -> H.
+-doc "Returns the committed key, or `undefined` if nothing was ever committed.".
+-spec committed_key(consumer_offset()) -> bondy_log_record:key() | undefined.
+committed_key(#consumer_offset{committed_key = H}) -> H.
 
-?DOC("Returns the monotonic commit count.").
+-doc "Returns the monotonic commit count.".
 -spec commit_count(consumer_offset()) -> non_neg_integer().
 commit_count(#consumer_offset{commit_count = N}) -> N.
 
-?DOC("""
+-doc """
 Replaces the `committed_segment` and `committed_frame_offset` fields.
-""").
+""".
 -spec with_position(consumer_offset(), non_neg_integer(), non_neg_integer()) ->
     consumer_offset().
 with_position(#consumer_offset{} = CO, Seg, Off) when
@@ -197,15 +210,15 @@ with_position(#consumer_offset{} = CO, Seg, Off) when
         committed_frame_offset = Off
     }.
 
-?DOC("Replaces the `committed_hlc` field.").
--spec with_hlc(consumer_offset(), bondy_oplog_hlc:hlc() | undefined) ->
+-doc "Replaces the committed key.".
+-spec with_key(consumer_offset(), bondy_log_record:key() | undefined) ->
     consumer_offset().
-with_hlc(#consumer_offset{} = CO, Hlc) when is_integer(Hlc), Hlc >= 0 ->
-    CO#consumer_offset{committed_hlc = Hlc};
-with_hlc(#consumer_offset{} = CO, undefined) ->
-    CO#consumer_offset{committed_hlc = undefined}.
+with_key(#consumer_offset{} = CO, Key) when is_integer(Key), Key >= 0 ->
+    CO#consumer_offset{committed_key = Key};
+with_key(#consumer_offset{} = CO, undefined) ->
+    CO#consumer_offset{committed_key = undefined}.
 
-?DOC("Replaces the `commit_count` field.").
+-doc "Replaces the `commit_count` field.".
 -spec with_commit_count(consumer_offset(), non_neg_integer()) ->
     consumer_offset().
 with_commit_count(#consumer_offset{} = CO, N) when is_integer(N), N >= 0 ->
@@ -215,21 +228,21 @@ with_commit_count(#consumer_offset{} = CO, N) when is_integer(N), N >= 0 ->
 %% SNAPSHOT WATERMARK API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Reads the snapshot watermark from `Dir`.
 
 Returns:
-- `{ok, Hlc}` — the persisted watermark.
+- `{ok, Key}` — the persisted watermark.
 - `{ok, undefined}` — no watermark file exists yet (fresh WAL).
 - `{error, Reason}` — the file exists but cannot be parsed (wrong
   version, missing field, etc.).
-""").
+""".
 -spec read_snapshot_watermark(file:filename_all()) ->
-    {ok, bondy_oplog_hlc:hlc() | undefined} | {error, term()}.
+    {ok, bondy_log_record:key() | undefined} | {error, term()}.
 
 read_snapshot_watermark(Dir) ->
     Path = filename:join(
-        Dir, ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_FILENAME
+        Dir, ?BONDY_LOG_SNAPSHOT_WATERMARK_FILENAME
     ),
     case filelib:is_regular(Path) of
         false ->
@@ -241,15 +254,24 @@ read_snapshot_watermark(Dir) ->
             end
     end.
 
-?DOC("Replaces the watermark in `Dir` with `Hlc`; see the moduledoc.").
--spec write_snapshot_watermark(file:filename_all(), bondy_oplog_hlc:hlc()) ->
+-doc """
+Atomically writes `Key` as the new watermark. Uses the same four-step
+durability sequence as `write_consumer_offset/2`. Errors at any step
+short-circuit and leave the prior on-disk watermark intact.
+""".
+-spec write_snapshot_watermark(file:filename_all(), bondy_log_record:key()) ->
     ok | {error, term()}.
 
-write_snapshot_watermark(Dir, Hlc) when is_integer(Hlc), Hlc >= 0 ->
-    bondy_mst_io:write_file_atomic(
-        filename:join(Dir, ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_FILENAME),
-        format_snapshot_watermark(Hlc)
-    ).
+write_snapshot_watermark(Dir, Key) when is_integer(Key), Key >= 0 ->
+    TmpPath = filename:join(
+        Dir, ?BONDY_LOG_SNAPSHOT_WATERMARK_TMP_FILENAME
+    ),
+    FinalPath = filename:join(
+        Dir, ?BONDY_LOG_SNAPSHOT_WATERMARK_FILENAME
+    ),
+    bondy_log_io:write_atomic(FinalPath, format_snapshot_watermark(Key), #{
+        tmp_path => TmpPath
+    }).
 
 %% =============================================================================
 %% PRIVATE — CONSUMER OFFSET
@@ -263,18 +285,18 @@ parse_consumer_offset_terms(Terms) ->
         validate_non_neg_integer(committed_segment, Seg),
         Off = required(committed_frame_offset, Map),
         validate_non_neg_integer(committed_frame_offset, Off),
-        Hlc = maps:get(committed_hlc, Map, undefined),
-        validate_hlc_or_undefined(Hlc),
+        Key = maps:get(committed_hlc, Map, undefined),
+        validate_key_or_undefined(Key),
         Count = maps:get(commit_count, Map, 0),
         validate_non_neg_integer(commit_count, Count),
         Version = maps:get(
-            schema_version, Map, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_VERSION
+            schema_version, Map, ?BONDY_LOG_CONSUMER_OFFSET_VERSION
         ),
         validate_consumer_offset_version(Version),
         {ok, #consumer_offset{
             committed_segment = Seg,
             committed_frame_offset = Off,
-            committed_hlc = Hlc,
+            committed_key = Key,
             commit_count = Count,
             schema_version = Version
         }}
@@ -286,7 +308,7 @@ parse_consumer_offset_terms(Terms) ->
     end.
 
 %% @private
-validate_consumer_offset_version(?BONDY_OPLOG_WAL_CONSUMER_OFFSET_VERSION) ->
+validate_consumer_offset_version(?BONDY_LOG_CONSUMER_OFFSET_VERSION) ->
     ok;
 validate_consumer_offset_version(V) ->
     throw({invalid, {unsupported_schema_version, V}}).
@@ -295,14 +317,14 @@ validate_consumer_offset_version(V) ->
 format_consumer_offset(#consumer_offset{
     committed_segment = Seg,
     committed_frame_offset = Off,
-    committed_hlc = Hlc,
+    committed_key = Key,
     commit_count = Count,
     schema_version = Version
 }) ->
     bondy_consult:encode([
         {committed_segment, Seg},
         {committed_frame_offset, Off},
-        {committed_hlc, Hlc},
+        {committed_hlc, Key},
         {commit_count, Count},
         {schema_version, Version}
     ]).
@@ -317,9 +339,9 @@ parse_snapshot_watermark_terms(Terms) ->
     try
         Version = required(snapshot_watermark_version, Map),
         validate_snapshot_watermark_version(Version),
-        Hlc = required(hlc, Map),
-        validate_hlc(Hlc),
-        {ok, Hlc}
+        Key = required(hlc, Map),
+        validate_key(Key),
+        {ok, Key}
     catch
         throw:{missing_field, F} -> {error, {missing_field, F}};
         throw:{invalid, R} -> {error, R}
@@ -327,18 +349,17 @@ parse_snapshot_watermark_terms(Terms) ->
 
 %% @private
 validate_snapshot_watermark_version(
-    ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_VERSION
+    ?BONDY_LOG_SNAPSHOT_WATERMARK_VERSION
 ) ->
     ok;
 validate_snapshot_watermark_version(V) ->
     throw({invalid, {unsupported_snapshot_watermark_version, V}}).
 
 %% @private
-format_snapshot_watermark(Hlc) ->
+format_snapshot_watermark(Key) ->
     bondy_consult:encode([
-        {snapshot_watermark_version,
-            ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_VERSION},
-        {hlc, Hlc}
+        {snapshot_watermark_version, ?BONDY_LOG_SNAPSHOT_WATERMARK_VERSION},
+        {hlc, Key}
     ]).
 
 %% =============================================================================
@@ -368,12 +389,12 @@ validate_non_neg_integer(_K, V) when is_integer(V), V >= 0 -> ok;
 validate_non_neg_integer(K, V) -> throw({invalid, {invalid_field, K, V}}).
 
 %% @private
-validate_hlc_or_undefined(undefined) ->
+validate_key_or_undefined(undefined) ->
     ok;
-validate_hlc_or_undefined(V) when is_integer(V), V >= 0 -> ok;
-validate_hlc_or_undefined(V) ->
+validate_key_or_undefined(V) when is_integer(V), V >= 0 -> ok;
+validate_key_or_undefined(V) ->
     throw({invalid, {invalid_field, committed_hlc, V}}).
 
 %% @private
-validate_hlc(H) when is_integer(H), H >= 0 -> ok;
-validate_hlc(V) -> throw({invalid, {invalid_hlc, V}}).
+validate_key(H) when is_integer(H), H >= 0 -> ok;
+validate_key(V) -> throw({invalid, {invalid_key, V}}).

@@ -81,8 +81,8 @@ mk_event(Hlc, Seq) ->
 
 %% N events with strictly increasing HLCs (one clock, N ticks).
 mk_monotonic_events(N) ->
-    Clock = bondy_oplog_hlc:new(),
-    [mk_event(bondy_oplog_hlc:now(Clock), Seq) || Seq <- lists:seq(1, N)].
+    Clock = bondy_hlc:new(),
+    [mk_event(bondy_hlc:now(Clock), Seq) || Seq <- lists:seq(1, N)].
 
 %% Force `Events` (one single-event batch each) into the writer's mailbox
 %% deterministically: suspend, enqueue all N async in order, resume, then
@@ -179,8 +179,8 @@ group_commit_respects_max_cap_test() ->
 %% synchronous append/2 path).
 group_commit_append_is_durable_on_return_test() ->
     with_wal(#{group_commit => true}, fun(Pid, _Dir) ->
-        Clock = bondy_oplog_hlc:new(),
-        Hlc = bondy_oplog_hlc:now(Clock),
+        Clock = bondy_hlc:new(),
+        Hlc = bondy_hlc:now(Clock),
         E = mk_event(Hlc, 1),
         {ok, Hlc, {Seg, _Start}} = bondy_oplog_wal:append(Pid, E),
         Info = bondy_oplog_wal:info(Pid),
@@ -364,15 +364,15 @@ group_commit_fatal_during_drain_errors_group_and_stops_test() ->
         Events = mk_monotonic_events(K),
         Reason = {rotation_failed_after_seal, injected},
         Replies = with_meck(
-            bondy_oplog_wal_segment,
+            bondy_log_segment,
             fun() ->
                 %% New-segment creation fails => `open_next_segment/1` fails
                 %% *after* the old fd is sealed+closed => `rotate/1` returns
                 %% `{fatal, {rotation_failed_after_seal, injected}, _}`.
                 ok = meck:expect(
-                    bondy_oplog_wal_segment,
+                    bondy_log_segment,
                     create,
-                    fun(_Path, _SegId, _Iid, _Origin) -> {error, injected} end
+                    fun(_Path, _SegId, _Identity) -> {error, injected} end
                 ),
                 suspend_enqueue_resume(Pid, Events)
             end
@@ -438,7 +438,7 @@ probe_rotation_event(MaxSegBytes) ->
             }
         ),
         try
-            find_rotation_index(Pid, bondy_oplog_hlc:new(), 1, 50)
+            find_rotation_index(Pid, bondy_hlc:new(), 1, 50)
         after
             ok = bondy_oplog_wal:close(Pid)
         end
@@ -449,7 +449,7 @@ probe_rotation_event(MaxSegBytes) ->
 find_rotation_index(_Pid, _Clock, I, Max) when I > Max ->
     error({probe_no_rotation_within, Max});
 find_rotation_index(Pid, Clock, I, Max) ->
-    E = mk_event(bondy_oplog_hlc:now(Clock), I),
+    E = mk_event(bondy_hlc:now(Clock), I),
     {ok, _Hlc, {Seg, _Off}} = bondy_oplog_wal:append(Pid, E),
     case Seg > 0 of
         true -> I;

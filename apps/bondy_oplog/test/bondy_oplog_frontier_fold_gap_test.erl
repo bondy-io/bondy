@@ -27,8 +27,7 @@
 %% from RECEIPT at `init/1`. A test that stops before the restart certifies a
 %% fix that does not work.
 %%
-%% Both cases are RED at the commit that introduced this module. See
-%% `_design/applied_frontier.md` (invariant I6) and
+%% Both cases are RED against a frontier derived from receipt. See
 %% `proofs/isabelle/Frontier_Writers.thy`
 %% (`receipt_log_overclaims`, `shipped_restart_overclaims`).
 %% =============================================================================
@@ -162,7 +161,7 @@ across_a_restart(Dir) ->
 %% As `live_path/1`, but the two appends reach the applier in SEPARATE batches
 %% and there is no restart, so nothing repairs the claim afterwards.
 %%
-%% The falsifier for increment 9 of `_design/applied_frontier_pending.md`. A
+%% The falsifier for a per-batch cap. A
 %% rule that caps below the lowest seq THIS batch failed to materialise lets
 %% batch one fail seq 1 and materialise nothing, batch two materialise seq 2
 %% and observe no failure at all, and the claim reach 2 over a projection
@@ -255,8 +254,8 @@ unroutable_bucket_keeps_the_replay_cursor(Dir) ->
             bondy_oplog_core:read(NS, primary, ?BUCKET_B, <<"kb">>)
         ),
 
-        %% THE ASSERTION. Registering the sibling table is the only repair a
-        %% held cell needs: the next replay re-presents it, it folds, and the
+        %% Registering the sibling table is the only repair a held cell
+        %% needs: the next replay re-presents it, it folds, and the
         %% claim rises unaided — `contig_mono` in
         %% `proofs/isabelle/Bucket_Skip_Soundness.thy`. It can only re-present
         %% if the replay that skipped it kept its cursor, so this fails
@@ -292,7 +291,7 @@ unroutable_bucket_keeps_the_replay_cursor(Dir) ->
 
 %% A peer-authored cell at an explicit seq — the shape anti-entropy delivers.
 append_peer(Id, Origin, Seq, Bucket, Key, Value) ->
-    Hlc = bondy_oplog_hlc:encode(
+    Hlc = bondy_hlc:encode(
         erlang:system_time(millisecond) + 1000 + Seq, 0
     ),
     Event = bondy_oplog_event:new(

@@ -84,7 +84,7 @@ mk_event(Hlc, Seq) ->
 mk_batch(HLC, Base, N) ->
     [
         begin
-            Hlc = bondy_oplog_hlc:now(HLC),
+            Hlc = bondy_hlc:now(HLC),
             mk_event(Hlc, Seq)
         end
      || Seq <- lists:seq(Base, Base + N - 1)
@@ -109,7 +109,7 @@ expect_open_error(Expected, Fun) ->
 
 append_batch_returns_one_entry_per_event_test() ->
     with_wal(#{}, fun(Pid, _Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         Events = mk_batch(HLC, 1, 5),
         {ok, Entries} = bondy_oplog_wal:append_batch(Pid, Events),
         ?assertEqual(5, length(Entries)),
@@ -128,8 +128,8 @@ append_batch_returns_one_entry_per_event_test() ->
 
 append_one_is_batch_of_one_test() ->
     with_wal(#{}, fun(Pid, _Dir) ->
-        HLC = bondy_oplog_hlc:new(),
-        Hlc = bondy_oplog_hlc:now(HLC),
+        HLC = bondy_hlc:new(),
+        Hlc = bondy_hlc:now(HLC),
         E = mk_event(Hlc, 1),
         {ok, Hlc2, Pos} = bondy_oplog_wal:append(Pid, E),
         ?assertEqual(Hlc, Hlc2),
@@ -159,16 +159,16 @@ non_monotonic_hlcs_rejected_test() ->
     %% writer's state is untouched so subsequent valid appends still
     %% succeed.
     with_wal(#{}, fun(Pid, _Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         [E1, E2] = mk_batch(HLC, 1, 2),
         ?assertEqual(
-            {error, {invalid_batch, hlc_not_monotonic}},
+            {error, {invalid_batch, key_not_monotonic}},
             bondy_oplog_wal:append_batch(Pid, [E2, E1])
         ),
         %% Duplicate HLC also rejected (same HLC twice is not strictly
         %% increasing).
         ?assertEqual(
-            {error, {invalid_batch, hlc_not_monotonic}},
+            {error, {invalid_batch, key_not_monotonic}},
             bondy_oplog_wal:append_batch(Pid, [E1, E1])
         ),
         %% Writer still healthy.
@@ -187,12 +187,12 @@ oversize_batch_rejected_test() ->
         max_segment_bytes => 1 * 1024 * 1024
     },
     with_wal(Opts, fun(Pid, _Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         %% Big payload per event to force the body past 4 KiB.
         Big = binary:copy(<<"x">>, 1024),
         Events = [
             begin
-                Hlc = bondy_oplog_hlc:now(HLC),
+                Hlc = bondy_hlc:now(HLC),
                 Key = bondy_oplog_event:key(Hlc, origin(), Seq),
                 bondy_oplog_event:new(Key, {op, Big}, undefined)
             end
@@ -219,12 +219,12 @@ pre_rotation_when_batch_does_not_fit_test() ->
         max_segment_bytes => 16 * 1024
     },
     with_wal(Opts, fun(Pid, _Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         Payload = binary:copy(<<"a">>, 256),
         MkBatch = fun(Base, N) ->
             [
                 begin
-                    Hlc = bondy_oplog_hlc:now(HLC),
+                    Hlc = bondy_hlc:now(HLC),
                     Key = bondy_oplog_event:key(Hlc, origin(), Seq),
                     bondy_oplog_event:new(Key, {op, Payload}, undefined)
                 end
@@ -250,12 +250,12 @@ pre_rotation_when_batch_does_not_fit_test() ->
 
 reader_returns_full_batch_test() ->
     with_wal(#{}, fun(Pid, _Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         Events = mk_batch(HLC, 1, 4),
         {ok, Entries} = bondy_oplog_wal:append_batch(Pid, Events),
         ExpectedHlcs = [H || {H, _} <- Entries],
-        {ok, Iter} = bondy_oplog_wal_reader:open(Pid, beginning),
-        case bondy_oplog_wal_reader:next(Iter) of
+        {ok, Iter} = bondy_log_reader:open(Pid, beginning),
+        case bondy_log_reader:next(Iter) of
             {ok, Batch, Hlcs, _Pos, _Iter2} ->
                 ?assertEqual(length(Events), length(Batch)),
                 ?assertEqual(ExpectedHlcs, Hlcs);

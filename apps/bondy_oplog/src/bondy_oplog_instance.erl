@@ -22,34 +22,28 @@
 %% writer, which then takes the rebuild backstop.
 -define(IDX_FLUSH_TIMEOUT_MS, 5000).
 
-%% Ephemeral fused-writer mode (fused-writer rollout, Step 3). When
+%% Ephemeral fused-writer mode. When
 %% `#state.fused` is set, the instance drains its own WAL and installs
 %% inline (no applier, no install cast). These mirror the applier's drain
 %% knobs; the ephemeral fused path reuses the applier's state-free drain
 %% leaves (`collect_frames/2`, `resume_position/2`, `resolve_cell_apply_ctx/1`).
 -define(FUSED_AWAIT_DURABLE_TIMEOUT_MS, 200).
 %% Max apply batches the fused drain processes per `handle_info(fused_drain)`
-%% before yielding back to the gen_server mailbox. The fused drain IS the
-%% instance process, so an unbounded drain loop (to `eol`) under a continuous
-%% write stream — which never reaches `eol` — would monopolise the process and
-%% STARVE every `handle_call`/`handle_cast` (compact, `integrate_peer_root`,
-%% `await_overlay_drained`, …). Yielding every N batches bounds control-plane
-%% latency to ~N·apply_batch_max events while amortising the message-loop
-%% overhead. 8 × 256 ≈ 2k events ≈ a few ms at steady state.
+%% before yielding to the mailbox. The fused drain IS the instance process, so
+%% an unbounded loop under a continuous write stream — which never reaches
+%% `eol` — would starve every `handle_call`/`handle_cast`. Yielding bounds
+%% control-plane latency to ~N·apply_batch_max events.
 -define(FUSED_DRAIN_MAX_BATCHES, 8).
 -define(FUSED_COMMIT_EVERY, 64).
 -define(FUSED_APPLY_BATCH_MAX, 256).
 -define(FUSED_RETRY_MS, 50).
 
 %% Mem WAL in-flight-gap handling: how long to short-retry a `Seq` gap before
-%% the drain treats it as unrecoverable. `1 ms` retry × `2000` ≈ 2 s. A real
-%% in-flight insert fills in ~µs; the window is deliberately wide (six orders of
-%% magnitude) so that a *live* writer merely descheduled between reserving and
-%% inserting under load is NOT mistaken for a dead one — misjudging it would
-%% drop an acknowledged local write. On exhaustion the instance stops for a
-%% supervised restart + reopen recovery rather than skipping the Seq (a silent
-%% drop). A future refinement could make the window scheduler-pressure-aware
-%% (pause the count while the run queue is deep) instead of wall-clock.
+%% the drain treats it as unrecoverable. A real in-flight insert fills in ~µs;
+%% the window is orders of magnitude wider so a live writer merely descheduled
+%% between reserving and inserting is not mistaken for a dead one — misjudging
+%% it drops an acknowledged local write. On exhaustion the instance stops for a
+%% supervised restart rather than skipping the Seq.
 -define(FUSED_GAP_RETRY_MS, 1).
 -define(FUSED_MAX_GAP_RETRIES, 2000).
 
@@ -66,13 +60,10 @@
 %% exactly-capped result falls back to the total full-tree filter.
 -define(DOOR_SCAN_CAP, 1024).
 
-%% TTL for peer-root pins (`pin_peer_root/2`). A sync session pins the
-%% root it is pulling so the ETS page GC (`truncate_below_or_equal/4`)
-%% does not sweep pulled-but-not-yet-merged pages out from under it; a
-%% session that dies without its pin being consumed by
-%% `integrate_peer_root` leaves the pin to expire here. Generous vs the
-%% session's own timeouts — the cost of a stale pin is only a few
-%% retained pages for this long.
+%% TTL for peer-root pins (`pin_peer_root/2`). A sync session pins the root it
+%% is pulling so the ETS page GC does not sweep pulled-but-not-yet-merged pages
+%% from under it; a session that dies leaves the pin to expire here. A stale pin
+%% costs only a few retained pages for this long.
 -define(PEER_ROOT_PIN_TTL_MS, 120_000).
 
 %% How long the instance's own aae-root must verify UNSERVABLE
@@ -134,23 +125,38 @@ this one.
 
 ## Concurrency model
 
-All operations currently round-trip the gen_server. Per-instance HLC
-and Seq counters live in `atomics` cells inside the state record so
-a future lock-free local-append path can move out of the gen_server
-without protocol changes.
+An append round-trips the gen_server unless the instance published a fast
+path, in which case `append_fast/3,4` builds and signs the event in the
+caller's process, appends to the WAL directly and inserts the overlay row
+itself. `frontier/1` reads the registry and takes no lock, while `root_hash/1`
+and `aae_root/1` deliberately do round-trip, so the advertised root is the
+same live snapshot `get_pages/2` serves. Per-instance HLC and Seq counters
+live in `atomics` cells inside the state record, so both append paths share
+one source of ordering.
+
+Local-event MST installs arrive as `install_local_batch` casts from the
+applier, the sole dispatch path for them. When the applier outruns the
+instance several casts queue while it is mid-`put_batch`, so draining up to
+`install_coalesce_max` of them into a single put_batch, publish and
+overlay-evict amortises the O(log n) spine rebuild — the dominant per-event
+durable cost — over many casts' worth of events. The drain matches only
+`install_local_batch` casts and preserves their FIFO, which is WAL and so HLC
+order. It may skip queued peer `install_remote`, `drain_install_queue` and
+`await_overlay_drained` calls, which is convergence-safe: local and peer
+events have disjoint MST keys and disjoint per-origin watermarks, so a
+local-ahead-of-peer install yields the same final MST, merge being commutative
+and idempotent; overlay eviction is per-event HLC-conditional; and the local
+applier blocks on `drain_install_queue`, so no install cast is ever queued
+behind that barrier.
 """).
 
-%% Ephemeral fused-writer drain state (fused-writer rollout, Step 3).
-%% Present only when `#state.fused`; the instance runs the WAL drain +
-%% inline install itself (no applier). The `cell_apply_ctx` is built at
-%% `init/1` (the core-registry entry exists before the instance starts);
-%% the WAL `iter` is opened lazily in `handle_info(fused_init)` because
-%% the WAL sibling publishes its pid only after this instance's init
-%% returns. `consumer_offset` tracks the committed segment for WAL
-%% retention; the ephemeral WAL needs no on-disk consumer.offset (a fresh
-%% BEAM re-reads from `resume_position`). `idle_waiter` is a monitored
-%% helper parked on the WAL durable position (the busy-spin-free wakeup,
-%% identical to the applier's).
+%% Ephemeral fused-writer drain state, present only when `#state.fused`: the
+%% instance runs the WAL drain and inline install itself, with no applier. The
+%% `cell_apply_ctx` is built at `init/1`; the WAL `iter` is opened lazily in
+%% `handle_info(fused_init)` because the WAL sibling publishes its pid only
+%% after this instance's init returns. `consumer_offset` tracks the committed
+%% segment for WAL retention — the ephemeral WAL needs no on-disk one, a fresh
+%% BEAM re-reads from `resume_position`.
 -record(fused_drain, {
     iter :: term() | undefined,
     cell_apply_ctx :: map(),
@@ -168,7 +174,7 @@ without protocol changes.
     commit_every :: pos_integer(),
     apply_batch_max :: pos_integer(),
     idle_waiter = undefined :: undefined | reference(),
-    %% Inline projection-replay cursor for the REMOTE path (Step 4). A
+    %% Inline projection-replay cursor for the REMOTE path. A
     %% fused instance has no applier, so it folds peer-merged events into
     %% the projection itself after `integrate_peer_root`. `undefined` →
     %% the next replay does a full fold; incremental thereafter. Mirrors
@@ -181,8 +187,8 @@ without protocol changes.
     %% applier bumps them in `commit_now`; the fused instance has no
     %% applier so it bumps them itself). Validated at `init/1`.
     ae_targets = [] :: list(),
-    %% WAL storage backend for the drain READER (task #50, ephemeral ETS
-    %% WAL). `disk` reads segment files via `bondy_oplog_wal_reader`; `mem`
+    %% WAL storage backend for the drain READER (ephemeral ETS WAL).
+    %% `disk` reads segment files via `bondy_log_reader`; `mem`
     %% reads the in-memory `bondy_oplog_wal_mem` table via
     %% `bondy_oplog_wal_mem_reader`, dropping the durable-position visibility
     %% gate. Producer/await/commit are protocol-shared, so ONLY the reader
@@ -212,17 +218,15 @@ without protocol changes.
 -record(state, {
     instance_id :: binary(),
     origin :: bondy_oplog_origin:t(),
-    hlc :: bondy_oplog_hlc:t(),
+    hlc :: bondy_hlc:t(),
     seq :: atomics:atomics_ref(),
     mst :: bondy_mst:t(),
     %% Per-root AAE-advertise servability cache: `{RootHash, Servable}`.
-    %% `aae_root/1` (the responder's advertise path) refuses to advertise a
-    %% dangling root — one whose pages are not all present, which would make
-    %% a pulling peer fail with `peer_returned_empty_pages` — and instead
-    %% advertises `undefined` so the peer pulls nothing from us and we heal
-    %% via our own pull/replay. The check (`missing_set` on the live MST) is
-    %% memoised per root hash so it re-walks (and re-logs) only when the
-    %% root changes, never every sync round.
+    %% `aae_root/1` refuses to advertise a dangling root — one whose pages are not
+    %% all present, which would fail a pulling peer with
+    %% `peer_returned_empty_pages` — and advertises `undefined` instead so we heal
+    %% via our own pull. The `missing_set` walk is memoised per root hash so it
+    %% re-walks only when the root changes.
     aae_root_check :: undefined | {binary(), boolean()},
     %% Monotonic ms of the FIRST unservable aae-root verdict of the
     %% current unservable streak; reset the moment any root verifies
@@ -253,16 +257,12 @@ without protocol changes.
     %% registry on the first append after a `'DOWN'` from the previous
     %% writer (one_for_all restarts swap in a new pid).
     wal_pid :: undefined | pid(),
-    %% Monitor reference for the cached `wal_pid`; cleared when the
-    %% monitored process dies.
     wal_pid_monitor :: undefined | reference(),
-    %% Per-instance overlay (`ordered_set`, public). Receives every
-    %% successfully WAL-appended local event so callers reading back
-    %% the key see the entry before the applier promotes it to the
-    %% MST. Rows are `{Key, Value, Hlc, Origin}`; entries are evicted
-    %% atomically with the MST insert via HLC-conditional
-    %% `ets:select_delete/2`. Created in `init/1`, deleted in
-    %% `terminate/2`; no heir.
+    %% Per-instance overlay (`ordered_set`, public): every successfully
+    %% WAL-appended local event lands here so a caller reading the key back sees it
+    %% before the applier promotes it to the MST. Rows are `{Key, Value, Hlc,
+    %% Origin}`, evicted atomically with the MST insert via HLC-conditional
+    %% `ets:select_delete/2`. Created in `init/1`, deleted in `terminate/2`.
     overlay :: undefined | ets:tid(),
     %% Overlay backpressure caps. `max_overlay_events` defaults to
     %% 10_000; `max_overlay_bytes` to 5 MB; `throttle_strategy`
@@ -271,24 +271,17 @@ without protocol changes.
     max_overlay_events :: pos_integer(),
     max_overlay_bytes :: pos_integer(),
     overlay_throttle :: drop,
-    %% Atomic mirrors of `ets:info(overlay, size)` and
-    %% `ets:info(overlay, memory)`. Held as `atomics:atomics_ref()` so
-    %% the lock-free `append_fast/2,3` path (caller-side) can update
-    %% them without going through this gen_server. Slot 1: event
-    %% count. Slot 2: byte estimate. Updated on insert
-    %% (`stage_to_overlay/3`) and evict (`evict_overlay_batch/3`).
-    %% With `decentralized_counters: true` on the overlay table, the
-    %% equivalent `ets:info/2` calls aggregate across all schedulers
-    %% and grow expensive under concurrent appenders — these atomic
-    %% mirrors keep the admit check purely lock-free and constant-time.
+    %% Atomic mirrors of the overlay's size and memory, so the lock-free
+    %% `append_fast/2,3` path updates them without this gen_server. Slot 1: event
+    %% count. Slot 2: byte estimate. With `decentralized_counters: true` on the
+    %% table the equivalent `ets:info/2` calls aggregate across schedulers and grow
+    %% expensive under concurrent appenders; the mirrors keep the admit check
+    %% lock-free and constant-time.
     overlay_counters :: atomics:atomics_ref(),
     %% Highest local-origin `seq` already installed into the MST.
-    %% Used by `install_local_batch/2` to skip the
-    %% O(log N) `bondy_mst:get/2` safety probe for events whose seq is
-    %% strictly greater than this value — for the local origin the seq
-    %% atomic monotonically increases, so any event with a higher seq
-    %% cannot already be in the tree. Resume-overlap events (seq ≤ max)
-    %% still take the safe path that probes the tree.
+    %% `install_local_batch/2` skips the O(log N) `bondy_mst:get/2` probe for events
+    %% above it: the local seq atomic increases monotonically, so a higher seq
+    %% cannot already be in the tree. Resume-overlap events still probe.
     max_local_installed_seq :: non_neg_integer(),
     %% Callers blocked in `await_apply/1,2` while the overlay is
     %% non-empty. Each install path that may shrink the overlay
@@ -297,22 +290,13 @@ without protocol changes.
     %% `maybe_signal_drain_waiters/1` which `gen_server:reply`-s every
     %% queued From the moment the overlay reaches 0.
     drain_waiters = [] :: [gen_server:from()],
-    %% Demand-based applier→instance flow control. The applier
-    %% increments slot 1 of `install_in_flight` before dispatching an
-    %% `install_local_batch` cast; this handler decrements it after
-    %% the cast is processed. When the post-decrement value is
-    %% `max_install_in_flight - 1` (i.e. just freed a slot from a
-    %% saturated counter), the instance sends a `drain_resume` cast
-    %% to the applier so it can read the next WAL batch. Bounds the
-    %% instance's mailbox at `cap × batch_size` events. Default `64`:
-    %% the disambiguation sweep (2026-06-11) showed the applier stalls
-    %% on the in-flight cap well before any other limiter — 16→64 is
-    %% +47% single-shard (7,358→10,841) for both ephemeral and durable,
-    %% saturating at ~64 (the residual floor is the per-hop cast
-    %% round-trip latency itself). Worst-case backlog is
-    %% `cap × apply_batch_max_events` = 64 × 256 ≈ 16k events; instance
-    %% coalescing (`install_coalesce_max`) keeps the steady state far
-    %% below that.
+    %% Demand-based applier→instance flow control. The applier increments slot 1
+    %% before dispatching an `install_local_batch` cast and this handler decrements
+    %% it after processing; on freeing a slot from a saturated counter the instance
+    %% sends `drain_resume` so the applier reads the next WAL batch. Bounds the
+    %% instance's mailbox at `cap × batch_size` events. The applier stalls on this
+    %% cap before any other limiter. Instance coalescing
+    %% (`install_coalesce_max`) keeps the steady state far below the worst case.
     install_in_flight :: atomics:atomics_ref() | undefined,
     max_install_in_flight :: pos_integer(),
     %% Remote-delivery generation shared with the applier's prepare
@@ -320,16 +304,12 @@ without protocol changes.
     %% handler (the local delivery point of peer-merged events);
     %% published via `bondy_oplog_registry:set_remote_gen/2` at init.
     remote_gen_ref :: atomics:atomics_ref() | undefined,
-    %% Instance-side install coalescing. The
-    %% `install_local_batch` cast handler drains up to this many *queued*
-    %% install casts (including the one being handled) and merges their
-    %% events into a single `bondy_mst:put_batch/2` + one publish + one
-    %% overlay-evict. When the applier outruns the instance the mailbox
-    %% accumulates casts, so this amortises the O(log n) spine rebuild
-    %% over many casts' worth of events — the dominant per-event durable
-    %% cost (A0b). `1` reproduces the pre-A4 one-put_batch-per-cast
-    %% behaviour. Bounded by `max_install_in_flight` in practice (the
-    %% applier cannot have more than that many casts in flight).
+    %% Instance-side install coalescing: the `install_local_batch` handler drains up
+    %% to this many queued casts and merges their events into one
+    %% `bondy_mst:put_batch/2`, one publish and one overlay-evict. When the applier
+    %% outruns the instance the mailbox accumulates casts, so this amortises the
+    %% O(log n) spine rebuild — the dominant per-event durable cost. `1` gives one
+    %% put_batch per cast. Bounded in practice by `max_install_in_flight`.
     install_coalesce_max :: pos_integer(),
     %% Bootstrap lifecycle (`bondy_oplog_bootstrap_lifecycle`). Opened
     %% at `init/1` and published via the registry so the applier can
@@ -358,20 +338,13 @@ without protocol changes.
     %% rather than derived from `instance_id`: the id is an opaque name, and
     %% `bondy_oplog` must not depend on how `bondy_db` composes it.
     db = undefined :: atom() | undefined,
-    %% MST retention policy for ephemeral catalogue (fused) instances
-    %% (opt `mst_retention` — distinct from the WAL's segment-retention
-    %% `retention` proplist): `#{max_age_ms => A, max_events => N}` (`0`
-    %% disables a knob) or `undefined` (stability-driven compaction only —
-    %% every durable instance). When set, `run_compaction` falls back to a LOCAL
-    %% retention frontier whenever the peer-confirmed frontier yields
-    %% nothing: the MST is bounded by policy, not by all-peer stability.
-    %% Sound only for an ephemeral projection-backed instance — the
-    %% projection holds all applied state and a peer that misses
-    %% truncated history recovers via catalogue bootstrap (the
-    %% `peer_pages_unavailable` / `frontier_gap` → rebootstrap path in
-    %% `bondy_oplog_sync_scheduler`). Requires `fused` (⇒ ephemeral, per
-    %% `bondy_db:assert_fused_requires_ephemeral/2`); enforced at
-    %% `init/1` via `validate_retention/2`.
+    %% MST retention policy for ephemeral catalogue (fused) instances (opt
+    %% `mst_retention`, not the WAL's segment-retention `retention` proplist):
+    %% `#{max_age_ms => A, max_events => N}` (`0` disables a knob), or
+    %% `undefined` for stability-driven compaction only. Sound only for an
+    %% ephemeral projection-backed instance — the projection holds all applied
+    %% state and a peer that misses truncated history recovers via catalogue
+    %% bootstrap. Requires `fused`; enforced at `init/1`.
     retention ::
         #{
             max_age_ms := non_neg_integer(),
@@ -386,25 +359,20 @@ without protocol changes.
     %% (a non-fused instance's applier holds its own copy); `undefined`
     %% for every non-fused instance.
     ctx_guard = bondy_oplog_ctx_guard:new() :: bondy_oplog_ctx_guard:guard(),
-    %% Async pack-store seal driver. `drive_seal` is true only when the
-    %% durable backend was opened with `seal_mode => async`; then the
-    %% instance rolls the incoming pack at the commit barrier
-    %% (`maybe_drive_seal/1`) and seals it in a monitored worker, keeping
-    %% the multi-hundred-ms rewrite off the install/commit critical path.
-    %% `seal` holds the single in-flight seal (the in-flight=1 backpressure
-    %% cap), `undefined` when none is running. With `seal_mode => sync`
-    %% (the default) `drive_seal` is false and the store auto-seals inline
-    %% on `put` exactly as before — zero behavioural change.
+    %% Async pack-store seal driver: true only when the durable backend was opened
+    %% with `seal_mode => async`, in which case the instance rolls the incoming pack
+    %% at the commit barrier and seals it in a monitored worker, keeping the
+    %% multi-hundred-ms rewrite off the install/commit critical path. `seal` holds
+    %% the single in-flight seal (the in-flight=1 cap). Under `seal_mode => sync`
+    %% the store auto-seals inline on `put`.
     drive_seal = false :: boolean(),
     seal = undefined :: undefined | #seal{},
-    %% Periodic heap-monitor state (see `bondy_oplog_heap_monitor`). A
-    %% long-lived instance accumulates transient apply/AAE garbage that the
-    %% BEAM does not return until a fullsweep; under a solo import (no peers)
-    %% the AAE-driven hibernate never fires, so the heap climbs unbounded
-    %% until the next major GC. The monitor periodically fullsweep-hibernates
-    %% the instance once its heap has grown past a threshold over its post-GC
-    %% baseline, capping the transient peak without touching the hot
-    %% append/drain path. Driven from `handle_info(gc_tick, _)`.
+    %% Periodic heap-monitor state (`bondy_oplog_heap_monitor`). A long-lived
+    %% instance accumulates transient apply/AAE garbage the BEAM does not return
+    %% until a fullsweep, and under a solo import the AAE-driven hibernate never
+    %% fires, so the heap climbs unbounded. The monitor fullsweep-hibernates the
+    %% instance once its heap grows past a threshold over its post-GC baseline,
+    %% without touching the hot append/drain path. Driven from `handle_info(gc_tick)`.
     heap_monitor = bondy_oplog_heap_monitor:new() ::
         bondy_oplog_heap_monitor:t(),
     %% Provenance of the applied frontier this instance booted with, and the
@@ -553,7 +521,7 @@ without protocol changes.
 -export([finalize_catalogue_bootstrap/4]).
 -export([finalize_catalogue_bootstrap/5]).
 -export([persist_frontier/1]).
--export([seed_seq/2]).
+-export([wal_opened/3]).
 -export([replay_anchor/1]).
 -export([reclamation_members/0]).
 -export([reclaim_stable_cells/1]).
@@ -580,7 +548,7 @@ without protocol changes.
 %% with `bondy_oplog_compaction_checkpoint_file:init/2`, the function it
 %% composes with (`bondy_oplog_path_test`).
 -export([resolve_checkpoint_backend/3]).
-%% Exposed for the non-event-frontier outcome test (Step 3, reclamation).
+%% Exposed for the non-event-frontier outcome test.
 -export([frontier_stability_point/1]).
 %% Exposed for the pack-store seal-threshold default test.
 -export([backend_opts/3]).
@@ -719,20 +687,18 @@ do_append_fast(InstanceId, FastPath, Op, Meta, Notify) ->
         %% Build the event in the caller's process. The HLC + seq
         %% atomics give us a unique, monotonic key without holding
         %% the instance gen_server.
-        Hlc = bondy_oplog_hlc:now(HLC),
+        Hlc = bondy_hlc:now(HLC),
         Seq = atomics:add_get(SeqRef, 1, 1),
         Key = bondy_oplog_event:key(Hlc, Origin, Seq),
         Event0 = bondy_oplog_event:new(Key, Op, Meta),
         %% Stateless validator: discard the returned state — by
         %% contract it equals the cached one.
         {Event, _} = ValidatorMod:sign_event(Event0, ValidatorState),
-        %% Stage the overlay row BEFORE the WAL append. See the matching
-        %% comment in `do_append_local/4` — the applier reads from the WAL
-        %% the instant it becomes durable, and an in-flight overlay insert
-        %% races with `evict_overlay_batch/3`. The overlay tid can briefly
-        %% be `undefined` (or dead) after a one_for_all restart before the
-        %% new instance's init/1 republishes it; both cases fall through to
-        %% the gen_server path, which mints its own key.
+        %% Stage the overlay row BEFORE the WAL append (see `do_append_local/4`): the
+        %% applier reads from the WAL the instant it becomes durable, and an in-flight
+        %% overlay insert races with `evict_overlay_batch/3`. The tid can briefly be
+        %% `undefined` or dead after a one_for_all restart; both fall through to the
+        %% gen_server path, which mints its own key.
         {ok, Tab} ?= fast_stage_overlay(InstanceId, [Event], Notify),
         overlay_counters_add(Ctrs, [Event]),
         case fast_wal_append_batch_to(Wal, [Event]) of
@@ -898,25 +864,14 @@ fast_stage_overlay(InstanceId, Events, Notify) ->
     end.
 
 %% @private
-%% Mints signed events for every item — the single minting core behind
-%% both the lock-free caller-side paths and the gen_server's
-%% `build_events/2`.
-%%
-%% - One HLC tick per item: the WAL's `do_append_batch/2` rejects
-%%   a batch whose HLCs are not strictly increasing (so receivers
-%%   can rely on per-batch monotonicity for cheap merge-by-HLC).
-%%   Each `bondy_oplog_hlc:now/1` is a lock-free CAS that already
-%%   guarantees strict monotonicity at the per-replica level.
-%% - **One** `atomics:add_get/3` to reserve a contiguous seq range,
-%%   then assign each event `Start+i`. N - 1 fewer atomic
-%%   read-modify-writes on the shared seq atomics per batch — and,
-%%   as importantly, no concurrent minter can land INSIDE the batch's
-%%   range, which is what makes `release_seq_range/3` safe to call
-%%   when the WAL rejects the batch.
-%%
-%% Threads the validator state and returns it; stateless validators
-%% (the fast-path eligibility contract) return it unchanged and the
-%% fast paths discard it.
+%% Mints signed events for every item — the single minting core behind the
+%% lock-free caller-side paths and the gen_server's `build_events/2`. One HLC
+%% tick per item, because the WAL rejects a batch whose HLCs are not strictly
+%% increasing (receivers rely on per-batch monotonicity for merge-by-HLC). ONE
+%% `atomics:add_get/3` reserves a contiguous seq range: no concurrent minter can
+%% land inside it, which is what makes `release_seq_range/3` safe when the WAL
+%% rejects the batch. Threads the validator state; stateless validators return
+%% it unchanged.
 do_build_events(HLC, SeqRef, Origin, Mod, VS0, Items) ->
     N = length(Items),
     EndSeq = atomics:add_get(SeqRef, 1, N),
@@ -932,7 +887,7 @@ do_build_events(HLC, SeqRef, Origin, Mod, VS0, Items) ->
 do_build_events_at(HLC, StartSeq, Origin, Mod, VS0, Items) ->
     {EventsRev, KeysRev, _, VS} = lists:foldl(
         fun({Op, Meta}, {EvAcc, KAcc, Seq, VSAcc0}) ->
-            Hlc = bondy_oplog_hlc:now(HLC),
+            Hlc = bondy_hlc:now(HLC),
             Key = bondy_oplog_event:key(Hlc, Origin, Seq),
             Event0 = bondy_oplog_event:new(Key, Op, Meta),
             {Event, VSAcc} = Mod:sign_event(Event0, VSAcc0),
@@ -944,18 +899,13 @@ do_build_events_at(HLC, StartSeq, Origin, Mod, VS0, Items) ->
     {lists:reverse(EventsRev), lists:reverse(KeysRev), VS}.
 
 %% @private
-%% Returns a rejected batch's seq range `[Start, End]` to the counter,
-%% keeping the origin's sequence gap-free. Safe exactly when the range
-%% is still the TOPMOST reservation (counter =:= End): the range was
-%% reserved in one `atomics:add_get/3`, so no foreign seq can sit
-%% inside it, and the CAS fails whenever a concurrent minter has
-%% reserved on top — in which case the range cannot be returned. A
-%% burned range would otherwise be a hole no replica can ever fill by
-%% sync (the prefix hold would park every peer on it until a
-%% rebootstrap), so the burn is counted via telemetry and the instance
-%% is asked to BACKFILL it with signed `seq_fill` no-op events
-%% (`fill_burned_seqs/4`): they occupy the burned seqs, fold to
-%% nothing, and advance every replica's applied frontier past the gap.
+%% Returns a rejected batch's seq range to the counter, keeping the origin's
+%% sequence gap-free. Safe exactly when the range is still the TOPMOST
+%% reservation: it was reserved in one `atomics:add_get/3` so no foreign seq
+%% sits inside it, and the CAS fails when a concurrent minter reserved on top. A
+%% burned range is a hole no replica can fill by sync — every peer's prefix hold
+%% parks on it until a rebootstrap — so the burn is counted and
+%% `fill_burned_seqs/4` backfills it.
 release_seq_range(_SeqRef, _InstanceId, []) ->
     ok;
 release_seq_range(SeqRef, InstanceId, [First | _] = Keys) ->
@@ -1056,15 +1006,12 @@ fast_wal_append_batch(InstanceId, Events) ->
     end.
 
 %% @private
-%% Resolves the WAL a caller-side append will hit. Called BEFORE the seq
-%% range is reserved: the WAL writer seeds the seq counter from its
-%% retained maximum and only then publishes its pid
-%% (`bondy_oplog_wal:init/1`), so a reservation that follows a successful
-%% resolution has already absorbed that maximum. Reserving first and
-%% resolving later would let a reservation run against the stale counter,
-%% fail its append, and then — the bump having landed in between — fail
-%% the CAS in `release_seq_range/3` and request a `seq_fill` over a range
-%% the WAL already holds.
+%% Resolves the WAL a caller-side append will hit, BEFORE the seq range is
+%% reserved. The bundle this caller holds was published by `wal_opened/3` after
+%% the counter absorbed the WAL's retained maximum. Reserving first would let a
+%% reservation run against a counter the WAL then bumps from under it: the
+%% append fails, the CAS in `release_seq_range/3` fails, and a `seq_fill` is
+%% requested over a range the WAL already holds.
 fast_wal_target(InstanceId) ->
     case bondy_oplog_registry:wal_handle(InstanceId) of
         #{backend := mem} = Handle ->
@@ -1186,7 +1133,7 @@ append_remote(Target, Event) ->
             case resolve_remote_route(Target) of
                 {fused, InstancePid} ->
                     %% Fused (no applier): the instance verifies and
-                    %% installs the remote event itself (Step 4). It still
+                    %% installs the remote event itself. It still
                     %% offloads the verify to a spawned worker (the
                     %% bondy_mst_crdt model — serialise writes, keep verify
                     %% concurrent) so the drain is not blocked on it.
@@ -1320,13 +1267,10 @@ await_apply(Target) ->
 await_apply(Target, Timeout) when
     is_binary(Target) orelse is_pid(Target)
 ->
-    %% Event-driven barrier: resolve the instance pid and issue a
-    %% `await_overlay_drained` gen_server:call. If the overlay is
-    %% non-empty the instance queues the caller in `drain_waiters`
-    %% and replies the moment its install handlers shrink the overlay
-    %% to 0. Replaces the prior 5 ms-poll loop, which floored every
-    %% wait at the timer resolution regardless of how fast the
-    %% applier actually drained.
+    %% Event-driven barrier: `await_overlay_drained` queues the caller in
+    %% `drain_waiters` while the overlay is non-empty and replies the moment the
+    %% install handlers shrink it to 0 — a poll loop floors every wait at the timer
+    %% resolution however fast the applier drained.
     case resolve_instance_pid(Target) of
         undefined ->
             ok;
@@ -1368,14 +1312,11 @@ lookup_instance_id(Pid) when is_pid(Pid) ->
     {ok, bondy_oplog_event:t()} | not_found.
 
 get(Target, Key) when is_binary(Target) ->
-    %% Overlay-first, then MST. One registry lookup pulls both
-    %% handles — the old two-`lookup_element` pattern serialised on
-    %% the same per-key slot lock and dominated the cost of cold
-    %% reads. The overlay holds events that landed in the WAL but
-    %% have not yet been promoted by the applier; reading the overlay
-    %% before the MST handle closes the race where the applier
-    %% publishes a new handle and then evicts the overlay row (MST
-    %% publish strictly precedes overlay evict).
+    %% Overlay-first, then MST, from ONE registry lookup: two `lookup_element`
+    %% calls serialise on the same per-key slot lock and dominate cold reads. The
+    %% overlay holds events that landed in the WAL but are not yet promoted, and
+    %% reading it before the MST handle closes the race where the applier publishes
+    %% a new handle and then evicts the overlay row (publish precedes evict).
     case bondy_oplog_registry:read_overlay_and_mst(Target) of
         undefined ->
             error({noproc, {?MODULE, Target}});
@@ -1396,13 +1337,12 @@ get(Target, Key) ->
 -spec root_hash(instance_id() | pid()) -> binary() | undefined.
 
 root_hash(Target) ->
-    %% Always route through the instance gen_server so the advertised root reads
-    %% the SAME live `#state.mst` snapshot that `get_pages/2` and the
-    %% `{missing_set, _}` handler serve from. Reading the registry-published
-    %% handle here instead let AAE advertise a root whose pages the live MST had
-    %% already compacted/advanced past — the peer then requested pages
+    %% Always route through the gen_server so the advertised root reads the SAME
+    %% live `#state.mst` snapshot that `get_pages/2` and `{missing_set, _}` serve.
+    %% Reading the registry-published handle instead let AAE advertise a root whose
+    %% pages the live MST had already compacted past; the peer then requested pages
     %% `get_pages/2` could not return (`peer_returned_empty_pages`), looping the
-    %% sync forever. One consistent snapshot for root + pages.
+    %% sync forever.
     gen_server:call(target(Target), root_hash).
 
 -doc """
@@ -1504,13 +1444,10 @@ frontier(InstanceId) when is_binary(InstanceId) ->
 ) -> Acc when Acc :: term().
 
 fold_range(Target, From, To, Fun, Acc0) when is_function(Fun, 2) ->
-    %% Routed through the gen_server so the MST snapshot and the
-    %% overlay scan are captured in the same callback — `publish/1`
-    %% (registry write) and `evict_overlay_batch/3` are sibling steps
-    %% of `install_local_batch`, but they are visible to a lock-free
-    %% reader at two independent moments. Under whole-suite load that
-    %% race was dropping events from `fold_range/5`. Sync hop cost is
-    %% acceptable for the rare admin / test use of range scans.
+    %% Routed through the gen_server so the MST snapshot and the overlay scan are
+    %% captured in one callback: `publish/1` and `evict_overlay_batch/3` are sibling
+    %% steps of `install_local_batch` but become visible to a lock-free reader at two
+    %% independent moments, which was dropping events from `fold_range/5`.
     gen_server:call(target(Target), {fold_range, From, To, Fun, Acc0}).
 
 -spec range(
@@ -1533,16 +1470,10 @@ truncate_prefix(Target, Watermark) ->
 -spec size(instance_id() | pid()) -> non_neg_integer().
 
 size(Target) ->
-    %% Total events visible to the instance = `live_size` (events
-    %% promoted to the MST) + overlay row count. The two are
-    %% maintained in lockstep by `install_local_batch` (live_size +=
-    %% N, overlay -= N), but those updates are *not* observable to a
-    %% lock-free reader as a single atom. Routing through the
-    %% gen_server is the simplest way to read them in the same
-    %% callback — no `install_local_batch` cast can run while we are
-    %% the handler — so we always return a consistent snapshot.
-    %% Sync hop cost is acceptable for the stats / admin use of
-    %% `size/1`; hot-path callers stay on `get/2` and `append/2,3`.
+    %% Total events visible = `live_size` (promoted to the MST) + overlay rows. The
+    %% two move in lockstep in `install_local_batch` but are not observable as one
+    %% atom, so this reads them inside the callback, where no `install_local_batch`
+    %% cast can interleave. Hot-path callers stay on `get/2` and `append/2,3`.
     gen_server:call(target(Target), instance_size).
 
 -spec first_key(instance_id() | pid()) ->
@@ -2074,14 +2005,12 @@ install_catalogue_batch(InstanceId, {replace, Cells}) when
     %% reach the applier (which would function_clause).
     case bondy_oplog_registry:fused(InstanceId) of
         true ->
-            %% A fused instance has no applier to install into: the install
-            %% runs in the instance gen_server itself, through the same
-            %% shared body (`bondy_oplog_applier:install_catalogue_cells/3`)
-            %% over this instance's own `#fused_drain{}` cell-apply source.
-            %% Load-bearing for retention-bounded (`mst_retention`)
-            %% instances: their truncated history makes catalogue bootstrap
-            %% the ONLY complete recovery path for a joining or lagging
-            %% peer — page-sync alone covers just the retention window.
+            %% A fused instance has no applier to install into: the install runs in the
+            %% instance gen_server through the same shared body
+            %% (`bondy_oplog_applier:install_catalogue_cells/3`) over its own
+            %% `#fused_drain{}` cell-apply source. For retention-bounded instances the
+            %% truncated history makes catalogue bootstrap the ONLY complete recovery path
+            %% for a joining peer — page-sync covers just the retention window.
             case ?MODULE:whereis(InstanceId) of
                 undefined ->
                     {error, instance_not_running};
@@ -2231,13 +2160,10 @@ open_drain_gate(InstanceId) when is_binary(InstanceId) ->
                 undefined ->
                     {error, instance_not_running};
                 ApplierPid ->
-                    %% The routing directory is complete the moment the
-                    %% orchestrator calls this, not when the applier gets to
-                    %% the cast below — so publish readiness here, where the
-                    %% fact becomes true, and let the drain follow
-                    %% asynchronously. Anti-entropy reads this, and gating it
-                    %% on a mailbox would leave a window in which the
-                    %% catalogue is complete but the shard still refuses.
+                    %% The routing directory is complete when the orchestrator calls this, not when
+                    %% the applier gets to the cast below, so readiness is published here and the
+                    %% drain follows asynchronously. Anti-entropy reads this; gating it on a mailbox
+                    %% would leave a window where the catalogue is complete but the shard refuses.
                     ok = bondy_oplog_registry:set_tables_registered(
                         InstanceId, true
                     ),
@@ -2306,8 +2232,8 @@ projection without touching the clock, and the AAE round that follows absorbs
 from `bondy_mst:last/1` — `undefined` exactly when the peer has compacted,
 which is the case bootstrap exists to serve. Without this absorb a
 bootstrapped replica can mint events BELOW a stability point computed from the
-very cells it installed, silently invalidating causal-stability reclamation
-(`BONDY_DB_RECLAMATION_PROOF.md` §7.1). The absorb happens inside the
+very cells it installed, silently invalidating causal-stability
+reclamation. The absorb happens inside the
 instance, before `mark_live` flips it into service. `0` means "nothing
 installed" and is a no-op. Over-absorption is safe: the clock only ever
 advances.
@@ -2386,17 +2312,32 @@ persist_frontier(Target) ->
     gen_server:call(target(Target), persist_frontier, infinity).
 
 ?DOC("""
-Raises this instance's per-origin seq counter to at least `MaxSeq`.
+Tells the instance its WAL sibling is open at `WalPid` with `MaxSeq` as
+the retained WAL's own-origin maximum, and opens minting.
 
-Called by the instance's WAL writer at its own `init/1` with the retained
-WAL's own-origin maximum, before the writer publishes its pid — the third
-durable seed source next to the compaction checkpoint's frontier entry and
-the live MST (`init/1`). Never lowers the counter.
+Called by `bondy_oplog_instance_sup` from the WAL child's start function,
+with the `max_seq` that `bondy_oplog_wal:open/2` returned (0 for the
+in-memory backend). In order, the instance:
+
+1. raises its per-origin seq counter to at least `MaxSeq` — the third
+   durable seed source next to the compaction checkpoint's minted slot and
+   the applied frontier (`init/1`); never lowers it;
+2. caches and monitors `WalPid` — until this call `ensure_wal_pid/1` has no
+   pid and every gen_server append answers `{error, wal_unavailable}`;
+3. publishes the lock-free `append_fast` bundle, if the validator is
+   stateless.
+
+Steps 2 and 3 are what gate a reservation on step 1: neither minting path
+can reserve a seq before the counter has absorbed the WAL's maximum
+(`proofs/tla/SeqSeed_CkptEarlyMint.cfg` is the window this closes; pinned
+by `bondy_oplog_seq_seed_restart_test`).
 """).
--spec seed_seq(instance_id() | pid(), non_neg_integer()) -> ok.
+-spec wal_opened(instance_id() | pid(), pid(), non_neg_integer()) -> ok.
 
-seed_seq(Target, MaxSeq) when is_integer(MaxSeq), MaxSeq >= 0 ->
-    gen_server:call(target(Target), {seed_seq, MaxSeq}, infinity).
+wal_opened(Target, WalPid, MaxSeq) when
+    is_pid(WalPid), is_integer(MaxSeq), MaxSeq >= 0
+->
+    gen_server:call(target(Target), {wal_opened, WalPid, MaxSeq}, infinity).
 
 ?DOC("""
 Where the applier must anchor its projection-replay cursor at boot:
@@ -2416,23 +2357,21 @@ peer-received events, and only the local one folds before it installs
 afterwards by a best-effort `replay_cell_events` cast from `deliver_remote/1`,
 which a crash or a shutdown can lose.
 
-Anchoring on the current root unconditionally — as this did — silently made
-that event unrecoverable: the WAL drain resumes past the durable root, so
-nothing else would ever re-present it. Declaring it applied instead (the
-deleted `frontier_from_mst/1`) was worse: it also disarmed `watermark_door/2`
-and `capped_truncation_point/2`, which hold never-applied events from
-truncation and judge "never applied" against this same frontier. Measured as
-user loss across a rolling restart; pinned by
+Anchoring on the current root unconditionally makes such an event
+unrecoverable: the WAL drain resumes past the durable root, so nothing would
+ever re-present it. Declaring it applied is worse still, because
+`watermark_door/2` and `capped_truncation_point/2` hold never-applied events
+back from truncation and judge "never applied" against this same frontier, so
+the over-claim also disarms the repair. Either way the loss is user data
+across a rolling restart; pinned by
 `bondy_oplog_frontier_fold_gap_test:across_a_restart/0`.
 
 COST. The scan is one O(live MST) fold — the size of the LOG, which compaction
-bounds, not of the projection. It replaces the fold `frontier_from_mst/1` did
-at every boot, so the traversal is not new. What is new is the re-fold in the
-`undefined` case, and it runs only when the scan found an unclaimed event: a
-replica that shut down with everything folded and checkpointed scans, finds
-nothing, and boots exactly as before. The re-fold itself is idempotent — cells
-are keyed and the commutative kernels guard on a per-origin `MaxSeq`
-(`bondy_oplog_crdt_g_counter:apply_op/3`).
+bounds, not of the projection. The re-fold in the `undefined` case runs only
+when the scan found an unclaimed event: a replica that shut down with
+everything folded and checkpointed scans, finds nothing, and proceeds. The
+re-fold itself is idempotent — cells are keyed and the commutative kernels
+guard on a per-origin `MaxSeq` (`bondy_oplog_crdt_g_counter:apply_op/3`).
 """).
 -spec replay_anchor(instance_id() | pid()) ->
     undefined | bondy_mst:hash().
@@ -2512,12 +2451,9 @@ lookup_origin(InstanceId) when is_binary(InstanceId) ->
 
 init({InstanceId, Opts}) ->
     process_flag(trap_exit, true),
-    %% Off-heap inbox: incoming messages land in their own heap
-    %% fragments instead of the process heap, so minor GC does not
-    %% scan them and the process heap stays small even when many
-    %% callers pile up appends. Without this flag the writer cliff
-    %% at >=16 concurrent appenders shows up as throughput regression
-    %% — the gen_server's heap fragmenting under mailbox depth
+    %% Off-heap inbox: incoming messages land in their own heap fragments, so minor
+    %% GC does not scan them and the process heap stays small when many callers pile
+    %% up appends. Without it the gen_server's heap fragments under mailbox depth and
     %% triggers frequent full-sweep GCs that stall every caller.
     process_flag(message_queue_data, off_heap),
     Origin = maps:get(origin, Opts, bondy_oplog_origin:new()),
@@ -2525,7 +2461,7 @@ init({InstanceId, Opts}) ->
         ok -> ok;
         {error, R0} -> error({invalid_origin, R0})
     end,
-    HLC = bondy_oplog_hlc:new(maps:get(hlc_seed, Opts, 0)),
+    HLC = bondy_hlc:new(maps:get(hlc_seed, Opts, 0)),
     SeqRef = atomics:new(1, [{signed, false}]),
     ok = atomics:put(SeqRef, 1, maps:get(seq_seed, Opts, 0)),
     ValidatorMod = maps:get(
@@ -2572,13 +2508,13 @@ init({InstanceId, Opts}) ->
         end,
     case LastMSTKey of
         undefined when Watermark =/= undefined ->
-            _ = bondy_oplog_hlc:update(
+            _ = bondy_hlc:update(
                 HLC, bondy_oplog_event:key_hlc(Watermark)
             );
         undefined ->
             ok;
         K ->
-            _ = bondy_oplog_hlc:update(HLC, bondy_oplog_event:key_hlc(K))
+            _ = bondy_hlc:update(HLC, bondy_oplog_event:key_hlc(K))
     end,
     %% Seed Seq similarly: if the MST has local-origin events, advance
     %% the Seq counter to dominate the highest seen.
@@ -2645,7 +2581,7 @@ init({InstanceId, Opts}) ->
         db = maps:get(db, Opts, undefined),
         %% NOTE the opt is `mst_retention`, NOT `retention` — the latter
         %% is the WAL's segment-retention proplist, forwarded verbatim to
-        %% `bondy_oplog_wal` (see `bondy_oplog_wal_manifest:new/3`).
+        %% `bondy_oplog_wal` (see `bondy_log_manifest:new/3`).
         retention = validate_retention(
             maps:get(mst_retention, Opts, undefined),
             maps:get(fused, Opts, false)
@@ -2670,58 +2606,25 @@ init({InstanceId, Opts}) ->
         InstanceId, validate_ae_targets(maps:get(ae_targets, Opts, []))
     ),
     ok = bondy_oplog_registry:set_ae_targets(InstanceId, AeTargets),
-    %% Restore the applied-frontier convergence oracle (`#{Origin => max Seq}`)
-    %% from the compaction checkpoint — the COMPACTED prefix's maxima (events
-    %% truncated from both the WAL and the MST, recoverable nowhere else).
-    %% The registry row exists (published above), which `merge_frontier/2`
-    %% requires.
-    %%
-    %% The UNCOMPACTED range (compaction watermark → durable root) is NOT
-    %% declared applied here. It used to be, by folding the live MST's
-    %% `cell_apply` keys straight into the frontier, and that was the defect:
-    %% the MST records RECEIPT, not materialisation — `install_event/5` is the
-    %% shared insert path for local and peer-received events alike, and
-    %% `bondy_oplog_applier:apply_batch/2` installs the whole verified batch
-    %% whatever the cell apply returned. So a cell whose bucket did not resolve
-    %% was counted as applied on every boot, which both over-claimed AND
-    %% disarmed the repair: `watermark_door/2` and `capped_truncation_point/2`
-    %% hold never-applied events from truncation, and they judge "never
-    %% applied" against this same frontier. Measured as user loss across a
-    %% rolling restart; pinned by
-    %% `bondy_oplog_frontier_fold_gap_test:across_a_restart/0` and proved in
-    %% `proofs/isabelle/Frontier_Writers.thy`
-    %% (`shipped_restart_overclaims`, `refold_restart_preserves_soundness`).
-    %%
-    %% That range is instead RE-PRESENTED to the fold, which is idempotent, and
-    %% the frontier follows from what actually materialises. `replay_anchor/1`
-    %% decides whether it has to be: it scans the live MST for a cell event
-    %% this restored frontier does not claim, and only then does the boot
-    %% replay re-fold. A replica that shut down with everything folded and
-    %% checkpointed finds nothing and boots as it always did. Recovery is
-    %% therefore only ever BEHIND the old claim, never ahead — the direction
-    %% that costs a re-fetch rather than a user
-    %% (`Frontier_Writers.refold_no_regression`).
+    %% Restore the applied-frontier oracle from the compaction checkpoint —
+    %% the COMPACTED prefix's maxima, recoverable nowhere else. The
+    %% UNCOMPACTED range is NOT declared applied: the MST records RECEIPT,
+    %% not materialisation, so folding its keys in would claim events no cell
+    %% applied, and the same frontier is what holds never-applied events back
+    %% from truncation, so the over-claim disarms the repair too. That range
+    %% is re-presented to the idempotent fold instead, leaving recovery only
+    %% ever BEHIND the old claim (`proofs/isabelle/Frontier_Writers.thy`).
     ok = restore_frontier(InstanceId, CachedCheckpoint),
     FrontierProvenance = checkpoint_provenance(CachedCheckpoint),
     ok = report_frontier_provenance(InstanceId, Origin, FrontierProvenance),
     %% Seed the per-origin seq counter — the MINTED quantity, not the applied
-    %% frontier. The live-MST seed above (`max_local_seq/2`) covers only what
-    %% compaction has not yet truncated, and in steady state the live MST
-    %% holds NO own-origin event (compaction empties it), so without a durable
-    %% seed every restart came back at 0 and re-minted dots every peer had
-    %% already applied — invisible to the frontier-gap oracle
-    %% (`proofs/tla/SeqSeed_Shipped.cfg`; pinned by
-    %% `bondy_oplog_seq_seed_restart_test`). The third source, the retained
-    %% WAL's maximum, arrives from the WAL writer (`seed_seq/2`) before the
-    %% writer publishes its pid. Runs BEFORE the fast path is published, so
-    %% no caller can reserve against the stale value.
-    %%
-    %% The checkpoint's dedicated `minted` slot is the durable source
-    %% (`minted_from_checkpoint/1`); the frontier's own-origin entry is kept
-    %% under `max` because a checkpoint written before that slot existed has
-    %% no minted value, and because an under-seed here is a dot collision.
-    %% The two are separate quantities answering separate questions — see
-    %% `minted_from_checkpoint/1`.
+    %% frontier; `minted_from_checkpoint/1` says why they must stay apart. In
+    %% steady state compaction empties the live MST of own-origin events, so
+    %% `max_local_seq/2` alone comes back at 0 and every restart re-mints dots
+    %% peers have already applied, invisible to the gap oracle
+    %% (`proofs/tla/SeqSeed_Shipped.cfg`, `bondy_oplog_seq_seed_restart_test`).
+    %% `max` composes the sources because a checkpoint predating the `minted`
+    %% slot has none; the WAL's maximum arrives later, via `wal_opened/3`.
     ok = maybe_bump_seq_atomic(
         SeqRef,
         max(
@@ -2729,13 +2632,12 @@ init({InstanceId, Opts}) ->
             maps:get(Origin, bondy_oplog_registry:frontier(InstanceId), 0)
         )
     ),
-    %% Publish the lock-free `append_fast` bundle iff the validator
-    %% advertises `is_stateless/0 -> true`. The bundle lets callers
-    %% build an event, hit the WAL gen_server directly, and stage
-    %% to the overlay without routing through this gen_server.
-    ok = bondy_oplog_registry:set_fast_path(
-        InstanceId, build_fast_path(State)
-    ),
+    %% The lock-free `append_fast` bundle is published by `wal_opened/3`,
+    %% after the WAL's retained maximum has been absorbed. Clear whatever a
+    %% previous incarnation left in the row: a bundle that outlived a
+    %% one_for_all restart would let a caller mint from the OLD atomics
+    %% against the NEW WAL before this incarnation has seeded.
+    ok = bondy_oplog_registry:set_fast_path(InstanceId, undefined),
     %% Publish the flow-control handle. The applier reads this once
     %% at its own `init/1` (or lazily on first drain) and gates its
     %% `install_local_batch` dispatch on the cap. The instance owns
@@ -2767,7 +2669,7 @@ init({InstanceId, Opts}) ->
     {ok, State1#state{heap_monitor = HeapMonitor}}.
 
 %% @private
-%% Ephemeral fused-writer setup (fused-writer rollout, Step 3). For a
+%% Ephemeral fused-writer setup. For a
 %% fused instance, build the cell-apply ctx now (the bondy_oplog_core_registry
 %% entry is registered before this instance starts) and schedule the
 %% deferred WAL-reader open (`handle_info(fused_init)`) — the WAL sibling
@@ -2790,7 +2692,7 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
         cell_apply_source = bondy_oplog_applier:build_cell_apply_source(
             State#state.instance_id, CellCtx, ApplierOpts
         ),
-        consumer_offset = bondy_oplog_wal_state:new_consumer_offset(),
+        consumer_offset = bondy_log_state:new_consumer_offset(),
         commit_every = maps:get(commit_every, ApplierOpts, ?FUSED_COMMIT_EVERY),
         apply_batch_max = maps:get(
             apply_batch_max_events, ApplierOpts, ?FUSED_APPLY_BATCH_MAX
@@ -2813,16 +2715,12 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
             end
     },
     self() ! fused_init,
-    %% Boot re-fold. A fused instance has no applier, so nothing else would
-    %% re-present the live MST (compaction watermark → durable root) to the
-    %% projection: its WAL drain resumes PAST the durable root. The applier's
-    %% equivalent is the `replay_cell_events` cast in
-    %% `bondy_oplog_applier:do_init_2/9`; `last_replayed_root = undefined`
-    %% above makes this first replay a full fold. Without it the frontier
-    %% would stay behind that range for as long as no peer delivered
-    %% anything, and `capped_truncation_point/2` would refuse to compact.
-    %% `fused_replay_cell_events/1` reads `State#state.mst` directly, so it
-    %% does not wait on the deferred WAL reader.
+    %% Boot re-fold. A fused instance has no applier, so nothing else
+    %% re-presents the live MST (compaction watermark → durable root) to the
+    %% projection — its WAL drain resumes PAST the durable root. Without it the
+    %% frontier stays behind that range until a peer delivers something, and
+    %% `capped_truncation_point/2` refuses to compact. `last_replayed_root =
+    %% undefined` above makes this first replay a full fold.
     self() ! fused_replay,
     State#state{fused_drain = FD}.
 
@@ -2884,14 +2782,11 @@ handle_call(Req, From, State0) ->
     maybe_hibernate_after(Req, Result).
 
 %% @private
-%% Hibernate after the heap-heavy anti-entropy handlers. They build large
-%% transient terms — the `missing_set` hash set, the `get_pages` page map, the
-%% `merge`/`replay_pairs` working set — on this long-lived process, and the heap
-%% does not shrink back on its own, so across AAE rounds it accumulates (a major
-%% driver of BEAM memory on a cluster doing nothing but periodic AAE). Hibernate
-%% forces a fullsweep GC and minimises the process after the reply, returning the
-%% heap to its live size; the wake cost on the next message is negligible at
-%% AAE's tick rate. Non-AAE replies (the hot write/read path) are untouched.
+%% Hibernate after the heap-heavy anti-entropy handlers: they build large
+%% transient terms on this long-lived process and the heap does not shrink back
+%% on its own, so it accumulates across AAE rounds. Hibernate forces a fullsweep
+%% GC after the reply; at AAE's tick rate the wake cost is negligible. Non-AAE
+%% replies (the hot write/read path) are untouched.
 maybe_hibernate_after(Req, {reply, Reply, State}) ->
     case heap_heavy_aae(Req) of
         true -> {reply, Reply, State, hibernate};
@@ -2902,28 +2797,16 @@ maybe_hibernate_after(_Req, Result) ->
 
 %% @private
 %% Buckets "missing" page hashes by their ACTUAL state in the store, which is
-%% what names the layer at fault:
+%% what names the layer at fault: `tombstoned` — the row is intact but `free/3`
+%% marked it, so a walk that called it missing has a read-path fault; `absent` —
+%% the row is gone, a store-layer fault; `live` — the miss was transient;
+%% `unknown` — the backend cannot say.
 %%
-%%   - `tombstoned` — the row is intact but `free/3` marked it. The bytes are
-%%     still readable, so a walk that called the page missing did not learn
-%%     that from the store: a read-path/masking fault.
-%%   - `absent`     — the row is gone. Something DELETED a page a live root
-%%     references: a store-layer fault.
-%%   - `live`       — present and unmarked; the miss was transient, observed
-%%     before a concurrent insert became visible.
-%%   - `unknown`    — the backend cannot say.
-%%
-%% Every backend answers through the optional `page_state/2` callback; the two
-%% that back production shards (`bondy_mst_ets_store`, `bondy_mst_pack_store`)
-%% both implement it, and anything that does not is reported honestly as
-%% `unknown` rather than guessed at.
-%%
-%% Do NOT reintroduce a store-type test here that defaults some backend to
-%% `absent`. That was the original shape — a pack-store-only probe with an
-%% `{[], Hashes}` fallthrough — and because the ephemeral ETS store `free/3`
-%% tombstones rather than deleting, it reported every missing page on a
-%% `registry/*` shard as `absent`, making the field that is supposed to
-%% identify the faulting layer a mere restatement of `missing`.
+%% Every backend answers through the optional `page_state/2` callback, and one
+%% that does not implement it is reported as `unknown` rather than guessed at.
+%% Do NOT reintroduce a store-type test that defaults some backend to `absent`:
+%% the ephemeral ETS store's `free/3` tombstones rather than deleting, so that
+%% makes the field a restatement of `missing` on every `registry/*` shard.
 classify_missing_pages(MST, Hashes) ->
     Store = bondy_mst:store(MST),
     lists:foldl(
@@ -2959,15 +2842,11 @@ heap_heavy_aae(mst_last) -> true;
 heap_heavy_aae(_) -> false.
 
 %% @private
-%% Publishes the registry row when the handle_call clause changed any
-%% field exposed to lock-free readers. We compare only the
-%% *published* subset (see `published_fingerprint/1`) because state
-%% fields that no reader sees — e.g. the in-process overlay counters
-%% maintained by `stage_to_overlay/3` and `evict_overlay_batch/3` —
-%% would otherwise force a registry write on every append. Under
-%% mixed read/write load that turned a 4 k/s writer into a
-%% bottleneck on the registry row's per-key lock bucket and dragged
-%% writer throughput by ~7×.
+%% Publishes the registry row when the handle_call clause changed any field
+%% exposed to lock-free readers. Only the *published* subset
+%% (`published_fingerprint/1`) is compared: state fields no reader sees — the
+%% in-process overlay counters — would otherwise force a registry write on every
+%% append and make the row's per-key lock bucket the writer bottleneck.
 maybe_publish(State0, {reply, _, State1}) ->
     maybe_publish_diff(State0, State1);
 maybe_publish(State0, {noreply, State1}) ->
@@ -3114,24 +2993,14 @@ do_handle_call(
         end,
     {reply, Reply, State};
 do_handle_call(drain_install_queue, _From, State0) ->
-    %% Synchronisation barrier for the applier's commit boundary.
-    %% Calls jump past casts in the mailbox order, so by the time
-    %% this call is processed, every prior `install_local_batch`
-    %% cast has been handled. The reply itself carries no payload.
-    %%
-    %% This is also the MST root durability barrier. Every install_local_batch
-    %% merged its events into the MST and staged the new root in memory
-    %% (`bondy_mst_pack_writer:set_root/2` only rewrites the manifest lazily);
-    %% by flushing here we advance the on-disk root in lockstep with the WAL
-    %% `consumer.offset` commit_now/1 is about to write. That bounds crash
-    %% replay to one commit window — without it the on-disk root lags the
-    %% debounce, `resume_position/2` reads a stale root and replays the whole
-    %% WAL, and the compaction watermark never advances so the WAL never
-    %% truncates. No-op for ephemeral (ets/map) backends.
-    %%
-    %% With `seal_mode => async` this is also where the instance rolls the
-    %% incoming pack aside and spawns the seal worker — the durable root is
-    %% now flushed, so the rolled pages are durable before the seal commits.
+    %% Barrier for the applier's commit boundary — calls jump past casts, so
+    %% every prior `install_local_batch` cast is handled by the time this one
+    %% is — and the MST root durability barrier. Each install staged the new
+    %% root in memory only; flushing here advances the on-disk root in
+    %% lockstep with the WAL `consumer.offset` commit, bounding crash replay
+    %% to one commit window. Without it the resume reads a stale root and
+    %% replays the whole WAL, and the watermark never advances. The seal runs
+    %% after the flush, so rolled pages are durable before an async seal.
     State = maybe_drive_seal(flush_mst_root(State0)),
     {reply, ok, State};
 do_handle_call(await_overlay_drained, From, State) ->
@@ -3155,16 +3024,12 @@ do_handle_call(
     #state{validator_module = Mod, validator_state = VS, instance_id = Id} =
         State
 ) ->
-    %% Fused-mode remote entry (Step 4): the analog of the applier's
-    %% `{enqueue_remote, Event}` handler, run in the instance because a
-    %% fused instance has no applier. Spawn-and-reply: free the instance
-    %% mailbox immediately so the WAL drain (`handle_info(fused_drain, _)`)
-    %% and other remote events interleave. The worker captures the
-    %% read-only validator snapshot + this instance's pid + the caller's
-    %% `From`, verifies, forwards verified events back to THIS instance for
-    %% origin-ban / backpressure / watermark / install (the existing
-    %% `{install_remote, Event}` clause), and replies on the instance's
-    %% behalf. The outer try/catch guarantees the `infinity` caller never
+    %% A fused instance has no applier, so the peer-event entry point runs here.
+    %% Spawn-and-reply frees the instance mailbox immediately so the WAL drain
+    %% and other remote events interleave: the worker captures the read-only
+    %% validator snapshot, verifies, forwards verified events back to this
+    %% instance for origin-ban / backpressure / watermark / install, and replies
+    %% on its behalf. The outer try/catch guarantees the `infinity` caller never
     %% hangs.
     InstancePid = self(),
     _ = spawn(fun() ->
@@ -3336,27 +3201,18 @@ do_handle_call(
     Result = fold_range_merged(MST, From, To, OverlayQueue, Fun, Acc0),
     {reply, Result, State};
 do_handle_call({truncate_prefix, Watermark}, _From, #state{mst = MST0} = State) ->
-    %% Operator-driven prefix removal: structurally drop every key
-    %% `=< Watermark` via `bondy_mst:truncate/2` (an O(log N) left-spine
-    %% rewrite), counting the removed events first for `live_size`
-    %% bookkeeping.
-    %%
-    %% Also advances `state.watermark` so the receive-side filter in
-    %% `do_append_remote/2` rejects re-shipped peer events with
-    %% HLC ≤ Watermark (already applied here — the live door only
-    %% accepts at-or-below-watermark events the applied VV does NOT
-    %% witness). Without this, peers that have not yet seen the
-    %% truncate would keep re-shipping the events we just dropped,
-    %% defeating the purpose of the call. No snapshot is written at the new
-    %% watermark — operator-driven truncate is documented as lossy for
-    %% bootstrap consumers (see `bondy_oplog:truncate_prefix/2`). The
-    %% watermark advance is monotone: a Watermark lower than the
-    %% current `state.watermark` is ignored so compaction-set values
-    %% are never regressed.
+    %% Operator-driven prefix removal: `bondy_mst:truncate/2` drops every key
+    %% `=< Watermark` in an O(log N) left-spine rewrite, the removed events
+    %% counted first for `live_size` bookkeeping. `state.watermark` advances
+    %% too, so the receive-side filter rejects re-shipped peer events at or
+    %% below it — without that, peers that have not seen the truncate keep
+    %% re-shipping what was just dropped. The advance is monotone, so a lower
+    %% Watermark cannot regress a compaction-set value. No snapshot is written:
+    %% operator truncate is documented lossy for bootstrap consumers.
     Removed = count_in_open_range(MST0, undefined, Watermark),
     MST1 = bondy_mst:truncate(MST0, Watermark),
     NewWatermark = advance_watermark(State#state.watermark, Watermark),
-    _ = bondy_oplog_hlc:update(
+    _ = bondy_hlc:update(
         State#state.hlc, bondy_oplog_event:key_hlc(Watermark)
     ),
     {reply, Removed, State#state{
@@ -3439,15 +3295,12 @@ do_handle_call(
     _From,
     #state{mst = MST0} = State000
 ) ->
-    %% ATOMIC pre-condition re-check: the session verified
-    %% `missing_set == []` one call earlier, but this instance's own
-    %% compaction (its ETS page GC sweeps everything unreachable from
-    %% the CURRENT root — which pulled-but-unmerged peer pages are) can
-    %% interleave between that check and this handler. Re-checking HERE
-    %% is race-free — the GC only runs in this process — and a missing
-    %% page must fail the call: `bondy_mst:merge/3` silently treats an
-    %% unresolvable subtree as empty, which loses every event under it
-    %% while the session records the round as complete.
+    %% ATOMIC pre-condition re-check: the session verified `missing_set == []`
+    %% one call earlier, and this instance's own compaction can sweep a
+    %% pulled-but-unmerged peer page in between. Re-checking HERE is race-free
+    %% (the GC only runs in this process) and a missing page must fail the call
+    %% — `bondy_mst:merge/3` silently treats an unresolvable subtree as empty,
+    %% losing every event under it while the session records the round complete.
     case bondy_mst:missing_set(MST0, PeerRoot) of
         [] ->
             do_integrate_peer_root(PeerRoot, State000);
@@ -3494,9 +3347,15 @@ do_handle_call(persist_frontier, _From, State) ->
         State#state.frontier_provenance
     ),
     {reply, Reply, State};
-do_handle_call({seed_seq, MaxSeq}, _From, State) ->
-    ok = maybe_bump_seq_atomic(State#state.seq, MaxSeq),
-    {reply, ok, State};
+do_handle_call({wal_opened, WalPid, MaxSeq}, _From, State0) ->
+    %% Order matters — see `wal_opened/3`: the bump lands before either
+    %% minting path can see the WAL.
+    ok = maybe_bump_seq_atomic(State0#state.seq, MaxSeq),
+    State1 = cache_wal_pid(invalidate_wal_pid(State0), WalPid),
+    ok = bondy_oplog_registry:set_fast_path(
+        State1#state.instance_id, build_fast_path(State1)
+    ),
+    {reply, ok, State1};
 do_handle_call(replay_anchor, _From, State) ->
     {reply, compute_replay_anchor(State), State};
 do_handle_call(reclamation_stability_point, _From, State) ->
@@ -3514,7 +3373,7 @@ do_handle_call({persist_frontier, AbsorbHlc}, From, State) when
     %% absorption is safe — `update/2` only ever advances the clock.
     _ =
         AbsorbHlc > 0 andalso
-            bondy_oplog_hlc:update(State#state.hlc, AbsorbHlc),
+            bondy_hlc:update(State#state.hlc, AbsorbHlc),
     do_handle_call(persist_frontier, From, State);
 do_handle_call(
     {cell_context, _Bucket, _Key},
@@ -3639,16 +3498,13 @@ do_handle_call(
         fused_drain = #fused_drain{cell_apply_source = Source}
     } = State
 ) ->
-    %% Mirrors `bondy_oplog_applier`'s `rederive_projection` handler — the
-    %% full re-apply of every retained MST event, restoring a cell that a
-    %% `replace`-mode catalogue install clobbered on a live re-bootstrap
-    %% (the peer's higher-HLC cell can omit ops the peer had not applied
-    %% when its snapshot was cut). Re-delivering an op a cell already
-    %% holds is idempotent (the kernel's per-origin causal metadata
-    %% rejects it); a missing op integrates — the op-based replacement
-    %% for CvRDT `merge_states`, same as the applier path. Runs in the
-    %% gen_server, serialized with the fused drain, and the MST fold is
-    %% already in-process (no separate applier to delegate to).
+    %% Full re-apply of every retained MST event, restoring a cell that a
+    %% `replace`-mode catalogue install clobbered on a live re-bootstrap (the
+    %% peer's higher-HLC cell can omit ops the peer had not applied when its
+    %% snapshot was cut). Re-delivering an op a cell already holds is idempotent
+    %% — the kernel's per-origin causal metadata rejects it — and a missing op
+    %% integrates; this is the op-based replacement for CvRDT `merge_states`.
+    %% Runs in the gen_server, serialized with the fused drain.
     Pairs =
         case MST of
             undefined -> [];
@@ -3729,32 +3585,11 @@ do_handle_call(_Req, _From, State) ->
     {reply, {error, badcall}, State}.
 
 handle_cast({install_local_batch, Events}, State0) ->
-    %% Sole dispatch path for local-event MST installs. The applier
-    %% verifies signatures in its own process and casts the surviving
-    %% events here. We fold `install_event` over them in WAL order,
-    %% publish once at the end (one ETS write per batch), then
-    %% HLC-conditionally evict the matching overlay rows. MST publish
-    %% strictly precedes overlay evict so a reader missing the
-    %% overlay row finds the entry in the MST instead.
-    %%
-    %% Instance-side install coalescing. When the applier outruns
-    %% the instance, several `install_local_batch` casts queue in the
-    %% mailbox while we are mid-`put_batch`. We drain the queued ones
-    %% (up to `install_coalesce_max`) and merge every cast's events into
-    %% a SINGLE `put_batch` + publish + overlay-evict, amortising the
-    %% O(log n) spine rebuild — the dominant per-event durable cost
-    %% (A0b) — over many casts' worth of events.
-    %%
-    %% The drain matches only `install_local_batch` casts and preserves
-    %% their FIFO (= WAL = HLC) order. It may skip past queued peer
-    %% `install_remote` / `drain_install_queue` / `await_overlay_drained`
-    %% *calls*; this is convergence-safe: local and peer events have
-    %% disjoint MST keys (different origin) and disjoint per-origin
-    %% watermarks, so a reordered local-ahead-of-peer install yields the
-    %% same final MST (merge is commutative/idempotent); overlay evict is
-    %% per-event HLC-conditional (order-independent); and the local
-    %% applier blocks on `drain_install_queue`, so no install cast is
-    %% ever queued behind that barrier (the barrier cannot be skipped).
+    %% Sole dispatch path for local-event MST installs. Events are folded in
+    %% WAL order, published once per batch, then the matching overlay rows are
+    %% evicted HLC-conditionally. MST publish strictly precedes overlay evict,
+    %% so a reader that misses the overlay row finds the entry in the MST. The
+    %% module doc carries why coalescing queued casts is convergence-safe.
     {EventsRev, NCasts} = drain_install_casts(
         [Events], 1, State0#state.install_coalesce_max
     ),
@@ -3797,11 +3632,12 @@ handle_info(
     #state{wal_pid_monitor = Ref} = State
 ) ->
     %% Cached WAL pid has gone down (one_for_all restart); drop the
-    %% cache so the next append re-resolves the new pid via the
-    %% registry.
+    %% cache. Appends answer `wal_unavailable` until the restarted
+    %% subtree's `wal_opened/3` — which reaches a NEW instance, since the
+    %% one_for_all strategy restarts this process along with the WAL.
     {noreply, State#state{wal_pid = undefined, wal_pid_monitor = undefined}};
 handle_info(fused_init, State) ->
-    %% Deferred fused-drain WAL-reader open (Step 3). Retries until the
+    %% Deferred fused-drain WAL-reader open. Retries until the
     %% WAL sibling has published its pid.
     {noreply, fused_open_reader(State)};
 handle_info(fused_replay, State) ->
@@ -3889,21 +3725,16 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 %% =============================================================================
-%% EPHEMERAL FUSED WRITER (fused-writer rollout, Step 3)
+%% EPHEMERAL FUSED WRITER
 %% =============================================================================
-%% A fused instance owns BOTH single-writer resources (MST + projection) in
-%% this one process, eliminating the applier↔instance install round-trip
-%% (H1) that caps single-shard ephemeral throughput. It drains its own WAL,
-%% verifies, writes the projection via `bondy_oplog_cell_apply`, and installs
-%% into the MST inline (no cast). The drain reuses the applier's STATE-FREE
-%% leaves (`collect_frames/2`, `resume_position/2`, `resolve_cell_apply_ctx/1`)
-%% so the durable applier hot loop stays byte-identical. Verify/serving stay
-%% concurrent (idle waiter offloaded; reads lock-free off the registry).
-%%
-%% Scope of this step: the LOCAL drain path (the H1 removal). Cross-node
-%% remote convergence (peer-merge → projection replay) + AE-target freshness
-%% bumping are wired in Step 4; until then a fused instance is single-node.
-%% Started ONLY when `#state.fused` (the supervisor omits the applier then).
+%% A fused instance owns BOTH single-writer resources (MST + projection) in one
+%% process, eliminating the applier<->instance install round-trip that caps
+%% single-shard ephemeral throughput. It drains its own WAL, verifies, writes
+%% the projection via `bondy_oplog_cell_apply`, and installs into the MST inline
+%% (no cast). The drain reuses the applier's state-free leaves
+%% (`collect_frames/2`, `resume_position/2`, `resolve_cell_apply_ctx/1`) so the
+%% durable applier hot loop stays byte-identical. Started ONLY when
+%% `#state.fused` — the supervisor omits the applier then.
 
 %% @private
 %% Deferred WAL-reader open: the WAL sibling publishes its pid only after
@@ -3977,20 +3808,16 @@ run_fused_drain(State0) ->
     end.
 
 %% @private
-%% Caught up: decide whether the drain stopped at the genuine end of the log
-%% (park on the WAL durable position — near-zero idle CPU) or at an in-flight
-%% mem-WAL `Seq` gap (a concurrent lock-free append reserved a later Seq and
-%% inserted it first). A gap fills in microseconds, so short-retry rather than
-%% park. After `?FUSED_MAX_GAP_RETRIES` the gap is treated as unrecoverable and
-%% the instance STOPS for a supervised restart + reopen recovery. It does NOT
-%% skip the Seq: skipping would advance the reader cursor past a reservation
-%% whose write, if the reserving process was merely slow (not dead), lands
-%% behind the cursor and is never installed — a silent drop of an acknowledged,
-%% local-origin write that anti-entropy cannot recover (this node is the
-%% origin). Stopping surfaces the fault loudly and lets the one_for_all subtree
-%% re-open cleanly. Returns `State` to continue draining, or
-%% `{stop, Reason, State}` to terminate. The disk backend has no gaps (its
-%% producer inserts serially), so it always parks.
+%% Caught up: park on the WAL durable position (near-zero idle CPU) at the
+%% genuine end of the log, or short-retry at an in-flight mem-WAL `Seq` gap — a
+%% concurrent lock-free append reserved a later Seq and inserted it first, and
+%% such gaps fill in microseconds. After `?FUSED_MAX_GAP_RETRIES` the instance
+%% STOPS for a supervised restart rather than skipping the Seq: skipping
+%% advances the cursor past a reservation whose write, if the reserving process
+%% was merely slow rather than dead, lands behind it and is never installed — a
+%% silent drop of an acknowledged local-origin write that anti-entropy cannot
+%% recover, this node being the origin. The disk backend's producer inserts
+%% serially, so it always parks.
 fused_park_or_retry(#state{fused_drain = FD} = State) ->
     case fused_mem_gap(FD) of
         no_gap ->
@@ -4191,7 +4018,7 @@ fused_batch_summary(Batch) ->
 
 %% @private
 %% Mem WAL: positions are dense `Seq`s, not byte offsets, so the disk-centric
-%% `bondy_oplog_wal_state` consumer-offset (which guards `Off >= header bytes`
+%% `bondy_log_state` consumer-offset (which guards `Off >= header bytes`
 %% and persists to disk) does not apply. There is nothing to resume from on a
 %% fresh BEAM (re-sync from peers), so we only track the uncommitted count for
 %% the AE-freshness commit cadence.
@@ -4210,10 +4037,10 @@ fused_bump_offset(
     LastHlc,
     Count
 ) ->
-    CO1 = bondy_oplog_wal_state:with_position(CO0, Seg, Off),
-    CO2 = bondy_oplog_wal_state:with_hlc(CO1, LastHlc),
-    Old = bondy_oplog_wal_state:commit_count(CO2),
-    CO3 = bondy_oplog_wal_state:with_commit_count(CO2, Old + 1),
+    CO1 = bondy_log_state:with_position(CO0, Seg, Off),
+    CO2 = bondy_log_state:with_key(CO1, LastHlc),
+    Old = bondy_log_state:commit_count(CO2),
+    CO3 = bondy_log_state:with_commit_count(CO2, Old + 1),
     FD#fused_drain{consumer_offset = CO3, uncommitted = U + Count}.
 
 %% @private
@@ -4248,7 +4075,7 @@ fused_commit_now(
 fused_commit_now(#state{fused_drain = FD} = State0) ->
     case ensure_wal_pid(State0) of
         {ok, WalPid, State1} ->
-            Seg = bondy_oplog_wal_state:committed_segment(
+            Seg = bondy_log_state:committed_segment(
                 FD#fused_drain.consumer_offset
             ),
             _ =
@@ -4259,7 +4086,7 @@ fused_commit_now(#state{fused_drain = FD} = State0) ->
                 end,
             %% AE-freshness: mirror the applier's `commit_now` so
             %% secondary-index reads on the target shards see the fused
-            %% writer's committed progress (Step 4).
+            %% writer's committed progress.
             ok = fused_bump_ae_targets(FD#fused_drain.ae_targets),
             State1#state{fused_drain = FD#fused_drain{uncommitted = 0}};
         {error, _} ->
@@ -4310,19 +4137,19 @@ fused_cancel_idle_waiter(State) ->
     State.
 
 %% @private
-%% WAL READER dispatch (task #50, ephemeral ETS WAL). Only the reader differs
+%% WAL READER dispatch (ephemeral ETS WAL). Only the reader differs
 %% between the disk and in-memory WAL backends; the producer + `await_durable`
 %% + `set_committed_segment` protocol is shared. These three helpers are the
-%% whole dispatch surface — `bondy_oplog_wal`, `bondy_oplog_wal_reader` and
+%% whole dispatch surface — `bondy_oplog_wal`, `bondy_log_reader` and
 %% `bondy_oplog_applier` are untouched.
 fused_reader_mod(mem) -> bondy_oplog_wal_mem_reader;
-fused_reader_mod(disk) -> bondy_oplog_wal_reader.
+fused_reader_mod(disk) -> bondy_log_reader.
 
 %% @private
 fused_reader_position(mem, Iter) ->
     bondy_oplog_wal_mem_reader:position(Iter);
 fused_reader_position(disk, Iter) ->
-    bondy_oplog_wal_reader:position(Iter).
+    bondy_log_reader:position(Iter).
 
 %% @private
 %% Disk reuses the applier's state-free `collect_frames/2` verbatim. Mem uses a
@@ -4380,17 +4207,15 @@ fused_mem_gc(#state{instance_id = Id}, #fused_drain{iter = Iter}) ->
     end.
 
 %% @private
-%% The REMOTE-path analog of `bondy_oplog_applier:do_replay_cell_events/1`,
-%% run INLINE in the fused instance after a peer merge
-%% (`integrate_peer_root`). A fused instance has no applier, so it folds the
-%% peer-merged events into the projection itself: diff the live MST from the
-%% replay cursor and apply the resulting cell pairs. The cursor advances so
-%% the next replay stays incremental; compaction re-anchors it on the
-%% post-truncate root (`finalize_catalogue_compaction`). Uses the in-process
-%% `State#state.mst` directly (the merged tree), not the registry, so it is
-%% correct before `maybe_publish/2` runs. Local events caught in the diff
-%% were already folded by the WAL drain; re-folding them is idempotent (the
-%% CRDT contract), exactly as in the applier.
+%% The REMOTE-path replay, run INLINE in the fused instance after a peer merge
+%% (`integrate_peer_root`): with no applier, it folds the peer-merged events
+%% into the projection itself — diff the live MST from the replay cursor and
+%% apply the resulting cell pairs. The cursor advances so the next replay stays
+%% incremental; compaction re-anchors it on the post-truncate root
+%% (`finalize_catalogue_compaction`). Reads `State#state.mst` directly, not the
+%% registry, so it is correct before `maybe_publish/2` runs. Local events caught
+%% in the diff were already folded by the WAL drain; re-folding them is
+%% idempotent by the CRDT contract.
 fused_replay_cell_events(#state{fused_drain = undefined} = State) ->
     State;
 fused_replay_cell_events(
@@ -4437,24 +4262,8 @@ fused_replay_cell_events(
 %% gen_server reply tuple.
 do_integrate_peer_root(PeerRoot, #state{mst = MST0} = State) ->
     MST1 = bondy_mst:merge(MST0, MST0, PeerRoot),
-    %% Watermark filter — THE WATERMARK DOOR: if our compaction has
-    %% advanced past some of the events in PeerRoot's tree, re-truncate
-    %% to drop them. The door's premise — "at or below the watermark ⇒
-    %% already folded here" — is FALSE for a peer event this replica
-    %% never saw: the peer-confirmed frontier and in-flight events race
-    %% by design under concurrent writes, so a just-minted peer event
-    %% can arrive after the watermark passed its key. Discarding it
-    %% unapplied is silent, permanent, per-replica data loss — the
-    %% completed round's `confirm_root` (a page-holding claim) lets the
-    %% origin compact the event away, and the applied VV max-merges
-    %% past the hole on the next same-origin apply (the VV is a max,
-    %% not a prefix witness), so no oracle ever flags it. Proven live
-    %% at defaults by the compaction cluster suite's forensics.
-    %% `watermark_door/2` therefore NEVER truncates a never-applied
-    %% event: fused instances fold it into the projection inline first;
-    %% applier-backed instances hold it below the watermark for the
-    %% applier's replay (the catalogue truncation site holds them the
-    %% same way — `capped_truncation_point/2`).
+    %% Watermark filter — see `watermark_door/2`, which never truncates a
+    %% never-applied event.
     MST2 = watermark_door(State, MST1),
     %% HLC update: events received via merge may carry HLCs higher than
     %% our local clock. Advance the HLC to dominate the merged tree's
@@ -4464,21 +4273,15 @@ do_integrate_peer_root(PeerRoot, #state{mst = MST0} = State) ->
         undefined ->
             ok;
         {LastKey, _V} ->
-            _ = bondy_oplog_hlc:update(
+            _ = bondy_hlc:update(
                 State#state.hlc, bondy_oplog_event:key_hlc(LastKey)
             )
     end,
-    %% Re-seed `max_local_installed_seq` from the merged tree. A sync
-    %% can echo our own local events back to us (peer pulled them
-    %% from us earlier, then we pull our originated pages back in via
-    %% `pull_until_complete` → `integrate_peer_root`). When the
-    %% applier later dispatches those same WAL entries to
-    %% `install_local_batch`, the `is_fast_install` predicate uses
-    %% this watermark to decide between the fast install (blindly
-    %% bumps `live_size`) and the slow safe install (checks the MST
-    %% first). Without this refresh, the fast path double-bumps
-    %% `live_size` for the echoed event — visible to `size/1` as an
-    %% off-by-N overcount.
+    %% Re-seed `max_local_installed_seq` from the merged tree: a sync can echo
+    %% our own events back to us, and when the applier later dispatches those
+    %% same WAL entries the `is_fast_install` predicate would take the fast path
+    %% and double-bump `live_size` — visible to `size/1` as an off-by-N
+    %% overcount.
     MaxLocalSeq =
         case max_local_seq(MST2, State#state.origin) of
             undefined -> State#state.max_local_installed_seq;
@@ -4501,33 +4304,26 @@ do_integrate_peer_root(PeerRoot, #state{mst = MST0} = State) ->
     {reply, ok, deliver_remote(State1)}.
 
 %% @private
-%% The remote DELIVERY POINT, shared by `do_integrate_peer_root/2`
-%% (page sync) and `append_remote_install/3` (live single events) —
-%% the only two paths by which remote-origin events enter an
-%% instance's MST post-live (catalogue bootstrap installs cells
-%% pre-live, before any context is served). Called strictly AFTER the
-%% MST root advance (program order within the calling handler).
+%% The remote DELIVERY POINT, shared by `do_integrate_peer_root/2` (page sync)
+%% and `append_remote_install/3` (live single events) — the only two paths by
+%% which remote-origin events enter an instance's MST post-live. Called strictly
+%% AFTER the MST root advance.
 %%
-%% - Fused (no applier): fold the new events into the projection
-%%   INLINE, in this process. The projection is current on return.
-%%   Reads see the values as soon as the calling handler returns (the
-%%   advanced MST is auto-published by `maybe_publish/2`).
-%% - Durable / non-fused: ask the applier to re-fold the projection
-%%   (a best-effort cast; the I1 fence below and the next sync tick
-%%   re-arm it if the applier was busy). Until the applier folds them,
-%%   the events are never-applied by the applied VV and every truncation
-%%   site holds them (`watermark_door/2`, `capped_truncation_point/2`).
+%% - Fused (no applier): fold the new events into the projection INLINE, in this
+%%   process; the projection is current on return.
+%% - Durable / non-fused: ask the applier to re-fold (a best-effort cast; the
+%%   fence below and the next sync tick re-arm it). No-op without a
+%%   `cell_apply_target`. Until the applier folds them the events are
+%%   never-applied by the applied VV and every truncation site holds them
+%%   (`watermark_door/2`, `capped_truncation_point/2`).
 %%
-%%   I1 (prepare-after-deliver): the shared remote-delivery
-%%   generation bump makes this the fence's delivery point — the
-%%   applier's prepare fence (`{cell_context, _, _}`) compares this
-%%   generation against the one it last replayed to, so a context
-%%   read ordered after the calling handler's completion either finds
-%%   the generation advanced (and replays before serving) or the cast
-%%   below already folded the events. A context read that races AHEAD
-%%   of this bump is, by definition, prepared before these events
-%%   were delivered — I1 holds vacuously for it. Both MST entry paths
-%%   route here, so this single bump site is exhaustive.
+%% I1 (prepare-after-deliver): the generation bump here is the fence's delivery
+%% point — the applier's prepare fence compares this generation against the one
+%% it last replayed to, so a context read ordered after the calling handler
+%% either finds it advanced (and replays before serving) or the cast below
+%% already folded the events. A read racing AHEAD of the bump is by definition
+%% prepared before these events were delivered, so I1 holds vacuously for it.
+%% Both MST entry paths route here, so this bump site is exhaustive.
 deliver_remote(#state{} = State) ->
     case State#state.fused of
         true ->
@@ -4546,9 +4342,8 @@ deliver_remote(#state{} = State) ->
     end.
 
 %% @private
-%% THE WATERMARK DOOR (see `do_integrate_peer_root/2` for the full
-%% rationale). Truncates the merged tree at or below the watermark
-%% WITHOUT ever dropping a never-applied event:
+%% THE WATERMARK DOOR. Truncates the merged tree at or below the watermark
+%% WITHOUT ever dropping a never-applied event.
 %%
 %% - No watermark, or no never-applied events at or below it → plain
 %%   truncate (the pre-existing behaviour; already-applied events at or
@@ -4621,15 +4416,13 @@ applied_witness(Id) ->
     {applied_vv(Id), Retired}.
 
 %% @private
-%% The door's predicate: an event the projection will still fold — its
-%% `{Origin, Seq}` exceeds the applied VV and its origin is not retired.
-%% The VV half is exact because the projection folds each origin as a
-%% contiguous prefix (`bondy_oplog_cell_apply:partition_contiguous/4`'s
-%% hold), so the per-origin maximum bounds every applied seq from above.
-%% A retired origin's events are dropped by the applier before any fold
-%% (`bondy_oplog_cell_apply:drop_retired/2`) and never raise the VV, so
-%% without the exemption they would be held — and block the compaction
-%% cap — forever.
+%% The door's predicate: an event the projection will still fold — its `{Origin,
+%% Seq}` exceeds the applied VV and its origin is not retired. The VV half is
+%% exact because the projection folds each origin as a contiguous prefix
+%% (`bondy_oplog_cell_apply:partition_contiguous/4`), so the per-origin maximum
+%% bounds every applied seq from above. A retired origin's events are dropped
+%% before any fold and never raise the VV, so without the exemption they would
+%% be held — and block the compaction cap — forever.
 never_applied(K, {VV, Retired}) ->
     Origin = bondy_oplog_event:key_origin(K),
     not is_map_key(Origin, Retired) andalso
@@ -4661,23 +4454,19 @@ first_never_applied_at_or_below(Id, MST, Bound) ->
     end.
 
 %% @private
-%% THE COMPACTION CAP — the watermark door's rule applied at the catalogue
-%% truncation site. A never-applied event at or below the requested
-%% frontier (one the door held for the applier's replay, or one the applier
-%% has not reached yet) must not be truncated: truncating it drops its op
-%% from the projection forever, since nothing replays a key the tree no
-%% longer holds. Returns the truncation point actually allowed: `Frontier`
-%% when nothing at or below it is un-applied, otherwise the largest tree
-%% key strictly below the first un-applied one — or `undefined` when there
-%% is none, or when it sits below the current watermark (the watermark and
-%% its checkpoint are monotone; a held key at or below the watermark leaves
-%% the already-compacted history under it to the door's next pass and the
-%% applier's replay, exactly as the door itself does). `proofs/tla/
-%% ConfirmedCompaction_RootVV2_AsyncSweep_NoCap.cfg` is the 7-step drop
-%% without this cap (`NoDrop`); `_RootVV2_AsyncSweep.cfg` and
-%% `proofs/isabelle/Confirmed_Compaction.thy` (`no_drop`) are the cap.
-%% Pinned by `bondy_oplog_compaction_fused_test:
-%% compaction_holds_doored_event_until_applied_*`.
+%% THE COMPACTION CAP — `watermark_door/2`'s rule at the catalogue truncation
+%% site. A never-applied event at or below the requested frontier must not be
+%% truncated: nothing replays a key the tree no longer holds, so truncating it
+%% drops its op from the projection forever. Returns `Frontier` when nothing at
+%% or below it is un-applied, otherwise the largest tree key strictly below the
+%% first un-applied one — or `undefined` when there is none, or when it sits
+%% below the current watermark (watermark and checkpoint are monotone, so a held
+%% key at or below the watermark is left to the door's next pass and the
+%% applier's replay).
+%% `proofs/tla/ConfirmedCompaction_RootVV2_AsyncSweep_NoCap.cfg` is the 7-step
+%% drop without this cap; `_RootVV2_AsyncSweep.cfg` and
+%% `proofs/isabelle/Confirmed_Compaction.thy` (`no_drop`) are the cap. Pinned by
+%% `bondy_oplog_compaction_fused_test`.
 capped_truncation_point(
     #state{instance_id = Id, mst = MST, watermark = W0}, Frontier
 ) ->
@@ -4704,19 +4493,16 @@ capped_truncation_point(
     end.
 
 %% @private
-%% THE UNSERVABLE-OWN-ROOT SELF-HEAL (the broken-node half of the
-%% dangling-root recovery; the peer half is the sync scheduler's
-%% `root_unservable_behind` escalation). A fused instance whose own
-%% root has lost pages (found live on Fly s16: 2 pages absent from the
-%% ephemeral ETS store) can never serve a complete page round again, so
-%% NOTHING on the shard ever earns a peer-confirmed truncation license:
-%% the MST grows forever and the shard is an AE blackout even for new
-%% writes. The events are already lost as replication currency (the
-%% tree cannot serve them) — but the PROJECTION is intact, the applied
-%% VV witnesses everything, and catalogue bootstrap serves both. So the
-%% honest recovery is to REBUILD: drop the unservable tree, advance the
-%% watermark past the dropped range, keep projection + frontier, and
-%% let AE resume on the fresh (servable) tree.
+%% THE UNSERVABLE-OWN-ROOT SELF-HEAL (the broken-node half of dangling-root
+%% recovery; the peer half is the sync scheduler's `root_unservable_behind`
+%% escalation). A fused instance whose own root has lost pages can never serve a
+%% complete page round again, so NOTHING on the shard ever earns a
+%% peer-confirmed truncation license: the MST grows forever and the shard is an
+%% AE blackout even for new writes. The events are already lost as replication
+%% currency — the tree cannot serve them — but the PROJECTION is intact and the
+%% applied VV witnesses everything, so the honest recovery is to REBUILD: drop
+%% the unservable tree, advance the watermark past the dropped range, keep
+%% projection + frontier, and let AE resume on the fresh servable tree.
 %%
 %% Gates, in order:
 %% - fused only (the s16 class; a durable instance heals
@@ -4763,7 +4549,7 @@ maybe_self_heal_unservable(
             {LastKey, _} = bondy_mst:last(MST),
             Dropped = State#state.live_size,
             MST1 = truncate_below_or_equal(MST, LastKey, State),
-            _ = bondy_oplog_hlc:update(
+            _ = bondy_hlc:update(
                 State#state.hlc, bondy_oplog_event:key_hlc(LastKey)
             ),
             telemetry:execute(
@@ -5000,17 +4786,14 @@ terminate(_Reason, #state{
         catch
             _:_ -> ok
         end,
-    %% CLOSE (not destroy) a durable MST: `terminate` runs on EVERY stop —
-    %% node shutdown, supervisor `one_for_all` subtree restart — none of which
-    %% mean "delete this data". For a pack-store backend `destroy/1` does
-    %% `file:del_dir_r/1`, which would wipe the durable tree on every restart
-    %% and force a full WAL replay (resume falls back to `beginning` because
-    %% `bondy_mst:last/1` returns `undefined`), and the WAL would never
-    %% truncate. `close/1` flushes the root + fds and PRESERVES the tree so the
-    %% next `init/1` restores it. Ephemeral backends (`ets`/`map`) keep
-    %% `destroy/1`: it frees the table explicitly and there is no on-disk state
-    %% to lose. Deleting a durable table's data belongs on an explicit drop
-    %% path, not here. Unknown backends fail safe to `close` (never delete).
+    %% CLOSE (not destroy) a durable MST: `terminate` runs on EVERY stop — node
+    %% shutdown, supervisor `one_for_all` subtree restart — none of which mean
+    %% "delete this data". A pack-store `destroy/1` is `file:del_dir_r/1`, which
+    %% would wipe the durable tree on every restart, force a full WAL replay
+    %% (resume falls back to `beginning` because `bondy_mst:last/1` returns
+    %% `undefined`) and leave the WAL never truncating. Ephemeral backends keep
+    %% `destroy/1`: it frees the table and there is no on-disk state to lose.
+    %% Unknown backends fail safe to `close`.
     _ =
         try
             case Backend of
@@ -5056,22 +4839,20 @@ report_clock_skew(Key, PeerOrigin) ->
 %% =============================================================================
 
 %% @private
-%% Restore the applied-frontier convergence oracle from the compaction
-%% checkpoint payload into the registry holder (a max-merge). The payload carries
-%% the version vector of the COMPACTED prefix — the events truncated from the
-%% WAL, which the applier's WAL-tail replay can no longer observe. A plain
-%% `projection_managed` marker or a bare-CRDT checkpoint carries no frontier
-%% (`_Other` clause): the holder stays empty and WAL replay alone reconstructs
-%% it. An origin whose events were ALL compacted away would then be momentarily
+%% Restore the applied-frontier oracle from the compaction checkpoint payload
+%% into the registry holder (a max-merge). The payload carries the version
+%% vector of the COMPACTED prefix, which the applier's WAL-tail replay can no
+%% longer observe. A `projection_managed` marker or a bare-CRDT checkpoint
+%% carries no frontier: the holder stays empty and WAL replay alone reconstructs
+%% it, so an origin whose events were ALL compacted away is momentarily
 %% under-counted — conservative (the oracle reads "behind", never a false IN
-%% SYNC) and self-healing at the next checkpoint write, which persists the full
-%% frontier.
-%% Goes through `merge_frontier/2` deliberately, like every other frontier
-%% writer: that is where the retired-origin ceiling lives, and it is what
-%% makes a frontier reap survive a restart. A reap is not stored as a
-%% deletion — the checkpoint still carries the reaped origin's maximum — so
-%% writing `#entry.frontier` directly here would resurrect every reaped
-%% entry on every boot.
+%% SYNC) and self-healing at the next checkpoint write.
+%%
+%% Goes through `merge_frontier/2` like every other frontier writer: that is
+%% where the retired-origin ceiling lives, and it is what makes a frontier reap
+%% survive a restart. A reap is not stored as a deletion — the checkpoint still
+%% carries the reaped origin's maximum — so writing `#entry.frontier` directly
+%% here would resurrect every reaped entry on every boot.
 restore_frontier(_InstanceId, undefined) ->
     ok;
 restore_frontier(
@@ -5197,23 +4978,18 @@ clear_instance_alarms(InstanceId) ->
 %% APPLIED PREFIX and its readers treat an over-claim as licence to discard
 %% (`watermark_door/2`, `capped_truncation_point/2`); the dot allocator needs
 %% "highest seq this replica ever handed out" and treats an UNDER-claim as
-%% licence to re-mint a dot a peer already applied. The two answers coincide
-%% today only because one map holds both, which is why capping the frontier
-%% for soundness would silently regress the allocator
+%% licence to re-mint a dot a peer already applied. One map holding both is what
+%% would make a soundness cap on the frontier silently regress the allocator
 %% (`proofs/tla/SeqSeed_Shipped.cfg`, `proofs/isabelle/Seq_Seed.thy`,
 %% `bondy_oplog_seq_seed_restart_test`).
 %%
-%% Why the checkpoint has to carry it: compaction truncates BOTH the WAL
-%% (`advance_wal_snapshot_watermark/2`) and the MST
-%% (`truncate_below_or_equal/4`), so in steady state neither holds an
-%% own-origin event and `max_local_seq/2` returns `undefined`. The checkpoint
-%% is then the only durable record.
+%% The checkpoint has to carry it because compaction truncates BOTH the WAL and
+%% the MST, so in steady state neither holds an own-origin event and
+%% `max_local_seq/2` returns `undefined`.
 %%
-%% `0` for a checkpoint written before this slot existed (the 3-tuple clause),
-%% for a bare-CRDT checkpoint, and for no checkpoint at all. `init/1` composes
-%% it with the frontier's own-origin entry under `max`, so an upgrading node
-%% keeps seeding from the frontier until it writes its first 4-tuple
-%% checkpoint.
+%% `0` for a checkpoint predating this slot, for a bare-CRDT checkpoint, and for
+%% no checkpoint at all; `init/1` composes it with the frontier's own-origin
+%% entry under `max`.
 minted_from_checkpoint(
     {_W, {projection_managed, frontier, _VV, Minted, _Meta}}
 ) when
@@ -5306,16 +5082,12 @@ is_durable_backend(map) -> false;
 is_durable_backend(_) -> true.
 
 %% @private
-%% Builds a signed event for each `{Op, Meta}` item, hands the resulting
-%% list to the per-instance WAL as a single atomic batch frame, then
-%% inserts the events into the per-instance overlay so the caller's
-%% next read sees them. The MST is **not** mutated here — the per-
-%% instance applier drains the WAL, re-verifies each event's
-%% signature, and casts `install_local_batch` back to this gen_server
-%% which performs the actual MST install and overlay eviction. The
-%% overlay row closes the read-your-writes gap until the applier
-%% catches up; the row is evicted by key (`evict_overlay_row/3`) once
-%% the install lands, answering `Notify` if the appender awaits it.
+%% Builds a signed event per `{Op, Meta}` item, hands the list to the
+%% per-instance WAL as one atomic batch frame, then inserts the events into the
+%% overlay so the caller's next read sees them. The MST is NOT mutated here: the
+%% applier drains the WAL, re-verifies each signature and casts
+%% `install_local_batch` back to this gen_server, which is what installs and
+%% evicts. The overlay row closes the read-your-writes gap until then.
 do_append_local(#state{} = State0, WalPid, Items, Notify) ->
     {Events, Keys, State1} = build_events(State0, Items),
     %% Stage overlay rows BEFORE the WAL append. The applier reads
@@ -5353,25 +5125,22 @@ unstage_overlay(#state{overlay = Tab, overlay_counters = Ctrs}, Events) ->
     unstage_overlay_rows(Tab, Ctrs, Events).
 
 %% @private
-%% Stages overlay rows on a registry-published tid, reporting `stale` when
-%% that tid no longer names a live table.
+%% Stages overlay rows on a registry-published tid, reporting `stale` when that
+%% tid no longer names a live table.
 %%
-%% `bondy_oplog_registry:overlay_tab/1` can hand back a dead tid, not just
+%% `bondy_oplog_registry:overlay_tab/1` can hand back a DEAD tid, not just
 %% `undefined`: the overlay table dies with its instance gen_server (it has no
 %% heir) and the registry row keeps the old value until the next instance
-%% `init/1` republishes a fresh one. A caller-side append landing in that
-%% window would otherwise crash with `badarg` instead of routing through the
-%% gen_server the way the `undefined` case already does.
+%% `init/1` republishes a fresh one. A caller-side append landing in that window
+%% would otherwise crash with `badarg` instead of routing through the gen_server
+%% the way the `undefined` case does. Staleness has to be discovered by
+%% attempting the write — an `ets:info/2` probe only moves the race, since the
+%% owner can die between probe and insert — and retrying is safe because staging
+%% is the first side effect of an append: nothing was written, no counter moved,
+%% no WAL frame exists yet.
 %%
-%% Staleness has to be discovered by attempting the write — probing with
-%% `ets:info/2` first would only move the race, since the owner can die
-%% between the probe and the insert. This is safe to retry because staging is
-%% the first side effect of an append: on a dead table nothing was written,
-%% no counters have moved, and no WAL frame exists yet.
-%%
-%% Only `badarg` is caught. A `badmatch` on the insert result would mean a
-%% live table refused the write, which is an invariant violation and must stay
-%% loud.
+%% Only `badarg` is caught. A `badmatch` on the insert result means a live table
+%% refused the write, which is an invariant violation and must stay loud.
 stage_overlay_rows(Tab, Rows) ->
     try
         true = ets:insert(Tab, Rows),
@@ -5464,21 +5233,16 @@ build_events(State0, Items) ->
     {Events, Keys, State0#state{validator_state = VS}}.
 
 %% @private
-%% Backfills a burned seq range `[Start, End]` with signed `seq_fill`
-%% no-op events: fresh HLC ticks (HLCs are never recycled), the burned
-%% seqs themselves (their only occupants — the rejected batch that
-%% reserved them never became durable), signed through the validator
-%% like any event. The fills ride the normal WAL → applier → MST path,
-%% so they replicate and advance the applied frontier on every replica
-%% (`bondy_oplog_cell_apply` counts `seq_fill` in `origin_seqs/2` and
-%% skips it in every fold), closing the gap the peers' prefix hold
-%% would otherwise park on until a rebootstrap. No overlay row is
-%% staged — a fill has no readable value.
-%%
-%% A rejected fill append retries with exponential backoff (the
-%% rejection is usually the same transient backpressure that caused
-%% the burn); after `?SEQ_FILL_MAX_RETRIES` the gap is left to the
-%% rebootstrap repair chain, already counted by `seq_burned`.
+%% Backfills a burned seq range `[Start, End]` with signed `seq_fill` no-op
+%% events: fresh HLC ticks (HLCs are never recycled) over the burned seqs, whose
+%% only occupants they are — the rejected batch that reserved them never became
+%% durable. The fills ride the normal WAL -> applier -> MST path, so they
+%% replicate and advance the applied frontier on every replica
+%% (`bondy_oplog_cell_apply` counts `seq_fill` in `origin_seqs/2` and skips it
+%% in every fold), closing the gap the peers' prefix hold would otherwise park
+%% on until a rebootstrap. No overlay row is staged — a fill has no readable
+%% value. After `?SEQ_FILL_MAX_RETRIES` the gap is left to the rebootstrap
+%% repair chain, already counted by `seq_burned`.
 fill_burned_seqs(State0, Start, End, Attempt) ->
     Items = [{seq_fill, undefined} || _ <- lists:seq(Start, End)],
     {Events, _Keys, State} = build_fill_events(State0, Start, Items),
@@ -5527,33 +5291,23 @@ build_fill_events(State0, StartSeq, Items) ->
     {Events, Keys, State0#state{validator_state = VS}}.
 
 %% @private
-%% Sole MST-install path for local-origin events. Driven by the
-%% `install_local_batch` cast from the per-instance applier. The
-%% applier has already re-verified every event's signature in its
-%% own process before dispatching, so this fold trusts the input.
+%% Sole MST-install path for local-origin events, driven by the applier's
+%% `install_local_batch` cast. The applier has re-verified every signature in
+%% its own process, so this fold trusts the input.
 %%
-%% The batch is split by `max_local_installed_seq`:
+%% `max_local_installed_seq` splits the batch. The fast suffix — local origin,
+%% `Seq` strictly greater than the cached max — cannot yet be in the tree, the
+%% seq atomic being monotonic per origin, so it goes through
+%% `bondy_mst:put_batch/2`: one spine rebuild for the whole batch instead of one
+%% per event. The slow prefix — an already-observed seq (resume-overlap) or a
+%% non-local origin — takes the per-event path that probes the tree with
+%% `bondy_mst:get` and either re-applies idempotently, ignores a matching value,
+%% or records an equivocation.
 %%
-%% 1. **Fast suffix** — events with local origin and `Seq` strictly
-%%    greater than the cached max. The seq atomic is monotonic per
-%%    origin so these keys cannot yet be in the tree. We collect
-%%    them into a list of `{Key, Value}` pairs and install them via
-%%    `bondy_mst:put_batch/2`, which builds a small in-process MST
-%%    from the batch and merges it into the live tree in a single
-%%    traversal — one spine rebuild for the whole batch instead of
-%%    one per event.
-%% 2. **Slow prefix** — events whose seq has already been observed
-%%    (resume-overlap) or that carry a non-local origin. These fall
-%%    back to the per-event safety path that probes the tree with
-%%    `bondy_mst:get` and either re-applies idempotently, ignores a
-%%    matching value, or records an equivocation.
-%%
-%% Within a single WAL frame the local-origin seqs are contiguous and
-%% strictly increasing (one batch from one writer), so the partition
-%% is a single `lists:splitwith/2`. The merger configured on the live
-%% tree is never invoked from the fast suffix because every key is
-%% guaranteed new — the only callers of put_batch here are batches
-%% that the seq filter has already promised contain no collisions.
+%% Within one WAL frame the local-origin seqs are contiguous and strictly
+%% increasing (one batch from one writer), so the partition is a single
+%% `lists:splitwith/2`. The live tree's merger is never invoked from the fast
+%% suffix: the seq filter has already promised no collisions.
 -spec install_local_batch(#state{}, [bondy_oplog_event:t()]) -> #state{}.
 
 install_local_batch(State, []) ->
@@ -5741,7 +5495,7 @@ install_fast_events(#state{} = State0, Events) ->
     InstallT0 = erlang:monotonic_time(microsecond),
     MST1 = bondy_mst:put_batch(State0#state.mst, Pairs),
     InstallUs = erlang:monotonic_time(microsecond) - InstallT0,
-    _ = bondy_oplog_hlc:update(State0#state.hlc, MaxHlc),
+    _ = bondy_hlc:update(State0#state.hlc, MaxHlc),
     %% Mirror the HLC update for the local-Seq atomic. Rebuilding the
     %% MST from the WAL on restart (init seeds SeqRef from
     %% `max_local_seq/2`, which returns `undefined` for an empty MST)
@@ -5850,23 +5604,19 @@ install_local_safe(State, Event, Key, NewValue) ->
     end.
 
 %% @private
-%% Evicts every overlay row for a freshly-installed batch via N
-%% O(log N) `ets:delete/2` point deletes — the overlay is an
-%% `ordered_set` so a deletion keyed by the row's primary key uses
-%% the index. The earlier approach built an N-way OR guard for a
-%% single `ets:select_delete/2`, but the resulting match spec did not
-%% pin the key in the head and so triggered a full table scan; on a
-%% 10k-row overlay with batches of 100 events that pattern cost
-%% ~1M comparisons per call. Point deletes drop that to ~1.3k.
+%% Evicts every overlay row for a freshly-installed batch with N O(log N)
+%% `ets:delete/2` point deletes; the overlay is an `ordered_set`, so a deletion
+%% keyed by the row's primary key uses the index. Do NOT replace this with a
+%% single `ets:select_delete/2` over an N-way OR guard: that match spec does not
+%% pin the key in the head and degrades to a full table scan.
 %%
-%% No HLC guard is needed: an event key `{Hlc, Origin, Seq}` is
-%% globally unique by construction (HLC and Seq are atomics; Origin
-%% is per-instance), so an overlay row at that key corresponds to
-%% exactly this event and no other.
+%% No HLC guard is needed: an event key `{Hlc, Origin, Seq}` is globally unique
+%% by construction (HLC and Seq are atomics, Origin is per-instance), so an
+%% overlay row at that key is this event's and no other.
 %%
-%% `Reply` is what the row's appender is told (see
-%% `evict_overlay_row/3`): `ok` for an installed event, `{error,
-%% rejected}` for one the fused verify step refused.
+%% `Reply` is what the row's appender is told (`evict_overlay_row/3`): `ok` for
+%% an installed event, `{error, rejected}` for one the fused verify step
+%% refused.
 -spec evict_overlay_batch(
     #state{}, [bondy_oplog_event:t()], ok | {error, rejected}
 ) -> #state{}.
@@ -5908,15 +5658,13 @@ evict_overlay_keys(
     State.
 
 %% @private
-%% Deletes the overlay row at `Key` and answers the appender awaiting it,
-%% if any: `{Alias, Reply}` is sent to the alias the row was staged with
-%% (`?OVERLAY_NOTIFY_POS`). The delete precedes the send, so an appender
-%% that has received its reply never observes its row. A stale alias —
-%% the appender gave up (`bondy_oplog:await_applied/3` timed out and
-%% deactivated it) or died — drops the message: that is
-%% `erlang:alias/0`'s contract, and `bondy_oplog_apply_barrier_test`
-%% holds it. Returns 1 when a row was deleted, 0 when there was none.
-%% Raises `badarg` on a dead table, like `ets:delete/2`.
+%% Deletes the overlay row at `Key` and answers the appender awaiting it:
+%% `{Alias, Reply}` goes to the alias the row was staged with
+%% (`?OVERLAY_NOTIFY_POS`). The delete precedes the send, so an appender that
+%% has received its reply never observes its row. A stale alias — the appender
+%% timed out and deactivated it, or died — drops the message per
+%% `erlang:alias/0`'s contract; `bondy_oplog_apply_barrier_test` holds it.
+%% Returns 1 when a row was deleted, 0 when there was none.
 evict_overlay_row(Tab, Key, Reply) ->
     %% `absent` is the default for a missing row; a present row carries
     %% `undefined` or an alias in that position, never `absent`.
@@ -5933,14 +5681,11 @@ evict_overlay_row(Tab, Key, Reply) ->
     end.
 
 %% @private
-%% Removes `Deleted` events from the overlay counters atomics. The
-%% byte delta is computed proportionally to the surviving fraction —
-%% same approximation the prior in-state version used. We snapshot
-%% both slots together, compute the new pair, and write each slot
-%% individually with `atomics:put/3`; a concurrent `append_fast/3`
-%% that races between the two writes can transiently underestimate
-%% byte usage by one increment, which is acceptable (backpressure
-%% accounting is best-effort, not exact).
+%% Removes `Deleted` events from the overlay counters atomics, the byte delta
+%% scaled by the surviving fraction. The two slots are snapshotted together but
+%% written individually, so a concurrent `append_fast/3` racing between the
+%% writes can transiently underestimate byte usage by one increment —
+%% acceptable, since backpressure accounting is best-effort, not exact.
 overlay_counters_sub(_Ctrs, 0) ->
     ok;
 overlay_counters_sub(Ctrs, Deleted) ->
@@ -5957,20 +5702,21 @@ overlay_counters_sub(Ctrs, Deleted) ->
     ok.
 
 %% @private
-%% Returns `{ok, WalPid, State1}` with `State1` carrying a monitored
-%% cached pid so subsequent appends skip the registry lookup. If the
-%% registry does not yet have a `wal_pid` (subtree mid-restart), the
-%% cache is left empty and the caller surfaces `{error, wal_unavailable}`.
+%% Returns `{ok, WalPid, State}` with the pid `wal_opened/3` cached, or
+%% `{error, wal_unavailable}` before that call (subtree mid-start or
+%% mid-restart) and after the pid went down. Deliberately NOT a registry
+%% lookup: the registry publishes the WAL pid before the counter has
+%% absorbed the WAL's maximum, and an append minted off it would be the
+%% early-mint window `wal_opened/3` closes.
 ensure_wal_pid(#state{wal_pid = Pid} = State) when is_pid(Pid) ->
     {ok, Pid, State};
-ensure_wal_pid(#state{instance_id = Id} = State) ->
-    case bondy_oplog_registry:wal_pid(Id) of
-        undefined ->
-            {error, wal_unavailable};
-        Pid when is_pid(Pid) ->
-            Ref = erlang:monitor(process, Pid),
-            {ok, Pid, State#state{wal_pid = Pid, wal_pid_monitor = Ref}}
-    end.
+ensure_wal_pid(#state{}) ->
+    {error, wal_unavailable}.
+
+%% @private
+cache_wal_pid(State, Pid) when is_pid(Pid) ->
+    Ref = erlang:monitor(process, Pid),
+    State#state{wal_pid = Pid, wal_pid_monitor = Ref}.
 
 %% @private
 %% Drops the cached WAL pid + its monitor. Used after a synchronous
@@ -6008,7 +5754,7 @@ invalidate_wal_pid(#state{wal_pid_monitor = Ref} = State) ->
 %%     on bad input avoids a crash-loop on poisoned peer traffic.
 do_append_remote(#state{} = State, Event) ->
     Key = bondy_oplog_event:key(Event),
-    _ = bondy_oplog_hlc:update(
+    _ = bondy_hlc:update(
         State#state.hlc, bondy_oplog_event:key_hlc(Key)
     ),
     case below_or_equal_watermark(Key, State#state.watermark) of
@@ -6110,23 +5856,17 @@ install_event(#state{} = State, Key, Value, Source, IsNew) ->
             Prev when Key > Prev -> Key;
             Prev -> Prev
         end,
-    _ = bondy_oplog_hlc:update(
+    _ = bondy_hlc:update(
         State#state.hlc, bondy_oplog_event:key_hlc(Key)
     ),
-    %% If the installed event's origin is **ours**, bump the SeqRef
-    %% atomic so a concurrent local `append_fast/3` can't allocate a
-    %% colliding seq. This handles two paths:
-    %%   1. Slow batch (`install_local_safe`): WAL-replayed local-
-    %%      origin events that the fast batcher skipped (resume-
-    %%      overlap probe).
-    %%   2. Peer loopback (`do_append_remote`): a peer ships back our
-    %%      own events via sync — `Origin == self`. Without this bump,
-    %%      a subsequent local append after crash recovery could
-    %%      allocate a seq that already lives in the MST (installed by
-    %%      the peer-shipped copy).
-    %% The fast batch path bumps once at end-of-batch in
-    %% `install_fast_events/2` (cheaper) and does **not** go through
-    %% `install_event/5`, so the per-event bump here doesn't duplicate.
+    %% If the installed event's origin is OURS, bump the SeqRef atomic so a
+    %% concurrent local `append_fast/3` cannot allocate a colliding seq. Two
+    %% paths reach here: WAL-replayed local-origin events the fast batcher
+    %% skipped, and peer loopback, where a peer ships our own events back via
+    %% sync. Without the bump a local append after crash recovery could allocate
+    %% a seq that already lives in the MST. The fast batch path bumps once at
+    %% end-of-batch in `install_fast_events/2` and does not go through
+    %% `install_event/5`, so this does not duplicate it.
     case bondy_oplog_event:key_origin(Key) of
         Origin when Origin =:= State#state.origin ->
             ok = maybe_bump_seq_atomic(
@@ -6292,18 +6032,14 @@ admit(State, Delta) ->
     end.
 
 %% @private
-%% Pressure-check before the WAL append. Returns
-%% `{error, backpressure}` when either cap is breached. `drop` is the
-%% only supported strategy; `block` is reserved.
-%%
-%% Reads both slots of the shared `overlay_counters` atomics — slot
-%% 1 the event count, slot 2 the byte estimate. Both are maintained
-%% by `stage_to_overlay/3` and `evict_overlay_batch/3`, and by
-%% lock-free `append_fast/2,3` callers. Pre-history this read pair
-%% `ets:info/2` on the overlay table for size and memory; under
-%% heavy concurrent appends those calls aggregated decentralised
-%% counters across every scheduler and dominated the gen_server's
-%% per-call cost.
+%% Pressure-check before the WAL append: `{error, backpressure}` when either cap
+%% is breached. `drop` is the only supported strategy; `block` is reserved.
+%% Reads both slots of the shared `overlay_counters` atomics — slot 1 the event
+%% count, slot 2 the byte estimate — maintained by `stage_to_overlay/3`,
+%% `evict_overlay_batch/3` and the lock-free `append_fast/2,3` callers. Do NOT
+%% go back to `ets:info/2` for size and memory: under heavy concurrent appends
+%% those calls aggregate decentralised counters across every scheduler and
+%% dominate the gen_server's per-call cost.
 overlay_admit(
     #state{
         instance_id = Id,
@@ -6345,17 +6081,13 @@ emit_overlay_backpressure(Id, Dimension, Current, Cap, Delta) ->
     ).
 
 %% @private
-%% Backpressure admission test. Returns `ok` if the instance can
-%% absorb `Delta` more events under its `max_working_set` cap, or
-%% `{error, working_set_full}` otherwise. `infinity` disables the
-%% cap.
-%%
-%% The cap is on **total events visible to readers** = MST live_size
-%% + overlay rows (matching `size/1`), because events arriving via
-%% `append`/`append_many` enter the overlay before the applier
-%% promotes them to the MST. Counting only `live_size` would let the
-%% caller burst arbitrarily many writes into the overlay before the
-%% cap fires.
+%% Admission test: `ok` if the instance can absorb `Delta` more events under its
+%% `max_working_set` cap, `{error, working_set_full}` otherwise; `infinity`
+%% disables it. The cap counts total events VISIBLE TO READERS = MST live_size +
+%% overlay rows (matching `size/1`), because `append` / `append_many` events
+%% enter the overlay before the applier promotes them — counting only
+%% `live_size` would let a caller burst arbitrarily many writes into the overlay
+%% before the cap fires.
 backpressure_admit(#state{max_working_set = infinity}, _Delta) ->
     ok;
 backpressure_admit(
@@ -6398,9 +6130,13 @@ advance_watermark(Cur, New) when New > Cur -> New;
 advance_watermark(Cur, _New) -> Cur.
 
 %% @private
-%% Drops every key in MST that is `=< Watermark`, keeping the suffix of
-%% keys `> Watermark`. Used both by explicit truncation and post-merge
-%% re-truncation.
+%% Drops every key `=< Watermark`, keeping the suffix. Delegates to
+%% `bondy_mst:truncate/2`, a structural prefix-truncate that rewrites only the
+%% tree's left spine: its cost is independent of the prefix size, which is what
+%% keeps the live MST bounded under sustained write saturation, where a per-key
+%% delete loop cannot keep pace. The result is byte-identical to the equivalent
+%% delete sequence (the MST is history-independent), so the root peers sync
+%% against is unchanged.
 %%
 %% Delegates to `bondy_mst:truncate/2', a structural prefix-truncate that
 %% rewrites only the tree's left spine. Its cost is independent of the
@@ -6440,12 +6176,18 @@ truncate_below_or_equal(MST, Watermark, #state{instance_id = Id}) ->
     end.
 
 %% @private
-%% Durable (pack) page reclamation.
+%% Durable (pack) page reclamation. `truncate_below_or_equal/4` collects only on
+%% the ETS backend; on the pack backend truncation merely unlinks the dropped
+%% subtrees, so without this nothing reclaims a durable compaction's prefix —
+%% the disk-side twin of the ETS page leak.
 %%
-%% `truncate_below_or_equal/4` collects only on the ETS backend; on the pack
-%% backend truncation merely unlinks the dropped subtrees, so every durable
-%% compaction left its prefix in the sealed packs and NOTHING ever reclaimed
-%% it — the disk-side twin of the ETS page leak, slow-burning but unbounded.
+%% Runs on the compaction tick rather than per truncation because a pack
+%% collection is a full sealed-pack REWRITE and `should_compact/3` coalesces
+%% whenever there is more than one sealed pack, so per-truncation invocation
+%% would rewrite the entire sealed set every cycle. Gated on the store being a
+%% pack store, on no seal being in flight (a collection rewrites the very packs
+%% a seal is producing), and on at most one collection per
+%% `durable_gc_interval_ms`.
 %%
 %% Runs on the compaction tick (the one periodic in-process hook, alongside
 %% `maybe_self_heal_unservable/1`) rather than per truncation, because a pack
@@ -6520,15 +6262,11 @@ pinned_roots(#state{pinned_peer_roots = Pins}) ->
     [R || R := T <- Pins, Now - T =< ?PEER_ROOT_PIN_TTL_MS].
 
 %% @private
-%% Runs a full compaction cycle synchronously, in the instance
-%% gen_server. The frontier is now O(diff) (read-only `diff_to_list` + an
-%% O(log N) `get/3` false-positive filter — see `compute_frontier_for/2`),
-%% so the cycle is cheap enough to run inline rather than off-process.
-%% Running in the gen_server is what makes the durable (pack-store)
-%% backend work: the MST is read by the process that OWNS its sealed-pack
-%% fds, so `prim_file:pread` no longer raises `not_on_controlling_process`.
-%% The truncate + projection flush + checkpoint always ran here; only the
-%% frontier moved in.
+%% Runs a full compaction cycle synchronously in the instance gen_server. The
+%% frontier is O(diff) (`compute_frontier_for/2`), so the cycle is cheap enough
+%% to run inline — and running here is what makes the durable (pack-store)
+%% backend work at all: the MST is read by the process that OWNS its sealed-pack
+%% fds, so `prim_file:pread` cannot raise `not_on_controlling_process`.
 %%
 %% Compaction is serial with every other gen_server message (appends,
 %% reads) and makes NO synchronous call to the applier:
@@ -6646,7 +6384,7 @@ sample (default 3), and a sample confirms a frontier the unsampled members
 never saw. `partisan_peer_service:members/0` returns the full known membership
 INCLUDING currently-unreachable peers (membership changes only by a deliberate
 join/leave, never by connectivity), which is what makes a partitioned member
-hold stability down instead of vanishing (`BONDY_DB_RECLAMATION_PROOF.md` A4).
+hold stability down instead of vanishing.
 
 Returns `error` — never `[]` — when the membership service is unavailable.
 The two MUST NOT be conflated: `[]` means *solo*, which licenses maximal
@@ -6673,7 +6411,7 @@ reclamation_members() ->
 -doc """
 The causal-stability point for projection-cell reclamation: an HLC `h` such
 that no event with HLC `< h` can ever be delivered again (POLog Definition
-5.1 — the Theorem in `BONDY_DB_RECLAMATION_PROOF.md`).
+5.1).
 
 The chain runs inside the instance because it owns the MST: membership
 (`reclamation_members/0`) → strict all-member confirmation
@@ -6706,7 +6444,7 @@ any `{error, _}`:
 - `{error, non_event_frontier}` — the frontier key is not an event key.
 """.
 -spec stability_point(instance_id() | pid()) ->
-    {ok, bondy_oplog_hlc:hlc()} | {error, term()}.
+    {ok, bondy_hlc:hlc()} | {error, term()}.
 
 stability_point(Target) ->
     gen_server:call(target(Target), reclamation_stability_point, infinity).
@@ -6822,15 +6560,13 @@ reclamation_stalled(InstanceId, Reason) ->
     {error, Reason}.
 
 %% @private
-%% The single point of truth for classifying a `reclamation_members/0`
-%% result into `solo | {clustered, Members} | error`, consumed by
-%% `reclamation_stability_point/1` (CRDT-cell reclamation's solo
-%% shortcut). MST/WAL compaction no longer needs a solo shortcut: the
-%% retention policy (`retention_frontier/3`) bounds ephemeral catalogue
-%% instances by local policy regardless of membership, which covers solo
-%% trivially. `reclamation_members/0`'s own contract (never conflate `[]`
-%% with `error`) is preserved verbatim: `error` in ⇒ `error` out, never
-%% `solo`.
+%% The single point of truth for classifying a `reclamation_members/0` result
+%% into `solo | {clustered, Members} | error`, consumed by
+%% `reclamation_stability_point/1` (CRDT-cell reclamation's solo shortcut).
+%% `reclamation_members/0`'s own contract — never conflate `[]` with `error` —
+%% is preserved verbatim here: `error` in => `error` out, never `solo`. MST/WAL
+%% compaction needs no solo shortcut: `retention_frontier/3` bounds ephemeral
+%% catalogue instances by local policy regardless of membership.
 -spec membership_class({ok, [node()]} | error) ->
     solo | {clustered, [node()]} | error.
 
@@ -6848,7 +6584,7 @@ reclamation_stability_point(State) ->
         solo ->
             %% Solo: a fresh tick strictly exceeds every event this node
             %% holds — see `stability_point/1`.
-            {ok, bondy_oplog_hlc:now(State#state.hlc)};
+            {ok, bondy_hlc:now(State#state.hlc)};
         {clustered, Members} ->
             case local_mst_empty(State) of
                 true ->
@@ -6896,40 +6632,31 @@ frontier_stability_point(Key) ->
     end.
 
 %% @private
-%% The stability frontier: the largest local key K such that every local
-%% key `=< K` is CONFIRMED by EVERY peer witness. A witness is a
-%% `bondy_oplog_peer_state:peer_state_entry()` (or a bare root binary:
-%% root only), and it confirms a key when EITHER
+%% The stability frontier: the largest local key K such that every local key `=<
+%% K` is CONFIRMED by EVERY peer witness. A witness is a
+%% `bondy_oplog_peer_state:peer_state_entry()` (or a bare root binary), and it
+%% confirms a key when EITHER the key is present, with the same value, in the
+%% peer's recorded root — the peer received it — OR the key's `{Origin, Seq}` is
+%% at or below the peer's recorded applied frontier — the peer folded it,
+%% whether or not it still holds it.
 %%
-%% - the key is present (with the same value) in the peer's recorded
-%%   root — the peer received it; or
-%% - the key's `{Origin, Seq}` is at or below the peer's recorded applied
-%%   frontier — the peer folded it, whether or not it still holds it.
-%%
-%% ROOT ALONE IS THE WRONG WITNESS — do not reduce this rule to it. A
-%% root describes the peer's TREE, and the tree loses exactly what the
-%% peer compacted, so two replicas that both compact stop confirming each
-%% other's prefix and neither compacts again. The applied VV survives the
-%% peer's compaction and is exact for the same reason the watermark
-%% door's is: the peer folds each origin as a contiguous prefix, so its
-%% per-origin maximum bounds every seq it applied.
-%%
-%% A rootless witness therefore CONSTRAINS rather than confirming
-%% nothing: it confirms what its VV covers. "Constrains nothing" loses an
-%% event to a live member. A witness with neither root nor VV confirms
-%% nothing at all.
-%%
-%% Evidence for all three rules — model-checked and proved for any
-%% membership: `proofs/tla/ConfirmedCompaction.tla` and
+%% ROOT ALONE IS THE WRONG WITNESS — do not reduce this rule to it. A root
+%% describes the peer's TREE, and the tree loses exactly what the peer
+%% compacted, so two replicas that both compact stop confirming each other's
+%% prefix and neither compacts again. The applied VV survives the peer's
+%% compaction and is exact for the same reason the watermark door's is: the peer
+%% folds each origin as a contiguous prefix. A rootless witness therefore
+%% CONSTRAINS rather than confirming nothing — "constrains nothing" loses an
+%% event to a live member — while a witness with neither root nor VV confirms
+%% nothing at all. All three rules are model-checked and proved for any
+%% membership: `proofs/tla/ConfirmedCompaction.tla`,
 %% `proofs/isabelle/Confirmed_Compaction.thy`.
 %%
-%% O(diff) and read-only: walk the structural diff against each peer root
-%% in key order to the first divergent key. The diff is a SUPERSET, so
-%% each candidate is re-checked against the root and then the VV before
-%% counting as a hole. The frontier is the predecessor of the smallest
-%% hole across peers; with no holes it is the local max key. Without a
-%% readable root the walk is over the tree itself. Only event keys can be
-%% VV-confirmed.
+%% O(diff) and read-only: walk the structural diff against each peer root in key
+%% order to the first divergent key. The diff is a SUPERSET, so each candidate
+%% is re-checked against the root and then the VV before counting as a hole.
+%% Without a readable root the walk is over the tree itself. Only event keys can
+%% be VV-confirmed.
 compute_frontier_for(_MST, []) ->
     undefined;
 compute_frontier_for(MST, PeerWitnesses) ->
@@ -6979,7 +6706,7 @@ validate_retention(Policy, false) ->
 %% The per-cycle retention context handed to `run_compaction/5`, or
 %% `undefined` when retention does not apply this cycle. Snapshots
 %% `live_size` and the wall clock at call time so the compaction body
-%% stays free of clock/state reads. Wall time, NOT `bondy_oplog_hlc:peek/1`:
+%% stays free of clock/state reads. Wall time, NOT `bondy_hlc:peek/1`:
 %% the HLC atomic only advances when events are generated, so on a quiet
 %% instance `peek` is frozen at the last write and nothing would ever age
 %% out. Event-key HLC physicals are epoch-ms (the same clock domain), so
@@ -7017,17 +6744,14 @@ retention_or_catchup(InstanceId, MST, Watermark0, Retention) ->
 %% The LOCAL retention frontier for an ephemeral catalogue instance, or
 %% `undefined` when the policy is absent or not yet breached.
 %%
-%% - `max_events` breach (checked first — one integer compare): frontier =
-%%   the MST's own max key, i.e. truncate the whole applied tree. Peers
-%%   within one AE round are unaffected (they hold their own copies);
-%%   laggards take the rebootstrap path.
-%% - `max_age_ms` breach: frontier = the largest REAL key strictly below
-%%   the age cutoff. Event keys are `#bondy_oplog_event_key{hlc, origin,
-%%   seq}` records ordered by HLC first, so a synthetic bound
-%%   `key(CutoffHlc, <<>>, 0)` sorts at-or-before every real key with
-%%   HLC >= cutoff, and `bondy_mst:last_n(MST, Bound, 1)` returns exactly
-%%   the newest key older than the cutoff (the same bound technique
-%%   `compute_frontier_for/2` uses for the first hole).
+%% - `max_events` breach (checked first — one integer compare): the MST's own
+%%   max key, i.e. truncate the whole applied tree. Peers within one AE round
+%%   hold their own copies; laggards take the rebootstrap path.
+%% - `max_age_ms` breach: the largest REAL key strictly below the age cutoff.
+%%   Event keys order by HLC first, so the synthetic bound `key(CutoffHlc, <<>>,
+%%   0)` sorts at-or-before every real key with HLC >= cutoff, and
+%%   `bondy_mst:last_n(MST, Bound, 1)` returns exactly the newest key older than
+%%   the cutoff.
 %%
 %% Every returned frontier is a REAL key from the tree (the commit path
 %% calls `bondy_oplog_event:key_hlc/1` on it) and strictly above
@@ -7060,13 +6784,13 @@ retention_age_frontier(MST, Watermark0, MaxAge, NowMs) ->
     CutoffPhys = NowMs - MaxAge,
     case CutoffPhys > 0 andalso bondy_mst:first(MST) of
         {OldestKey, _V} ->
-            {OldestPhys, _} = bondy_oplog_hlc:decode(
+            {OldestPhys, _} = bondy_hlc:decode(
                 bondy_oplog_event:key_hlc(OldestKey)
             ),
             case OldestPhys < CutoffPhys of
                 true ->
                     Bound = bondy_oplog_event:key(
-                        bondy_oplog_hlc:encode(CutoffPhys, 0), <<>>, 0
+                        bondy_hlc:encode(CutoffPhys, 0), <<>>, 0
                     ),
                     case bondy_mst:last_n(MST, Bound, 1) of
                         [{K, _}] -> above_watermark(age, K, Watermark0);
@@ -7125,16 +6849,13 @@ min_hole(H, Acc) when H < Acc -> H;
 min_hole(_H, Acc) -> Acc.
 
 %% @private
-%% First (smallest) local key the witness `{R, VV}` does not confirm.
-%% With a root: walks the read-only structural diff against `R`
-%% (ascending key order), skipping present-and-equal false-positives and
-%% VV-covered keys; `no_hole` when local is a subset of the peer's root
-%% (diff empty or all false-positives). Without a root — none recorded,
-%% or the recorded one references pages this store has already reclaimed
-%% (post-truncation page GC on the ephemeral backend; never raises out of
-%% the synchronous compaction handler) — walks the tree to the first key
-%% the VV does not cover; with no VV either that is the first local key,
-%% which defers compaction for this peer until its next round (seconds).
+%% First (smallest) local key the witness `{R, VV}` does not confirm. With a
+%% root: walk the read-only structural diff against `R` in ascending key order,
+%% skipping present-and-equal false-positives and VV-covered keys; `no_hole`
+%% when local is a subset of the peer's root. Without a root — none recorded, or
+%% the recorded one references pages this store has already reclaimed — walk the
+%% tree to the first key the VV does not cover; with no VV either, that is the
+%% first local key, which defers compaction for this peer until its next round.
 peer_first_hole(MST, {undefined, VV}) ->
     first_key_not_covered(MST, VV);
 peer_first_hole(MST, {R, VV}) ->
@@ -7243,23 +6964,19 @@ commit_compaction(State, _Started, {error, _} = Error) ->
 
 %% @private
 %% The MST-bounding tail of a catalogue compaction: persist the watermark
-%% checkpoint, truncate the stable prefix, re-anchor the applier's replay
-%% cursor (a CAST — never blocks on the applier) and recompute
-%% `live_size`. Makes NO synchronous applier call, so it is deadlock-free.
+%% checkpoint, truncate the stable prefix, re-anchor the applier's replay cursor
+%% (a CAST — never blocks on the applier) and recompute `live_size`. Makes NO
+%% synchronous applier call, so it is deadlock-free.
 %%
-%% The checkpoint envelope records the watermark; its state slot carries the
-%% `{projection_managed, frontier, FrontierVV}` payload — "the materialised
-%% state is the projection" plus the applied-frontier convergence oracle — which
-%% on restart seeds the frontier holder but is never fed to `interpret_cog` (the
-%% projection is the authoritative read source).
-%% Verified by
+%% The checkpoint envelope records the watermark; its state slot carries
+%% `{projection_managed, frontier, FrontierVV}` — "the materialised state is the
+%% projection" plus the applied-frontier oracle — which on restart seeds the
+%% frontier holder but is never fed to `interpret_cog`. Verified by
 %% `bondy_oplog_catalogue_compaction_test:crdt_kernel_compaction_matches_from_scratch`.
 %%
-%% The requested frontier is first capped below the first never-applied
-%% key at or below it (`capped_truncation_point/2`): "the projection is
-%% current up to `Frontier`" is checked against the applied VV here, not
-%% assumed — the door holds never-applied events below the watermark, and
-%% the applier's replay may not have reached a delivered event above it.
+%% The requested frontier is first capped below the first never-applied key at
+%% or below it (`capped_truncation_point/2`): "the projection is current up to
+%% `Frontier`" is CHECKED against the applied VV here, not assumed.
 finalize_catalogue_compaction(State0, Started, Frontier0) ->
     case capped_truncation_point(State0, Frontier0) of
         undefined ->
@@ -7305,16 +7022,13 @@ do_finalize_catalogue_compaction(State, Started, Frontier) ->
     {MST1, TruncateUs} = tc(fun() ->
         truncate_below_or_equal(State#state.mst, Frontier, State)
     end),
-    %% Persist the truncated MST root BEFORE advancing the durable
-    %% checkpoint. The reboot resume position is
-    %% `max(durable_root_last.hlc, durable_checkpoint.hlc)`
-    %% (`bondy_oplog_applier:resume_position/2`), so the durable checkpoint
-    %% must never outrun the durable root — otherwise a crash between the
-    %% checkpoint write and the next commit-barrier flush resumes PAST
-    %% events on reboot, corrupting the shard. Flushing here (pages-then-
-    %% root, enforced inside the writer) keeps the two in lockstep. A flush
-    %% failure ABORTS the compaction: we leave the original (un-truncated)
-    %% state untouched and retry next cycle rather than advance the
+    %% Persist the truncated MST root BEFORE advancing the durable checkpoint.
+    %% The reboot resume position is `max(durable_root_last.hlc,
+    %% durable_checkpoint.hlc)`, so the durable checkpoint must never outrun the
+    %% durable root — otherwise a crash between the checkpoint write and the
+    %% next commit-barrier flush resumes PAST events on reboot, corrupting the
+    %% shard. A flush failure ABORTS the compaction: the original un-truncated
+    %% state is left untouched and retried next cycle rather than advancing the
     %% checkpoint past a non-durable root.
     {FlushRes, FlushUs} = tc(fun() ->
         flush_mst_root_checked(State#state{mst = MST1})
@@ -7325,27 +7039,14 @@ do_finalize_catalogue_compaction(State, Started, Frontier) ->
                 StateF, State, Started, Frontier, TruncateUs, FlushUs
             );
         {error, Reason} ->
-            %%
-            %% DO NOT "fix" this to carry `MST1` forward on the belief that the
-            %% pre-truncate root is now dangling. It is not, and the reasoning
-            %% is worth spelling out because it is easy to get backwards:
-            %%
-            %%   - This branch is reachable ONLY on the pack backend.
-            %%     `bondy_mst_ets_store:flush/1` returns `{ok, _}`
-            %%     unconditionally, so an ephemeral instance never lands here.
-            %%   - On the pack backend `truncate_below_or_equal/4` takes the
-            %%     non-`ets` clause, which truncates WITHOUT collecting. So
-            %%     nothing was reclaimed.
-            %%   - `bondy_mst:truncate/2` does `free/3` the spine pages it
-            %%     rewrote, but `bondy_mst_pack_store:free/3` only adds the
-            %%     hash to the `free_set`, and that set is explicitly NOT a
-            %%     read mask (see `get/2` there — masking reads was removed
-            %%     precisely because it reported live pages as dangling).
-            %%
-            %% So `State`'s root is still fully readable and reverting to it
-            %% is sound. Carrying the truncated tree forward instead would be
-            %% the actual bug: it drops events the durable checkpoint does not
-            %% cover, on the one path where we already know durability failed.
+            %% DO NOT carry `MST1` forward on the belief that the
+            %% pre-truncate root is now dangling. It is not: this branch is
+            %% reachable only on the pack backend, where the truncate runs
+            %% WITHOUT collecting and `bondy_mst_pack_store:free/3` only adds
+            %% the rewritten spine pages to the `free_set`, which is
+            %% explicitly not a read mask. `State0`'s root is therefore still
+            %% fully readable, while carrying the truncated tree forward would
+            %% drop events the durable checkpoint does not cover.
             ?LOG_ERROR(#{
                 description =>
                     "Aborting compaction: durable MST root flush failed; "
@@ -7430,7 +7131,7 @@ finalize_catalogue_compaction_commit(
             live_size_us => LiveSizeUs
         }
     ),
-    _ = bondy_oplog_hlc:update(
+    _ = bondy_hlc:update(
         StateF#state.hlc, bondy_oplog_event:key_hlc(Frontier)
     ),
     State1 = StateF#state{
@@ -7445,24 +7146,21 @@ finalize_catalogue_compaction_commit(
 
 %% @private
 %% Feeds the WAL's retention sweep with the compaction watermark. The sweep
-%% (`bondy_oplog_wal:compute_deletable/1`) drops a segment only below the
-%% committed offset AND below this watermark, and keys sort HLC-first, so
-%% every event on a dropped segment is strictly below `Frontier`: truncated
-%% from the MST, applied to the projection, its own-origin seq carried by the
-%% checkpoint's frontier entry. That last property is why this runs ONLY
-%% after the checkpoint is durable — a segment dropped before its checkpoint
-%% is the crash window `proofs/tla/SeqSeed_CkptCommitKeyedRetention.cfg`
-%% refutes; `proofs/isabelle/Seq_Seed.thy` (RETAINED) proves the order kept
-%% here. Before this call existed nothing advanced the watermark and the
-%% sweep never dropped a segment (found 2026-09-03; pinned by
-%% `bondy_oplog_compaction_durable_test:compaction_advances_wal_watermark_and_sweeps`).
+%% drops a segment only below the committed offset AND below this watermark, and
+%% keys sort HLC-first, so every event on a dropped segment is strictly below
+%% `Frontier`: truncated from the MST, applied to the projection, its own-origin
+%% seq carried by the checkpoint's frontier entry. That last property is why
+%% this runs ONLY after the checkpoint is durable — a segment dropped before its
+%% checkpoint is the crash window
+%% `proofs/tla/SeqSeed_CkptCommitKeyedRetention.cfg` refutes, and
+%% `proofs/isabelle/Seq_Seed.thy` (RETAINED) proves the order kept here. Pinned
+%% by
+%% `bondy_oplog_compaction_durable_test:compaction_advances_wal_watermark_and_sweeps`.
 %%
-%% Ephemeral (mem) WALs keep no segments. A writer that is mid-restart
-%% (`wal_pid` unset) or dies under the call is left to the next compaction
-%% cycle, which carries a watermark at least as high. The watermark itself is
-%% monotone (the compaction frontier only advances), so the writer's
-%% regression check cannot fire; if it ever does, the sweep merely lags and
-%% the warning says so.
+%% Ephemeral (mem) WALs keep no segments. A writer mid-restart (`wal_pid` unset)
+%% or dying under the call is left to the next cycle, which carries a watermark
+%% at least as high. The watermark is monotone, so the writer's regression check
+%% cannot fire; if it ever does, the sweep merely lags and the warning says so.
 advance_wal_snapshot_watermark(InstanceId, Frontier) ->
     case bondy_oplog_registry:wal_handle(InstanceId) of
         #{backend := mem} ->
@@ -7580,8 +7278,6 @@ backstop_index_rebuild(Entry) ->
     bondy_oplog_index_rebuild:request(NS, IndexName).
 
 %% @private
-%% Times `Fun`, returning `{Result, Microseconds}`. Diagnostic helper for
-%% the per-cycle compaction sub-stage trace.
 tc(Fun) ->
     T0 = erlang:monotonic_time(),
     R = Fun(),
@@ -7736,15 +7432,12 @@ backend_opts(_, InstanceId, Opts) ->
 %% @private
 %% True iff the instance should drive the asynchronous seal off the commit
 %% barrier (`maybe_drive_seal/1`) rather than letting the store seal inline on
-%% `put`. Two conditions, both required:
-%%   1. the backend advertises the `async_seal` capability (a roll/run/complete
-%%      seal flow exists) — checked via `bondy_mst:capabilities/1`, so no
-%%      backend MODULE name is hardcoded here and a new sealing backend works
-%%      unchanged. Memory backends advertise `async_seal => false`.
-%%   2. it was opened in `seal_mode => async`.
-%% The `seal_mode` default MUST match `backend_opts/3`'s injected default
-%% (`bondy_oplog_config:pack_seal_mode/0`) so the store-open mode and the drive
-%% decision never disagree.
+%% `put`: the backend must advertise the `async_seal` capability AND have been
+%% opened in `seal_mode => async`. The capability is read through
+%% `bondy_mst:capabilities/1` so no backend MODULE name is hardcoded here and a
+%% new sealing backend works unchanged. The `seal_mode` default MUST match
+%% `backend_opts/3`'s injected default (`bondy_oplog_config:pack_seal_mode/0`)
+%% or the store-open mode and this decision disagree.
 drive_seal_enabled(MST, Opts) ->
     maps:get(async_seal, bondy_mst:capabilities(MST), false) andalso
         seal_mode_async(Opts).
@@ -7757,23 +7450,16 @@ seal_mode_async(Opts) ->
         maps:get(seal_mode, BackendOptions, Default) =:= async.
 
 %% @private
-%% Resolve the compaction-checkpoint backend module + opts.
+%% Resolve the compaction-checkpoint backend module and opts. An explicit
+%% `compaction_checkpoint` in Opts wins; otherwise a `path` in
+%% `compaction_checkpoint_opts` or a `storage_path` on the instance selects the
+%% file backend; otherwise the in-memory ETS backend.
 %%
-%% Precedence:
-%%   1. Explicit `compaction_checkpoint` in Opts wins; checkpoint opts
-%%      are passed through unchanged.
-%%   2. Otherwise, if a `path` is set in `compaction_checkpoint_opts`
-%%      OR `storage_path` is set on the instance, default to the file
-%%      backend, deriving `path` from `storage_path` (via the configured
-%%      `path_layout`) when not explicit.
-%%   3. Otherwise default to the in-memory ETS backend (ephemeral).
-%%
-%% Path derivation when deriving from `storage_path`: the path layout
-%% returns the per-instance dir (terminates in `<InstanceId>`); the
-%% file backend then appends `<InstanceId>` again.
-%% Pass the parent (the shard dir) so the final file lands at
-%% `<storage_path>/<shard>/<InstanceId>/checkpoint.etf` alongside the
-%% other per-instance artefacts (WAL, MST, projection).
+%% When deriving from `storage_path`, the path layout returns the per-instance
+%% dir (terminating in `<InstanceId>`) and the file backend appends
+%% `<InstanceId>` again, so the PARENT — the shard dir — is what gets passed,
+%% landing the file at `<storage_path>/<shard>/<InstanceId>/checkpoint.etf`
+%% beside the other per-instance artefacts (WAL, MST, projection).
 resolve_checkpoint_backend(InstanceId, Opts, CkptOpts) ->
     case maps:find(compaction_checkpoint, Opts) of
         {ok, Mod} ->

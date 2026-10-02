@@ -249,7 +249,7 @@ mk_id() ->
 %% A fixed-HLC key so both replicas address the same event by seq.
 hole_key(Origin, Seq) ->
     bondy_oplog_event:key(
-        bondy_oplog_hlc:encode(1_000_000_000 + Seq, 0), Origin, Seq
+        bondy_hlc:encode(1_000_000_000 + Seq, 0), Origin, Seq
     ).
 
 %% A `cell_apply` op, so the applier folds it into the projection and the

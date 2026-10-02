@@ -25,7 +25,7 @@ is `false` and callers store plaintext (backward-compatible). When configured bu
 the key cannot be resolved or is malformed, the keyring **fails closed** — it
 never silently downgrades to plaintext.
 
-This module implements the `bondy_oplog_wal_key_registry` behaviour
+This module implements the `bondy_log_key_registry` behaviour
 (`current_key/0`, `lookup_key/1`) so the same master key can back WAL body
 encryption. A rotation-aware `key_id` is baked into every envelope; today a
 single current key is served, and `lookup_key/1` resolves only the current id
@@ -42,7 +42,7 @@ Additional Authenticated Data (AAD) — e.g. a realm URI + kid — so an envelop
 cannot be lifted from one context to another.
 """.
 
--behaviour(bondy_oplog_wal_key_registry).
+-behaviour(bondy_log_key_registry).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -53,8 +53,8 @@ cannot be lifted from one context to another.
 -define(CACHE_KEY(KeyId), {?MODULE, master_key, KeyId}).
 -define(DEFAULT_KEY_ID, 1).
 
--type key_id() :: bondy_oplog_wal_key_registry:key_id().
--type cipher_key() :: bondy_oplog_wal_key_registry:cipher_key().
+-type key_id() :: bondy_log_key_registry:key_id().
+-type cipher_key() :: bondy_log_key_registry:cipher_key().
 -type envelope() :: binary().
 
 -export_type([envelope/0]).

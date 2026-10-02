@@ -95,9 +95,9 @@ peer_loopback_local_origin_bumps_seq_atomic() ->
 
 peer_loopback_foreign_origin_does_not_bump_seq() ->
     %% Symmetric check: a peer event whose Origin is NOT this instance
-    %% must NOT bump our SeqRef. The fix is origin-gated and should
-    %% leave foreign-origin events alone (their seq lives in the
-    %% peer's own counter, not ours).
+    %% must NOT bump our SeqRef: the bump is origin-gated and leaves
+    %% foreign-origin events alone, their seq living in the peer's own
+    %% counter rather than ours.
     Id = mk_id(),
     Origin = bondy_oplog_origin:default(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{origin => Origin}),

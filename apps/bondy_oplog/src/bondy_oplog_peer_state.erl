@@ -469,15 +469,13 @@ handle_cast(
     {record_sync_complete, Peer, Instance, Hash, Frontier0, Now}, State
 ) ->
     Key = {Peer, Instance},
-    %% A rootless completion (peer tree empty) refreshes recency but must
-    %% not ERASE a previously confirmed root: the peer checkpointed that
-    %% root's content before compacting, so keeping it is conservative —
-    %% the stability frontier stays where it was rather than regressing to
-    %% unconfirmed. Same preservation for the recorded frontier: an
-    %% unknown-frontier completion must not erase a previously observed
-    %% one (regressing it could falsely license the unservable-root
-    %% self-heal against stale knowledge — preserving is conservative
-    %% the other way: it can only DELAY the rebuild).
+    %% A rootless completion (the peer's tree was empty) refreshes recency but
+    %% must not ERASE a previously confirmed root: the peer checkpointed that
+    %% root's content before compacting, so keeping it holds the stability
+    %% frontier where it was rather than regressing it to unconfirmed. The
+    %% recorded frontier is preserved for the same reason — regressing it
+    %% could license the unservable-root self-heal against stale knowledge,
+    %% whereas preserving it can only DELAY a rebuild.
     Prev =
         case ets:lookup(?TABLE, Key) of
             [#peer_instance_state{} = P] -> P;
@@ -505,7 +503,6 @@ handle_cast(
     true = ets:insert(?TABLE, Entry),
     {noreply, State};
 handle_cast({touch_peer, Peer, Now}, State) ->
-    %% Update last_seen for every (Peer, _) entry.
     MatchSpec = [
         {
             #peer_instance_state{

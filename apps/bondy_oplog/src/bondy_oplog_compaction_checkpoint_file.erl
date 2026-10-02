@@ -94,7 +94,7 @@ put_checkpoint(#state{path = Path}, Watermark, Checkpoint) ->
         {checkpoint_v1, Watermark, Checkpoint},
         [{minor_version, 2}]
     ),
-    bondy_mst_io:write_file_atomic(Path, Bin).
+    bondy_log_io:write_atomic(Path, Bin).
 
 get_checkpoint(#state{path = Path}) ->
     case file:read_file(Path) of

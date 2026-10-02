@@ -23,20 +23,20 @@
 ?MODULEDOC("""
 Read side of the in-memory ephemeral WAL (`bondy_oplog_wal_mem`).
 
-Mirrors the surface of `bondy_oplog_wal_reader` that the fused drain uses —
+Mirrors the surface of `bondy_log_reader` that the fused drain uses —
 `open/3`, `next/1`, `position/1`, `close/1` — but reads events out of the mem
 WAL's `ordered_set` ETS table instead of segment files. Because an inserted
 event is visible to a reader immediately (no durable-position gate), this is
 where the ephemeral path stops paying the WAL-durability latency.
 
-`next/1` returns the same shape as `bondy_oplog_wal_reader:next/1`
+`next/1` returns the same shape as `bondy_log_reader:next/1`
 (`{ok, Batch, Hlcs, {Seg, Off}, NewIter}`), with `Off` being the dense `Seq`
 and `Seg` the mem WAL's single logical segment id — so the fused drain's
 consumer-offset bookkeeping, idle-waiter and `collect_frames`-style aggregation
 work unchanged on `{Seg, Seq}` positions.
 
-The drain dispatches to this module (vs `bondy_oplog_wal_reader`) on the
-instance's `wal_backend` flag; `bondy_oplog_wal_reader` itself is untouched.
+The drain dispatches to this module (vs `bondy_log_reader`) on the
+instance's `wal_backend` flag; `bondy_log_reader` itself is untouched.
 """).
 
 %% Default events read per `next/1` when the caller does not pass `{chunk, _}`.
@@ -81,7 +81,7 @@ instance's `wal_backend` flag; `bondy_oplog_wal_reader` itself is untouched.
 %% API
 %% =============================================================================
 
--spec open(pid(), bondy_oplog_wal_reader:start_position()) ->
+-spec open(pid(), bondy_log_reader:start_position()) ->
     {ok, t()} | {error, term()}.
 
 open(WalPid, Start) ->
@@ -89,11 +89,11 @@ open(WalPid, Start) ->
 
 ?DOC("""
 Opens a reader over the mem WAL's table at `Start`. `Opts` are accepted for
-parity with `bondy_oplog_wal_reader:open/3` (e.g. `{follow, _}`) and ignored —
+parity with `bondy_log_reader:open/3` (e.g. `{follow, _}`) and ignored —
 the mem reader never blocks; `next/1` simply returns `end_of_log` when the
 cursor has caught up to the head.
 """).
--spec open(pid(), bondy_oplog_wal_reader:start_position(), list()) ->
+-spec open(pid(), bondy_log_reader:start_position(), list()) ->
     {ok, t()} | {error, term()}.
 
 open(WalPid, Start, Opts) when is_pid(WalPid) ->
@@ -140,7 +140,7 @@ microseconds); `Seq > reserved` is the genuine end of the log. A missing
 is skipped forward to `committed`. Point lookups keep reads O(chunk·log n)
 regardless of cursor advance or GC.
 """).
--spec next(t()) -> bondy_oplog_wal_reader:next_result().
+-spec next(t()) -> bondy_log_reader:next_result().
 
 next(#mem_iter{seg = Seg, cursor = Cursor} = Iter) ->
     #mem_iter{tab = Tab, atomics = ARef, chunk = Chunk, min_hlc = Min} = Iter,
@@ -188,12 +188,11 @@ close(#mem_iter{}) ->
 apply_start(Iter, beginning) ->
     Iter#mem_iter{cursor = 0};
 apply_start(Iter, tail) ->
-    %% Start at the head: skip everything already present.
     #{head_seq := H} = bondy_oplog_wal_mem:info(Iter#mem_iter.wal_pid),
     Iter#mem_iter{cursor = H};
 apply_start(Iter, {offset, _Seg, Off}) ->
     Iter#mem_iter{cursor = Off};
-apply_start(Iter, {hlc, Hlc}) ->
+apply_start(Iter, {key, Hlc}) ->
     %% No persisted Seq↔HLC map (a fresh process has an empty table), so scan
     %% from the start and drop events below the watermark per batch.
     Iter#mem_iter{cursor = 0, min_hlc = Hlc}.

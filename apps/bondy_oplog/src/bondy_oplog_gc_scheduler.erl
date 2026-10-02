@@ -45,8 +45,8 @@ interval, cap and trigger is just another registration: pass `name` in
 `child_spec/1` id. The control API's default arities address the default
 instance; the name-first arities address a named one. Telemetry events carry
 `scheduler => Name` so instances are distinguishable. This is what lets
-projection-cell reclamation run on its own cadence
-(`BONDY_DB_RECLAMATION_PLAN.md` Step 5) without duplicating this module or
+projection-cell reclamation run on its own cadence without duplicating this
+module or
 smuggling per-instance time checks into a shared trigger.
 """).
 
@@ -57,7 +57,6 @@ smuggling per-instance time checks into a shared trigger.
     trigger :: undefined | fun((instance_id()) -> any()),
     tick_ref :: undefined | reference(),
     max_concurrency :: pos_integer(),
-    %% Pid → InstanceId of currently running workers.
     in_flight :: #{pid() => instance_id()},
     %% InstanceId → last wall-clock ms a stall was LOGGED for it. The
     %% rate limit for the stalled-reclamation warning (telemetry is never

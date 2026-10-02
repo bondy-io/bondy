@@ -46,7 +46,7 @@ with_wal(Opts, Fun) ->
     end.
 
 mk_event(HLC, Seq) ->
-    Hlc = bondy_oplog_hlc:now(HLC),
+    Hlc = bondy_hlc:now(HLC),
     Key = bondy_oplog_event:key(Hlc, origin(), Seq),
     bondy_oplog_event:new(Key, {op, Hlc}, undefined).
 
@@ -60,10 +60,10 @@ append_n(Pid, HLC, Base, N) ->
     ].
 
 commit_at(Dir, {Seg, Off}) ->
-    CO0 = bondy_oplog_wal_state:new_consumer_offset(),
-    CO1 = bondy_oplog_wal_state:with_position(CO0, Seg, Off),
-    CO = bondy_oplog_wal_state:with_commit_count(CO1, 1),
-    ok = bondy_oplog_wal_state:write_consumer_offset(Dir, CO).
+    CO0 = bondy_log_state:new_consumer_offset(),
+    CO1 = bondy_log_state:with_position(CO0, Seg, Off),
+    CO = bondy_log_state:with_commit_count(CO1, 1),
+    ok = bondy_log_state:write_consumer_offset(Dir, CO).
 
 lag(Pid) ->
     maps:get(consumer_lag_bytes, bondy_oplog_wal:info(Pid)).
@@ -75,7 +75,7 @@ lag(Pid) ->
 %% A consumer that never committed owes the whole live log.
 never_committed_is_whole_log_test() ->
     with_wal(#{}, fun(Pid, _Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         _ = append_n(Pid, HLC, 1, 5),
         #{bytes_total := Total} = bondy_oplog_wal:info(Pid),
         ?assert(Total > 0),
@@ -86,7 +86,7 @@ never_committed_is_whole_log_test() ->
 %% distance from the committed frame to the head.
 committed_positions_test() ->
     with_wal(#{}, fun(Pid, Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         Positions = append_n(Pid, HLC, 1, 8),
         #{
             current_segment := HeadSeg,
@@ -109,7 +109,7 @@ committed_positions_test() ->
 rotated_segments_test() ->
     %% A tiny segment cap forces rotation after a few frames.
     with_wal(#{max_segment_bytes => 512}, fun(Pid, Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         Positions = append_n(Pid, HLC, 1, 40),
         #{
             current_segment := HeadSeg,
@@ -123,7 +123,7 @@ rotated_segments_test() ->
         %% Independent arithmetic: the committed segment's remainder, every
         %% whole segment in between, and the head segment's bytes.
         SegSize = fun(Id) ->
-            Name = bondy_oplog_wal_segment:filename(Id),
+            Name = bondy_log_segment:filename(Id),
             filelib:file_size(filename:join(Dir, Name))
         end,
         Expected =
@@ -140,7 +140,7 @@ rotated_segments_test() ->
 %% reported as zero, never negative.
 committed_ahead_is_zero_test() ->
     with_wal(#{}, fun(Pid, Dir) ->
-        HLC = bondy_oplog_hlc:new(),
+        HLC = bondy_hlc:new(),
         [{_, Off} | _] = append_n(Pid, HLC, 1, 3),
         #{current_segment := HeadSeg} = bondy_oplog_wal:info(Pid),
         ok = commit_at(Dir, {HeadSeg + 7, Off}),

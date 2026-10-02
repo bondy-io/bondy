@@ -161,8 +161,8 @@ run_restart(Dir) ->
         ML1,
         "durable MST root did not survive a clean restart"
     ),
-    %% The fix cursor is ALWAYS O(1): resuming from the consumer offset does no
-    %% work, regardless of the MST.
+    %% The resume cursor is ALWAYS O(1): resuming from the consumer offset
+    %% does no work, regardless of the MST.
     ?assertEqual(
         0,
         FromOffset1,
@@ -184,24 +184,24 @@ run_restart(Dir) ->
 consumer_offset_pos(WalP) ->
     View = bondy_oplog_wal:reader_view(WalP),
     Dir = maps:get(dir, View),
-    {ok, CO} = bondy_oplog_wal_state:read_consumer_offset(Dir),
+    {ok, CO} = bondy_log_state:read_consumer_offset(Dir),
     {
-        bondy_oplog_wal_state:committed_segment(CO),
-        bondy_oplog_wal_state:committed_frame_offset(CO)
+        bondy_log_state:committed_segment(CO),
+        bondy_log_state:committed_frame_offset(CO)
     }.
 
 frames_to_eol(WalP, Start) ->
-    case bondy_oplog_wal_reader:open(WalP, Start, [{follow, false}]) of
+    case bondy_log_reader:open(WalP, Start, [{follow, false}]) of
         {ok, It} ->
             N = count_frames(It, 0),
-            _ = bondy_oplog_wal_reader:close(It),
+            _ = bondy_log_reader:close(It),
             N;
         {error, R} ->
             error({open_failed, Start, R})
     end.
 
 count_frames(It, Acc) ->
-    case bondy_oplog_wal_reader:next(It) of
+    case bondy_log_reader:next(It) of
         {ok, _Batch, _Hlcs, _NextPos, NewIt} ->
             count_frames(NewIt, Acc + 1);
         end_of_log ->

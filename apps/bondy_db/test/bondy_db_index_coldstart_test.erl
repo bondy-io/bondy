@@ -129,17 +129,12 @@ untrusted_restart_rebuilds(Dirs) ->
     untrust_all_shards(T0, by_value),
     close(T0, Db0, Sup0),
 
-    %% --- Second lifetime: the unmarked index triggers a rebuild on open. ---
-    %% We assert the DECISION Step 3 owns: a shard whose durable trust marker
-    %% is absent is rebuilt (not silently trusted). We do NOT assert the
-    %% rebuilt contents here: the rebuild re-derives from the primary via
-    %% `reindex_from_projection`, whose cell directory for this durable table is
-    %% the projection (`cell_keys/2`, the complete durable directory — see
-    %% `bondy_oplog_cell_utils:primary_cell_directory/4`). Its completeness depends
-    %% on the primary's own durable recovery / tail-replay — a separate concern
-    %% from the marker-driven decision, and exercised by the rebuild suites
-    %% (lag / writer / tier2). The trusted path (and its full data survival) is
-    %% covered by `clean_restart_trusts`.
+    %% Second lifetime: the unmarked index triggers a rebuild on open. The
+    %% assertion is the DECISION — a shard whose durable trust marker is
+    %% absent is rebuilt, not silently trusted — and NOT the rebuilt
+    %% contents, whose completeness rests on the primary's own durable
+    %% recovery and is exercised by the rebuild suites (lag / writer /
+    %% tier2). `clean_restart_trusts` covers the trusted path.
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
     {Db1, Sup1} = open(Dirs),
@@ -195,12 +190,11 @@ graceful_tail_restart_trusts(Dirs) ->
         close(T1, Db1, Sup1)
     end.
 
-%% Test B — the original data-loss scenario, now correctly
-%% recovered. A write durable in the PRIMARY whose index dispatch is lost on a
-%% CRASH (in-flight coalesce buffer gone, no clean close) must still be present
-%% after reopen — via a REBUILD (the shard is not trusted, because no
-%% clean-shutdown flag was written). The fix turns the silent under-count into a
-%% rebuild; rebuilding is the accepted cost on the crash path.
+%% The data-loss scenario. A write durable in the PRIMARY whose index dispatch
+%% is lost on a CRASH (in-flight coalesce buffer gone, no clean close) must
+%% still be present after reopen — via a REBUILD, because no clean-shutdown
+%% flag was written and the shard is therefore not trusted. Rebuilding is the
+%% accepted cost on the crash path; a silent under-count is not.
 %%
 %% Construction: u3 is durable in the primary; `reset/1` drops its buffered index
 %% op (the crash's effect on the in-memory buffer); `crash/2` tears the processes

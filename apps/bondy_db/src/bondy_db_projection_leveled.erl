@@ -614,13 +614,11 @@ bucket_cell_keys(Pid, Bucket) ->
         leveled_bookie:book_keylist(Pid, ?HEAD_TAG, Bucket, {FoldFun, []}),
     Folder().
 
-%% True when binary `Bucket` ends with binary `Suffix`.
 is_bucket_suffix(Suffix, Bucket) when is_binary(Bucket) ->
     SS = byte_size(Suffix),
     BS = byte_size(Bucket),
     BS >= SS andalso binary:part(Bucket, BS - SS, SS) =:= Suffix;
 is_bucket_suffix(_Suffix, _Bucket) ->
-    %% Non-binary bucket (not produced by this layer) — never a match.
     false.
 
 %% Remove every cell of one bucket. Folds the bucket's keys keyed off the
@@ -694,7 +692,6 @@ bookie(#{bookie := Pid}) when is_pid(Pid) ->
 bookie(#{bookie := {pt, PTKey}}) ->
     persistent_term:get(PTKey).
 
-%% Read the state subkey, returning {ok, Hlc, StateBytes} | not_found.
 read_state_subkey(Pid, Bucket, Key) ->
     case leveled_bookie:book_headonly(Pid, Bucket, Key, ?SK_STATE) of
         {ok, <<HlcLen:16/big-unsigned, Hlc:HlcLen/binary, StateBytes/binary>>} ->
@@ -704,7 +701,6 @@ read_state_subkey(Pid, Bucket, Key) ->
             not_found
     end.
 
-%% Read the value subkey, returning {ok, Hlc, ValueBytes} | not_found.
 read_value_subkey(Pid, Bucket, Key) ->
     case leveled_bookie:book_headonly(Pid, Bucket, Key, ?SK_VALUE) of
         {ok, <<HlcLen:16/big-unsigned, Hlc:HlcLen/binary, ValueBytes/binary>>} ->
@@ -714,15 +710,6 @@ read_value_subkey(Pid, Bucket, Key) ->
             not_found
     end.
 
-%% Turn an [{Bucket, Key, Frame}] list into a flat [ObjectSpec] list
-%% suitable for book_mput.
-%%
-%% For frames with `HasValueColumn=1` we emit BOTH subkeys (state +
-%% value). For frames with `HasValueColumn=0` (value_equals_state
-%% folds) we emit ONLY the state subkey — the value subkey absence is
-%% the signal on read that the cell was written by a
-%% value_equals_state fold. See `get/3` and `head/3` for the
-%% read-side handling.
 build_object_specs([], Acc) ->
     lists:reverse(Acc);
 build_object_specs([{Bucket, Key, Frame} | Rest], Acc) ->
@@ -802,11 +789,8 @@ finalize_frame({K, Hlc, StateBytes, ValueBytes}, Count, Results) ->
     Frame = bondy_oplog_cell_frame:encode(Hlc, StateBytes, ValueBytes, false),
     {Count + 1, [{K, Frame} | Results]}.
 
-%% Parse a head subkey payload `<<HlcLen:16, Hlc, Bytes>>` to `{HlcInt, Bytes}`.
 decode_head(<<HlcLen:16/big-unsigned, Hlc:HlcLen/binary, Bytes/binary>>) ->
     {binary:decode_unsigned(Hlc, big), Bytes}.
 
-%% The payload bytes of a head subkey (the state subkey's HLC is authoritative
-%% for the reconstructed frame, matching `get/3`).
 head_payload(<<HlcLen:16/big-unsigned, _Hlc:HlcLen/binary, Bytes/binary>>) ->
     Bytes.

@@ -127,7 +127,7 @@ loss, not a bookkeeping-bloat nuisance — heed `reap_origins/2`'s own
 -type dot() :: bondy_oplog_crdt_aw_core:dot().
 -type outer_key() :: term().
 -type flat_value() :: term().
--type sub_value() :: {sub, module(), bondy_oplog_hlc:hlc(), term()}.
+-type sub_value() :: {sub, module(), bondy_hlc:hlc(), term()}.
 -type value() :: flat_value() | sub_value().
 -type dot_store() :: #{dot() => value()}.
 -type entries() :: #{outer_key() => dot_store()}.
@@ -172,7 +172,7 @@ currently holds a flat (non-nested) value.
     Dot :: dot(),
     Ctx :: bondy_oplog_crdt_aw_core:vv(),
     SubMod :: module(),
-    Hlc :: bondy_oplog_hlc:hlc(),
+    Hlc :: bondy_hlc:hlc(),
     SubOp :: term()
 ) -> entries().
 
@@ -182,16 +182,14 @@ currently holds a flat (non-nested) value.
 put_nested(Entries, K, Dot, _Ctx, SubMod, Hlc, SubOp) ->
     DS0 = maps:get(K, Entries, #{}),
     ok = check_sub_mod(DS0, K, SubMod),
-    %% Deliberately no drop_observed/2 here, unlike put/5. A flat value is
-    %% a register — a sequential same-origin write should supersede its
-    %% own prior value, which is exactly what drop_observed/2 achieves.
-    %% A nested sub-op is not a value to be superseded; it is one event in
-    %% a sequence every one of which must survive to be individually
-    %% folded through SubMod's own interpret_cog (an accumulator like
-    %% pn_counter, or a permanent-membership type like two_p_set, computes
-    %% the wrong result if any of its own ops go missing). Only an
-    %% explicit rmv/3 of the whole outer key may prune nested sub-op
-    %% dots — never an ordinary same-origin put_nested/7.
+    %% Deliberately no `drop_observed/2` here, unlike `put/5`. A flat value is
+    %% a register, so a sequential same-origin write should supersede its own
+    %% prior value. A nested sub-op is not a value to be superseded: it is one
+    %% event in a sequence, every one of which must survive to be folded
+    %% individually through `SubMod`'s own `interpret_cog` — an accumulator
+    %% like `pn_counter`, or a permanent-membership type like `two_p_set`,
+    %% computes the wrong result if any of its ops go missing. Only an
+    %% explicit `rmv/3` of the whole outer key may prune nested sub-op dots.
     Entries#{K => DS0#{Dot => {sub, SubMod, Hlc, SubOp}}}.
 
 -doc """
@@ -248,7 +246,7 @@ foldable run. Value-preserving by construction: the fold IS the module's
 own convergence kernel.
 """.
 -spec stabilize_fold(
-    DotStore :: dot_store(), StableHlc :: bondy_oplog_hlc:hlc()
+    DotStore :: dot_store(), StableHlc :: bondy_hlc:hlc()
 ) -> {folded, dot_store()} | unchanged.
 
 stabilize_fold(DotStore, StableHlc) ->

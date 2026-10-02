@@ -84,7 +84,6 @@ the restart. A restart of `bondy_metrics` wipes the counters.
     %% first window is bounded by "time since last tick" rather than
     %% clamping to 1ms.
     last_tick_ts :: integer(),
-    %% Snapshot of {Reads, Ranges, Hits, Misses, MonoMs} at last tick.
     snapshot :: #{
         atom() => {
             non_neg_integer(),
@@ -397,9 +396,7 @@ subscriber_count(NS) ->
 %% nothing bumps a secondary's atomic and its "lag" is just time since boot.
 %% Nothing is lost by excluding it — a secondary index is written from the
 %% same cell apply as its primary (`dispatch_index_ops/4`), so it carries no
-%% freshness independent of the primary shard it rides on. Measured
-%% 2026-09-09 on an idle 2-node cluster before this change: primary 0.06s,
-%% `by_resource` 343s and growing 1:1 with wall clock.
+%% freshness independent of the primary shard it rides on.
 freshness_lag_max_ms(NS, NowMs) ->
     try bondy_oplog_core_registry:primary_shards_for(NS) of
         [] ->

@@ -60,7 +60,7 @@ issuer, on its own band right after its write, and `cleanup/0`, the single
 writer per owned realm. The order is `(expires_at, write HLC, key)`: soonest-
 expiring first, and among tokens expiring in the same second — every token
 issued within one second, at the default TTL — the one written EARLIEST. The
-HLC is the cell's, stamped by the store on the write (`bondy_oplog_hlc`:
+HLC is the cell's, stamped by the store on the write (`bondy_hlc`:
 milliseconds plus a logical counter, comparable across nodes), so "new replaces
 old" holds at write resolution: an issue can evict any token but the one it
 just wrote, and a refresh, being a write, makes its token the newest.

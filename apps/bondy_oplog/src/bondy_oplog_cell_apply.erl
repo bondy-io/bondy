@@ -48,14 +48,12 @@ behaviour is byte-identical.
     %% always allocate).
     high_water_ref => bondy_oplog_high_water:ref() | undefined,
     %% Secondary indexes declared on this primary table. Static descriptors
-    %% resolved once at init from the applier opts; `[]` (the default) makes
-    %% the index
-    %% dispatch a strict no-op for non-indexed tables. For each cell the
-    %% applier materialises, it term-diffs the cell's old vs new value
-    %% per descriptor and dispatches `index_entry` ops to the
-    %% `bondy_oplog_secondary_writer` owning each touched secondary
-    %% shard (resolved live via `bondy_oplog_core_registry`), so the writer
-    %% need not exist when the applier starts.
+    %% resolved once at init from the applier opts; `[]` (the default) makes the
+    %% index dispatch a strict no-op. For each cell the applier materialises it
+    %% term-diffs the cell's old vs new value per descriptor and dispatches
+    %% `index_entry` ops to the `bondy_oplog_secondary_writer` owning each
+    %% touched secondary shard, resolved live via `bondy_oplog_core_registry` so
+    %% the writer need not exist when the applier starts.
     secondary_indexes => [index_descriptor()]
 }.
 -type index_descriptor() :: #{
@@ -121,23 +119,20 @@ by `sec_idx/1`.
 %% =============================================================================
 
 %% @private
-%% Apply a batch of `cell_apply` events to the projection. For each event,
-%% read the cell's current frame from the projection (or the in-batch
-%% shadow), decode to state via the fold's `decode_state/1`, fold the event in
-%% via `apply_event/3`, encode back, and write the new frame via
-%% `put_batch/2`. Bucket is a first-class call-time parameter on the
-%% projection adapter; the applier passes it through verbatim.
+%% Apply a batch of `cell_apply` events to the projection: per event, read the
+%% cell's current frame from the projection or the in-batch shadow, decode to
+%% state via the fold's `decode_state/1`, fold the event in via `apply_event/3`,
+%% encode back, and write the new frame via `put_batch/2`. Bucket is a
+%% first-class call-time parameter on the projection adapter, passed through
+%% verbatim.
 %%
-%% RETURNS the per-origin seqs this call MATERIALISED, `#{Origin => [Seq]}`,
-%% for `apply_cell_batch_mux/3` to turn into a frontier claim. It does not
-%% merge the frontier itself: `bondy_oplog_registry:merge_applied/2` is the
-%% single writer of that quantity, and one over-claiming writer poisons the
-%% entry permanently.
-%%
-%% An event the fold SKIPS counts as materialised: `compute_one_cell/13`
-%% returns `skip` when the event is older than the cell's current state, so
-%% that state already reflects it. A failed `put_batch/2` counts as nothing:
-%% the cells re-apply on the next replay.
+%% RETURNS the per-origin seqs this call MATERIALISED, `#{Origin => [Seq]}`, for
+%% `apply_cell_batch_mux/3` to turn into a frontier claim. It does not merge the
+%% frontier itself: `bondy_oplog_registry:merge_applied/2` is the single writer
+%% of that quantity, and one over-claiming writer poisons the entry permanently.
+%% An event the fold SKIPS counts as materialised (`compute_one_cell/13` returns
+%% `skip` when the cell's state already reflects it); a failed `put_batch/2`
+%% counts as nothing, the cells re-applying on the next replay.
 apply_cell_batch(undefined, _Id, _Events) ->
     #{};
 apply_cell_batch(_Ctx, _Id, []) ->
@@ -152,20 +147,13 @@ apply_cell_batch(Ctx, Id, Events) ->
     SecIdx = sec_idx(Ctx),
 
     %% Collect all per-event writes into a single `Adapter:put_batch/2` call.
-    %%
-    %% Correctness: when two events in the batch target the same
-    %% `{Bucket, Key}`, the second must observe the first's write.
-    %% We thread a `LocalWrites :: #{{Bucket, Key} => Frame}` shadow
-    %% through the fold so the per-event read path checks the local
-    %% map before falling back to `Adapter:get/3`. After the fold,
-    %% we issue ONE `put_batch` with the deduped {Bucket, Key, Frame}
-    %% list (last write wins per key — consistent with the previous
-    %% sequential-per-key semantics).
-    %%
-    %% A third accumulator `IdxAcc :: #{{IndexName, SecShard} => [IndexOp]}`
-    %% collects the secondary-index ops every cell yields (empty for
-    %% non-indexed tables); they are dispatched to the secondary writers
-    %% *after* the primary `put_batch` returns ok.
+    %% When two events in the batch target the same `{Bucket, Key}` the second
+    %% must observe the first's write, so a `LocalWrites :: #{{Bucket, Key} =>
+    %% Frame}` shadow is threaded through the fold and the per-event read
+    %% checks it before falling back to `Adapter:get/3`. The one `put_batch`
+    %% then takes the deduped list, last write winning per key. `IdxAcc`
+    %% collects the secondary-index ops each cell yields; those are dispatched
+    %% AFTER the primary `put_batch` returns ok.
     {LocalWrites, MaxHlc, IdxAcc} = lists:foldl(
         fun(Event, {WAcc, HlcAcc, IAcc}) ->
             case bondy_oplog_event:op(Event) of
@@ -268,17 +256,11 @@ apply_cell_batch(Ctx, Id, Events) ->
     end.
 
 %% @private
-%% Per-event compute (read + apply + encode). Returns the new frame +
-%% HLC to the batch caller, which collects and writes them all at once.
-%%
-%% Reads first consult `LocalWrites` so in-batch updates to the same
-%% `{Bucket, Key}` see each other (the substrate has not been written
-%% yet at this point). Then falls back to `Adapter:get/3`.
-%%
-%% Per-event telemetry boundaries `cell_read` + `cell_apply_event`
-%% remain (each cell still pays the read + compute cost). The put
-%% and side-effects now happen once per batch and are measured by
-%% `batch_cell_put` in `apply_cell_batch/3`.
+%% Per-event compute (read + apply + encode). Returns the new frame + HLC to the
+%% batch caller, which collects and writes them all at once. Reads first consult
+%% `LocalWrites` so in-batch updates to the same `{Bucket, Key}` see each other
+%% — the substrate has not been written yet at this point — then fall back to
+%% `Adapter:get/3`.
 compute_one_cell(
     Id,
     Adapter,
@@ -415,7 +397,6 @@ oldstate_cache_new(true, Max) ->
     {ets:new(applier_oldstate_cache, [set, private]), Max}.
 
 %% @private
-%% Look up the cached frame for `{Bucket, Key}`.
 oldstate_cache_get(undefined, _Bucket, _Key) ->
     miss;
 oldstate_cache_get({Tab, _Max}, Bucket, Key) ->
@@ -591,10 +572,6 @@ index_seckey(Term, PrimaryKey, _RealmFolded) ->
     bondy_oplog_index_key:encode(Term, PrimaryKey).
 
 %% @private
-%% Group the cell's `{IndexName, SecShard, Op}` triples into
-%% `#{{IndexName, SecShard} => [Op]}` (ops accumulate in reverse; the
-%% dispatcher restores arrival order). A no-op for an empty op list, so
-%% non-indexed tables pay nothing.
 merge_idx_ops(Acc, []) ->
     Acc;
 merge_idx_ops(Acc, [{IName, SecShard, Op} | Rest]) ->
@@ -602,17 +579,17 @@ merge_idx_ops(Acc, [{IName, SecShard, Op} | Rest]) ->
     merge_idx_ops(Acc#{K => [Op | maps:get(K, Acc, [])]}, Rest).
 
 %% @private
-%% Dispatch the grouped index ops to the secondary writer owning each
-%% touched shard, resolved live from the registry (so the writer need not
-%% have existed when the applier started). A missing writer pid or row is
-%% dropped silently — the index is rebuildable from the primary.
+%% Dispatch the grouped index ops to the secondary writer owning each touched
+%% shard, resolved live from the registry so the writer need not have existed
+%% when the applier started. A missing writer pid or row is dropped silently —
+%% the index is rebuildable from the primary.
 %%
-%% Back-pressure: each `(IName, SecShard)` carries an in-flight op
-%% counter. On the live drain path (`Bypass = false`) a batch that would
-%% push the counter past the index's `max_inflight` cap is dropped, the
-%% shard is marked `needs_rebuild`, its freshness reset to stale (so reads
-%% refuse), and a rebuild requested. A rebuild's own re-fold dispatches
-%% with `Bypass = true` so it can reload the full working set in one pass.
+%% Back-pressure: each `(IName, SecShard)` carries an in-flight op counter. On
+%% the live drain path (`Bypass = false`) a batch that would push the counter
+%% past the index's `max_inflight` cap is dropped, the shard is marked
+%% `needs_rebuild`, its freshness reset to stale so reads refuse, and a rebuild
+%% requested. A rebuild's own re-fold dispatches with `Bypass = true` so it can
+%% reload the full working set in one pass.
 dispatch_index_ops({_NS, []}, _IdxAcc, _MaxHlc, _Bypass) ->
     ok;
 dispatch_index_ops({NS, SecIndexes}, IdxAcc, MaxHlc, Bypass) ->
@@ -695,27 +672,23 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
     ok.
 
 %% @private
-%% Walks the `{Key, Value}` pairs from the MST (or its diff) and
-%% dispatches every `cell_apply` op through the batched compute path.
-%% Non-cell ops are skipped.
-%%
-%% Same collect-then-batch shape as `apply_cell_batch/3`. Per-key shadow
-%% map preserves in-batch read-your-own-writes when two pairs target the
-%% same `{Bucket, Key}`.
+%% Walks the `{Key, Value}` pairs from the MST (or its diff) and dispatches
+%% every `cell_apply` op through the batched compute path. Non-cell ops are
+%% skipped here — the per-instance fold owns them and has already seen them via
+%% the WAL drain. Same collect-then-batch shape as `apply_cell_batch/3`, with a
+%% per-key shadow map for in-batch read-your-own-writes.
 %%
 %% Index dispatch respects the back-pressure cap (`Bypass = false`): a
-%% peer-event replay that overflows a writer is dropped and self-heals via
-%% a marked rebuild. The full-rebuild path no longer routes through here —
-%% it re-indexes from the converged projection
-%% (`bondy_oplog_cell_utils:reindex/3`).
+%% peer-event replay that overflows a writer is dropped and self-heals via a
+%% marked rebuild. The full-rebuild path re-indexes from the converged
+%% projection instead (`bondy_oplog_cell_utils:reindex/3`).
 %%
-%% RETURNS `{CellsApplied, Materialised}` where `Materialised` is the
-%% per-origin seqs this call reflected into the projection — the replay-path
-%% counterpart of `apply_cell_batch/3`'s return, and for the same reason: the
-%% frontier claim is made once per batch by `apply_cell_pairs_mux/5`, after
-%% every group has reported. A pair the fold SKIPS counts as materialised (the
-%% cell's state already dominates it); a failed `put_batch/2` counts as
-%% nothing.
+%% RETURNS `{CellsApplied, Materialised}`, `Materialised` being the per-origin
+%% seqs this call reflected into the projection — the replay-path counterpart of
+%% `apply_cell_batch/3`'s return, and for the same reason: the frontier claim is
+%% made once per batch by `apply_cell_pairs_mux/5`, after every group has
+%% reported. A pair the fold SKIPS counts as materialised (the cell's state
+%% already dominates it); a failed `put_batch/2` counts as nothing.
 apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
     CrdtOpts = maps:get(crdt_opts, Ctx, #{}),
@@ -865,20 +838,17 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     end.
 
 %% @private
-%% Per-origin seqs over the seq-bearing pairs of a replay batch.
 batch_seqs(Pairs) ->
     origin_seqs(Pairs, fun pair_cell_key/1).
 
 %% @private
-%% Per-origin seq lists (unsorted) over a batch's seq-bearing events —
-%% the shared core of `batch_seqs/1`, `apply_cell_batch_mux/3`,
-%% `detect_prefix_holes/2` and `partition_contiguous/4`. `KeyF` extracts
-%% the event key from one batch element, or `undefined` for elements
-%% that carry no per-origin seq claim. `cell_apply` events count, and so
-%% do `seq_fill` backfills (the no-op occupants of a burned seq range,
-%% see `release_seq_range` in `bondy_oplog_instance`): a fill's whole
-%% purpose is to be PRESENT — to advance the frontier and complete
-%% contiguous runs — while every fold skips it.
+%% Per-origin seq lists (unsorted) over a batch's seq-bearing events — the
+%% shared core of `batch_seqs/1`, `apply_cell_batch_mux/3`,
+%% `detect_prefix_holes/2` and `partition_contiguous/4`. `KeyF` extracts the
+%% event key from one batch element, or `undefined` for elements carrying no
+%% per-origin seq claim. `cell_apply` events count, and so do `seq_fill`
+%% backfills: a fill's whole purpose is to be PRESENT — to advance the frontier
+%% and complete contiguous runs — while every fold skips it.
 origin_seqs(Items, KeyF) ->
     lists:foldl(
         fun(Item, Acc) ->
@@ -1066,19 +1036,17 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin) ->
     Count.
 
 %% @private
-%% As `apply_cell_pairs_mux/4`, with per-origin prefix-closure
-%% enforcement: when `hold => true`, a remote origin's events beyond its
-%% first contiguity gap
-%% are HELD — excluded from the fold and therefore from the
-%% applied-frontier claim, which only ever names folded pairs.
-%% Returns `{CellsApplied, HeldCount}`; a caller passing `hold => true`
-%% MUST NOT advance its replay cursor past this diff when `HeldCount > 0`
-%% — the unadvanced cursor is what re-presents the held events on the
-%% next replay (idempotent re-fold), until the gap fills or a catalogue
-%% rebootstrap re-anchors the cursor. Callers with no re-presentation
-%% path (the compaction catch-up, whose input is about to be truncated
-%% out of the MST, and `rederive_projection`, a one-shot full fold) MUST
-%% keep using `apply_cell_pairs_mux/4`: for them a hold is a silent drop.
+%% As `apply_cell_pairs_mux/4`, with per-origin prefix-closure enforcement: when
+%% `hold => true`, a remote origin's events beyond its first contiguity gap are
+%% HELD — excluded from the fold and therefore from the applied-frontier claim,
+%% which only ever names folded pairs. Returns `{CellsApplied, HeldCount}`; a
+%% caller passing `hold => true` MUST NOT advance its replay cursor past this
+%% diff when `HeldCount > 0`, the unadvanced cursor being what re-presents the
+%% held events on the next replay (idempotent re-fold) until the gap fills or a
+%% catalogue rebootstrap re-anchors the cursor. Callers with no re-presentation
+%% path — the compaction catch-up, whose input is about to be truncated out of
+%% the MST, and `rederive_projection`, a one-shot full fold — MUST keep using
+%% `apply_cell_pairs_mux/4`: for them a hold is a silent drop.
 %%
 %% Local-origin events are never held: they are delivered in seq order
 %% by the local WAL drain, and holding a replica's own echoes could only
@@ -1135,23 +1103,20 @@ fill_pairs(Pairs) ->
 %% @private
 %% Drops pairs authored by a RETIRED origin before anything folds them.
 %%
-%% `bondy_oplog_instance` refuses a banned origin at `install_remote`, but
-%% that gate covers only the single-event path: a whole-root page merge
-%% (`do_integrate_peer_root`) brings a peer's subtree in structurally and
-%% never consults it. Without this filter a retired origin's events would
-%% still reach the projection by that route, which contradicts the
-%% retirement the frontier reap is licensed by — the reap drops the
-%% origin's frontier entry precisely because no further event from it will
-%% ever be applied here.
+%% `bondy_oplog_instance` refuses a banned origin at `install_remote`, but that
+%% gate covers only the single-event path: a whole-root page merge
+%% (`do_integrate_peer_root`) brings a peer's subtree in structurally and never
+%% consults it. Without this filter a retired origin's events would still reach
+%% the projection by that route, contradicting the retirement the frontier reap
+%% is licensed by — the reap drops the origin's frontier entry precisely because
+%% no further event from it will ever be applied here.
 %%
-%% Only RETIRED origins are dropped, never merely banned ones. Retirement
-%% is permanent, so never re-presenting these pairs is correct; an ordinary
-%% ban can be lifted, and dropping its events here would silently lose them
-%% once the replay cursor advanced past the diff that carried them.
-%%
-%% Filtering here rather than at the fold's tail also keeps them out of the
-%% claim, so the applied frontier never rises for an origin whose events this
-%% replica declined.
+%% Only RETIRED origins are dropped, never merely banned ones. Retirement is
+%% permanent, so never re-presenting these pairs is correct; an ordinary ban can
+%% be lifted, and dropping its events here would silently lose them once the
+%% replay cursor advanced past the diff that carried them. Filtering here rather
+%% than at the fold's tail also keeps them out of the claim, so the applied
+%% frontier never rises for an origin whose events this replica declined.
 drop_retired(Id, Pairs) ->
     case bondy_oplog_origin_bans:has_retired() of
         false ->
@@ -1279,7 +1244,6 @@ unroutable(Pairs, Source) ->
     ).
 
 %% @private
-%% The longest prefix of sorted `Seqs` contiguous with `Prev`.
 contiguous_run(Prev, [S | Rest]) when S =:= Prev + 1 ->
     [S | contiguous_run(S, Rest)];
 contiguous_run(_Prev, _Seqs) ->

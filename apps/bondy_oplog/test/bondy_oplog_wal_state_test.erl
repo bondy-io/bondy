@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Unit tests for `bondy_oplog_wal_state` — the persistent state-file
+%% Unit tests for `bondy_log_state` — the persistent state-file
 %% module that owns `consumer.offset` (applier commit position) and
 %% `snapshot.watermark` (retention watermark).
 %%
@@ -60,16 +60,16 @@ with_tmp_dir(Fun) ->
 %% =============================================================================
 
 new_returns_defaults_test() ->
-    CO = bondy_oplog_wal_state:new_consumer_offset(),
-    ?assertEqual(0, bondy_oplog_wal_state:committed_segment(CO)),
+    CO = bondy_log_state:new_consumer_offset(),
+    ?assertEqual(0, bondy_log_state:committed_segment(CO)),
     ?assertEqual(
         ?SEG_HEADER,
-        bondy_oplog_wal_state:committed_frame_offset(CO)
+        bondy_log_state:committed_frame_offset(CO)
     ),
     ?assertEqual(
-        undefined, bondy_oplog_wal_state:committed_hlc(CO)
+        undefined, bondy_log_state:committed_key(CO)
     ),
-    ?assertEqual(0, bondy_oplog_wal_state:commit_count(CO)).
+    ?assertEqual(0, bondy_log_state:commit_count(CO)).
 
 %% =============================================================================
 %% read/write round-trip
@@ -78,35 +78,35 @@ new_returns_defaults_test() ->
 read_missing_file_returns_new_test() ->
     with_tmp_dir(fun(Dir) ->
         ?assertEqual(
-            {ok, bondy_oplog_wal_state:new_consumer_offset()},
-            bondy_oplog_wal_state:read_consumer_offset(Dir)
+            {ok, bondy_log_state:new_consumer_offset()},
+            bondy_log_state:read_consumer_offset(Dir)
         )
     end).
 
 write_then_read_roundtrip_test() ->
     with_tmp_dir(fun(Dir) ->
-        CO0 = bondy_oplog_wal_state:new_consumer_offset(),
-        CO1 = bondy_oplog_wal_state:with_position(CO0, 5, 1024),
-        CO2 = bondy_oplog_wal_state:with_hlc(CO1, 1715520000123),
-        CO3 = bondy_oplog_wal_state:with_commit_count(CO2, 42),
-        ok = bondy_oplog_wal_state:write_consumer_offset(Dir, CO3),
-        {ok, Read} = bondy_oplog_wal_state:read_consumer_offset(Dir),
-        ?assertEqual(5, bondy_oplog_wal_state:committed_segment(Read)),
+        CO0 = bondy_log_state:new_consumer_offset(),
+        CO1 = bondy_log_state:with_position(CO0, 5, 1024),
+        CO2 = bondy_log_state:with_key(CO1, 1715520000123),
+        CO3 = bondy_log_state:with_commit_count(CO2, 42),
+        ok = bondy_log_state:write_consumer_offset(Dir, CO3),
+        {ok, Read} = bondy_log_state:read_consumer_offset(Dir),
+        ?assertEqual(5, bondy_log_state:committed_segment(Read)),
         ?assertEqual(
             1024,
-            bondy_oplog_wal_state:committed_frame_offset(Read)
+            bondy_log_state:committed_frame_offset(Read)
         ),
         ?assertEqual(
             1715520000123,
-            bondy_oplog_wal_state:committed_hlc(Read)
+            bondy_log_state:committed_key(Read)
         ),
-        ?assertEqual(42, bondy_oplog_wal_state:commit_count(Read))
+        ?assertEqual(42, bondy_log_state:commit_count(Read))
     end).
 
 write_uses_tmp_then_rename_test() ->
     with_tmp_dir(fun(Dir) ->
-        CO = bondy_oplog_wal_state:new_consumer_offset(),
-        ok = bondy_oplog_wal_state:write_consumer_offset(Dir, CO),
+        CO = bondy_log_state:new_consumer_offset(),
+        ok = bondy_log_state:write_consumer_offset(Dir, CO),
         FinalPath = filename:join(
             Dir, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_FILENAME
         ),
@@ -119,14 +119,14 @@ write_uses_tmp_then_rename_test() ->
 
 write_overwrites_existing_test() ->
     with_tmp_dir(fun(Dir) ->
-        CO1 = bondy_oplog_wal_state:with_commit_count(
-            bondy_oplog_wal_state:new_consumer_offset(), 1
+        CO1 = bondy_log_state:with_commit_count(
+            bondy_log_state:new_consumer_offset(), 1
         ),
-        ok = bondy_oplog_wal_state:write_consumer_offset(Dir, CO1),
-        CO2 = bondy_oplog_wal_state:with_commit_count(CO1, 2),
-        ok = bondy_oplog_wal_state:write_consumer_offset(Dir, CO2),
-        {ok, Read} = bondy_oplog_wal_state:read_consumer_offset(Dir),
-        ?assertEqual(2, bondy_oplog_wal_state:commit_count(Read))
+        ok = bondy_log_state:write_consumer_offset(Dir, CO1),
+        CO2 = bondy_log_state:with_commit_count(CO1, 2),
+        ok = bondy_log_state:write_consumer_offset(Dir, CO2),
+        {ok, Read} = bondy_log_state:read_consumer_offset(Dir),
+        ?assertEqual(2, bondy_log_state:commit_count(Read))
     end).
 
 %% =============================================================================
@@ -146,7 +146,7 @@ read_missing_required_field_test() ->
         ),
         ?assertMatch(
             {error, {missing_field, committed_frame_offset}},
-            bondy_oplog_wal_state:read_consumer_offset(Dir)
+            bondy_log_state:read_consumer_offset(Dir)
         )
     end).
 
@@ -163,7 +163,7 @@ read_unsupported_schema_version_test() ->
         ),
         ?assertMatch(
             {error, {unsupported_schema_version, 99}},
-            bondy_oplog_wal_state:read_consumer_offset(Dir)
+            bondy_log_state:read_consumer_offset(Dir)
         )
     end).
 
@@ -179,7 +179,7 @@ read_invalid_committed_segment_test() ->
         ),
         ?assertMatch(
             {error, {invalid_field, committed_segment, _}},
-            bondy_oplog_wal_state:read_consumer_offset(Dir)
+            bondy_log_state:read_consumer_offset(Dir)
         )
     end).
 
@@ -195,7 +195,7 @@ read_negative_offset_rejected_test() ->
         ),
         ?assertMatch(
             {error, {invalid_field, committed_frame_offset, _}},
-            bondy_oplog_wal_state:read_consumer_offset(Dir)
+            bondy_log_state:read_consumer_offset(Dir)
         )
     end).
 
@@ -204,27 +204,27 @@ read_negative_offset_rejected_test() ->
 %% =============================================================================
 
 with_position_updates_both_fields_test() ->
-    CO = bondy_oplog_wal_state:with_position(
-        bondy_oplog_wal_state:new_consumer_offset(), 7, 2048
+    CO = bondy_log_state:with_position(
+        bondy_log_state:new_consumer_offset(), 7, 2048
     ),
-    ?assertEqual(7, bondy_oplog_wal_state:committed_segment(CO)),
+    ?assertEqual(7, bondy_log_state:committed_segment(CO)),
     ?assertEqual(
-        2048, bondy_oplog_wal_state:committed_frame_offset(CO)
+        2048, bondy_log_state:committed_frame_offset(CO)
     ).
 
-with_hlc_accepts_integer_and_undefined_test() ->
-    CO0 = bondy_oplog_wal_state:new_consumer_offset(),
-    CO1 = bondy_oplog_wal_state:with_hlc(CO0, 1234567890),
+with_key_accepts_integer_and_undefined_test() ->
+    CO0 = bondy_log_state:new_consumer_offset(),
+    CO1 = bondy_log_state:with_key(CO0, 1234567890),
     ?assertEqual(
-        1234567890, bondy_oplog_wal_state:committed_hlc(CO1)
+        1234567890, bondy_log_state:committed_key(CO1)
     ),
-    CO2 = bondy_oplog_wal_state:with_hlc(CO1, undefined),
+    CO2 = bondy_log_state:with_key(CO1, undefined),
     ?assertEqual(
-        undefined, bondy_oplog_wal_state:committed_hlc(CO2)
+        undefined, bondy_log_state:committed_key(CO2)
     ).
 
 with_commit_count_test() ->
-    CO = bondy_oplog_wal_state:with_commit_count(
-        bondy_oplog_wal_state:new_consumer_offset(), 100
+    CO = bondy_log_state:with_commit_count(
+        bondy_log_state:new_consumer_offset(), 100
     ),
-    ?assertEqual(100, bondy_oplog_wal_state:commit_count(CO)).
+    ?assertEqual(100, bondy_log_state:commit_count(CO)).

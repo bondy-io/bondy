@@ -367,7 +367,7 @@ init_state(Keypair, PeerPubkeys) ->
     }).
 
 mk_event(Origin, Seq) ->
-    Hlc = bondy_oplog_hlc:encode(1_700_000_000_000 + Seq, 0),
+    Hlc = bondy_hlc:encode(1_700_000_000_000 + Seq, 0),
     Key = bondy_oplog_event:key(Hlc, Origin, Seq),
     bondy_oplog_event:new(Key, {op, Seq}, undefined).
 

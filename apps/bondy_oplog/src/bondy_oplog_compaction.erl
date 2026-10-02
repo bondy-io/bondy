@@ -43,15 +43,14 @@ Runs one compaction cycle for `InstanceId`. Returns:
     | {error, term()}.
 
 compact(InstanceId) when is_binary(InstanceId) ->
-    %% Every recency-live entry is a witness, INCLUDING a rootless one
-    %% (rounds only ever completed against an empty peer tree): it
-    %% confirms what its recorded applied frontier covers and nothing
-    %% more, so a live peer that has applied none of our events holds
-    %% compaction until it pulls them. Treating such a row as "constrains
-    %% nothing" truncated events a live member never received
-    %% (`proofs/tla/ConfirmedCompaction_Root3.cfg`, `NoLoss` in 5 steps);
-    %% only a peer this table has never seen — or one past
-    %% `peer_timeout_ms` — is left to the bootstrap path.
+    %% Every recency-live entry is a witness, INCLUDING a rootless one whose
+    %% rounds only ever completed against an empty peer tree: it confirms what
+    %% its recorded applied frontier covers and nothing more, so a live peer
+    %% that has applied none of our events holds compaction until it pulls
+    %% them. Treating such a row as constraining nothing truncates events a
+    %% live member never received (`proofs/tla/ConfirmedCompaction_Root3.cfg`
+    %% reaches `NoLoss` in 5 steps). Only a peer this table has never seen, or
+    %% one past `peer_timeout_ms`, is left to the bootstrap path.
     bondy_oplog_instance:compact(
         InstanceId,
         bondy_oplog_peer_state:get_instance_peer_states(InstanceId)
