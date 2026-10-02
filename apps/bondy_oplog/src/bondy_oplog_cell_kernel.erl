@@ -61,6 +61,7 @@ folds events through a state-based `apply_event`.
 -export([to_value/2]).
 -export([apply/5]).
 -export([apply/6]).
+-export([check_op/3]).
 -export([interpret_overlay/4]).
 -export([decode_value_bytes/2]).
 -export([reap_origins/3]).
@@ -270,6 +271,26 @@ apply({crdt, Mod}, OldState, _OldValueOpt, Op, Key, Context) ->
             %% Non-commutative CRDTs need their live group re-interpreted
             %% on write; the per-cell live-log is a later rollout step.
             error({non_commutative_crdt_eager_unsupported, Mod})
+    end.
+
+-doc """
+`ok` when `apply/6` accepts `Op` for this kernel, else
+`{error, {invalid_op, Op}}`.
+
+The check is `apply/6` itself, run on the kernel's bottom state (`init/2` with
+the table's `CrdtOpts`), so what it accepts cannot drift from what the applier
+accepts (`bondy_oplog_cell_kernel_test`). An op the CRDT refuses only in some
+states passes here.
+""".
+-spec check_op(Kernel :: t(), CrdtOpts :: map(), Op :: term()) ->
+    ok | {error, {invalid_op, term()}}.
+
+check_op(Kernel, CrdtOpts, Op) ->
+    Key = bondy_oplog_event:key(0, <<>>, 0),
+    try apply(Kernel, init(Kernel, CrdtOpts), undefined, Op, Key, undefined) of
+        _ -> ok
+    catch
+        _:_ -> {error, {invalid_op, Op}}
     end.
 
 -doc """

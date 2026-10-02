@@ -26,7 +26,12 @@ apply_many_test_() ->
             "cross_shard_batch_all_visible", fun cross_shard_batch_all_visible/1
         ),
         gen("empty_batch_is_ok", fun empty_batch_is_ok/1),
-        gen("invalid_write_is_rejected", fun invalid_write_is_rejected/1)
+        gen("invalid_write_is_rejected", fun invalid_write_is_rejected/1),
+        gen("invalid_op_is_never_appended", fun invalid_op_is_never_appended/1),
+        gen(
+            "invalid_op_rejects_the_whole_batch",
+            fun invalid_op_rejects_the_whole_batch/1
+        )
     ]}.
 
 gen(Title, Fn) ->
@@ -134,9 +139,45 @@ invalid_write_is_rejected({Dir, Sup}) ->
     ),
     close(Db, Tables).
 
+%% An op the table's CRDT cannot apply is refused before the append, on every
+%% write path, so it never reaches the log, the MST or a peer.
+invalid_op_is_never_appended({Dir, Sup}) ->
+    {Db, [Users] = Tables} = open_db(Dir, Sup, am_op, 1, [users]),
+    Realm = <<"r1">>,
+    Logged = logged_events(),
+    ?assertEqual(
+        {error, {invalid_op, {inc, 1}}},
+        bondy_db:apply(Users, Realm, <<"k">>, {inc, 1})
+    ),
+    ?assertEqual(
+        {error, {invalid_op, {inc, 1}}},
+        bondy_db:apply_async(Users, Realm, <<"k">>, {inc, 1})
+    ),
+    ?assertEqual(Logged, logged_events()),
+    ?assertEqual({error, not_found}, bondy_db:read(Users, Realm, <<"k">>)),
+    close(Db, Tables).
+
+invalid_op_rejects_the_whole_batch({Dir, Sup}) ->
+    {Db, [Users] = Tables} = open_db(Dir, Sup, am_opb, 1, [users]),
+    Realm = <<"r1">>,
+    Logged = logged_events(),
+    ?assertEqual(
+        {error, {invalid_op, {inc, 1}}},
+        bondy_db:apply_many([
+            {Users, Realm, <<"a">>, set(<<"v">>)},
+            {Users, Realm, <<"b">>, {inc, 1}}
+        ])
+    ),
+    ?assertEqual(Logged, logged_events()),
+    ?assertEqual({error, not_found}, bondy_db:read(Users, Realm, <<"a">>)),
+    close(Db, Tables).
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+logged_events() ->
+    lists:sum([bondy_oplog:size(I) || I <- bondy_oplog:list_instances()]).
 
 set(V) ->
     {set, V}.

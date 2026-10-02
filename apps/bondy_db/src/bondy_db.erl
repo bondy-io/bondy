@@ -827,9 +827,11 @@ visible to a subsequent `read/3` from the same caller
 (read-your-writes). The wait is for this event alone: other appenders'
 pending events on the shard do not extend it.
 
-The event shape is whatever the table's `fold_module:apply_event/3`
-accepts. Idempotency and conflict resolution are inherited from the
-fold's contract; the facade does not validate event shapes.
+The event is an op of the table's CRDT. One the CRDT cannot apply is
+refused before the append with `{error, {invalid_op, Event}}`, so it never
+reaches the log (`bondy_oplog_cell_kernel:check_op/3`,
+`bondy_db_apply_many_test`). Idempotency and conflict resolution are the
+CRDT's.
 
 Returns `ok` on successful WAL durability + applier commit;
 `{error, rejected}` when the event is WAL-durable but the applier
@@ -909,6 +911,8 @@ possibly-busy instance); only the commit barrier is skipped.
 
 No write→readable latency sample is recorded — the metric measures
 exactly the barrier this variant does not have.
+
+An op the table's CRDT cannot apply is refused as in `apply/4`.
 """.
 -spec apply_async(
     Table :: table(),
@@ -1014,6 +1018,8 @@ A `tier_2` (causal-context-stamped) table is refused with
 folded into one frame — apply those cells individually with `apply/4`.
 
 Returns `ok` once every shard frame is durable and committed, or `{error, _}`.
+One write whose op the table's CRDT cannot apply refuses the whole batch with
+`{error, {invalid_op, Event}}` before any frame is appended.
 An empty batch is `ok`.
 """.
 -spec apply_many(
@@ -1042,12 +1048,14 @@ group_batch([], Acc) ->
 group_batch([{Table, Realm, Key, Event} | Rest], Acc) when
     is_map(Table) andalso is_binary(Realm) andalso is_binary(Key)
 ->
-    case maps:get(causal_tier, Table, tier_0) of
-        tier_2 ->
+    case {maps:get(causal_tier, Table, tier_0), check_event(Table, Event)} of
+        {tier_2, _} ->
             {error,
                 {tier_2_batch_unsupported,
                     maps:get(namespace, Table, undefined)}};
-        _ ->
+        {_, {error, _} = Err} ->
+            Err;
+        {_, ok} ->
             #{
                 db_topology := Topology,
                 table_state := TableState,
@@ -1134,6 +1142,25 @@ await_barrier(InstanceId, Barrier, N) ->
 
 %% @private
 do_apply(Table, InstanceId, Bucket, Key, Event, Barrier) ->
+    case check_event(Table, Event) of
+        ok -> append_event(Table, InstanceId, Bucket, Key, Event, Barrier);
+        {error, _} = Err -> Err
+    end.
+
+%% @private
+%% Refuse an op the table's CRDT cannot apply before it is appended: once in
+%% the log the applier skips it, yet it replicates and counts as applied.
+check_event(Table, Event) ->
+    Kernel = bondy_oplog_cell_kernel:from_modules(
+        maps:get(fold_module, Table, undefined),
+        maps:get(crdt_module, Table, undefined)
+    ),
+    bondy_oplog_cell_kernel:check_op(
+        Kernel, maps:get(crdt_opts, Table, #{}), Event
+    ).
+
+%% @private
+append_event(Table, InstanceId, Bucket, Key, Event, Barrier) ->
     case maps:get(causal_tier, Table, tier_0) of
         tier_2 ->
             apply_with_context(InstanceId, Bucket, Key, Event, Barrier);

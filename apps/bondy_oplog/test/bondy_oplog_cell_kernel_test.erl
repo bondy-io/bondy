@@ -53,6 +53,35 @@ default_crdt_for_fold_test() ->
     ?assertEqual(undefined, ?K:default_crdt_for_fold(no_such_fold)).
 
 %% =============================================================================
+%% Admission check
+%% =============================================================================
+
+check_op_accepts_what_apply_accepts_test() ->
+    ?assertEqual(ok, ?K:check_op({crdt, ?LWW}, #{}, {set, <<"v">>})),
+    ?assertEqual(ok, ?K:check_op({crdt, ?LWW}, #{}, clear)).
+
+check_op_rejects_what_apply_raises_on_test() ->
+    ?assertEqual(
+        {error, {invalid_op, {inc, 1}}},
+        ?K:check_op({crdt, ?LWW}, #{}, {inc, 1})
+    ),
+    ?assertError(
+        function_clause,
+        ?K:apply(
+            {crdt, ?LWW},
+            ?K:init({crdt, ?LWW}),
+            undefined,
+            {inc, 1},
+            ek(1, <<"o">>, 0)
+        )
+    ).
+
+check_op_rejects_any_op_for_a_non_commutative_crdt_test() ->
+    ?assertEqual(
+        {error, {invalid_op, {inc, 1}}}, ?K:check_op({crdt, ?BC}, #{}, {inc, 1})
+    ).
+
+%% =============================================================================
 %% Dispatch of init / decode_state / encode_state / to_value
 %% =============================================================================
 

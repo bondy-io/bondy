@@ -7,10 +7,12 @@
 %% durable MST root lacks: a durable backend resumes from that offset alone,
 %% so an event committed past without its install is never re-presented.
 %%
-%% Three ways to commit without the barrier, each asserted not to move the
+%% Four ways to commit without the barrier, each asserted not to move the
 %% offset or lose an event: the root flush fails (`bondy_mst:flush/1`
-%% mocked), the instance is already dead at the commit boundary, and the
-%% applier terminates while paused on its install cap with a commit owed.
+%% mocked), the instance is already dead at the commit boundary, the
+%% applier terminates while paused on its install cap with a commit owed,
+%% and the projection read under a cell apply raises
+%% (`bondy_oplog_projection_ets:get/3` mocked).
 %% Not covered: an instance that dies during the barrier call; that exit
 %% propagates.
 -module(bondy_oplog_commit_barrier_test).
@@ -33,6 +35,9 @@ commit_barrier_test_() ->
             {timeout, 60, fun() ->
                 terminate_owing_commit_loses_nothing(Dir)
             end}
+        end,
+        fun(Dir) ->
+            {timeout, 60, fun() -> failed_read_reapplies_the_event(Dir) end}
         end
     ]}.
 
@@ -159,6 +164,20 @@ terminate_owing_commit_loses_nothing(Dir) ->
     ?assertEqual(4, bondy_oplog:size(InstId)),
     teardown(InstId, NS, Shard).
 
+failed_read_reapplies_the_event(Dir) ->
+    {InstId, NS, _Opts, Shard} = boot(Dir),
+    append_batch(InstId, 1, 2),
+    Instance = bondy_oplog_registry:instance_pid(InstId),
+    ok = fail_first_read(),
+    append(InstId, 2, 1),
+
+    ok = await_restart(InstId, Instance),
+    ok = bondy_oplog_test_projection:drain(InstId),
+    ?assertMatch(
+        {<<"k_2_1">>, _}, bondy_oplog_core:read(NS, primary, <<"k_2_1">>)
+    ),
+    teardown(InstId, NS, Shard).
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -237,6 +256,17 @@ retry_restart(InstId, OldPid, N) ->
 fail_flush() ->
     ok = meck:new(bondy_mst, [passthrough, no_link]),
     ok = meck:expect(bondy_mst, flush, fun(_) -> {error, injected} end).
+
+fail_first_read() ->
+    Calls = counters:new(1, []),
+    ok = meck:new(bondy_oplog_projection_ets, [passthrough, no_link]),
+    ok = meck:expect(bondy_oplog_projection_ets, get, fun(H, B, K) ->
+        ok = counters:add(Calls, 1, 1),
+        case counters:get(Calls, 1) of
+            1 -> error(injected_read_failure);
+            _ -> meck:passthrough([H, B, K])
+        end
+    end).
 
 wal_dir(InstId) ->
     View = bondy_oplog_wal:reader_view(bondy_oplog_registry:wal_pid(InstId)),
