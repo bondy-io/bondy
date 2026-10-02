@@ -117,17 +117,17 @@ throttle(Class, Req, Dims) ->
 -doc """
 Returns the HTTP status code for an error.
 
-Accepts a `bondy_error:t()`, an error URI or an error type. A URI with no
+Accepts a `bondy_connect_error:t()`, an error URI or an error type. A URI with no
 explicit mapping is treated as a server-side condition, i.e. 500.
 """.
--spec http_status(bondy_error:t() | binary() | atom()) -> pos_integer().
+-spec http_status(bondy_connect_error:t() | binary() | atom()) -> pos_integer().
 
 http_status(#{uri := Uri}) ->
     status_of(Uri);
 http_status(Uri) when is_binary(Uri) ->
     status_of(Uri);
 http_status(Type) when is_atom(Type) ->
-    status_of(bondy_error:uri(Type)).
+    status_of(bondy_connect_error:uri(Type)).
 
 -doc """
 Returns the default error URI to HTTP status map used by the API Gateway.
@@ -139,8 +139,8 @@ this is a starting point rather than a policy.
 
 default_status_codes() ->
     maps:from_list([
-        {bondy_error:uri(Type), http_status(Type)}
-     || Type <- bondy_error:types()
+        {bondy_connect_error:uri(Type), http_status(Type)}
+     || Type <- bondy_connect_error:types()
     ]).
 
 -spec set_meta_headers(Req :: cowboy_req:req()) ->

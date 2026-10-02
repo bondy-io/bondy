@@ -13,7 +13,7 @@
     {registered, [bondy_mcp_sup, bondy_mcp_gateway]},
     {mod, {bondy_mcp_app, []}},
     %% `bondy_router' is a runtime dependency but is deliberately NOT listed:
-    %% `bondy_app:start/2' starts this application mid-boot, before its own
+    %% `bondy_router_app:start/2' starts this application mid-boot, before its own
     %% start has returned, so listing it would make that call try to start an
     %% application that is already starting. `bondy_http_connector' and
     %% `bondy_mail' follow the same rule for the same reason.

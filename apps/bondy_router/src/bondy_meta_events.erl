@@ -56,7 +56,7 @@ are NOT produced here — emission sites count them unconditionally via
 
 -doc """
 Eagerly allocates the shed-warning rate-limit cell at boot, off the shed
-path. Idempotent; called once from `bondy_app`.
+path. Idempotent; called once from `bondy_router_app`.
 """.
 -spec setup() -> ok.
 
@@ -150,7 +150,7 @@ enqueue(Topic, Action, Entry) ->
     SessionId = bondy_registry_entry:session_id(Entry),
 
     Fun = fun() ->
-        ExtSessionId = bondy_utils:external_session_id(SessionId),
+        ExtSessionId = bondy_router_utils:external_session_id(SessionId),
         %% We use a global ID as this is not a publishers request
         ReqId = bondy_message_id:global(),
         EntryId = bondy_registry_entry:id(Entry),
@@ -177,7 +177,7 @@ enqueue(Topic, Action, Entry) ->
         bondy_broker:publish(ReqId, #{}, Topic, Args, KWArgs, Ctxt)
     end,
 
-    PartitionKey = bondy_stdlib:lazy_or_else(
+    PartitionKey = bondy_connect_lib:lazy_or_else(
         SessionId, fun bondy_wamp_utils:rand_uniform/0
     ),
 

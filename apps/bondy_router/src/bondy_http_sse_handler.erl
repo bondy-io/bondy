@@ -123,7 +123,7 @@ do_handle_open_body(Req0, State) ->
 
 %% @private
 open_session(Protocol, Req0, State) ->
-    TransportId = bondy_utils:uuid(),
+    TransportId = bondy_router_utils:uuid(),
     SessionId = bondy_session_id:new(),
     Peer = bondy_http_utils:peer(Req0),
 
@@ -374,7 +374,9 @@ reply_error(StatusCode, ErrorBin, Req) ->
     %% `error' is retained for existing clients; the standard error payload is
     %% added alongside it.
     Body = maps:put(
-        ~"error", ErrorBin, bondy_error:to_map(bondy_error:from_term(ErrorBin))
+        ~"error",
+        ErrorBin,
+        bondy_connect_error:to_map(bondy_connect_error:from_term(ErrorBin))
     ),
     ReplyBody = json:encode(Body),
     cowboy_req:reply(

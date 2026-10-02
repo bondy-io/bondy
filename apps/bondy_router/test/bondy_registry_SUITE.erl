@@ -381,7 +381,7 @@ sub_del_local_exact_2(Config) ->
 %% fused registry projection never shrank back down.
 sub_session_death_cleans_registry(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
 
     Pid = start_subscriber(RealmUri, Uri, #{match => ?EXACT_MATCH}),
 
@@ -609,7 +609,7 @@ sub_sessionless_refs(Config) ->
 
 register_invoke_single(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Opts = #{invoke => ?INVOKE_SINGLE},
 
     Ref = bondy_ref:new(internal),
@@ -633,7 +633,7 @@ register_invoke_single(Config) ->
 
 register_shared(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
 
     Ref = bondy_ref:new(internal),
@@ -651,8 +651,10 @@ register_shared(Config) ->
 register_callback(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
 
-    Uri1 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
-    Uri2 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri1 =
+        <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
+    Uri2 =
+        <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
 
     Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
 
@@ -669,7 +671,7 @@ register_callback(Config) ->
     ),
 
     %% Not allowed currently
-    %% Uri2 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    %% Uri2 = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     % ?assertMatch(
     %     {ok, _},
     %     bondy_dealer:register(Uri2, Opts, RealmUri, Ref1),
@@ -721,7 +723,7 @@ pattern_based_registration_is_not_optional(Config) ->
     %% One: the registration the router makes of itself. The same shape as the
     %% session manager's — an internal callback reference, wildcard policy, the
     %% empty component standing in for the session's id segment.
-    Frag = bondy_utils:generate_fragment(12),
+    Frag = bondy_router_utils:generate_fragment(12),
     Uri = <<"com.example.", Frag/binary, "..get">>,
     Ref = bondy_ref:new(internal, {bondy_session_api, get}),
     Opts = #{match => ?WILDCARD_MATCH, callback_args => [RealmUri]},
@@ -745,7 +747,7 @@ pattern_based_registration_is_not_optional(Config) ->
 %% `await_cell/4`'s barrier covers.
 registry_rib_dual_write(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
     Ref = bondy_ref:new(internal),
     Table = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
@@ -816,7 +818,8 @@ registry_rib_dual_write(Config) ->
 
     %% Subscriptions: reachability-only cells (`#{count}`).
     Ctxt = key_value:get(context, Config),
-    SubUri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    SubUri =
+        <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     add_subscription_test(
         subscription, RealmUri, SubUri, #{match => ?EXACT_MATCH}, Ctxt
     ),
@@ -869,7 +872,7 @@ registry_rib_dual_write(Config) ->
 %% callee is applied and the RESULT is sent back to the caller ref.
 rib_completion_selects_local(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
     ?assertMatch(
         {ok, _},
@@ -901,7 +904,7 @@ rib_completion_selects_local(Config) ->
 %% never hang, never re-forward.
 rib_completion_no_local_fails_fast(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
 
     Caller = bondy_ref:new(internal),
     Call = rib_call(1, #{}, Uri),
@@ -931,7 +934,7 @@ rib_completion_no_local_fails_fast(Config) ->
 %% reading stamped earlier than the live one cannot override it.
 rib_restate_stale_cell(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Table = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
     Key = term_to_binary(
         {RealmUri, ?EXACT_MATCH, Uri, bondy_config:nodestring()}
@@ -987,7 +990,7 @@ rib_restate_stale_cell(Config) ->
 %% again — and complete the call locally instead of relaying the error.
 rib_retry_local_win(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
     ?assertMatch(
         {ok, _},
@@ -1020,7 +1023,7 @@ rib_retry_local_win(Config) ->
 %% the failed node in the tried set.
 rib_retry_next_node(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Dead = <<"deadnode@nohost">>,
     Next = <<"nextnode@nohost">>,
     StubKey = term_to_binary({RealmUri, ?EXACT_MATCH, Uri, Next}),
@@ -1062,7 +1065,7 @@ rib_retry_next_node(Config) ->
 %% must reach the caller with the routing-internal marker stripped.
 rib_retry_exhausted(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
     ?assertMatch(
         {ok, _},
@@ -1100,7 +1103,7 @@ rib_retry_exhausted(Config) ->
 %% invocation would otherwise break.
 rib_retry_requires_marker(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
     ?assertMatch(
         {ok, _},
@@ -1136,7 +1139,7 @@ rib_retry_requires_marker(Config) ->
 %% most of these counters.
 rib_metrics_surface(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     V = fun(Name, Label) ->
         case bondy_metrics:value(#{name => Name, label => Label}) of
             undefined -> 0;
@@ -1208,7 +1211,8 @@ rib_metrics_surface(Config) ->
     after 5000 ->
         error(no_response)
     end,
-    NoProc = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    NoProc =
+        <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     ok = bondy_dealer:forward(
         rib_call(93, #{}, NoProc),
         bondy_ref:new(internal),
@@ -1388,7 +1392,7 @@ kill_and_wait(Pid) ->
 %% holds a copy to merge back, so a cell can only come from this node.
 rib_restored_after_storage_owner_death(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     T0 = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
     ok = register_n(RealmUri, Uri, 2),
     ?assertEqual(true, poll_summary(RealmUri, Uri, 2)),
@@ -1407,7 +1411,7 @@ rib_restored_after_storage_owner_death(Config) ->
 %% WAL. The cell must still come to carry that registration.
 rib_restored_after_instance_death(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     ok = register_n(RealmUri, Uri, 1),
     ?assertEqual(true, poll_summary(RealmUri, Uri, 1)),
     T = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
@@ -1427,7 +1431,7 @@ rib_restored_after_instance_death(Config) ->
 %% keep their entries.
 rib_restored_after_catalogue_restart(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
     ok = register_n(RealmUri, Uri, 2),
     ?assertEqual(true, poll_summary(RealmUri, Uri, 2)),
     Old = whereis(bondy_namespace_catalog),

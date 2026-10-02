@@ -30,7 +30,7 @@ flowchart TD
         REG[bondy_regulator<br/>load & rate regulation]
         MAIL[bondy_mail<br/>outbound email]
         METRICS[bondy_metrics]
-        STDLIB[bondy_stdlib]
+        STDLIB[bondy_connect_lib]
     end
     ROUTER --> DB
     ROUTER --> WAMP
@@ -48,7 +48,7 @@ flowchart TD
 
 An arrow means *uses*: the source may call the target's public interface.
 The relation is acyclic by design, and the layering is strict — an
-application uses only layers below it. `bondy_stdlib` and `bondy_metrics`
+application uses only layers below it. `bondy_connect_lib` and `bondy_metrics`
 are usable from every layer and are drawn once for legibility.
 
 ## Element catalog
@@ -66,7 +66,7 @@ are usable from every layer and are drawn once for legibility.
 | `bondy_regulator` | Admission control: system-load sampling (`bondy_regulator_load`) and token-bucket rate limiting, consulted at connection and session admission. |
 | `bondy_mail` | Outbound email: relay configuration, queueing and delivery. Dormant unless a `mail.relay.*` is configured — it starts, supervises nothing, and the `bondy.mail.*` procedures report that mail is not configured. It sits *below* the router and is told which module resolves a realm's prototype (`realm_module`) rather than calling up into one. |
 | `bondy_metrics` | Metric primitives and a declaration registry; wait-free counters the hot paths can afford. |
-| `bondy_stdlib` | Types and utilities shared by all layers (`optional/1`, keys, encoding helpers). |
+| `bondy_connect_lib` | Types and utilities shared by all layers (`optional/1`, keys, encoding helpers). |
 | `bondy_broker_bridge`, `bondy_http_connector` | Integrations that consume the router's interfaces: bridging events to external brokers, and invoking upstream HTTP services as callees. |
 
 ## Interfaces between layers

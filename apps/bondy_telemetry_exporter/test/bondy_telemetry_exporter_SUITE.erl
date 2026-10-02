@@ -34,7 +34,7 @@ init_per_suite(Config) ->
                 false
         end,
     %% A suite that ran earlier on this node may have booted Bondy, and
-    %% bondy_app starts bondy_telemetry_exporter — so stop it (and the
+    %% bondy_router_app starts bondy_telemetry_exporter — so stop it (and the
     %% SDK, which reads its env only at start) before setting this
     %% suite's posture.
     _ = application:stop(bondy_telemetry_exporter),

@@ -15,11 +15,11 @@ a log map, in an error payload, or in a telemetry label yields
 out takes a deliberate `expose/1`.
 
 That makes leaking a secret an act rather than an oversight, which is the same
-reasoning behind `bondy_error:sanitise/1` and the error catalogue's contract
+reasoning behind `bondy_connect_error:sanitise/1` and the error catalogue's contract
 that stacktraces and internal terms never reach a peer.
 
 A secret is resolved once, when its relay starts, through
-`bondy_secret_resolver`. From then on only the resolved value is held, and only
+`bondy_connect_secret_resolver`. From then on only the resolved value is held, and only
 in the relay process's state.
 
     {ok, Secret} = bondy_mail_secret:resolve(#{provider => env,
@@ -54,7 +54,7 @@ bind it into anything that outlives the call.
 Resolve a credential reference into an opaque secret.
 
 `#{provider => none, value => V}` wraps a literal. Anything else is handed to
-`bondy_secret_resolver:resolve/1`, which ships `env` and `aws_sm` providers.
+`bondy_connect_secret_resolver:resolve/1`, which ships `env` and `aws_sm` providers.
 
 The failure reason is whatever the resolver reported. It names the provider and
 the missing variable, never a credential.
@@ -64,7 +64,7 @@ the missing variable, never a credential.
 resolve(#{provider := none, value := Value}) when is_binary(Value) ->
     {ok, new(Value)};
 resolve(#{provider := _} = Ref) ->
-    case bondy_secret_resolver:resolve(Ref) of
+    case bondy_connect_secret_resolver:resolve(Ref) of
         {ok, Value} ->
             {ok, new(Value)};
         {error, _} = Error ->

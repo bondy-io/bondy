@@ -366,7 +366,7 @@ node.
     ok | {error, term()}.
 
 write(Dir, Manifest) when is_map(Manifest) ->
-    %% `bondy_consult:encode/1` owns the byte encoding of the term (UTF-8,
+    %% `bondy_connect_consult:encode/1` owns the byte encoding of the term (UTF-8,
     %% one line), which is what `file:consult/1` in `read/1` decodes. The
     %% frozen map carries caller-supplied atoms (`db`, `topology_module`,
     %% `partition_strategy`), so an atom with a non-ASCII character reaches
@@ -377,7 +377,7 @@ write(Dir, Manifest) when is_map(Manifest) ->
         "%% bondy_db topology manifest -- DO NOT EDIT.\n"
         "%% Frozen keying configuration; changing it re-keys on-disk data.\n"
         "%% Migration: export -> wipe data dir -> reimport (bondy_export).\n",
-        bondy_consult:encode([Manifest])
+        bondy_connect_consult:encode([Manifest])
     ],
     try
         bondy_mst_io:write_file_atomic(path(Dir), IOData)

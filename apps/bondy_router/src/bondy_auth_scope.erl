@@ -498,7 +498,7 @@ normalize_roundtrip_preserves_type_test() ->
         fun(Scope) ->
             Decoded = bondy_wamp_json:decode(bondy_wamp_json:encode(Scope)),
             Renormalized = bondy_auth_scope:normalize(
-                bondy_utils:to_existing_atom_keys(Decoded)
+                bondy_router_utils:to_existing_atom_keys(Decoded)
             ),
             ?assertEqual(Scope, Renormalized),
             ?assertEqual(

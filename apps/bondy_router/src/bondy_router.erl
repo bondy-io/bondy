@@ -116,7 +116,7 @@ roles() ->
 Returns the Bondy agent identification string.
 """.
 agent() ->
-    Vsn = list_to_binary(bondy_app:vsn()),
+    Vsn = list_to_binary(bondy_router_app:vsn()),
     <<"LEAPSIGHT-BONDY-", Vsn/binary>>.
 
 -doc """
@@ -233,7 +233,7 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
                 maps:get(from, Opts, undefined), To
             ),
 
-            case bondy:peek_via(Opts) of
+            case bondy_router_peer:peek_via(Opts) of
                 undefined ->
                     Node = bondy_ref:node(To),
                     PeerMsg = {forward, To, Msg, Opts},
@@ -241,7 +241,7 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
                 Relay ->
                     case bondy_ref:is_local(Relay) of
                         true ->
-                            bondy:send(RealmUri, To, Msg, Opts);
+                            bondy_router_peer:send(RealmUri, To, Msg, Opts);
                         false ->
                             Node = bondy_ref:node(Relay),
                             PeerMsg = {forward, To, Msg, Opts},
@@ -278,7 +278,7 @@ pre_stop() ->
             end;
         ({RealmUri, Ref}) ->
             try
-                bondy:send(RealmUri, Ref, M)
+                bondy_router_peer:send(RealmUri, Ref, M)
             catch
                 _:_ -> ok
             end,
@@ -287,7 +287,7 @@ pre_stop() ->
 
     %% We loop with batches of 100
     Opts = #{limit => 100, return => ref},
-    bondy_utils:foreach(Fun, bondy_session:list(Opts)).
+    bondy_router_utils:foreach(Fun, bondy_session:list(Opts)).
 
 stop() ->
     ok.
@@ -328,12 +328,12 @@ async_forward(M, Ctxt0) ->
     %% existing worker or spawning a new one depending on
     %% bondy_broker_pool_type.
     Event = {M, Ctxt0},
-    Meta = bondy:get_process_metadata(),
+    Meta = bondy_router_peer:get_process_metadata(),
 
     Fun = fun() ->
         %% We copy the process meta (we do not need to unset because the worker
         %% will do it for us).
-        ok = bondy:set_process_metadata(Meta),
+        ok = bondy_router_peer:set_process_metadata(Meta),
         Res = sync_forward(Event),
         %% ?LOG_DEBUG(#{
         %%     description => "info",
@@ -359,7 +359,9 @@ async_forward(M, Ctxt0) ->
         error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
-            ErrorMap = bondy_error:to_map(bondy_error:from_term(Reason)),
+            ErrorMap = bondy_connect_error:to_map(
+                bondy_connect_error:from_term(Reason)
+            ),
             Reply = bondy_wamp_message:error_from(
                 M,
                 #{},

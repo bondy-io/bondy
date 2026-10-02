@@ -247,7 +247,7 @@ swap_adoption_lifts_otp_pairs_to_records_test() ->
         lists:sort([{?ID, <<"a">>}, {?OTHER, <<"b">>}]), lists:sort(alarms(S))
     ).
 
-%% Producers that start BEFORE `bondy_app` swaps this handler in — the
+%% Producers that start BEFORE `bondy_router_app` swaps this handler in — the
 %% namespace catalogue, the oplog applier — raise into OTP's default handler,
 %% whose list holds whatever term was passed. A rich alarm adopted through the
 %% pair clause alone would silently lose its details on exactly the boots where
@@ -445,7 +445,7 @@ terminate_publishes_not_blocking_test() ->
 
 %% The totality of the public `affects_ready/0` wrapper — an absent handler
 %% must read as `false` rather than exit — is pinned in
-%% `bondy_app_readiness_test`, which owns the interaction with the globally
+%% `bondy_router_app_readiness_test`, which owns the interaction with the globally
 %% registered `alarm_handler` name.
 
 %% =============================================================================
@@ -596,7 +596,7 @@ an_unkeyable_raise_records_nothing_test() ->
     ?assertEqual(history_(S0), history_(S)).
 
 %% The same shape arriving through the SWAP rather than through a raise. It
-%% matters more here: an alarm raised before `bondy_app` swaps this handler in,
+%% matters more here: an alarm raised before `bondy_router_app` swaps this handler in,
 %% and dropped at the swap, is lost on every boot where the condition fires
 %% early — which is exactly when a boot-time fault would be raising one.
 an_unkeyable_alarm_dropped_while_adopting_is_logged_test() ->

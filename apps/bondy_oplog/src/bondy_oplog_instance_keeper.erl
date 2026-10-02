@@ -31,14 +31,14 @@ A `start_instance/2` of a kept instance that is not running is handed to
 instance would get two subtrees writing one WAL.
 What a restart needs, each instance's start options and subtree
 supervisor, is in a table this process borrows from
-`bondy_table_manager`, so the table survives a crash here and a restarted
+`bondy_connect_table_manager`, so the table survives a crash here and a restarted
 keeper monitors every subtree recorded in it. Each of these is exercised by
 `bondy_oplog_instance_keeper_test`.
 
 From the moment a kept instance's subtree stops until a start succeeds or
 `forget/1` drops it, `not_running/0` lists the instance; the alarm
 `{bondy_oplog_instance_down, InstanceId}` is raised once this process has
-handled the stop, and cleared with it. `bondy_app:is_ready/0` reads
+handled the stop, and cleared with it. `bondy_router_app:is_ready/0` reads
 `not_running/0` (`bondy_oplog_instance_keeper_statem_test`). Because
 restarts run here one at a time, subtrees that stop together come back one
 after another, and `watch/3`, `forget/1`, `start_now/1` and
@@ -186,7 +186,7 @@ drain_released(InstanceId) ->
 %% =============================================================================
 
 init([]) ->
-    {ok, ?TAB} = bondy_table_manager:add_or_claim(
+    {ok, ?TAB} = bondy_connect_table_manager:add_or_claim(
         ?TAB, [named_table, set, protected]
     ),
     State = ets:foldl(

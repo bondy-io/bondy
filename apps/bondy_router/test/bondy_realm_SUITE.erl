@@ -51,7 +51,7 @@ end_per_suite(Config) ->
     {save_config, Config}.
 
 gen_uri() ->
-    string:casefold(bondy_utils:generate_fragment(6)).
+    string:casefold(bondy_router_utils:generate_fragment(6)).
 
 uri(_) ->
     Uri = gen_uri(),
@@ -122,7 +122,7 @@ invalid_uri(_) ->
     ).
 
 invalid_description(_) ->
-    TooLong = bondy_utils:generate_fragment(513),
+    TooLong = bondy_router_utils:generate_fragment(513),
     ?assertError(
         #{
             code := invalid_value,
@@ -336,7 +336,7 @@ migration(_) ->
     %%     [12] encryption_keys = #{}    ::  keyset(),
     %%     [13] info = #{}               ::  map()
     %% }).
-    Desc = bondy_utils:generate_fragment(10),
+    Desc = bondy_router_utils:generate_fragment(10),
     Authmethods = [?WAMP_CRYPTOSIGN_AUTH],
     Sec = true,
     IsSSO = false,

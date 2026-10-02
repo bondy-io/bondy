@@ -355,7 +355,7 @@ manager_resolves_and_starts_by_phase(_Config) ->
     ?assertMatch(Port when is_integer(Port), ranch:get_port(ct_late)),
     %% Not up: that is what lets the probe paths answer while the node still
     %% reports `initialising`, without a client reaching a public listener first
-    %% — `bondy_app:start_normal_listeners/0` sets the status to `ready` only
+    %% — `bondy_router_app:start_normal_listeners/0` sets the status to `ready` only
     %% after the normal phase. `ranch:get_port/1` reaches
     %% `ets:lookup_element/3` on the ranch table (`ranch_server.erl:135-136`),
     %% which raises `badarg` for a listener that was never started.
@@ -406,7 +406,7 @@ listener_with_no_option_block_starts(_Config) ->
     %% (`bondy_config:listener_transport_opts/2`'s block and `num_acceptors`,
     %% and `normalise_socket_opts/1`'s `ip_version`). Each raised out of
     %% `bondy_listener:start/1` rather than returning `{error, _}`, so
-    %% `bondy_app`'s `ok ?= start_normal_listeners()` could not catch it and the
+    %% `bondy_router_app`'s `ok ?= start_normal_listeners()` could not catch it and the
     %% node did not boot.
     %%
     %% `fun bondy_config:get/2` is the production accessor, so the resolver and
@@ -571,7 +571,7 @@ top_level_ip_does_not_reach_ranch(_Config) ->
     %% merge in `bondy_config:listener_transport_opts/2` and reaches
     %% `ranch:start_listener/5`, whose `validate_transport_opt/3` catch-all
     %% answers `false` for an unknown key — `{error, {bad_option, ip}}`, which
-    %% `fold_until_error/2` propagates and `bondy_app:start_normal_listeners/0`
+    %% `fold_until_error/2` propagates and `bondy_router_app:start_normal_listeners/0`
     %% turns into a refused boot.
     %%
     %% The block below puts the address at the top of `transport_opts` and the
@@ -1058,7 +1058,7 @@ splatted_cors_and_security_headers_reach_the_consumers(_Config) ->
     %% NOT `start(all)`: see `ws_listener_restricted_to_one_protocol' above.
     %% Starting is the point — `bondy_listener_ranch:protocol_opts/1' calls
     %% `bondy_http_security_headers:init/1', so a `badmap' there aborts the
-    %% start as an EXCEPTION, which `bondy_app''s
+    %% start as an EXCEPTION, which `bondy_router_app''s
     %% `ok ?= start_early_listeners()' cannot catch.
     ok = bondy_listener_manager:start(normal),
     ?assert(is_integer(ranch:get_port(ct_headers))),
@@ -1432,7 +1432,7 @@ partial_proxy_protocol_survives_a_real_connection(_Config) ->
     ok = bondy_listener:stop(L).
 
 drain_spares_the_early_phase(_Config) ->
-    %% `bondy_app:prep_stop/1' suspends, then SLEEPS the whole grace period.
+    %% `bondy_router_app:prep_stop/1' suspends, then SLEEPS the whole grace period.
     %% `/ping', `/ready' and `/metrics' answer on an `early' listener, so a
     %% drain that suspended every phase would make an orchestrator read the
     %% draining node as dead and hard-kill it — the grace period inverted.

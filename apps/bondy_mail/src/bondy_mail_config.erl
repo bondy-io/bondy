@@ -455,7 +455,7 @@ Return the prototype `RealmUri` inherits from, if any.
 
 Realm inheritance is the router's concept, and this application cannot call
 into the router without creating a cycle. So the resolver is named in
-configuration -- `bondy_app` sets it to `bondy_realm`, which exports
+configuration -- `bondy_router_app` sets it to `bondy_realm`, which exports
 `prototype_uri/1` -- and looked up dynamically.
 
 With no resolver configured, or a realm the resolver cannot answer for, this

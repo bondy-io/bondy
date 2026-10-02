@@ -402,8 +402,8 @@ assert_routed(Status) ->
 `/ready` answers 503 while an alarm declaring `affects_ready` is raised, and
 204 once it clears.
 
-This is the only hop between `bondy_app:is_ready/0` and a load balancer, and it
-was the one leg of the readiness path with no coverage: `bondy_app_readiness_test`
+This is the only hop between `bondy_router_app:is_ready/0` and a load balancer, and it
+was the one leg of the readiness path with no coverage: `bondy_router_app_readiness_test`
 drives the real `alarm_handler` manager and the published `atomics` cell, but
 stops at the boolean. The mapping below it — true to 204, false to 503 — is
 four lines with one branch, and inverting them would take every node out of
@@ -445,7 +445,7 @@ the_ready_probe_follows_a_blocking_alarm(_) ->
 %% `gen_event:call` to the handler is the barrier; `list/0` is the cheapest.
 await_ready_flag(Expected) ->
     _ = bondy_alarm_handler:list(),
-    ?assertEqual(Expected, bondy_app:is_ready()),
+    ?assertEqual(Expected, bondy_router_app:is_ready()),
     ok.
 
 %% The port comes from the resolved inventory rather than a literal, so the case

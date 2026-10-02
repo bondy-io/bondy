@@ -566,7 +566,7 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 handle_info({'ETS-TRANSFER', _, _, _}, State) ->
-    %% The store ets tables use bondy_table_manager.
+    %% The store ets tables use bondy_connect_table_manager.
     %% We ignore as tables are named.
     {noreply, State};
 handle_info({execute, Fun, Args}, State) ->

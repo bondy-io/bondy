@@ -116,7 +116,7 @@ out_of_order_arrival_converges() ->
     %% (`pending_intervals_bounded_by_holes`): two holes here (3 and 7-8),
     %% and the pending set is two elements however many seqs sit above them.
     ?assertEqual([{4, 6}, 9], pending(Id2, O2)),
-    ?assertEqual(2, bondy_interval_set:size(pending(Id2, O2))).
+    ?assertEqual(2, bondy_connect_interval_set:size(pending(Id2, O2))).
 
 %% Re-presenting an already-folded seq must not move anything. The projection
 %% fold is idempotent and the boot re-fold re-presents the whole live oplog, so

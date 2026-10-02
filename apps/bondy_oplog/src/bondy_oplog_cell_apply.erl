@@ -130,9 +130,10 @@ by `sec_idx/1`.
 %% `apply_cell_batch_mux/3` to turn into a frontier claim. It does not merge the
 %% frontier itself: `bondy_oplog_registry:merge_applied/2` is the single writer
 %% of that quantity, and one over-claiming writer poisons the entry permanently.
-%% An event the fold SKIPS counts as materialised (`compute_one_cell/13` returns
-%% `skip` when the cell's state already reflects it); a failed `put_batch/2`
-%% counts as nothing, the cells re-applying on the next replay.
+%% An event whose kernel apply raises is skipped (`compute_one_cell/13`) and
+%% still counts as materialised, so a malformed op does not hold the frontier
+%% back; a failed `put_batch/2` counts as nothing, the cells re-applying on the
+%% next replay.
 apply_cell_batch(undefined, _Id, _Events) ->
     #{};
 apply_cell_batch(_Ctx, _Id, []) ->
@@ -197,8 +198,8 @@ apply_cell_batch(Ctx, Id, Events) ->
 
     case map_size(LocalWrites) of
         0 ->
-            %% Every event in the batch was older than its cell's current
-            %% state. Nothing to write, but the state reflects them all.
+            %% No cell produced a frame: the batch held no cell events, or
+            %% every kernel apply raised.
             origin_seqs(Events, fun event_cell_key/1);
         _ ->
             PutT0 = erlang:monotonic_time(microsecond),
@@ -261,6 +262,12 @@ apply_cell_batch(Ctx, Id, Events) ->
 %% `LocalWrites` so in-batch updates to the same `{Bucket, Key}` see each other
 %% — the substrate has not been written yet at this point — then fall back to
 %% `Adapter:get/3`.
+%%
+%% Only the kernel apply is caught, and a raise there returns `skip`. The read
+%% is outside the catch: a storage error must stop the applier, which resumes
+%% from `consumer.offset` and re-applies the event, rather than skip an event
+%% the caller has already been told is applied
+%% (`bondy_oplog_commit_barrier_test`).
 compute_one_cell(
     Id,
     Adapter,
@@ -276,35 +283,34 @@ compute_one_cell(
     SecIdx,
     OldStateCache
 ) ->
+    ReadT0 = erlang:monotonic_time(microsecond),
+    %% OldValue read precedence: in-batch shadow (`LocalWrites`) →
+    %% Frame-cache → projection `get/3`. A cache hit returns
+    %% byte-identical `{OldState, OldValueOpt}` to a projection read
+    %% (the cache is a write-through mirror of the durable frame), so
+    %% the kernel result is unchanged — the cache only removes the read I/O.
+    {OldState, OldValueOpt} =
+        case maps:get({Bucket, Key}, LocalWrites, undefined) of
+            undefined ->
+                read_old_value(
+                    OldStateCache,
+                    Adapter,
+                    Handle,
+                    Kernel,
+                    CrdtOpts,
+                    Id,
+                    Bucket,
+                    Key
+                );
+            LocalFrame ->
+                decode_old_frame(Kernel, LocalFrame)
+        end,
+    telemetry:execute(
+        [bondy_oplog, applier, cell_read],
+        #{duration_us => erlang:monotonic_time(microsecond) - ReadT0},
+        #{instance_id => Id}
+    ),
     try
-        ReadT0 = erlang:monotonic_time(microsecond),
-        %% OldValue read precedence: in-batch shadow (`LocalWrites`) →
-        %% Frame-cache → projection `get/3`. A cache hit returns
-        %% byte-identical `{OldState, OldValueOpt}` to a projection read
-        %% (the cache is a write-through mirror of the durable frame), so
-        %% the kernel result is unchanged — the cache only removes the read I/O.
-        {OldState, OldValueOpt} =
-            case maps:get({Bucket, Key}, LocalWrites, undefined) of
-                undefined ->
-                    read_old_value(
-                        OldStateCache,
-                        Adapter,
-                        Handle,
-                        Kernel,
-                        CrdtOpts,
-                        Id,
-                        Bucket,
-                        Key
-                    );
-                LocalFrame ->
-                    decode_old_frame(Kernel, LocalFrame)
-            end,
-        telemetry:execute(
-            [bondy_oplog, applier, cell_read],
-            #{duration_us => erlang:monotonic_time(microsecond) - ReadT0},
-            #{instance_id => Id}
-        ),
-
         ApplyT0 = erlang:monotonic_time(microsecond),
         %% The cell kernel ({fold, _} legacy or {crdt, _} operation-based)
         %% applies one operation and returns every frame component. The
@@ -687,8 +693,8 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
 %% seqs this call reflected into the projection — the replay-path counterpart of
 %% `apply_cell_batch/3`'s return, and for the same reason: the frontier claim is
 %% made once per batch by `apply_cell_pairs_mux/5`, after every group has
-%% reported. A pair the fold SKIPS counts as materialised (the cell's state
-%% already dominates it); a failed `put_batch/2` counts as nothing.
+%% reported. A pair whose kernel apply raises counts as materialised, as on the
+%% local path; a failed `put_batch/2` counts as nothing.
 apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
     CrdtOpts = maps:get(crdt_opts, Ctx, #{}),
@@ -898,10 +904,10 @@ detect_prefix_holes(Id, OriginSeqs) ->
     maps:foreach(
         fun(Origin, Seqs) ->
             Cur = maps:get(Origin, VV, 0),
-            Held = maps:get(Origin, Pending, bondy_interval_set:new()),
-            Present = bondy_interval_set:union(
+            Held = maps:get(Origin, Pending, bondy_connect_interval_set:new()),
+            Present = bondy_connect_interval_set:union(
                 Held,
-                bondy_interval_set:from_list([S || S <- Seqs, S > Cur])
+                bondy_connect_interval_set:from_list([S || S <- Seqs, S > Cur])
             ),
             case seq_gaps(Cur, Present) of
                 [] ->
@@ -915,7 +921,7 @@ detect_prefix_holes(Id, OriginSeqs) ->
                             instance_id => Id,
                             origin => Origin,
                             applied_seq => Cur,
-                            held => bondy_interval_set:flat_size(Held),
+                            held => bondy_connect_interval_set:flat_size(Held),
                             gaps => Gaps
                         }
                     ),
@@ -935,7 +941,7 @@ detect_prefix_holes(Id, OriginSeqs) ->
                         instance_id => Id,
                         origin => Origin,
                         applied_seq => Cur,
-                        held => bondy_interval_set:flat_size(Held),
+                        held => bondy_connect_interval_set:flat_size(Held),
                         gaps => Gaps,
                         missing => Missing
                     })
@@ -947,7 +953,7 @@ detect_prefix_holes(Id, OriginSeqs) ->
 %% @private
 %% The absent runs below each maximal run of `Set`, relative to `Prev`
 %% (exclusive): each `{From, To}` is a maximal run of absent seqs. `Set` is a
-%% `bondy_interval_set`, whose runs are ascending, disjoint and non-adjacent
+%% `bondy_connect_interval_set`, whose runs are ascending, disjoint and non-adjacent
 %% (it coalesces), so one left-to-right pass suffices; a run already covered
 %% by `Prev` contributes nothing.
 seq_gaps(_Prev, []) ->

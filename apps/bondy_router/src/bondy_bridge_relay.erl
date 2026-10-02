@@ -752,7 +752,7 @@ to_external(Bridge) ->
 %% @private
 %% The open bondy_db `bondy_bridge_relay` table handle. Raises if the catalogue
 %% has not provisioned it — the table is a hard dependency. The catalogue
-%% (a `bondy_sup` child) opens it before `bondy_bridge_relay_manager` (a later
+%% (a `bondy_router_sup` child) opens it before `bondy_bridge_relay_manager` (a later
 %% child) reads bridge config at boot.
 table() ->
     case bondy_namespace_catalog:table(bondy_bridge_relay) of

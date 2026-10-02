@@ -9,7 +9,7 @@ An idiomatic, supervised, multi-session **WAMP client** for the Bondy
 ecosystem. It is the replacement for the legacy `wamp_client` (which wrapped
 `awre`), built fresh on Bondy's mature, router-independent WAMP building blocks
 (`bondy_wamp`, `bondy_wamp_cryptosign`, `bondy_wamp_cra`, `bondy_regulator`,
-`bondy_stdlib`).
+`bondy_connect_lib`).
 
 `bondy_connect_sdk` is a client only — it has **no dependency on the `bondy` router
 application** and can be embedded by external consumers via rebar3

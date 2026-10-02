@@ -175,7 +175,7 @@ mk_event(Hlc, Seq) ->
     bondy_oplog_event:new(Key, {op, Seq}, undefined).
 
 append1(Pid, HLC, Seq) ->
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     {ok, _, Pos} = bondy_oplog_wal:append(Pid, mk_event(Hlc, Seq)),
     Pos.
 
@@ -188,7 +188,7 @@ seed(Id, NEvents) ->
     Dir = mktemp_dir(),
     Opts = (base_opts())#{dir => Dir},
     {ok, Pid} = bondy_oplog_wal:start_link(Id, Opts),
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Positions = [append1(Pid, HLC, Seq) || Seq <- lists:seq(0, NEvents - 1)],
     {Pid, Dir, Positions}.
 

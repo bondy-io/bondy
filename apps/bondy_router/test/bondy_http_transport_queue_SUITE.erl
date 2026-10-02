@@ -454,7 +454,7 @@ partition_tables_are_anonymous(_Config) ->
 partitions_survive_manager_crash(_Config) ->
     %% The real property this suite is here to guard: when the transport
     %% queue manager gen_server crashes, the partition tables owned by
-    %% bondy_table_manager must stay alive and queued messages must still
+    %% bondy_connect_table_manager must stay alive and queued messages must still
     %% be dequeue-able after a new manager replaces the crashed one.
     TransportId = make_transport_id(),
     ok = bondy_http_transport_queue:init_transport(

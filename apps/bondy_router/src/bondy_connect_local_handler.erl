@@ -11,7 +11,7 @@ Router-side adapter for the `bondy_connect_sdk` **in-VM (local) transport**.
 This is the `bondy`-app implementation of the `bondy_connect_local` handler
 behaviour. It is the *only* place the in-VM transport touches the router core
 (`bondy_router`, `bondy_session_manager`, …); `bondy_connect_sdk` itself names no
-`bondy` module. `bondy_app:start/2` registers this module via
+`bondy` module. `bondy_router_app:start/2` registers this module via
 `bondy_connect_local:register_handler/1`, so on a router node `transport =>
 local` works, while on a peer node (no `bondy` app) the transport is simply
 unavailable.
@@ -130,7 +130,7 @@ do_open(RealmUri, Roles) ->
         roles => Roles,
         peer => ?LOCAL_PEER,
         authrealm => RealmUri,
-        authid => bondy_utils:uuid(),
+        authid => bondy_router_utils:uuid(),
         authmethod => ?WAMP_ANON_AUTH,
         authrole => <<"anonymous">>,
         is_anonymous => true,

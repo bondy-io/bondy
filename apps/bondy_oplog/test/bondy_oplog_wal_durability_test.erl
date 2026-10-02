@@ -70,7 +70,7 @@ mk_event(Hlc, Seq) ->
 %% append result and the post-append head offset (= the end of the
 %% frame, which is the `await_durable/3` boundary for that frame).
 append_one(Pid, HLC, Seq) ->
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     E = mk_event(Hlc, Seq),
     {ok, Hlc, {Seg, StartOff}} = bondy_oplog_wal:append(Pid, E),
     Info = bondy_oplog_wal:info(Pid),
@@ -102,7 +102,7 @@ per_write_default_mode_test() ->
     end).
 
 per_write_durable_equals_head_after_append_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         {_Hlc, {Seg, _Start}, {Seg, EndOff}} = append_one(Pid, HLC, 1),
         ?assertEqual({Seg, EndOff}, bondy_oplog_wal:durable_position(Pid)),
@@ -113,7 +113,7 @@ per_write_durable_equals_head_after_append_test() ->
     end).
 
 per_write_await_durable_returns_immediately_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         {_Hlc, _Start, EndPos} = append_one(Pid, HLC, 1),
         ?assertEqual(ok, bondy_oplog_wal:await_durable(Pid, EndPos, 0)),
@@ -124,7 +124,7 @@ per_write_await_durable_returns_immediately_test() ->
     end).
 
 per_write_pending_bytes_stay_zero_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         _ = append_one(Pid, HLC, 1),
         _ = append_one(Pid, HLC, 2),
@@ -142,7 +142,7 @@ per_write_pending_bytes_stay_zero_test() ->
 %% does not advance the durable position. The batched-mode interval
 %% timer must be armed on the first un-fsynced append.
 batched_append_defers_fsync_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         %% effectively disabled
@@ -161,7 +161,7 @@ batched_append_defers_fsync_test() ->
     end).
 
 batched_size_threshold_triggers_fsync_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     %% Threshold is ~120 bytes; any single event frame should exceed it.
     %% Interval is large so only the size trigger matters here.
     Opts = #{
@@ -177,7 +177,7 @@ batched_size_threshold_triggers_fsync_test() ->
     end).
 
 batched_interval_timer_triggers_fsync_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     %% Disable size trigger; rely on the 30 ms timer.
     Opts = #{
         fsync_mode => batched,
@@ -200,7 +200,7 @@ batched_interval_timer_triggers_fsync_test() ->
 %% =============================================================================
 
 batched_await_durable_already_satisfied_returns_immediately_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         batched_fsync_interval => 30,
@@ -214,7 +214,7 @@ batched_await_durable_already_satisfied_returns_immediately_test() ->
     end).
 
 batched_await_durable_blocks_then_sync_wakes_it_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         batched_fsync_interval => 10_000,
@@ -245,7 +245,7 @@ batched_await_durable_blocks_then_sync_wakes_it_test() ->
     end).
 
 batched_await_durable_blocks_then_timer_wakes_it_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         batched_fsync_interval => 30,
@@ -266,7 +266,7 @@ batched_await_durable_blocks_then_timer_wakes_it_test() ->
     end).
 
 batched_await_durable_timeout_returns_error_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         batched_fsync_interval => 10_000,
@@ -284,7 +284,7 @@ batched_await_durable_timeout_returns_error_test() ->
     end).
 
 batched_await_durable_zero_timeout_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         batched_fsync_interval => 10_000,
@@ -301,7 +301,7 @@ batched_await_durable_zero_timeout_test() ->
     end).
 
 batched_multiple_waiters_woken_in_order_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         batched_fsync_interval => 10_000,
@@ -341,7 +341,7 @@ batched_multiple_waiters_woken_in_order_test() ->
 %% =============================================================================
 
 batched_sync_advances_durable_and_resets_pending_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         batched_fsync_interval => 10_000,
@@ -365,7 +365,7 @@ batched_sync_advances_durable_and_resets_pending_test() ->
     end).
 
 batched_rotation_advances_durable_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     %% Force rotation with a small segment cap.
     Opts = #{
         fsync_mode => batched,
@@ -389,7 +389,7 @@ batched_rotation_advances_durable_test() ->
     end).
 
 batched_rotation_wakes_waiters_in_old_segment_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Opts = #{
         fsync_mode => batched,
         batched_fsync_interval => 10_000,
@@ -419,7 +419,7 @@ batched_rotation_wakes_waiters_in_old_segment_test() ->
     end).
 
 batched_close_fsyncs_pending_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{
@@ -525,8 +525,8 @@ torn_write_keeps_later_acked_appends_test() ->
     Dir = mktemp_dir(),
     Opts = (base_opts())#{dir => Dir},
     OldTrap = process_flag(trap_exit, true),
-    HLC = bondy_hlc:new(),
-    Ev = fun(Seq) -> mk_event(bondy_hlc:now(HLC), Seq) end,
+    HLC = bondy_connect_hlc:new(),
+    Ev = fun(Seq) -> mk_event(bondy_connect_hlc:now(HLC), Seq) end,
     try
         {ok, W0} = bondy_oplog_wal:start_link(instance_id(), Opts),
         E1 = Ev(1),
@@ -577,7 +577,7 @@ failed_datasync_does_not_satisfy_waiters_test() ->
     OldTrap = process_flag(trap_exit, true),
     try
         {ok, Pid} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        {_Hlc, _Start, EndPos} = append_one(Pid, bondy_hlc:new(), 1),
+        {_Hlc, _Start, EndPos} = append_one(Pid, bondy_connect_hlc:new(), 1),
         Parent = self(),
         Waiter = spawn(fun() ->
             Result =
@@ -642,7 +642,7 @@ live_writer(Pid, Opts) ->
 %% delete that segment. Only the fsync after the manifest's rename fails. The
 %% log must reopen with its frames.
 rotation_manifest_dir_sync_failure_keeps_the_log_openable_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Dir = mktemp_dir(),
     Opts = #{dir => Dir, origin => origin(), max_segment_bytes => 200},
     OldFlag = process_flag(trap_exit, true),

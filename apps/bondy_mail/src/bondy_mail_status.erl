@@ -472,7 +472,7 @@ encode(Bytes) ->
 
 %% @private
 %% Partisan's name is the identity the rest of the cluster knows this node by,
-%% and `bondy_app` starts Partisan before this application, so that is what a
+%% and `bondy_router_app` starts Partisan before this application, so that is what a
 %% running node uses. The fallback covers `bondy_mail` running on its own,
 %% where there is no cluster for the distinction to matter to -- and, because
 %% `cluster_nodes/1` falls back in step, a node without Partisan simply owns

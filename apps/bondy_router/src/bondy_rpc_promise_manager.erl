@@ -119,7 +119,7 @@ handle_info(evict, State) ->
             [Mssg]
         ),
 
-        bondy:send(RealmUri, Caller, Error)
+        bondy_router_peer:send(RealmUri, Caller, Error)
     end,
 
     Opts = #{

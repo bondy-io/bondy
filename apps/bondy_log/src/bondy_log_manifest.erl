@@ -429,13 +429,13 @@ format(#?MODULE{
     created_at = CreatedAt,
     last_rotated_at = LastRotatedAt
 }) ->
-    %% `bondy_consult:encode/1` owns the byte encoding: one term per line,
+    %% `bondy_connect_consult:encode/1` owns the byte encoding: one term per line,
     %% UTF-8. `instance_id` is a caller-supplied binary and `retention` a
     %% caller-supplied term, so both can carry bytes or characters that an
     %% `iolist_to_binary/1` of the rendering would write as invalid UTF-8
     %% and `file:consult/1` would then refuse. Pinned through disk by
     %% the manifest test's `write_read_survives_high_bytes_test_`.
-    bondy_consult:encode([
+    bondy_connect_consult:encode([
         {manifest_version, MV},
         {instance_id, InstanceId},
         {current_segment, CurrentSegment},

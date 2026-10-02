@@ -57,7 +57,7 @@ The registry write path runs in the caller's process, and so does RIB
 maintenance, with no serialisation point. The partition's members table (an
 `ordered_set`) holds one row per live local entry and one counter row per
 `(Type, Realm, Policy, Uri)` group. A writer changes both rows, then takes a
-stamp from this node's RIB clock (a `bondy_hlc`, created by `init/0`),
+stamp from this node's RIB clock (a `bondy_connect_hlc`, created by `init/0`),
 then reads the group's counter, and writes that reading asynchronously.
 Because the stamp follows the writer's own row op and precedes its read, the
 highest-stamped reading carries the count after every row op stamped before
@@ -206,7 +206,7 @@ partitions start, so every writer stamps from the same clock.
 
 init() ->
     case persistent_term:get(?CLOCK, undefined) of
-        undefined -> persistent_term:put(?CLOCK, bondy_hlc:new());
+        undefined -> persistent_term:put(?CLOCK, bondy_connect_hlc:new());
         _ -> ok
     end.
 
@@ -296,7 +296,7 @@ write(Tab, Entry, Action, Extra) ->
 %% registry drain's backlog.
 write_cell(Tab, Type, RealmUri, Policy, Uri, Action, Extra) ->
     try
-        Stamp = bondy_hlc:now(persistent_term:get(?CLOCK)),
+        Stamp = bondy_connect_hlc:now(persistent_term:get(?CLOCK)),
         Count = ets:lookup_element(
             Tab, ?GROUP_KEY(Type, RealmUri, Policy, Uri), 2, 0
         ),
@@ -379,7 +379,7 @@ ensure_stubs_table() ->
         {read_concurrency, true},
         {write_concurrency, true}
     ],
-    {ok, Tab} = bondy_table_manager:add_or_claim(?STUBS_TAB, Opts),
+    {ok, Tab} = bondy_connect_table_manager:add_or_claim(?STUBS_TAB, Opts),
     Tab.
 
 -doc """

@@ -64,13 +64,13 @@ stateDiagram-v2
     config :: bondy_bridge_relay:t(),
     socket :: gen_tcp:socket() | ssl:sslsocket(),
     network_timeout :: pos_integer(),
-    reconnect_retry :: optional(bondy_retry:t()),
+    reconnect_retry :: optional(bondy_connect_retry:t()),
     %% The delay the next `connecting` enter applies before dialing,
     %% decided by redial/2 when the previous connection died: 0 after a
     %% connection that had opened a session, the advancing retry
     %% backoff after a session-less one.
     redial_delay = 0 :: non_neg_integer(),
-    ping_retry :: optional(bondy_retry:t()),
+    ping_retry :: optional(bondy_connect_retry:t()),
     ping_payload :: optional(binary()),
     ping_idle_timeout :: optional(non_neg_integer()),
     idle_timeout :: pos_integer(),
@@ -780,14 +780,14 @@ handle_event(EventType, EventContent, StateName, _) ->
 maybe_enable_reconnect(#{enabled := true} = Opts0, State) ->
     Opts = key_value:set(backoff_enabled, true, Opts0),
     State#state{
-        reconnect_retry = bondy_retry:init(connect, Opts)
+        reconnect_retry = bondy_connect_retry:init(connect, Opts)
     };
 maybe_enable_reconnect(_, State) ->
     State.
 
 %% @private
 reset_reconnect_retry_state(State) ->
-    {_, R1} = bondy_retry:succeed(State#state.reconnect_retry),
+    {_, R1} = bondy_connect_retry:succeed(State#state.reconnect_retry),
     State#state{reconnect_retry = R1}.
 
 %% @private A connection died: re-enter `connecting`. Whether the retry
@@ -815,7 +815,7 @@ redial(Reason, State0) ->
 redial_failed(Reason, #state{reconnect_retry = R0} = State0) when
     R0 =/= undefined
 ->
-    case bondy_retry:fail(R0) of
+    case bondy_connect_retry:fail(R0) of
         {Delay, R1} when is_integer(Delay) ->
             ?LOG_NOTICE(#{
                 description =>
@@ -853,7 +853,7 @@ maybe_reconnect(Reason, #state{reconnect_retry = R0} = State0) when
         (?IS_RETRIABLE(Reason) orelse ?IS_NETDOWN(Reason))
 ->
     %% Reconnect enabled
-    case bondy_retry:fail(R0) of
+    case bondy_connect_retry:fail(R0) of
         {Delay, R1} when is_integer(Delay) ->
             ?LOG_NOTICE(#{
                 description =>
@@ -989,7 +989,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
     Timeout = maps:get(timeout, PingOpts),
     Attempts = maps:get(max_attempts, PingOpts),
 
-    Retry = bondy_retry:init(
+    Retry = bondy_connect_retry:init(
         ping_timeout,
         #{
             % disable, use max_retries only
@@ -1002,7 +1002,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
 
     State#state{
         ping_idle_timeout = IdleTimeout,
-        ping_payload = bondy_utils:generate_fragment(16),
+        ping_payload = bondy_router_utils:generate_fragment(16),
         ping_retry = Retry
     };
 maybe_enable_ping(#{enabled := false}, State) ->
@@ -1013,7 +1013,7 @@ ping_succeed(#state{ping_retry = undefined} = State) ->
     %% ping disabled
     State;
 ping_succeed(#state{} = State) ->
-    {_, Retry} = bondy_retry:succeed(State#state.ping_retry),
+    {_, Retry} = bondy_connect_retry:succeed(State#state.ping_retry),
     State#state{ping_retry = Retry}.
 
 %% @private
@@ -1021,7 +1021,7 @@ ping_fail(#state{ping_retry = undefined} = State) ->
     %% ping disabled
     State;
 ping_fail(#state{} = State) ->
-    {_, Retry} = bondy_retry:fail(State#state.ping_retry),
+    {_, Retry} = bondy_connect_retry:fail(State#state.ping_retry),
     State#state{ping_retry = Retry}.
 
 %% @private
@@ -1036,7 +1036,7 @@ maybe_send_ping(#state{ping_retry = undefined} = State, Actions0) ->
     ],
     {keep_state_and_data, Actions};
 maybe_send_ping(#state{} = State, Actions0) ->
-    case bondy_retry:get(State#state.ping_retry) of
+    case bondy_connect_retry:get(State#state.ping_retry) of
         Time when is_integer(Time) ->
             %% We send a ping
             Bin = State#state.ping_payload,
@@ -1468,5 +1468,5 @@ send_session_message(SessionId, Msg, State) ->
 forward_remote_message(Msg, To, Opts, SessionId, State) ->
     #{realm_uri := RealmUri, ref := MyRef} = session(SessionId, State),
 
-    SendOpts = bondy:add_via(MyRef, Opts),
+    SendOpts = bondy_router_peer:add_via(MyRef, Opts),
     bondy_router:forward(Msg, To, SendOpts#{realm_uri => RealmUri}).

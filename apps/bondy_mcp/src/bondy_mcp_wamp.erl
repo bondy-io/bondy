@@ -178,7 +178,7 @@ flatten_payload(Args, KwArgs) ->
     end.
 
 -doc """
-A `CallToolResult` from a `bondy:call/5` success
+A `CallToolResult` from a `bondy_router_peer:call/5` success
 (`#{args, kwargs, details, ...}`).
 """.
 -spec call_result(ResultMap :: map()) -> map().
@@ -232,7 +232,7 @@ tool_result(Result) when is_map(Result) ->
     end.
 
 -doc """
-A `CallToolResult` with `isError: true` from a `bondy:call/5` error
+A `CallToolResult` with `isError: true` from a `bondy_router_peer:call/5` error
 (`#{error_uri, args, kwargs, ...}`), classified per §10.2. `retryable` is
 structured data inside `structuredContent`; the original WAMP error URI
 rides in `_meta."bondy:error_uri"`.

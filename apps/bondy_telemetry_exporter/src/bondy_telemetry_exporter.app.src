@@ -15,7 +15,7 @@
         "requirement: the bondy_metrics REGISTRY PROCESS must be running "
         "(bondy_metrics is a library app whose gen_server is hosted by "
         "the consumer's supervision tree — bondy_oplog_sup in a full "
-        "node, started by bondy_app before this app)."},
+        "node, started by bondy_router_app before this app)."},
     {vsn, "0.1.0"},
     {registered, [bondy_telemetry_exporter_sup]},
     {mod, {bondy_telemetry_exporter_app, []}},

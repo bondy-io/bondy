@@ -71,7 +71,7 @@ utf8_error_bodies_test_() ->
 %% `Term` is a runtime value out of an action response, so its size is chosen
 %% by an upstream service, not by us. Rendering it whole turns a small
 %% malformed request into an arbitrarily large 400 body and log line.
-%% `bondy_error:format_term/1` caps it; a bare `io_lib:format("~p", ...)` at
+%% `bondy_connect_error:format_term/1` caps it; a bare `io_lib:format("~p", ...)` at
 %% the call site does not, which is what these modules used to do.
 body_is_bounded() ->
     Expr = <<"{{action.result}}">>,
@@ -160,7 +160,7 @@ caught(Fun) ->
 
 %% Encodability alone is a weak oracle for `rest_handler`, which already
 %% survived `json:encode/1` before this was fixed — but only by accident.
-%% `bondy_error:to_binary/1` gates on `is_utf8/1` and falls back to rendering
+%% `bondy_connect_error:to_binary/1` gates on `is_utf8/1` and falls back to rendering
 %% the whole message with `~p` when it fails, so a latin-1 message came out
 %% escaped end-to-end and mojibake'd:
 %%

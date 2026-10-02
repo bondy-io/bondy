@@ -79,7 +79,7 @@ so a table can switch from the fold to this module with no data migration.
 -type counter() :: {non_neg_integer(), non_neg_integer()}.
 -type state() :: #{
     counters := #{origin() => counter()},
-    hlc := bondy_hlc:hlc()
+    hlc := bondy_connect_hlc:hlc()
 }.
 -type op() :: {inc, non_neg_integer()}.
 
@@ -146,7 +146,7 @@ apply_op(#{counters := C0, hlc := H0} = S, {inc, Delta}, Key) when
 to_value(#{counters := C}) ->
     maps:fold(fun(_O, {Count, _S}, Acc) -> Acc + Count end, 0, C).
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc(#{hlc := H}) -> H.
 

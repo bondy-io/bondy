@@ -1468,7 +1468,7 @@ register_shard_with_bucket(NS, InstanceId, Bucket, CrdtModule, CrdtOpts) ->
 %% ms is forced past `Key`'s before writing; the precondition is asserted
 %% rather than assumed.
 compact_above(Local, Key) ->
-    {KeyMs, _} = bondy_hlc:decode(bondy_oplog_event:key_hlc(Key)),
+    {KeyMs, _} = bondy_connect_hlc:decode(bondy_oplog_event:key_hlc(Key)),
     wait_past_ms(KeyMs),
     _ = bondy_oplog:append(Local, {cell_apply, ?B, <<"own">>, {inc, 1}}),
     _ = bondy_oplog:append(Local, {cell_apply, ?B, <<"own">>, {inc, 1}}),

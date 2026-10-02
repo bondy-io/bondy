@@ -134,7 +134,7 @@ call_timeout_merge_test(_) ->
 %% Regression test: the action `timeout` (inherited from `defaults.timeout`)
 %% must survive parsing and, once merged, govern the WAMP call options.
 %% Previous versions parsed the value but discarded it before calling
-%% `bondy:call/5`, so the spec's timeout had no effect.
+%% `bondy_router_peer:call/5`, so the spec's timeout had no effect.
 call_timeout_spec_flow_test(_) ->
     Spec = #{
         <<"id">> => <<"com.timeout_api">>,

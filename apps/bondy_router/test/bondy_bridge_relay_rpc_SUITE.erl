@@ -86,12 +86,12 @@ end_per_suite(Config) ->
 %% freshly booted node, so every atom those modules name is in the atom
 %% table before the first `[safe]` wire decode (the bridge relay wire,
 %% both ends). The apps listed are the ones loaded before
-%% `bondy_app:start/2` reaches its supervisor in every context: a
+%% `bondy_router_app:start/2` reaches its supervisor in every context: a
 %% release boot script loads ALL release apps before starting any (all
 %% `application:load` instructions precede the first `start_boot` in the
 %% generated start.script — verified on 1.0.0-rc-sunlight), and under CT
 %% these are pulled in by the `ensure_all_started` calls that precede
-%% `bondy_sup:start_link/0`. This case does NOT cover apps loaded later
+%% `bondy_router_sup:start_link/0`. This case does NOT cover apps loaded later
 %% under CT/shell (bondy_mcp, bondy_mail, ...) — in a release the sweep
 %% covers them too, but no fresh-node harness here boots from a release.
 boot_loads_every_app_module(Config) ->

@@ -379,9 +379,9 @@ reply_ok(RealmUri, Identity, Req) ->
 
 %% @private
 reply_error(Status, Type, RealmUri, Req) ->
-    Error = bondy_error:from_term(Type),
+    Error = bondy_connect_error:from_term(Type),
     Body = json:encode(
-        maps:put(~"active", false, bondy_error:to_map(Error))
+        maps:put(~"active", false, bondy_connect_error:to_map(Error))
     ),
 
     Headers = maps:merge(no_store_headers(), #{
@@ -410,8 +410,8 @@ join_roles(Roles) ->
     iolist_to_binary(lists:join($,, Roles)).
 
 %% @private
-%% Every failure maps to a `bondy_error` type whose HTTP status is 401.
-%% Routing raw reasons through `bondy_error:from_term/1` would not do: bare
+%% Every failure maps to a `bondy_connect_error` type whose HTTP status is 401.
+%% Routing raw reasons through `bondy_connect_error:from_term/1` would not do: bare
 %% atoms fall through to `internal_error` (500) and `oauth2_invalid_grant`
 %% resolves to `bondy.error.invalid_grant` (400). A proxy can act on neither.
 error_type(expired) -> token_expired;

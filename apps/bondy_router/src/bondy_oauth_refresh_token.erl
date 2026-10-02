@@ -42,7 +42,7 @@ protection.
 
 new(Key) ->
     KeyPart = encode_key_part(Key),
-    UUID = bondy_uuidv7:new(),
+    UUID = bondy_connect_uuidv7:new(),
 
     %% Add additional random bytes for extra entropy
 
@@ -64,7 +64,7 @@ Generate HMAC-protected sortable token (for improved security).
 
 new(Key, SecretKey) ->
     KeyPart = encode_key_part(Key),
-    UUID = bondy_uuidv7:new(),
+    UUID = bondy_connect_uuidv7:new(),
 
     %% Create HMAC for integrity protection
     HMAC = crypto:mac(hmac, sha256, SecretKey, UUID),

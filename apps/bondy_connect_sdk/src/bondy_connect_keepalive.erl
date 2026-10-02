@@ -15,7 +15,7 @@ ping is retried up to `max_attempts` times before the link is declared dead and
 the connection reconnects. Any inbound traffic proves the link alive and resets
 the budget.
 
-This module owns the retry budget (a `bondy_retry` state machine), the idle
+This module owns the retry budget (a `bondy_connect_retry` state machine), the idle
 timeout, and the per-connection ping payload, and answers the connection's
 keepalive questions purely — *should I ping now, and by when must the pong
 arrive?* / *the deadline elapsed, retry or give up?* / *traffic arrived, reset*.
@@ -25,7 +25,7 @@ actions as data so the connection only has to apply them.
 """.
 
 -record(keepalive, {
-    retry :: bondy_retry:t() | undefined,
+    retry :: bondy_connect_retry:t() | undefined,
     idle_timeout :: pos_integer() | undefined,
     payload :: binary() | undefined
 }).
@@ -59,7 +59,7 @@ Must be called from the connection process (the payload derives from `self()`).
 -spec new(PingConfig :: map()) -> t().
 
 new(#{enabled := true} = Ping) ->
-    Retry = bondy_retry:init(ping_timeout, #{
+    Retry = bondy_connect_retry:init(ping_timeout, #{
         deadline => 0,
         interval => maps:get(timeout, Ping),
         max_retries => maps:get(max_attempts, Ping),
@@ -111,13 +111,13 @@ only counted as failed when its deadline elapses, via `on_ping_timeout/1`).
 on_idle(#keepalive{retry = undefined}) ->
     disabled;
 on_idle(#keepalive{retry = R}) ->
-    case bondy_retry:get(R) of
+    case bondy_connect_retry:get(R) of
         Deadline when is_integer(Deadline) -> {ping, Deadline};
         _Limit -> give_up
     end.
 
 -doc """
-A ping deadline elapsed with no pong. Count the failure via `bondy_retry:fail/1`
+A ping deadline elapsed with no pong. Count the failure via `bondy_connect_retry:fail/1`
 and act on **its** result: `{ping, Deadline, t()}` to retry, `{give_up, t()}`
 once the attempts are exhausted, or `disabled`.
 
@@ -134,7 +134,7 @@ always returns the interval. The pre-A2 code read `get/1` after `fail/1` and so
 on_ping_timeout(#keepalive{retry = undefined}) ->
     disabled;
 on_ping_timeout(#keepalive{retry = R} = KA) ->
-    case bondy_retry:fail(R) of
+    case bondy_connect_retry:fail(R) of
         {Deadline, R1} when is_integer(Deadline) ->
             {ping, Deadline, KA#keepalive{retry = R1}};
         {_Limit, R1} ->
@@ -147,5 +147,5 @@ on_ping_timeout(#keepalive{retry = R} = KA) ->
 on_activity(#keepalive{retry = undefined} = KA) ->
     KA;
 on_activity(#keepalive{retry = R} = KA) ->
-    {_, R1} = bondy_retry:succeed(R),
+    {_, R1} = bondy_connect_retry:succeed(R),
     KA#keepalive{retry = R1}.

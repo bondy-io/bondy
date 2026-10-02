@@ -153,9 +153,9 @@ signals deliberately do not run through the alarm — see each entry's
 
 **So the readiness mechanism has no live producer, and its path is exercised
 only by tests.** `bondy_alarm_handler` publishes the blocking flag into an
-`atomics` cell that `bondy_app:is_ready/0` reads, and nothing in this build has
+`atomics` cell that `bondy_router_app:is_ready/0` reads, and nothing in this build has
 ever put a `true` in it outside `bondy_alarm_handler_test` and
-`bondy_app_readiness_test`. The seam is kept because readiness is a per-alarm
+`bondy_router_app_readiness_test`. The seam is kept because readiness is a per-alarm
 judgement rather than a severity threshold (design D1) and this table is where
 that judgement belongs — but the first entry to declare `true` is the one that
 will find whatever is wrong with the path, and it should be landed expecting

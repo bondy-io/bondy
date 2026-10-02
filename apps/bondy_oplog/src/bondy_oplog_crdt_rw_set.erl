@@ -72,7 +72,7 @@ not the per-element cells.
 -type state() :: {
     #{elem() => bondy_oplog_crdt_rw_core:cell()},
     context(),
-    bondy_hlc:hlc()
+    bondy_connect_hlc:hlc()
 }.
 -type op() :: {add, elem()} | {rmv, elem()}.
 
@@ -169,7 +169,7 @@ to_value({Elems, _CC, _Hlc}) ->
 context_of({_Elems, CC, _Hlc}) ->
     CC.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc({_Elems, _CC, Hlc}) ->
     Hlc.

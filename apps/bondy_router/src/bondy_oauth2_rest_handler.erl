@@ -620,8 +620,8 @@ jwks(Req0, St) ->
             Req1 = prepare_request(KeySet, #{}, Req0),
             {true, Req1, St};
         {error, not_found} ->
-            ErrorMap = bondy_error:to_map(
-                bondy_error:from_term({no_such_realm, RealmUri})
+            ErrorMap = bondy_connect_error:to_map(
+                bondy_connect_error:from_term({no_such_realm, RealmUri})
             ),
             Req1 = cowboy_req:reply(
                 ?HTTP_NOT_FOUND,
@@ -654,16 +654,16 @@ reply(common_name_mismatch, Req) ->
     reply(oauth2_invalid_client, Req);
 reply(oauth2_invalid_client = Reason, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
-    Error = bondy_error:from_term(Reason),
+    Error = bondy_connect_error:from_term(Reason),
     cowboy_req:reply(
         ?HTTP_UNAUTHORIZED,
-        prepare_request(bondy_error:to_map(Error), Headers, Req)
+        prepare_request(bondy_connect_error:to_map(Error), Headers, Req)
     );
 reply(overload, Req) ->
     %% The admission gate refused the request: same URI and status as any
     %% other transient refusal, with a message that names the condition.
     reply_error(
-        bondy_error:new(service_unavailable, #{
+        bondy_connect_error:new(service_unavailable, #{
             message => <<
                 "The server is overloaded and cannot accept new requests "
                 "at the moment. Please retry."
@@ -673,7 +673,7 @@ reply(overload, Req) ->
     );
 reply(memory_pressure, Req) ->
     reply_error(
-        bondy_error:new(service_unavailable, #{
+        bondy_connect_error:new(service_unavailable, #{
             message => <<
                 "The server is under memory pressure and cannot accept "
                 "new requests at the moment. Please retry."
@@ -682,10 +682,11 @@ reply(memory_pressure, Req) ->
         Req
     );
 reply(Reason, Req) ->
-    reply_error(bondy_error:from_term(Reason), Req).
+    reply_error(bondy_connect_error:from_term(Reason), Req).
 
 %% @private
--spec reply_error(bondy_error:t(), cowboy_req:req()) -> cowboy_req:req().
+-spec reply_error(bondy_connect_error:t(), cowboy_req:req()) ->
+    cowboy_req:req().
 
 reply_error(Error, Req) ->
     %% An OAuth2 request that carries no more specific status is a bad request,
@@ -704,7 +705,7 @@ reply_error(Error, Req) ->
             _ -> #{}
         end,
     cowboy_req:reply(
-        Status, prepare_request(bondy_error:to_map(Error), Headers, Req)
+        Status, prepare_request(bondy_connect_error:to_map(Error), Headers, Req)
     ).
 
 %% @private
@@ -716,7 +717,7 @@ prepare_request(Body, Headers, Req0) ->
     ),
     AllHeaders = maps:merge(maps:merge(?JSON_HEADERS, CorsHeaders), Headers),
     Req1 = set_resp_headers(AllHeaders, Req0),
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body), Req1).
+    cowboy_req:set_resp_body(bondy_router_utils:maybe_encode(json, Body), Req1).
 
 %% @private
 token_response(Token, Req0) ->

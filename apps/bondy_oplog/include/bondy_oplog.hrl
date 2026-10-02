@@ -45,7 +45,7 @@
 
 %% The HLC pack layout (`?BONDY_HLC_LOGICAL_*`) comes from the clock's own
 %% header; event keys are ordered by that integer.
--include_lib("bondy_stdlib/include/bondy_hlc.hrl").
+-include_lib("bondy_connect_lib/include/bondy_connect_hlc.hrl").
 
 %% A globally unique event identity and total order key. Tuple element order
 %% is significant because ETS ordered_set sorts tuples lexicographically:

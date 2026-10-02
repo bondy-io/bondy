@@ -19,7 +19,7 @@
 cluster.overlay.topology                    = fullmesh
 cluster.automatic_leave                     = off
 ## M0 runs on Fly's private 6PN mesh with no cluster mTLS provisioned.
-## bondy_app:guard_peer_plane refuses to boot a discovering node on an insecure
+## bondy_router_app:guard_peer_plane refuses to boot a discovering node on an insecure
 ## peer plane unless this override is set. Real perf/correctness runs (M6) use
 ## the production mTLS from deployment/fly/CLUSTER_MTLS.md instead.
 cluster.tls.allow_insecure                  = on

@@ -46,7 +46,7 @@ with_wal(Opts, Fun) ->
     end.
 
 mk_event(HLC, Seq) ->
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     Key = bondy_oplog_event:key(Hlc, origin(), Seq),
     bondy_oplog_event:new(Key, {op, Hlc}, undefined).
 
@@ -75,7 +75,7 @@ lag(Pid) ->
 %% A consumer that never committed owes the whole live log.
 never_committed_is_whole_log_test() ->
     with_wal(#{}, fun(Pid, _Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         _ = append_n(Pid, HLC, 1, 5),
         #{bytes_total := Total} = bondy_oplog_wal:info(Pid),
         ?assert(Total > 0),
@@ -86,7 +86,7 @@ never_committed_is_whole_log_test() ->
 %% distance from the committed frame to the head.
 committed_positions_test() ->
     with_wal(#{}, fun(Pid, Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         Positions = append_n(Pid, HLC, 1, 8),
         #{
             current_segment := HeadSeg,
@@ -109,7 +109,7 @@ committed_positions_test() ->
 rotated_segments_test() ->
     %% A tiny segment cap forces rotation after a few frames.
     with_wal(#{max_segment_bytes => 512}, fun(Pid, Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         Positions = append_n(Pid, HLC, 1, 40),
         #{
             current_segment := HeadSeg,
@@ -140,7 +140,7 @@ rotated_segments_test() ->
 %% reported as zero, never negative.
 committed_ahead_is_zero_test() ->
     with_wal(#{}, fun(Pid, Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         [{_, Off} | _] = append_n(Pid, HLC, 1, 3),
         #{current_segment := HeadSeg} = bondy_oplog_wal:info(Pid),
         ok = commit_at(Dir, {HeadSeg + 7, Off}),

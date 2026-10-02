@@ -408,7 +408,7 @@ subscribe_oplog(State) ->
     case spec_table_opt() of
         undefined ->
             %% RETRY rather than give up. The catalogue provisions its tables
-            %% synchronously in `init/1` and `bondy_sup` starts it before this
+            %% synchronously in `init/1` and `bondy_router_sup` starts it before this
             %% process, so in a healthy boot this branch is unreachable — but
             %% it IS reachable when a DB open failed, and returning here left
             %% the spec-change reactor disabled for the LIFETIME of the node,
@@ -434,7 +434,7 @@ subscribe_oplog(State) ->
             %% only the subscribers that exist when it fires. The catalogue
             %% provisions — and therefore AAE can bootstrap — the
             %% `api_gateway` table before this process is started by
-            %% `bondy_sup`, so an install completing in that window would be
+            %% `bondy_router_sup`, so an install completing in that window would be
             %% missed and this node would serve the dispatch tables it had
             %% before, which on a fresh replica is no routes at all.
             %%
@@ -464,7 +464,7 @@ unsubscribe(State) ->
 %% @private
 %% The open bondy_db `api_gateway` table handle. Raises if the catalogue has
 %% not provisioned it — the table is a hard dependency (the catalogue, a
-%% `bondy_sup` child, opens it before this gen_server starts).
+%% `bondy_router_sup` child, opens it before this gen_server starts).
 spec_table() ->
     case spec_table_opt() of
         undefined -> error(api_gateway_table_unavailable);
@@ -507,7 +507,7 @@ note_spec_change(
 do_apply_config() ->
     %% The built-in admin API's declarative half: the two RBAC groups its
     %% spec authorises against, ensured on its realm on every boot that takes
-    %% the durable path (`bondy_app:configure_services/0` calls
+    %% the durable path (`bondy_router_app:configure_services/0` calls
     %% `apply_config/0` before any listener starts). A durable write, so it
     %% belongs here and NOT in `admin_api_routes/1`, which the early
     %% listeners build on a degraded boot as well.
@@ -521,7 +521,7 @@ do_apply_config() ->
 %% @private
 do_apply_config(FName) ->
     try
-        case bondy_utils:json_consult(FName) of
+        case bondy_router_utils:json_consult(FName) of
             {ok, Spec} when is_map(Spec) ->
                 load_spec(Spec, #{declarative => true});
             {ok, []} ->
@@ -583,7 +583,7 @@ load_spec(Map, Opts) when is_map(Map) ->
             throw(Reason)
     end;
 load_spec(FName, Opts) ->
-    case bondy_utils:json_consult(FName) of
+    case bondy_router_utils:json_consult(FName) of
         {ok, Spec} when is_map(Spec) ->
             ok = load_spec(Spec, Opts),
             rebuild_dispatch_tables();
@@ -731,7 +731,7 @@ handle_spec_updates(#state{updated_specs = L}) ->
 admin_spec() ->
     Base = bondy_config:get(priv_dir),
     File = filename:join(Base, "specs/bondy_admin_api.json"),
-    case bondy_utils:json_consult(File) of
+    case bondy_router_utils:json_consult(File) of
         {ok, Spec} ->
             Spec;
         {error, enoent} ->

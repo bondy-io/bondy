@@ -15,7 +15,7 @@ request traffic from a private process.
 
 ## Why there is no leader
 
-Each sweep partitions its own work by `bondy:is_owner/1`, so every node reclaims
+Each sweep partitions its own work by `bondy_router_peer:is_owner/1`, so every node reclaims
 only the realms it owns under Rendezvous hashing and no election, quorum or
 coordination is involved. That is not merely cheaper than a leader — it is what
 makes the sweeps *correct*, because it leaves exactly one writer per realm (see

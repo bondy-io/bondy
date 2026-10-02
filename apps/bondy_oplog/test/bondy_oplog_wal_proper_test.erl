@@ -382,7 +382,7 @@ prop_wal_single_event_roundtrip() ->
         N,
         choose(1, 50),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             %% Pick a cap that yields ~3 events per segment on average.
             MaxBytes = ?SEG_HEADER + estimated_frame_size() * 3,
@@ -420,7 +420,7 @@ prop_wal_hlc_monotonicity() ->
         N,
         choose(1, 50),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             {ok, Pid} = bondy_oplog_wal:start_link(
                 instance_id(),
@@ -453,7 +453,7 @@ prop_wal_roundtrip() ->
         N,
         choose(1, 50),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             MaxBytes = ?SEG_HEADER + estimated_frame_size() * 3,
             {ok, Pid} = bondy_oplog_wal:start_link(
@@ -493,7 +493,7 @@ prop_index_consistency() ->
         N,
         choose(1, 50),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             MaxBytes = ?SEG_HEADER + estimated_frame_size() * 3,
             %% Tighten the index interval so the workload reliably
@@ -608,7 +608,7 @@ prop_truncation_safety() ->
         {N, ChopBytes},
         ?LET(NN, choose(2, 20), {NN, choose(0, max(1, NN * 30))}),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -658,7 +658,7 @@ prop_manifest_atomicity() ->
         N,
         choose(1, 10),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -698,7 +698,7 @@ prop_consumer_offset_clamping() ->
             {NN, choose(0, 99), choose(0, 1_000_000)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -781,7 +781,7 @@ prop_await_durable_correctness() ->
         N,
         choose(1, 20),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -850,7 +850,7 @@ prop_batch_atomicity() ->
         BatchSizes,
         non_empty(list(choose(1, 8))),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Batches = generate_batches(HLC, BatchSizes),
             %% Rotation-friendly cap so multi-segment trials are
             %% reachable. Let the writer default-clamp `max_batch_bytes`
@@ -899,7 +899,7 @@ prop_retention_safety() ->
         Ops,
         retention_ops_gen(),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             MinLive = 1,
             MaxBytes = ?SEG_HEADER + estimated_frame_size() * 2,
             Opts = #{
@@ -974,7 +974,7 @@ step_op(Pid, HLC, {watermark_advance, Delta}, _SeqRef, WB, _CB, MinLive) ->
     Pre = snapshot_state(Pid),
     %% Bound the watermark to a value derived from current HLC so it
     %% stays plausible across long sequences.
-    Now = bondy_hlc:now(HLC),
+    Now = bondy_connect_hlc:now(HLC),
     Cur = counters:get(WB, 1),
     Floor = max(Cur, Now - 1000),
     NewBase = Floor + Delta,
@@ -993,7 +993,7 @@ do_appends(_Pid, _HLC, _SeqRef, 0) ->
 do_appends(Pid, HLC, SeqRef, N) when N > 0 ->
     counters:add(SeqRef, 1, 1),
     Seq = counters:get(SeqRef, 1),
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     Key = bondy_oplog_event:key(Hlc, origin(), Seq),
     Event = bondy_oplog_event:new(Key, {op, Hlc}, undefined),
     {ok, _, _} = bondy_oplog_wal:append(Pid, Event),
@@ -1104,14 +1104,14 @@ base_wal_opts(Dir, Extra) ->
 %% fit them all) or we hit `{error, wal_full}` (the expected outcome
 %% under a tight cap). Returns a tagged outcome the caller inspects.
 run_wal_full_outcome(Pid, NEvents) ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     append_until_full(Pid, HLC, NEvents, 0).
 
 %% @private
 append_until_full(_Pid, _HLC, 0, Count) ->
     {fit, Count};
 append_until_full(Pid, HLC, N, Count) ->
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     Key = bondy_oplog_event:key(Hlc, origin(), Count + 1),
     Event = bondy_oplog_event:new(Key, {op, Hlc}, undefined),
     case bondy_oplog_wal:append(Pid, Event) of
@@ -1173,7 +1173,7 @@ prop_bit_flip_magic() ->
             {NN, choose(0, NN - 1), choose(0, 31)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -1258,7 +1258,7 @@ prop_rotation_atomicity() ->
         N,
         choose(1, 20),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             %% Big segment cap — keep everything in segment 0 so we can
             %% deterministically construct the orphan as segment 1.
@@ -1339,7 +1339,7 @@ prop_partial_write() ->
                 choose(1, 200)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -1431,7 +1431,7 @@ prop_rescan_recovery() ->
             {NN, choose(0, NN - 1), choose(20, 80)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{dir => Dir, origin => origin()},
             {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -1524,7 +1524,7 @@ prop_concurrent_reader_safety() ->
         {N, R},
         {choose(5, 30), choose(1, 4)},
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -1656,7 +1656,7 @@ prop_failed_fsync() ->
         N,
         choose(2, 12),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -1747,7 +1747,7 @@ prop_failed_fsync_batched() ->
         N,
         choose(2, 8),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -1837,7 +1837,7 @@ prop_rename_failure() ->
         N,
         choose(3, 15),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             %% Tight cap so we rotate after the first frame.
             Opts = #{
@@ -1985,7 +1985,7 @@ prop_multiproc_convergence() ->
             {NN, choose(1, NN - 1), choose(0, 3)}
         ),
         with_wal_dir(fun(Dir) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             Events = generate_events(HLC, N),
             Opts = #{
                 dir => Dir,
@@ -2167,7 +2167,7 @@ origin() ->
 generate_events(HLC, N) ->
     [
         begin
-            Hlc = bondy_hlc:now(HLC),
+            Hlc = bondy_connect_hlc:now(HLC),
             Key = bondy_oplog_event:key(Hlc, origin(), Seq),
             bondy_oplog_event:new(Key, {op, Hlc}, undefined)
         end
@@ -2357,7 +2357,7 @@ generate_batches(_HLC, []) ->
 generate_batches(HLC, [Size | Sizes]) ->
     Batch = [
         begin
-            Hlc = bondy_hlc:now(HLC),
+            Hlc = bondy_connect_hlc:now(HLC),
             Key = bondy_oplog_event:key(Hlc, origin(), Seq),
             bondy_oplog_event:new(Key, {op, Hlc}, undefined)
         end

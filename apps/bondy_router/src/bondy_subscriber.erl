@@ -257,7 +257,7 @@ apply_callback(Event0, Retry, State) ->
 %% after it. Forwarding to an external sink is best-effort and unordered
 %% already, so a late retry beats a blocked subscriber.
 schedule_retry(Event, Reason, Retry0, State) ->
-    case bondy_retry:fail(Retry0) of
+    case bondy_connect_retry:fail(Retry0) of
         {Delay, Retry} when is_integer(Delay) ->
             Msg = {?MODULE, retry, Event, Retry},
             _ = erlang:send_after(Delay, self(), Msg),
@@ -271,7 +271,7 @@ schedule_retry(Event, Reason, Retry0, State) ->
 %% adds jitter, so a fleet of subscribers failing against the same sink does not
 %% retry in lockstep.
 new_retry() ->
-    bondy_retry:init(?MODULE, #{
+    bondy_connect_retry:init(?MODULE, #{
         max_retries => 3,
         interval => 50,
         %% Bounded by attempts, not by wall clock.

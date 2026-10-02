@@ -956,13 +956,16 @@ raise_hole_alarm(Id, VV, Pending, HeldForMs) ->
             #{
                 prefix => Prefix,
                 missing_from => Prefix + 1,
-                holes => bondy_interval_set:size(Set),
-                stranded => bondy_interval_set:flat_size(Set)
+                holes => bondy_connect_interval_set:size(Set),
+                stranded => bondy_connect_interval_set:flat_size(Set)
             }
         end,
         Pending
     ),
-    Holes = lists:sum([bondy_interval_set:size(S) || S <- maps:values(Pending)]),
+    Holes = lists:sum([
+        bondy_connect_interval_set:size(S)
+     || S <- maps:values(Pending)
+    ]),
     Info = #{
         instance_id => Id,
         held_for_ms => HeldForMs,
@@ -1674,6 +1677,6 @@ track_live(Pid, InstanceId, Peer) ->
 %% on the next round. The default `#{}` keeps the historical behaviour:
 %% the session falls back to `bondy_oplog_transport_inline`. A clustered
 %% deployment sets `#{transport => bondy_oplog_transport_partisan,
-%% transport_opts => #{channel => ...}}` here (see `bondy_app`).
+%% transport_opts => #{channel => ...}}` here (see `bondy_router_app`).
 session_opts() ->
     bondy_oplog_config:sync_session_opts().

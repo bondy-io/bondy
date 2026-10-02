@@ -55,7 +55,7 @@ init_per_suite(Config) ->
     true = register(span_collector, Collector),
     MetricsStarted = ensure_metrics_registry(),
     %% A suite that ran earlier on this node may have booted Bondy, and
-    %% bondy_app starts bondy_telemetry_exporter with the production
+    %% bondy_router_app starts bondy_telemetry_exporter with the production
     %% posture (`traces_exporter = none`) — so stop it (and the SDK,
     %% which reads its env only at start) before setting this suite's.
     _ = application:stop(bondy_telemetry_exporter),
@@ -691,7 +691,7 @@ bridge_attached() ->
 %% bondy_metrics is a LIBRARY app: its named gen_server (which owns the
 %% counter + declaration ETS tables `bondy_prometheus:setup/0` writes)
 %% is hosted by the consumer's supervision tree — `bondy_oplog_sup` in a
-%% full node, which bondy_app starts before bondy_telemetry_exporter. On
+%% full node, which bondy_router_app starts before bondy_telemetry_exporter. On
 %% a standalone test node this suite is the consumer. Unlinked so the
 %% server survives this init process.
 ensure_metrics_registry() ->

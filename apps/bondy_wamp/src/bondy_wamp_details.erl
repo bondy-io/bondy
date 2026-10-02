@@ -66,7 +66,7 @@ validate(hello, Details0, Extensions) ->
 
     maps:size(Roles) > 0 orelse
         error(
-            bondy_error:new(missing_required_value, #{
+            bondy_connect_error:new(missing_required_value, #{
                 message => ~"No WAMP peer roles defined.",
                 description => <<
                     "At least one WAMP peer role is required in the "
@@ -80,7 +80,7 @@ validate(hello, Details0, Extensions) ->
         true ->
             key_value:get([caller, call_canceling], Details, false) orelse
                 error(
-                    bondy_error:new(invalid_feature_request, #{
+                    bondy_connect_error:new(invalid_feature_request, #{
                         message => ~"Invalid feature requested for Caller role",
                         description => <<
                             "The feature progressive_call_results was requested "
@@ -98,7 +98,7 @@ validate(hello, Details0, Extensions) ->
         true ->
             key_value:get([callee, call_canceling], Details, false) orelse
                 error(
-                    bondy_error:new(invalid_feature_request, #{
+                    bondy_connect_error:new(invalid_feature_request, #{
                         message => ~"Invalid feature requested for Callee role",
                         description => <<
                             "The feature progressive_call_results was requested "
@@ -166,7 +166,7 @@ require_call_canceling(Role, Feature, Roles) ->
         true ->
             key_value:get([Role, features, call_canceling], Roles, false) orelse
                 error(
-                    bondy_error:new(invalid_feature_request, #{
+                    bondy_connect_error:new(invalid_feature_request, #{
                         message => ~"Invalid feature requested",
                         description => iolist_to_binary([
                             "The feature ",

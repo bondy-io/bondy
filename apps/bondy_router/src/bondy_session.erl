@@ -300,7 +300,7 @@ transport_id(Id) when is_binary(Id) ->
 
 -doc """
 Creates a new session provided the RealmUri exists or can be dynamically
-created. It calls `bondy_utils:get_realm/1` which will fail with an exception if
+created. It calls `bondy_router_utils:get_realm/1` which will fail with an exception if
 the realm does not exist or cannot be created.
 """.
 -spec store(t()) -> {ok, t()} | no_return().

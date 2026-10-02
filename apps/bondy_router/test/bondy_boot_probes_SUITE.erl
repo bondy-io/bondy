@@ -13,7 +13,7 @@ full route set and `/ready` answers 204.
 
 The stall is `bondy_ct:stall_main_open/1`, a pre-boot hook that mocks
 `bondy_namespace_catalog:init/1` on the peer to block until the testcase
-releases it; `init/1` is where `main` opens, inside `bondy_sup:start_link/0`.
+releases it; `init/1` is where `main` opens, inside `bondy_router_sup:start_link/0`.
 A node that binds its early listeners only after that point answers `/ping`
 with a refused connection, and `probes_answer_while_main_opens` fails on its
 first assertion.

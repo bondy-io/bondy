@@ -14,7 +14,7 @@ credential, no SMTP banner. The relay's configured name does, because the
 caller supplied it.
 
 `no_message_has_an_unsubstituted_placeholder` is the case worth reading.
-`bondy_error` leaves an absent `%{key}` visible rather than blanking it -- the
+`bondy_connect_error` leaves an absent `%{key}` visible rather than blanking it -- the
 right choice, since a silently missing substitution is worse than an obvious
 one -- which means a catalogue message referring to a value its own callers
 cannot supply ships `%{relay}` to a user. Nothing else catches that.
@@ -74,13 +74,13 @@ cannot supply ships `%{relay}` to a user. Nothing else catches that.
 %% error. A translation that raised would turn a failed send into a crash.
 every_reason_translates_test() ->
     [
-        ?assert(bondy_error:is_type(bondy_mail:to_error(R)))
+        ?assert(bondy_connect_error:is_type(bondy_mail:to_error(R)))
      || R <- ?REASONS
     ].
 
 unrecognised_reasons_translate_test() ->
     [
-        ?assert(bondy_error:is_type(bondy_mail:to_error(R)))
+        ?assert(bondy_connect_error:is_type(bondy_mail:to_error(R)))
      || R <- [undefined, ~"a binary", {a, b, c, d}, [1, 2, 3], #{}, 42]
     ].
 
@@ -143,7 +143,7 @@ nature_survives_translation_test() ->
 A message that interpolates `%{key}` must be given that key by every caller
 that can produce it.
 
-`bondy_error` deliberately leaves an absent placeholder visible, so a mismatch
+`bondy_connect_error` deliberately leaves an absent placeholder visible, so a mismatch
 between a catalogue message and the details its producers supply reaches a user
 as literal `%{relay}`.
 """.
@@ -190,7 +190,7 @@ A three-digit reply code does survive: it is the part a caller can act on, and
 it says nothing about the relay beyond what it decided.
 """.
 reply_code_is_kept_test() ->
-    %% `bondy_error:sanitise/1` renders every details key as a binary, because
+    %% `bondy_connect_error:sanitise/1` renders every details key as a binary, because
     %% the payload has to be JSON-encodable.
     Error = bondy_mail:to_error({permanent, rejected, ~"550"}),
     ?assertEqual(#{~"code" => ~"550"}, maps:get(details, Error)),
@@ -277,7 +277,7 @@ internal_errors_carry_a_trace_id_test() ->
     ?assertMatch(<<_:32/binary>>, TraceId),
     %% And the reason is in metadata, which is not part of the peer's payload.
     ?assertMatch(#{reason := _}, maps:get(metadata, Error)),
-    ?assertNot(maps:is_key(metadata, bondy_error:to_map(Error))).
+    ?assertNot(maps:is_key(metadata, bondy_connect_error:to_map(Error))).
 
 %% =============================================================================
 %% PRIVATE
@@ -287,4 +287,4 @@ internal_errors_carry_a_trace_id_test() ->
 %% Everything a peer actually receives, flattened, so a check for a leak cannot
 %% miss it by looking in the wrong field.
 render(Error) ->
-    iolist_to_binary(io_lib:format("~p", [bondy_error:to_map(Error)])).
+    iolist_to_binary(io_lib:format("~p", [bondy_connect_error:to_map(Error)])).

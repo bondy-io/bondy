@@ -34,7 +34,7 @@ read path remains lock-free.
 
 ## Restart semantics
 
-The table is borrowed from `bondy_table_manager`, its heir, so it and
+The table is borrowed from `bondy_connect_table_manager`, its heir, so it and
 its rows outlive a crash of this process: the atomics and handles the
 owners and appliers hold stay the ones the rows point to. A restarted
 registry claims the table back and monitors the owner recorded in every
@@ -1244,7 +1244,7 @@ index_clear_clean(_) ->
 %% =============================================================================
 
 init([]) ->
-    {ok, ?TABLE} = bondy_table_manager:add_or_claim(?TABLE, [
+    {ok, ?TABLE} = bondy_connect_table_manager:add_or_claim(?TABLE, [
         set,
         public,
         named_table,

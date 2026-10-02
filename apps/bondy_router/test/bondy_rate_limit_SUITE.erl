@@ -56,7 +56,7 @@ end_per_testcase(_, Config) ->
     ok.
 
 gen_uri() ->
-    string:casefold(bondy_utils:generate_fragment(6)).
+    string:casefold(bondy_router_utils:generate_fragment(6)).
 
 key() ->
     {test_ip, erlang:unique_integer([positive])}.

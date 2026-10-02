@@ -8,7 +8,7 @@
 -moduledoc """
 OTP application behaviour for `bondy_mcp`.
 
-Started by `bondy_app:start/2` after the early-phase listeners and before the
+Started by `bondy_router_app:start/2` after the early-phase listeners and before the
 normal-phase ones bind, so an MCP socket never accepts a request while the
 application that answers it is down.
 """.
@@ -26,7 +26,7 @@ start(_Type, _Args) ->
     ok = bondy_mcp_metrics:setup(),
     %% The bondy.mcp.* Meta API. Registered here — not a static clause in
     %% bondy_wamp_api's table — because this application sits above
-    %% bondy_router; bondy_app completes this start before the normal
+    %% bondy_router; bondy_router_app completes this start before the normal
     %% listeners bind, so the registration precedes any client call.
     ok = bondy_wamp_api:register_handler(~"bondy.mcp.", bondy_mcp_wamp_api),
     case bondy_mcp_sup:start_link() of

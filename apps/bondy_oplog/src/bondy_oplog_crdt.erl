@@ -200,7 +200,7 @@ silently diverge.
 
 -callback to_value(State :: term()) -> Value :: term().
 
--callback hlc(State :: term()) -> bondy_hlc:hlc().
+-callback hlc(State :: term()) -> bondy_connect_hlc:hlc().
 
 -callback encode_state(State :: term()) -> binary().
 
@@ -211,7 +211,7 @@ silently diverge.
 -callback removal_op() -> Op :: term() | undefined.
 
 -callback stabilize(
-    StableHlc :: bondy_hlc:hlc(),
+    StableHlc :: bondy_connect_hlc:hlc(),
     State :: term()
 ) -> keep | {keep, State :: term()} | discard.
 

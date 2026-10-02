@@ -575,7 +575,7 @@ do_close_all(Bindings, Opts0, ReasonUri) ->
 
     try
         Matches = bondy_session:match(Bindings, Opts),
-        ok = bondy_utils:foreach(Fun, Matches)
+        ok = bondy_router_utils:foreach(Fun, Matches)
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
@@ -616,7 +616,7 @@ do_invalidate_rbac_all(Bindings) ->
 
     try
         Matches = bondy_session:match(Bindings, Opts),
-        ok = bondy_utils:foreach(Fun, Matches)
+        ok = bondy_router_utils:foreach(Fun, Matches)
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
@@ -641,7 +641,7 @@ maybe_send_goodbye(Session, ReasonUri) ->
     ),
     _ =
         try
-            bondy:send(RealmUri, ProcRef, Msg)
+            bondy_router_peer:send(RealmUri, ProcRef, Msg)
         catch
             _:_ -> ok
         end,

@@ -836,7 +836,7 @@ tokens, so it reports a stable sentinel of `0`. Aliases resolve to the canonical
 user's version.
 """.
 -spec token_version(RealmUri :: uri(), Username :: username_int()) ->
-    {ok, bondy_hlc:hlc()} | {error, not_found}.
+    {ok, bondy_connect_hlc:hlc()} | {error, not_found}.
 
 token_version(RealmUri, Username0) ->
     case normalise_username(Username0) of
@@ -2021,7 +2021,7 @@ durable_apply(Table, RealmUri, Key, Event) ->
 password_opts(_, #{password_opts := Opts}) when is_map(Opts) ->
     Opts;
 password_opts(RealmUri, _) ->
-    bondy_stdlib:or_else(
+    bondy_connect_lib:or_else(
         bondy_realm:password_opts(RealmUri),
         #{}
     ).
@@ -2221,7 +2221,7 @@ on_credentials_change(RealmUri, User) ->
 
     Reason = ?BONDY_USER_CREDENTIALS_CHANGED,
     Opts =
-        case bondy:get_process_metadata() of
+        case bondy_router_peer:get_process_metadata() of
             #{session_id := SessionId} ->
                 #{exclude => SessionId};
             _ ->

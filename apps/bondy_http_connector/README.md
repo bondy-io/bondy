@@ -104,7 +104,7 @@ URIs without colliding with stale entries from the previous incarnation.
   fast-fail — no retry, no backoff — because the same `persistent_term`
   value will keep coming back until the pool's own health-check loop
   flips it to `up`.
-- **Pool health-check** — uses `bondy_retry` with indefinite retries
+- **Pool health-check** — uses `bondy_connect_retry` with indefinite retries
   (`max_retries` resets on hit). `hackney_pool:start_pool/2` is
   idempotent, so transient health failures do not tear down in-flight
   connections.

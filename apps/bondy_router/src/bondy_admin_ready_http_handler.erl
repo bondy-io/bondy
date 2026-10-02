@@ -7,7 +7,7 @@
 -moduledoc """
 An HTTP handler for the Admin API readiness (`/ready`) probe.
 
-Replies with `204 No Content` when `bondy_app:is_ready/0` — the node's one
+Replies with `204 No Content` when `bondy_router_app:is_ready/0` — the node's one
 readiness oracle — is `true`, otherwise with `503 Service Unavailable`.
 """.
 -include("http_api.hrl").
@@ -34,11 +34,11 @@ ready(_, Req) ->
 %% =============================================================================
 
 %% @private
-%% The conditions live in `bondy_app:is_ready/0`, not here: the
+%% The conditions live in `bondy_router_app:is_ready/0`, not here: the
 %% `bondy_node_ready` gauge answers from the same function, so the probe and
 %% the dashboard cannot disagree.
 status_code() ->
-    case bondy_app:is_ready() of
+    case bondy_router_app:is_ready() of
         true -> ?HTTP_NO_CONTENT;
         false -> ?HTTP_SERVICE_UNAVAILABLE
     end.

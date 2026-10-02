@@ -51,7 +51,7 @@ pinned by `get_alarms_projection_is_two_tuples_test`.
 
 An alarm may declare `affects_ready => true`, meaning "while this condition
 holds, do not send this node traffic". `affects_ready/0` folds the active
-alarms into the single boolean `bondy_app:is_ready/0` consumes. The flag is
+alarms into the single boolean `bondy_router_app:is_ready/0` consumes. The flag is
 per-alarm and NOT derived from `severity`: an unreachable upstream connector is
 `major` and must not pull the node out of the load balancer, while a failed
 durable store is `major` and must.
@@ -97,7 +97,7 @@ concealed it: raising an alarm is a CAST, so a raise and a readiness read are
 NOT ordered. `/ready` can answer READY for as long as the raise sits in this
 handler's mailbox. That window is bounded by the mailbox and invisible to
 anyone but a caller that just raised — `/ready` is polled on the order of a
-second — but it is why `bondy_app_readiness_test` has to synchronise before
+second — but it is why `bondy_router_app_readiness_test` has to synchronise before
 asserting, and it would be wrong to make `set_alarm/2` synchronous to remove
 it: a producer reporting a problem must never block on the alarm subsystem.
 
@@ -300,7 +300,7 @@ init({[], {alarm_handler, Alarms}}) ->
     %% `{alarm_handler, swap}` so its `terminate(swap, Alarms)` hands its
     %% alarm list over (sasl/alarm_handler.erl). Adopt it: alarms raised
     %% BEFORE the swap — e.g. `bondy_db_main_unavailable`, set by the
-    %% namespace catalogue while bondy_sup is still starting — must survive
+    %% namespace catalogue while bondy_router_sup is still starting — must survive
     %% into `get_alarms/0` (asserted by `bondy_degraded_boot_SUITE`).
     %%
     %% The OTP handler records no timestamps, so an adopted alarm's
@@ -440,7 +440,7 @@ do_clear(Id, #state{alarms = Alarms} = State) ->
 
 %% @private
 %% The two shapes `handle_event/2` accepts, because the OTP default handler
-%% stores whatever term was raised: producers that start before `bondy_app`
+%% stores whatever term was raised: producers that start before `bondy_router_app`
 %% swaps this handler in (the namespace catalogue, the oplog applier) raise
 %% into OTP's list, and a rich alarm adopted as `_Other` would silently lose
 %% its severity, class and details on every boot where it fired early.
@@ -639,7 +639,7 @@ record(Alarm, Action, Now, #state{alarms = Alarms} = State) ->
 %% resolving the name first removes the failure mode rather than catching it.
 %%
 %% The manager is absent exactly when nothing could consume the event —
-%% before `bondy_app:setup_event_handlers/0` installs both handlers, and in
+%% before `bondy_router_app:setup_event_handlers/0` installs both handlers, and in
 %% unit tests that drive this module directly. Pinned by
 %% `transitions_do_not_need_an_event_manager_test`.
 emit(Action, Alarm) ->

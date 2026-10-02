@@ -218,7 +218,7 @@ behind that barrier.
 -record(state, {
     instance_id :: binary(),
     origin :: bondy_oplog_origin:t(),
-    hlc :: bondy_hlc:t(),
+    hlc :: bondy_connect_hlc:t(),
     seq :: atomics:atomics_ref(),
     mst :: bondy_mst:t(),
     %% Per-root AAE-advertise servability cache: `{RootHash, Servable}`.
@@ -687,7 +687,7 @@ do_append_fast(InstanceId, FastPath, Op, Meta, Notify) ->
         %% Build the event in the caller's process. The HLC + seq
         %% atomics give us a unique, monotonic key without holding
         %% the instance gen_server.
-        Hlc = bondy_hlc:now(HLC),
+        Hlc = bondy_connect_hlc:now(HLC),
         Seq = atomics:add_get(SeqRef, 1, 1),
         Key = bondy_oplog_event:key(Hlc, Origin, Seq),
         Event0 = bondy_oplog_event:new(Key, Op, Meta),
@@ -887,7 +887,7 @@ do_build_events(HLC, SeqRef, Origin, Mod, VS0, Items) ->
 do_build_events_at(HLC, StartSeq, Origin, Mod, VS0, Items) ->
     {EventsRev, KeysRev, _, VS} = lists:foldl(
         fun({Op, Meta}, {EvAcc, KAcc, Seq, VSAcc0}) ->
-            Hlc = bondy_hlc:now(HLC),
+            Hlc = bondy_connect_hlc:now(HLC),
             Key = bondy_oplog_event:key(Hlc, Origin, Seq),
             Event0 = bondy_oplog_event:new(Key, Op, Meta),
             {Event, VSAcc} = Mod:sign_event(Event0, VSAcc0),
@@ -2461,7 +2461,7 @@ init({InstanceId, Opts}) ->
         ok -> ok;
         {error, R0} -> error({invalid_origin, R0})
     end,
-    HLC = bondy_hlc:new(maps:get(hlc_seed, Opts, 0)),
+    HLC = bondy_connect_hlc:new(maps:get(hlc_seed, Opts, 0)),
     SeqRef = atomics:new(1, [{signed, false}]),
     ok = atomics:put(SeqRef, 1, maps:get(seq_seed, Opts, 0)),
     ValidatorMod = maps:get(
@@ -2508,13 +2508,13 @@ init({InstanceId, Opts}) ->
         end,
     case LastMSTKey of
         undefined when Watermark =/= undefined ->
-            _ = bondy_hlc:update(
+            _ = bondy_connect_hlc:update(
                 HLC, bondy_oplog_event:key_hlc(Watermark)
             );
         undefined ->
             ok;
         K ->
-            _ = bondy_hlc:update(HLC, bondy_oplog_event:key_hlc(K))
+            _ = bondy_connect_hlc:update(HLC, bondy_oplog_event:key_hlc(K))
     end,
     %% Seed Seq similarly: if the MST has local-origin events, advance
     %% the Seq counter to dominate the highest seen.
@@ -3206,7 +3206,7 @@ do_handle_call({truncate_prefix, Watermark}, _From, #state{mst = MST0} = State) 
     Removed = count_in_open_range(MST0, undefined, Watermark),
     MST1 = bondy_mst:truncate(MST0, Watermark),
     NewWatermark = advance_watermark(State#state.watermark, Watermark),
-    _ = bondy_hlc:update(
+    _ = bondy_connect_hlc:update(
         State#state.hlc, bondy_oplog_event:key_hlc(Watermark)
     ),
     {reply, Removed, State#state{
@@ -3367,7 +3367,7 @@ do_handle_call({persist_frontier, AbsorbHlc}, From, State) when
     %% absorption is safe — `update/2` only ever advances the clock.
     _ =
         AbsorbHlc > 0 andalso
-            bondy_hlc:update(State#state.hlc, AbsorbHlc),
+            bondy_connect_hlc:update(State#state.hlc, AbsorbHlc),
     do_handle_call(persist_frontier, From, State);
 do_handle_call(
     {cell_context, _Bucket, _Key},
@@ -4267,7 +4267,7 @@ do_integrate_peer_root(PeerRoot, #state{mst = MST0} = State) ->
         undefined ->
             ok;
         {LastKey, _V} ->
-            _ = bondy_hlc:update(
+            _ = bondy_connect_hlc:update(
                 State#state.hlc, bondy_oplog_event:key_hlc(LastKey)
             )
     end,
@@ -4543,7 +4543,7 @@ maybe_self_heal_unservable(
             {LastKey, _} = bondy_mst:last(MST),
             Dropped = State#state.live_size,
             MST1 = truncate_below_or_equal(MST, LastKey, State),
-            _ = bondy_hlc:update(
+            _ = bondy_connect_hlc:update(
                 State#state.hlc, bondy_oplog_event:key_hlc(LastKey)
             ),
             telemetry:execute(
@@ -5464,7 +5464,7 @@ install_fast_events(#state{} = State0, Events) ->
     InstallT0 = erlang:monotonic_time(microsecond),
     MST1 = bondy_mst:put_batch(State0#state.mst, Pairs),
     InstallUs = erlang:monotonic_time(microsecond) - InstallT0,
-    _ = bondy_hlc:update(State0#state.hlc, MaxHlc),
+    _ = bondy_connect_hlc:update(State0#state.hlc, MaxHlc),
     %% Mirror the HLC update for the local-Seq atomic. Rebuilding the
     %% MST from the WAL on restart (init seeds SeqRef from
     %% `max_local_seq/2`, which returns `undefined` for an empty MST)
@@ -5723,7 +5723,7 @@ invalidate_wal_pid(#state{wal_pid_monitor = Ref} = State) ->
 %%     on bad input avoids a crash-loop on poisoned peer traffic.
 do_append_remote(#state{} = State, Event) ->
     Key = bondy_oplog_event:key(Event),
-    _ = bondy_hlc:update(
+    _ = bondy_connect_hlc:update(
         State#state.hlc, bondy_oplog_event:key_hlc(Key)
     ),
     case below_or_equal_watermark(Key, State#state.watermark) of
@@ -5825,7 +5825,7 @@ install_event(#state{} = State, Key, Value, Source, IsNew) ->
             Prev when Key > Prev -> Key;
             Prev -> Prev
         end,
-    _ = bondy_hlc:update(
+    _ = bondy_connect_hlc:update(
         State#state.hlc, bondy_oplog_event:key_hlc(Key)
     ),
     %% If the installed event's origin is OURS, bump the SeqRef atomic so a
@@ -6413,7 +6413,7 @@ any `{error, _}`:
 - `{error, non_event_frontier}` — the frontier key is not an event key.
 """.
 -spec stability_point(instance_id() | pid()) ->
-    {ok, bondy_hlc:hlc()} | {error, term()}.
+    {ok, bondy_connect_hlc:hlc()} | {error, term()}.
 
 stability_point(Target) ->
     gen_server:call(target(Target), reclamation_stability_point, infinity).
@@ -6553,7 +6553,7 @@ reclamation_stability_point(State) ->
         solo ->
             %% Solo: a fresh tick strictly exceeds every event this node
             %% holds — see `stability_point/1`.
-            {ok, bondy_hlc:now(State#state.hlc)};
+            {ok, bondy_connect_hlc:now(State#state.hlc)};
         {clustered, Members} ->
             case local_mst_empty(State) of
                 true ->
@@ -6675,7 +6675,7 @@ validate_retention(Policy, false) ->
 %% The per-cycle retention context handed to `run_compaction/5`, or
 %% `undefined` when retention does not apply this cycle. Snapshots
 %% `live_size` and the wall clock at call time so the compaction body
-%% stays free of clock/state reads. Wall time, NOT `bondy_hlc:peek/1`:
+%% stays free of clock/state reads. Wall time, NOT `bondy_connect_hlc:peek/1`:
 %% the HLC atomic only advances when events are generated, so on a quiet
 %% instance `peek` is frozen at the last write and nothing would ever age
 %% out. Event-key HLC physicals are epoch-ms (the same clock domain), so
@@ -6753,13 +6753,13 @@ retention_age_frontier(MST, Watermark0, MaxAge, NowMs) ->
     CutoffPhys = NowMs - MaxAge,
     case CutoffPhys > 0 andalso bondy_mst:first(MST) of
         {OldestKey, _V} ->
-            {OldestPhys, _} = bondy_hlc:decode(
+            {OldestPhys, _} = bondy_connect_hlc:decode(
                 bondy_oplog_event:key_hlc(OldestKey)
             ),
             case OldestPhys < CutoffPhys of
                 true ->
                     Bound = bondy_oplog_event:key(
-                        bondy_hlc:encode(CutoffPhys, 0), <<>>, 0
+                        bondy_connect_hlc:encode(CutoffPhys, 0), <<>>, 0
                     ),
                     case bondy_mst:last_n(MST, Bound, 1) of
                         [{K, _}] -> above_watermark(age, K, Watermark0);
@@ -7074,7 +7074,7 @@ finalize_catalogue_compaction_commit(
             live_size_us => LiveSizeUs
         }
     ),
-    _ = bondy_hlc:update(
+    _ = bondy_connect_hlc:update(
         StateF#state.hlc, bondy_oplog_event:key_hlc(Frontier)
     ),
     State1 = StateF#state{

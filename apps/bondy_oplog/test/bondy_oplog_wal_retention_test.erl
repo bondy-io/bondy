@@ -88,7 +88,7 @@ mk_event(Hlc, Seq) ->
     bondy_oplog_event:new(Key, {op, Seq}, undefined).
 
 mk_one(HLC, Seq) ->
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     {Hlc, mk_event(Hlc, Seq)}.
 
 %% Append a single event, returning {Hlc, Pos}.
@@ -125,8 +125,8 @@ advance_watermark_persists_test() ->
     Dir = mktemp_dir(),
     try
         Hlc1 = with_wal(Dir, #{}, fun(Pid, _Dir) ->
-            HLC = bondy_hlc:new(),
-            H = bondy_hlc:now(HLC),
+            HLC = bondy_connect_hlc:new(),
+            H = bondy_connect_hlc:now(HLC),
             ok = bondy_oplog_wal:advance_snapshot_watermark(Pid, H),
             Info = bondy_oplog_wal:info(Pid),
             ?assertEqual(H, maps:get(snapshot_watermark, Info)),
@@ -143,8 +143,8 @@ advance_watermark_persists_test() ->
 
 watermark_regression_rejected_test() ->
     with_wal(#{}, fun(Pid, _Dir) ->
-        HLC = bondy_hlc:new(),
-        High = bondy_hlc:now(HLC),
+        HLC = bondy_connect_hlc:new(),
+        High = bondy_connect_hlc:now(HLC),
         Low = High - 1,
         ok = bondy_oplog_wal:advance_snapshot_watermark(Pid, High),
         ?assertMatch(
@@ -158,7 +158,7 @@ watermark_regression_rejected_test() ->
 
 sweep_noop_without_progress_test() ->
     with_wal(small_segment_opts(), fun(Pid, _Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         fill_events(Pid, HLC, 4),
         %% No watermark advance, no committed segment — sweep is a
         %% no-op even though there are sealed segments.
@@ -170,7 +170,7 @@ sweep_respects_min_live_segments_test() ->
     %% eligible.
     Opts = maps:merge(small_segment_opts(), #{min_live_segments => 3}),
     with_wal(Opts, fun(Pid, _Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         fill_events(Pid, HLC, 6),
         Live0 = live_segment_ids(Pid),
         ?assert(length(Live0) >= 5),
@@ -180,7 +180,7 @@ sweep_respects_min_live_segments_test() ->
         %% the implicit sweep sees both cursors at their max.
         ok = bondy_oplog_wal:set_committed_segment(Pid, 9999),
         ok = bondy_oplog_wal:advance_snapshot_watermark(
-            Pid, bondy_hlc:now(HLC) + 1
+            Pid, bondy_connect_hlc:now(HLC) + 1
         ),
         Live1 = live_segment_ids(Pid),
         ?assertEqual(3, length(Live1))
@@ -195,7 +195,7 @@ sweep_deletes_eligible_prefix_test() ->
     %% `advance_snapshot_watermark/2` triggers.
     Opts = maps:merge(small_segment_opts(), #{min_live_segments => 1}),
     with_wal(Opts, fun(Pid, _Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         fill_events(Pid, HLC, 5),
         Live0 = live_segment_ids(Pid),
         ?assert(length(Live0) >= 3),
@@ -205,7 +205,7 @@ sweep_deletes_eligible_prefix_test() ->
         ExpectedDeleted = lists:droplast(Sealed),
         ok = bondy_oplog_wal:set_committed_segment(Pid, HeadSeg),
         ok = bondy_oplog_wal:advance_snapshot_watermark(
-            Pid, bondy_hlc:now(HLC) + 1
+            Pid, bondy_connect_hlc:now(HLC) + 1
         ),
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(
@@ -253,7 +253,7 @@ sweep_explicit_when_no_implicit_trigger_test() ->
     %% nothing is eligible.
     Opts = maps:merge(small_segment_opts(), #{min_live_segments => 1}),
     with_wal(Opts, fun(Pid, _Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         fill_events(Pid, HLC, 4),
         ok = bondy_oplog_wal:set_committed_segment(Pid, 9999),
         ?assertMatch({ok, [], 0}, bondy_oplog_wal:retention_sweep(Pid))
@@ -268,13 +268,13 @@ sweep_explicit_after_watermark_via_manual_state_test() ->
     %% sweep.
     Opts = maps:merge(small_segment_opts(), #{min_live_segments => 1}),
     with_wal(Opts, fun(Pid, _Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         fill_events(Pid, HLC, 3),
         %% First watermark advance — covers segs 0..1 (boundary at
         %% the last sealed, seg 1). Implicit sweep handles them.
         ok = bondy_oplog_wal:set_committed_segment(Pid, 999),
         ok = bondy_oplog_wal:advance_snapshot_watermark(
-            Pid, bondy_hlc:now(HLC) + 1
+            Pid, bondy_connect_hlc:now(HLC) + 1
         ),
         LiveMid = live_segment_ids(Pid),
         %% Append more so new sealed segments accrue.
@@ -284,7 +284,7 @@ sweep_explicit_after_watermark_via_manual_state_test() ->
         %% retention_sweep AFTER advance_snapshot_watermark so the
         %% sweep returns the new deletions.
         ok = bondy_oplog_wal:advance_snapshot_watermark(
-            Pid, bondy_hlc:now(HLC) + 1
+            Pid, bondy_connect_hlc:now(HLC) + 1
         ),
         %% By now the implicit sweep has done the deletions; verify
         %% the explicit call is a no-op.
@@ -296,10 +296,10 @@ watermark_advance_without_committed_segment_is_noop_test() ->
     %% no deletion happens (both cuts must pass).
     Opts = maps:merge(small_segment_opts(), #{min_live_segments => 1}),
     with_wal(Opts, fun(Pid, _Dir) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         fill_events(Pid, HLC, 4),
         ok = bondy_oplog_wal:advance_snapshot_watermark(
-            Pid, bondy_hlc:now(HLC) + 1
+            Pid, bondy_connect_hlc:now(HLC) + 1
         ),
         ?assertMatch({ok, [], 0}, bondy_oplog_wal:retention_sweep(Pid))
     end).
@@ -313,7 +313,7 @@ crash_between_manifest_and_unlink_cleaned_on_open_test() ->
         %% remain. The writer uses a per-instance subdir, so file
         %% I/O is done relative to `InstanceDir`, not the base.
         {SegToOrphan, InstanceDir} = with_wal(Dir, Opts, fun(Pid, _) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             fill_events(Pid, HLC, 4),
             Live = live_segment_ids(Pid),
             S = hd(Live),

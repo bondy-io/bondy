@@ -109,7 +109,7 @@ microseconds_duration_buckets() ->
 -doc """
 Declares every metric family this node exposes, attaches the telemetry
 sinks and registers the Prometheus collectors. Called once at boot by
-`bondy_app`; idempotent.
+`bondy_router_app`; idempotent.
 """.
 -spec setup() -> ok.
 

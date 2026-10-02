@@ -78,7 +78,7 @@ issue(RealmUri, Authid, OidcProvider, OidcTokens, Opts) when
         Authroles = maps:get(authroles, Opts, []),
 
         Claims0 = #{
-            id => bondy_utils:uuid(),
+            id => bondy_router_utils:uuid(),
             authrealm => RealmUri,
             authid => Authid,
             authmethod => ?OIDCRP_AUTH,

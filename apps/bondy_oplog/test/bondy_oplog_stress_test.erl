@@ -99,7 +99,7 @@ hlc_seeds_from_persisted_watermark() ->
     Suffix = integer_to_list(os:system_time(microsecond)),
     Tmp = filename:join(
         <<"/tmp">>,
-        list_to_binary("bondy_hlc_" ++ Suffix)
+        list_to_binary("bondy_connect_hlc_" ++ Suffix)
     ),
     ok = filelib:ensure_path(Tmp),
     Id = list_to_binary("hlc_" ++ Suffix),

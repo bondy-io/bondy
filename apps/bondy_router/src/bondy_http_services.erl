@@ -148,7 +148,7 @@ routes(metrics, _Spec, _Listener) ->
 %% is made HERE, once per carrier, rather than by catching
 %% `*_table_unavailable` per route inside the compiler: the listener still
 %% mounts every static carrier, so `/ping`, `/ready` and `/metrics` answer on
-%% a degraded node. This is the same mode dispatch `bondy_app:start_services/1`
+%% a degraded node. This is the same mode dispatch `bondy_router_app:start_services/1`
 %% boots by. Exercised by `bondy_degraded_boot_SUITE`.
 routes(api_gateway, _Spec, Listener) ->
     specification_routes(
@@ -165,7 +165,7 @@ routes(admin_api, _Spec, Listener) ->
 
 %% @private
 %% The routes `bondy_listener_manager:start_probes/0` binds before storage
-%% opens. Their handlers must not reach anything `bondy_sup` starts;
+%% opens. Their handlers must not reach anything `bondy_router_sup` starts;
 %% `bondy_boot_probes_SUITE` serves them with `main` held mid-open.
 probe_routes() ->
     [

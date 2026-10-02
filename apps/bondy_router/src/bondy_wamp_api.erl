@@ -51,7 +51,7 @@ the API but never shadow a built-in family.
 the same grain as the static table — or the call raises `badarg`.
 
 Call it from the registering application's `start/2`. Every registrant is
-started by `bondy_app` BEFORE `start_normal_listeners/0` runs, so a
+started by `bondy_router_app` BEFORE `start_normal_listeners/0` runs, so a
 registration is in place before any client can be admitted — the ordering
 is by construction, not by luck (falsifier:
 `bondy_mcp_gateway_SUITE:overlay_wamp_api_lifecycle` goes through this
@@ -128,7 +128,7 @@ dry_run_refusal(Proc, M) ->
 
 %% @private
 unsupported_dry_run_error(Proc, M) ->
-    Error = bondy_error:new(invalid_argument, #{
+    Error = bondy_connect_error:new(invalid_argument, #{
         message => ~"This procedure does not support `dry_run`.",
         description =>
             <<

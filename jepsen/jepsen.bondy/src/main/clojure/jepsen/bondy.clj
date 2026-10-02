@@ -205,7 +205,7 @@
 
 (defn await-ready!
   "Blocks until the node's `/ready` answers 204, i.e. the durable store
-   opened and both listener phases are up (bondy_app:is_ready/0), or fails
+   opened and both listener phases are up (bondy_router_app:is_ready/0), or fails
    after `timeout-s`. A node that boots degraded answers 503 and must fail
    setup rather than take part in a run it cannot serve."
   [node timeout-s]

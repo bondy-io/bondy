@@ -29,14 +29,14 @@
         %% Rendezvous hashing, used to pick the node that owns an idempotency
         %% key. Partisan supplies the membership it runs over and the transport
         %% used to reach the chosen node, but is deliberately absent here: it is
-        %% `{partisan, load}` in the release and `bondy_app` starts it by hand,
+        %% `{partisan, load}` in the release and `bondy_router_app` starts it by hand,
         %% so no app.src may list it. See bondy_mail_status.
         lrw,
         telemetry,
         gen_smtp,
         bondy_metrics,
         bondy_regulator,
-        bondy_stdlib
+        bondy_connect_lib
     ]},
     {env, []},
     {modules, []},

@@ -177,7 +177,7 @@ bridge and another from the RPC for identical causes.
 
 ## What a caller is told
 
-The `M001`-`M009` entries of `bondy_error` carry the relay's configured *name*
+The `M001`-`M009` entries of `bondy_connect_error` carry the relay's configured *name*
 and nothing else about it. A relay's hostname, its username, its credential and
 the text of its SMTP replies stay in the log. A relay banner is written by
 someone other than us and may say anything at all, so only the three-digit
@@ -186,22 +186,22 @@ reply code survives translation -- that is the part a caller can act on.
 Anything unrecognised becomes `internal_error`, which carries a trace id and no
 detail. A failure Bondy cannot describe safely is one it does not describe.
 """.
--spec to_error(Reason :: any()) -> bondy_error:t().
+-spec to_error(Reason :: any()) -> bondy_connect_error:t().
 
 to_error(not_configured) ->
-    bondy_error:new(mail_not_configured);
+    bondy_connect_error:new(mail_not_configured);
 to_error({permanent, Class, _}) when
     Class == configuration orelse Class == missing_requirement
 ->
     %% Declared but unusable. Same audience, same remedy, same absence of
     %% anything a caller can do -- but saying "not configured" of a relay that
     %% is plainly configured would send an operator looking in the wrong place.
-    bondy_error:new(mail_not_configured, #{
+    bondy_connect_error:new(mail_not_configured, #{
         message =>
             ~"The mail relay is declared but cannot be used as configured."
     });
 to_error(no_such_relay) ->
-    bondy_error:new(no_such_relay, #{
+    bondy_connect_error:new(no_such_relay, #{
         message =>
             <<
                 "No mail relay was named, and no default relay is configured."
@@ -214,18 +214,20 @@ to_error({permanent, no_such_relay, Name}) ->
 to_error({relay_not_permitted, Name}) ->
     relay_error(relay_not_permitted, Name);
 to_error({sender_not_permitted, Name, Address}) ->
-    bondy_error:new(sender_not_permitted, #{
+    bondy_connect_error:new(sender_not_permitted, #{
         details => #{relay => Name, address => Address}
     });
 to_error({invalid_recipient, Address}) ->
-    bondy_error:new(invalid_recipient, #{details => #{address => Address}});
+    bondy_connect_error:new(invalid_recipient, #{
+        details => #{address => Address}
+    });
 to_error({unknown_keys, Keys}) ->
-    bondy_error:new(invalid_request, #{
+    bondy_connect_error:new(invalid_request, #{
         message => ~"The request contains keys that are not recognised.",
         details => #{keys => Keys}
     });
 to_error({header_injection, Name}) ->
-    bondy_error:new(invalid_request, #{
+    bondy_connect_error:new(invalid_request, #{
         message =>
             ~"The header '%{key}' contains a line break and was refused.",
         description =>
@@ -238,7 +240,7 @@ to_error({header_injection, Name}) ->
         details => #{key => Name}
     });
 to_error({reserved_header, Name}) ->
-    bondy_error:new(invalid_request, #{
+    bondy_connect_error:new(invalid_request, #{
         message => ~"The header '%{key}' may not be set by a caller.",
         description =>
             <<
@@ -249,16 +251,16 @@ to_error({reserved_header, Name}) ->
         details => #{key => Name}
     });
 to_error({invalid_header, Name}) ->
-    bondy_error:new(invalid_request, #{
+    bondy_connect_error:new(invalid_request, #{
         message => ~"The header '%{key}' is malformed.",
         details => #{key => Name}
     });
 to_error({too_large_payload, Size, Max}) ->
-    bondy_error:new(too_large_payload, #{
+    bondy_connect_error:new(too_large_payload, #{
         details => #{value => Size, limit => Max}
     });
 to_error({too_many_recipients, Count, Max}) ->
-    bondy_error:new(too_large_payload, #{
+    bondy_connect_error:new(too_large_payload, #{
         message =>
             ~"The message names %{value} recipients; at most %{limit} are allowed.",
         details => #{value => Count, limit => Max}
@@ -271,41 +273,41 @@ to_error({permanent, too_large_payload, {too_large_payload, Size, Max}}) ->
     %% difference that sends someone looking for a second bug.
     to_error({too_large_payload, Size, Max});
 to_error({permanent, too_large_payload, _}) ->
-    bondy_error:new(too_large_payload);
+    bondy_connect_error:new(too_large_payload);
 to_error({invalid_request, Reason}) ->
-    bondy_error:new(invalid_request, #{details => #{reason => Reason}});
+    bondy_connect_error:new(invalid_request, #{details => #{reason => Reason}});
 to_error({transient, rate_limited, Name}) ->
     relay_error(rate_limit_exceeded, Name);
 to_error({transient, queue_full, Name}) ->
     relay_error(mail_queue_full, Name);
 to_error({transient, queue_unavailable, _}) ->
-    bondy_error:new(relay_unavailable);
+    bondy_connect_error:new(relay_unavailable);
 to_error({transient, owner_unavailable, _}) ->
     %% The owner is a Bondy node, not a relay: S004 says exactly this, and saying
     %% the relay is unavailable would send an operator to inspect a healthy one.
-    bondy_error:new(unavailable);
+    bondy_connect_error:new(unavailable);
 to_error({transient, status_unavailable, _}) ->
-    bondy_error:new(unavailable);
+    bondy_connect_error:new(unavailable);
 to_error({transient, Class, _}) when
     Class == timeout orelse Class == deadline
 ->
-    bondy_error:new(request_timeout);
+    bondy_connect_error:new(request_timeout);
 to_error({transient, network, _}) ->
-    bondy_error:new(relay_unavailable);
+    bondy_connect_error:new(relay_unavailable);
 to_error({permanent, rejected, Code}) ->
-    bondy_error:new(mail_rejected, #{details => reply_code(Code)});
+    bondy_connect_error:new(mail_rejected, #{details => reply_code(Code)});
 to_error({transient, deferred, Code}) ->
-    bondy_error:new(mail_delivery_failed, #{details => reply_code(Code)});
+    bondy_connect_error:new(mail_delivery_failed, #{details => reply_code(Code)});
 to_error({permanent, encoding_failed, _} = Reason) ->
     %% A message Bondy could not encode is Bondy's defect, not the caller's, and
     %% the catalogue's contract for those is a trace id and nothing else.
-    bondy_error:internal(Reason);
+    bondy_connect_error:internal(Reason);
 to_error({permanent, _, _}) ->
-    bondy_error:new(mail_rejected);
+    bondy_connect_error:new(mail_rejected);
 to_error({transient, _, _}) ->
-    bondy_error:new(mail_delivery_failed);
+    bondy_connect_error:new(mail_delivery_failed);
 to_error(Other) ->
-    bondy_error:internal(Other).
+    bondy_connect_error:internal(Other).
 
 %% =============================================================================
 %% REMOTE CALLBACKS
@@ -591,9 +593,9 @@ permitted_relay(RealmUri, Name) ->
 
 %% @private
 relay_error(Type, Name) when is_binary(Name) ->
-    bondy_error:new(Type, #{details => #{relay => Name}});
+    bondy_connect_error:new(Type, #{details => #{relay => Name}});
 relay_error(Type, _) ->
-    bondy_error:new(Type).
+    bondy_connect_error:new(Type).
 
 %% @private
 %% Only a three-digit reply code survives. The rest of a relay's rejection text

@@ -640,7 +640,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         %% We define the process metadata and which keys are exposed as logger
         %% metadata.
         Meta = #{
-            agent => bondy_utils:maybe_slice(Agent, 0, 64),
+            agent => bondy_router_utils:maybe_slice(Agent, 0, 64),
             authid => Authid,
             authmethod => Authmethod,
             authrealm => Authrealm,
@@ -651,7 +651,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         %% Do not expose authid as it might be private info
         LogKeys = [agent, authmethod, protocol_session_id, realm, session_id],
 
-        ok = bondy:set_process_metadata(Meta, LogKeys),
+        ok = bondy_router_peer:set_process_metadata(Meta, LogKeys),
 
         %% resolve the per-session message-throttle bucket chain ONCE,
         %% now that the session is open (or `undefined` if message
@@ -674,7 +674,7 @@ open_session(Extra, St0) when is_map(Extra) ->
 
 %% @private
 maybe_gen_authid(anonymous) ->
-    bondy_utils:uuid();
+    bondy_router_utils:uuid();
 maybe_gen_authid(UserId) ->
     UserId.
 
@@ -986,7 +986,7 @@ stop(Reason, Acc, St) ->
 %% @private
 %% Each clause picks the error type whose catalogued URI is the one this abort
 %% has always used, so the reason URI on the wire is unchanged. Routing through
-%% bondy_error is what adds the standard keys - notably `nature', which lets a
+%% bondy_connect_error is what adds the standard keys - notably `nature', which lets a
 %% client tell a retryable refusal (overload, fence) from a permanent one.
 abort_message(internal_error) ->
     abort(
@@ -1213,7 +1213,7 @@ abort(Type, Message) ->
 %% @private
 abort(Type, Message, Description, Details) ->
     bondy_wamp_error:to_abort(
-        bondy_error:new(Type, #{
+        bondy_connect_error:new(Type, #{
             message => Message,
             description => Description,
             details => Details

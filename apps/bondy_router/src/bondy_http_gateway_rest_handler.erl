@@ -34,7 +34,7 @@ Cowboy REST
 Each HTTP method section in the spec contains an action that is executed
 when that method is called:
 
-- `wamp_call` — calls a WAMP RPC procedure via `bondy:call/5` and maps
+- `wamp_call` — calls a WAMP RPC procedure via `bondy_router_peer:call/5` and maps
   the WAMP result/error through the `on_result`/`on_error` MOPS
   response templates. The action's `timeout` (which inherits from
   `defaults.timeout`) is used as the WAMP call timeout unless the
@@ -242,13 +242,17 @@ is_authorized(Req0, St0) ->
         end
     catch
         throw:proxy_protocol_error ->
-            Body = bondy_error:to_map(bondy_error:new(proxy_protocol_error)),
+            Body = bondy_connect_error:to_map(
+                bondy_connect_error:new(proxy_protocol_error)
+            ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(?HTTP_FORBIDDEN, json, Response, Req0),
             {stop, Req1, St0};
         error:{no_such_realm, _} = Reason ->
             {StatusCode, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)),
+                bondy_connect_error:to_map(
+                    bondy_connect_error:from_term(Reason)
+                ),
                 ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
@@ -265,7 +269,9 @@ is_authorized(Req0, St0) ->
                 St0
             ),
             {StatusCode, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)),
+                bondy_connect_error:to_map(
+                    bondy_connect_error:from_term(Reason)
+                ),
                 ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
@@ -499,7 +505,9 @@ authenticate(Token, Ctxt0, Req0, St0) ->
             {true, Req0, St1};
         {error, {no_such_realm, _} = Reason} ->
             {_, ErrorMap} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason))
+                bondy_connect_error:to_map(
+                    bondy_connect_error:from_term(Reason)
+                )
             ),
             Response = #{
                 <<"body">> => ErrorMap,
@@ -549,7 +557,9 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     catch
         throw:Reason ->
             {StatusCode, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)),
+                bondy_connect_error:to_map(
+                    bondy_connect_error:from_term(Reason)
+                ),
                 ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
@@ -566,7 +576,9 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 St0
             ),
             {StatusCode, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)),
+                bondy_connect_error:to_map(
+                    bondy_connect_error:from_term(Reason)
+                ),
                 ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
@@ -603,7 +615,9 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     catch
         throw:Reason ->
             {StatusCode1, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)),
+                bondy_connect_error:to_map(
+                    bondy_connect_error:from_term(Reason)
+                ),
                 ?HTTP_BAD_REQUEST
             ),
             ErrResp = #{<<"body">> => Body, <<"headers">> => #{}},
@@ -620,7 +634,9 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 St0
             ),
             {StatusCode1, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)),
+                bondy_connect_error:to_map(
+                    bondy_connect_error:from_term(Reason)
+                ),
                 ?HTTP_INTERNAL_SERVER_ERROR
             ),
             ErrResp = #{<<"body">> => Body, <<"headers">> => #{}},
@@ -755,7 +771,9 @@ init_context(Req) ->
         <<"language">> => maps:get(language, Req, <<"en">>),
         <<"query_string">> => cowboy_req:qs(Req),
         <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req)),
-        <<"bindings">> => bondy_utils:to_binary_keys(cowboy_req:bindings(Req)),
+        <<"bindings">> => bondy_router_utils:to_binary_keys(
+            cowboy_req:bindings(Req)
+        ),
         <<"body">> => <<>>,
         <<"body_length">> => 0
     },
@@ -821,7 +839,7 @@ decode_body_in_context(Method, St) when
     Bin = maps_utils:get_path(Path, Ctxt),
     Enc = maps:get(encoding, St),
     try
-        Body = bondy_utils:decode(Enc, Bin),
+        Body = bondy_router_utils:decode(Enc, Bin),
         maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St)
     catch
         Class:Reason:Stacktrace ->
@@ -911,14 +929,14 @@ perform_action(
         {error, Reason} ->
             %% Reason is a raw hackney term: it has no JSON representation and
             %% must be rendered before it can reach a client.
-            Error = bondy_error:new(bad_gateway, #{
+            Error = bondy_connect_error:new(bad_gateway, #{
                 message =>
                     <<"Error while connecting with upstream URL '", Url/binary,
                         "'.">>,
                 details => #{url => Url},
                 metadata => #{reason => Reason}
             }),
-            throw(bondy_error:to_map(Error))
+            throw(bondy_connect_error:to_map(Error))
     end;
 perform_action(
     Method,
@@ -962,11 +980,11 @@ perform_action(
     RealmUri = maps:get(realm_uri, St1),
     WampCtxt = wamp_context(RealmUri, Peer, St1),
 
-    case bondy:call(P, Opts, A, Akw, WampCtxt) of
+    case bondy_router_peer:call(P, Opts, A, Akw, WampCtxt) of
         {ok, Result0} ->
             %% Result is map #{request_id, details, args, kwargs};
             %% mops uses binary keys
-            Result1 = bondy_utils:to_binary_keys(Result0),
+            Result1 = bondy_router_utils:to_binary_keys(Result0),
             ApiCtxt1 = update_context({result, Result1}, ApiCtxt0),
             Response = mops_eval(
                 maps:get(<<"on_result">>, RSpec), ApiCtxt1, MopsOpts
@@ -977,7 +995,7 @@ perform_action(
             StatusCode0 = bondy_http_utils:http_status(
                 maps:get(error_uri, WampError0)
             ),
-            WampError1 = bondy_utils:to_binary_keys(WampError0),
+            WampError1 = bondy_router_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
             ApiCtxt1 = update_context({error, Error}, ApiCtxt0),
             Response0 = mops_eval(
@@ -1039,7 +1057,7 @@ perform_action(
             StatusCode0 = bondy_http_utils:http_status(
                 maps:get(error_uri, WampError0)
             ),
-            WampError1 = bondy_utils:to_binary_keys(WampError0),
+            WampError1 = bondy_router_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
             ApiCtxt1 = update_context({error, Error}, ApiCtxt0),
             Response0 = mops_eval(
@@ -1056,7 +1074,7 @@ perform_action(
 %% The action-level `timeout` applies unless the action's WAMP call
 %% `options` already define a non-zero `timeout` (per WAMP, 0 means the
 %% Call Timeout feature is disabled, so we treat it as unset). Downstream
-%% `bondy:call/5` falls back to `wamp.call_timeout` when no timeout is set.
+%% `bondy_router_peer:call/5` falls back to `wamp.call_timeout` when no timeout is set.
 merge_call_timeout(Timeout, Opts) when
     is_integer(Timeout) andalso Timeout > 0
 ->
@@ -1097,7 +1115,7 @@ wamp_context(RealmUri, Peer, St1) ->
 
 %% @private
 authid(#{is_anonymous := true}) ->
-    bondy_utils:uuid();
+    bondy_router_utils:uuid();
 authid(St) ->
     maps:get(authid, St).
 
@@ -1144,7 +1162,7 @@ from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
 
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
     {_, Body} = take_status_code(
-        bondy_error:to_map(bondy_error:from_term(Error))
+        bondy_connect_error:to_map(bondy_connect_error:from_term(Error))
     ),
     Code = maps:get(<<"code">>, Body, <<>>),
     Msg = maps:get(<<"message">>, Body, <<>>),
@@ -1249,7 +1267,7 @@ method_to_atom(<<"put">>) -> put.
 maybe_encode(undefined, Body) ->
     Body;
 maybe_encode(Enc, Body) ->
-    bondy_utils:maybe_encode(Enc, Body).
+    bondy_router_utils:maybe_encode(Enc, Body).
 
 %% @private
 maybe_encode(_, <<>>, _) ->
@@ -1259,7 +1277,7 @@ maybe_encode(undefined, Body, _) ->
 maybe_encode(_, Body, #{<<"action">> := #{<<"type">> := <<"forward">>}}) ->
     Body;
 maybe_encode(Enc, Body, _) ->
-    bondy_utils:maybe_encode(Enc, Body).
+    bondy_router_utils:maybe_encode(Enc, Body).
 
 error_encoding(json) -> json;
 error_encoding(msgpack) -> msgpack;
@@ -1292,8 +1310,8 @@ mops_eval(Expr, Ctxt, Opts) ->
     catch
         error:{invalid_expression, [Expr, Term]} ->
             throw(
-                bondy_error:to_map(
-                    bondy_error:new(invalid_expression, #{
+                bondy_connect_error:to_map(
+                    bondy_connect_error:new(invalid_expression, #{
                         %% Same message, built the same way, as
                         %% `bondy_http_gateway_api_spec_parser:mops_eval/2`:
                         %% each untrusted fragment is made UTF-8 on its own
@@ -1304,9 +1322,9 @@ mops_eval(Expr, Ctxt, Opts) ->
                         message => iolist_to_binary([
                             <<"There was an error evaluating the MOPS ">>,
                             <<"expression '">>,
-                            bondy_error:to_binary(Expr),
+                            bondy_connect_error:to_binary(Expr),
                             "' with value '",
-                            bondy_error:format_term(Term),
+                            bondy_connect_error:format_term(Term),
                             "'"
                         ]),
                         details => #{expression => Expr}

@@ -223,7 +223,7 @@ init_pool() ->
             resulto:try_recover(
                 Result,
                 fun(Reason) ->
-                    Info = bondy_error:new(noproc, #{
+                    Info = bondy_connect_error:new(noproc, #{
                         message =>
                             ~"An error occurred when starting an HTTP Connector token cache worker.",
                         details => #{reason => Reason}

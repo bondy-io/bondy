@@ -99,13 +99,13 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
     shard => non_neg_integer()
 }.
 -type read_result() ::
-    {Value :: term(), Hlc :: bondy_hlc:hlc()}
+    {Value :: term(), Hlc :: bondy_connect_hlc:hlc()}
     | undefined.
 
 -type consistency() :: eventual | causal | snapshot.
 -type batch_key() :: {atom(), atom(), bucket(), term()}.
 -type read_batch_opts() :: #{
-    fence => bondy_hlc:hlc(),
+    fence => bondy_connect_hlc:hlc(),
     max_lag => non_neg_integer() | infinity,
     require_skew_below => non_neg_integer(),
     consistency => consistency()
@@ -120,11 +120,11 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 -type range_opts() :: #{
     limit => pos_integer(),
     include_overlay => boolean(),
-    fence => bondy_hlc:hlc() | infinity,
+    fence => bondy_connect_hlc:hlc() | infinity,
     shard => non_neg_integer()
 }.
 -type range_row() :: {
-    Key :: term(), Value :: term(), Hlc :: bondy_hlc:hlc()
+    Key :: term(), Value :: term(), Hlc :: bondy_connect_hlc:hlc()
 }.
 -type range_result() :: [range_row()].
 
@@ -222,13 +222,13 @@ API — consumers of substrate values must call `read/3..5`.
 `undefined` when the cell does not exist and the overlay is empty.
 """.
 -spec read_state(atom(), atom(), term()) ->
-    {State :: term(), bondy_hlc:hlc()} | undefined | {error, term()}.
+    {State :: term(), bondy_connect_hlc:hlc()} | undefined | {error, term()}.
 
 read_state(NS, Index, Key) ->
     read_state(NS, Index, <<>>, Key).
 
 -spec read_state(atom(), atom(), bucket(), term()) ->
-    {State :: term(), bondy_hlc:hlc()} | undefined | {error, term()}.
+    {State :: term(), bondy_connect_hlc:hlc()} | undefined | {error, term()}.
 
 read_state(NS, Index, Bucket, Key) ->
     case resolve_shard(NS, Index, Bucket, Key) of
@@ -269,7 +269,7 @@ there. It is retained for the strict-realm / export / cluster-join class of
 consumers that need an explicitly fenced multi-cell read.
 """.
 -spec read_batch([batch_key()], read_batch_opts()) ->
-    {ok, read_batch_result(), bondy_hlc:hlc()} | {error, term()}.
+    {ok, read_batch_result(), bondy_connect_hlc:hlc()} | {error, term()}.
 
 read_batch(Reads, Opts) when is_list(Reads), is_map(Opts) ->
     Consistency = maps:get(consistency, Opts, eventual),
@@ -478,9 +478,9 @@ slot. See `read_at_hlc/4` for the Bucket-aware version.
 -spec read_at_hlc(
     Namespace :: atom(),
     Key :: term(),
-    T :: bondy_hlc:hlc()
+    T :: bondy_connect_hlc:hlc()
 ) ->
-    {ok, Value :: term(), Hlc :: bondy_hlc:hlc()}
+    {ok, Value :: term(), Hlc :: bondy_connect_hlc:hlc()}
     | {error, term()}.
 
 read_at_hlc(NS, Key, T) ->
@@ -498,9 +498,9 @@ has already advanced past `T`.
     Namespace :: atom(),
     Bucket :: bucket(),
     Key :: term(),
-    T :: bondy_hlc:hlc()
+    T :: bondy_connect_hlc:hlc()
 ) ->
-    {ok, Value :: term(), Hlc :: bondy_hlc:hlc()}
+    {ok, Value :: term(), Hlc :: bondy_connect_hlc:hlc()}
     | {error, term()}.
 
 read_at_hlc(NS, Bucket, Key, T) when is_integer(T), T >= 0 ->
@@ -618,7 +618,7 @@ subscribe(NS, Pattern) ->
 unsubscribe(SubRef) ->
     bondy_oplog_core_dispatcher:unsubscribe(SubRef).
 
--spec publish(atom(), term(), bondy_hlc:hlc(), term()) -> ok.
+-spec publish(atom(), term(), bondy_connect_hlc:hlc(), term()) -> ok.
 
 publish(NS, Key, Hlc, Op) ->
     bondy_oplog_core_dispatcher:publish(NS, Key, Hlc, Op).
@@ -634,7 +634,7 @@ credential change or a remote write clobbering a differing local value. See
 -spec publish_merge(
     NS :: atom(),
     Key :: term(),
-    Hlc :: bondy_hlc:hlc(),
+    Hlc :: bondy_connect_hlc:hlc(),
     Op :: term(),
     Old :: term() | undefined
 ) -> ok.
@@ -959,7 +959,7 @@ collect_hlcs(Values) ->
     ).
 
 physical(Hlc) ->
-    {Phys, _Log} = bondy_hlc:decode(Hlc),
+    {Phys, _Log} = bondy_connect_hlc:decode(Hlc),
     Phys.
 
 %% =============================================================================

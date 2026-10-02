@@ -30,44 +30,48 @@ origin_validate_test() ->
 %% =============================================================================
 
 hlc_monotonic_test() ->
-    H = bondy_hlc:new(),
-    Vs = [bondy_hlc:now(H) || _ <- lists:seq(1, 1000)],
+    H = bondy_connect_hlc:new(),
+    Vs = [bondy_connect_hlc:now(H) || _ <- lists:seq(1, 1000)],
     ?assertEqual(Vs, lists:sort(Vs)),
     ?assertEqual(length(Vs), length(lists:usort(Vs))).
 
 hlc_update_test() ->
-    H = bondy_hlc:new(),
-    Peer = bondy_hlc:encode(erlang:system_time(millisecond) + 60_000, 7),
-    Updated = bondy_hlc:update(H, Peer),
+    H = bondy_connect_hlc:new(),
+    Peer = bondy_connect_hlc:encode(
+        erlang:system_time(millisecond) + 60_000, 7
+    ),
+    Updated = bondy_connect_hlc:update(H, Peer),
     ?assert(Updated > Peer),
-    Next = bondy_hlc:now(H),
+    Next = bondy_connect_hlc:now(H),
     ?assert(Next > Peer).
 
 hlc_logical_overflow_test() ->
-    Seed = bondy_hlc:encode(erlang:system_time(millisecond) + 60_000, 0),
-    H = bondy_hlc:new(Seed),
+    Seed = bondy_connect_hlc:encode(
+        erlang:system_time(millisecond) + 60_000, 0
+    ),
+    H = bondy_connect_hlc:new(Seed),
     N = ?BONDY_HLC_LOGICAL_MAX + 100,
     Last = lists:foldl(
         fun(_, Prev) ->
-            V = bondy_hlc:now(H),
+            V = bondy_connect_hlc:now(H),
             ?assert(V > Prev),
             V
         end,
         0,
         lists:seq(1, N)
     ),
-    {LastPhys, _} = bondy_hlc:decode(Last),
-    {SeedPhys, _} = bondy_hlc:decode(Seed),
+    {LastPhys, _} = bondy_connect_hlc:decode(Last),
+    {SeedPhys, _} = bondy_connect_hlc:decode(Seed),
     ?assert(LastPhys > SeedPhys).
 
 hlc_concurrent_test() ->
-    H = bondy_hlc:new(),
+    H = bondy_connect_hlc:new(),
     Parent = self(),
     NWorkers = 8,
     NPerWorker = 500,
     Pids = [
         spawn_link(fun() ->
-            Vs = [bondy_hlc:now(H) || _ <- lists:seq(1, NPerWorker)],
+            Vs = [bondy_connect_hlc:now(H) || _ <- lists:seq(1, NPerWorker)],
             Parent ! {self(), Vs}
         end)
      || _ <- lists:seq(1, NWorkers)
@@ -90,7 +94,7 @@ hlc_encode_decode_test() ->
     [
         ?assertEqual(
             {Phys, Log},
-            bondy_hlc:decode(bondy_hlc:encode(Phys, Log))
+            bondy_connect_hlc:decode(bondy_connect_hlc:encode(Phys, Log))
         )
      || {Phys, Log} <- Cases
     ].

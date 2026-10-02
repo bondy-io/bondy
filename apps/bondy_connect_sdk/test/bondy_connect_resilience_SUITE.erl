@@ -547,7 +547,7 @@ transient_abort_retries_until_admitted(_) ->
 %% and re-dial on a 0ms timer.
 %%
 %% Count actual HELLO arrivals at the router over a fixed window: with the
-%% `bondy_retry` ladder engaged (min 300ms, jittered) a few attempts fit; a
+%% `bondy_connect_retry` ladder engaged (min 300ms, jittered) a few attempts fit; a
 %% full-speed loop produces orders of magnitude more.
 transient_abort_retry_backs_off(_) ->
     ok = force_hello_gate(closed),

@@ -329,7 +329,7 @@ pool_recovers_and_alarm_cleared_respecting_success_threshold(Config) ->
     {ok, _} = mock_auth_http_server:start(#{port => Port}),
 
     %% The pool itself recovers fail-open on the very first successful
-    %% probe (down-state bondy_retry loop), well before the up-state
+    %% probe (down-state bondy_connect_retry loop), well before the up-state
     %% cadence has run success_threshold=2 times.
     wait_until(
         fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 60

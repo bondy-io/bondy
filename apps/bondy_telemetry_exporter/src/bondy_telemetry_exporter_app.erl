@@ -18,7 +18,7 @@ therefore supervises Bondy's own event-consuming handlers and, on
 start, runs `bondy_prometheus:setup/0` (metric-family declarations,
 telemetry sinks, collector registration).
 
-`bondy_app` starts this application before it binds any listener, so
+`bondy_router_app` starts this application before it binds any listener, so
 the Prometheus sinks are attached before the first socket/session event
 can fire — the `bondy_sockets_total`/`bondy_sessions_total` gauges
 would drift if an open were missed and its close counted.

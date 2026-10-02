@@ -84,7 +84,7 @@ close(Tab) ->
     ok.
 
 -spec get(ets:tid(), Bucket :: term(), Key :: term()) ->
-    {ok, {Value :: term(), Hlc :: bondy_hlc:hlc()}} | not_found.
+    {ok, {Value :: term(), Hlc :: bondy_connect_hlc:hlc()}} | not_found.
 
 get(Tab, Bucket, Key) ->
     case ets:lookup(Tab, {Bucket, Key}) of
@@ -101,7 +101,7 @@ ticket(Tab) ->
     ets:tid(),
     Bucket :: term(),
     Key :: term(),
-    {Value :: term(), Hlc :: bondy_hlc:hlc()},
+    {Value :: term(), Hlc :: bondy_connect_hlc:hlc()},
     Ticket :: non_neg_integer()
 ) -> ok.
 

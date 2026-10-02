@@ -70,7 +70,7 @@ mk_event(Hlc, Seq) ->
 generate_events(_HLC, 0, _) ->
     [];
 generate_events(HLC, N, Seq) ->
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     [mk_event(Hlc, Seq) | generate_events(HLC, N - 1, Seq + 1)].
 
 drain_reader(Iter) ->
@@ -143,7 +143,7 @@ roundtrip_single_event_test() ->
     end).
 
 roundtrip_1000_events_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 1000, 1),
         [{ok, _, _} = bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -157,7 +157,7 @@ roundtrip_1000_events_test() ->
 %% =============================================================================
 
 roundtrip_across_rotations_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     %% Tight cap: every event ends up in its own segment.
     with_wal(#{max_segment_bytes => 200}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 8, 1),
@@ -171,7 +171,7 @@ roundtrip_across_rotations_test() ->
     end).
 
 read_from_offset_resumes_at_frame_boundary_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 5, 1),
         Positions = [
@@ -307,13 +307,13 @@ tail_follow_unblocks_on_rotation_test() ->
 %% events. Reader should still be able to walk segment 0 to its end
 %% and seamlessly enter segment 1.
 reader_survives_rotation_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{max_segment_bytes => 200}, fun(Pid, _Dir) ->
-        E1 = mk_event(bondy_hlc:now(HLC), 1),
+        E1 = mk_event(bondy_connect_hlc:now(HLC), 1),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
         {ok, Iter} = bondy_log_reader:open(Pid, beginning),
         %% Trigger rotation by writing one more event.
-        E2 = mk_event(bondy_hlc:now(HLC), 2),
+        E2 = mk_event(bondy_connect_hlc:now(HLC), 2),
         {ok, _, {1, _}} = bondy_oplog_wal:append(Pid, E2),
         {ok, Read} = drain_reader(Iter),
         ?assertEqual([E1, E2], Read)
@@ -351,13 +351,13 @@ close_is_idempotent_test() ->
 %% reader at `beginning` and drain — the first `next/1` returns frame
 %% 1; the second surfaces the corruption.
 truncated_sealed_segment_surfaces_error_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     %% Pack two events into segment 0 (cap chosen experimentally so
     %% two events fit but a third triggers rotation).
     with_wal(#{max_segment_bytes => 400}, fun(Pid, Dir) ->
-        E1 = mk_event(bondy_hlc:now(HLC), 1),
-        E2 = mk_event(bondy_hlc:now(HLC), 2),
-        E3 = mk_event(bondy_hlc:now(HLC), 3),
+        E1 = mk_event(bondy_connect_hlc:now(HLC), 1),
+        E2 = mk_event(bondy_connect_hlc:now(HLC), 2),
+        E3 = mk_event(bondy_connect_hlc:now(HLC), 3),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E2),
         {ok, _, {1, _}} = bondy_oplog_wal:append(Pid, E3),
@@ -405,7 +405,7 @@ open_hlc_seek_on_empty_wal_returns_end_of_log_test() ->
 %% the reader resolve `{key, T}` against the head segment without any
 %% `.qidx` file on disk.
 hlc_seek_within_head_segment_returns_first_ge_t_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 10, 1),
         Results = [
@@ -428,7 +428,7 @@ hlc_seek_within_head_segment_returns_first_ge_t_test() ->
 %% Same as above, but the target is *between* two consecutive HLCs.
 %% The reader must return the first event with HLC >= Target.
 hlc_seek_between_two_hlcs_returns_first_strictly_above_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 5, 1),
         Hlcs = [
@@ -464,7 +464,7 @@ hlc_seek_between_two_hlcs_returns_first_strictly_above_test() ->
 %% the reader uses `head_idx_entries` from `reader_view/1`. This is the
 %% steady-state path during normal operation.
 hlc_seek_into_head_segment_via_in_memory_index_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{max_segment_bytes => 400}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 9, 1),
         Hlcs = [
@@ -493,7 +493,7 @@ hlc_seek_into_head_segment_via_in_memory_index_test() ->
 %% then seek into a *sealed* segment (the `.qidx` is on disk after the
 %% rotation flush). Verify the reader lands on the correct frame.
 hlc_seek_into_sealed_segment_via_disk_index_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     %% Tight cap → ~3 events per segment.
     with_wal(#{max_segment_bytes => 400}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 12, 1),
@@ -517,7 +517,7 @@ hlc_seek_into_sealed_segment_via_disk_index_test() ->
 %% and returns every event (the seek target is satisfied by the very
 %% first frame).
 hlc_seek_below_earliest_starts_at_beginning_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 5, 1),
         [{ok, _, _} = bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -530,7 +530,7 @@ hlc_seek_below_earliest_starts_at_beginning_test() ->
 %% T above the latest written HLC: reader walks past every frame and
 %% returns end_of_log without emitting any event.
 hlc_seek_above_latest_returns_end_of_log_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 5, 1),
         Hlcs = [
@@ -551,7 +551,7 @@ hlc_seek_above_latest_returns_end_of_log_test() ->
 %% Reader with `key_upper_bound` stops returning frames once the bound
 %% is exceeded.
 key_upper_bound_truncates_drain_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 10, 1),
         Hlcs = [
@@ -574,7 +574,7 @@ key_upper_bound_truncates_drain_test() ->
 %% Combined: `{key, T_lo}` start + `{key_upper_bound, T_hi}` opt — yields
 %% the slice [T_lo, T_hi] inclusive.
 hlc_range_yields_slice_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 10, 1),
         Hlcs = [
@@ -598,10 +598,10 @@ hlc_range_yields_slice_test() ->
 %% After rotation, the sealed segment's `.qidx` exists on disk; verify
 %% it directly so we know the writer flushed it.
 qidx_is_flushed_to_disk_on_rotation_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{max_segment_bytes => 200}, fun(Pid, Dir) ->
-        E1 = mk_event(bondy_hlc:now(HLC), 1),
-        E2 = mk_event(bondy_hlc:now(HLC), 2),
+        E1 = mk_event(bondy_connect_hlc:now(HLC), 1),
+        E2 = mk_event(bondy_connect_hlc:now(HLC), 2),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
         %% This second event forces rotation (segment 0 is full).
         {ok, _, {1, _}} = bondy_oplog_wal:append(Pid, E2),
@@ -623,7 +623,7 @@ qidx_is_flushed_to_disk_on_rotation_test() ->
 %% on disk so that a subsequent recovery can use the index directly
 %% rather than rebuild it via a segment scan.
 qidx_for_head_segment_is_flushed_on_close_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
@@ -673,7 +673,7 @@ qidx_not_written_on_close_if_no_appends_test() ->
 %% gate has to look at the accumulator's entry count, not the writer's
 %% lifetime `append_count`. QA finding C1.
 qidx_not_written_for_empty_head_after_rotation_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{
@@ -683,8 +683,8 @@ qidx_not_written_for_empty_head_after_rotation_test() ->
         },
         {ok, Pid} = bondy_oplog_wal:start_link(instance_id(), Opts),
         %% Two events, second triggers rotation into segment 1.
-        E1 = mk_event(bondy_hlc:now(HLC), 1),
-        E2 = mk_event(bondy_hlc:now(HLC), 2),
+        E1 = mk_event(bondy_connect_hlc:now(HLC), 1),
+        E2 = mk_event(bondy_connect_hlc:now(HLC), 2),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
         {ok, _, {1, _}} = bondy_oplog_wal:append(Pid, E2),
         %% Now close without doing anything else; head is segment 1
@@ -713,7 +713,7 @@ qidx_not_written_for_empty_head_after_rotation_test() ->
 %% header. Verify by writing across two segments, deleting segment 0's
 %% `.qidx`, then seeking a target HLC that lives in segment 0.
 hlc_seek_falls_back_when_qidx_missing_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     %% Tight cap so we rotate; pack enough events into segment 0 to
     %% have at least one indexed frame.
     with_wal(#{max_segment_bytes => 400}, fun(Pid, Dir) ->

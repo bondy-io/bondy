@@ -60,7 +60,7 @@ issuer, on its own band right after its write, and `cleanup/0`, the single
 writer per owned realm. The order is `(expires_at, write HLC, key)`: soonest-
 expiring first, and among tokens expiring in the same second — every token
 issued within one second, at the default TTL — the one written EARLIEST. The
-HLC is the cell's, stamped by the store on the write (`bondy_hlc`:
+HLC is the cell's, stamped by the store on the write (`bondy_connect_hlc`:
 milliseconds plus a logical counter, comparable across nodes), so "new replaces
 old" holds at write resolution: an issue can evict any token but the one it
 just wrote, and a refresh, being a write, makes its token the newest.
@@ -292,7 +292,7 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
         {TokenId, RToken} =
             case TokenType of
                 access ->
-                    {bondy_uuidv7:new(), undefined};
+                    {bondy_connect_uuidv7:new(), undefined};
                 refresh ->
                     gen_refresh_token(Key)
             end,
@@ -367,7 +367,7 @@ import_legacy(#{
         {ok, _} ->
             Realm = bondy_realm:fetch(AuthRealmUri),
             Kid = bondy_realm:get_random_kid(Realm),
-            TokenId = bondy_uuidv7:format(bondy_uuidv7:new()),
+            TokenId = bondy_connect_uuidv7:format(bondy_connect_uuidv7:new()),
             AuthGrants = [
                 bondy_rbac:externalize_grant(X)
              || X <- bondy_rbac:user_grants(AuthRealmUri, AuthId)
@@ -663,7 +663,7 @@ it unverifiable. Raises when the realm or the key is gone.
 to_access_token(#{type := ?MODULE, authrealm := RealmUri, kid := Kid} = T0) ->
     Realm = bondy_realm:fetch(RealmUri),
     PrivKey = bondy_realm:get_private_key(Realm, Kid),
-    T = T0#{id => bondy_uuidv7:format(bondy_uuidv7:new())},
+    T = T0#{id => bondy_connect_uuidv7:format(bondy_connect_uuidv7:new())},
     to_access_token(T, PrivKey).
 
 -doc """
@@ -701,7 +701,7 @@ it on an interval; it is also safe to call by hand.
 
 > #### Ownership keeps eviction single-writer {: .warning}
 >
-> Restricting each node to the realms it owns (`bondy:is_owner/1`) makes the
+> Restricting each node to the realms it owns (`bondy_router_peer:is_owner/1`) makes the
 > bound's authoritative evictor one process per realm across the cluster, so
 > the filter is applied here rather than left to the caller, and there is
 > deliberately no "sweep everything" variant. A clear can only remove; a sweep
@@ -781,7 +781,9 @@ expires_at(#{type := ?MODULE, issued_at := Ts, refresh_expires_in := Exp}) ->
 get_authrealm_uri(RealmUri) ->
     Result = bondy_realm:lookup(RealmUri),
     resulto:then(Result, fun(Realm) ->
-        Uri = bondy_stdlib:or_else(bondy_realm:sso_realm_uri(Realm), RealmUri),
+        Uri = bondy_connect_lib:or_else(
+            bondy_realm:sso_realm_uri(Realm), RealmUri
+        ),
         {ok, Uri}
     end).
 
@@ -913,7 +915,7 @@ fold_user(Table, AuthRealmUri, AuthId, Fun, Acc0) ->
 %% @private
 %% The open bondy_db `bondy_oauth_token` table handle. Raises if the catalogue
 %% has not provisioned it — the table is a hard dependency (the catalogue, a
-%% `bondy_sup` child, opens it at boot, well before any auth flow issues or
+%% `bondy_router_sup` child, opens it at boot, well before any auth flow issues or
 %% revokes a token).
 table() ->
     case bondy_namespace_catalog:table(?BONDY_DB_OAUTH_TOKEN_TAB) of
@@ -1257,7 +1259,9 @@ revoke_all_in(Table, Bucket, ScopeRealmUri) ->
 %% decides ownership of the bucket — which is the only correct grain (see that
 %% function).
 owned_auth_realm_uris() ->
-    lists:filter(fun bondy:is_owner/1, bondy_realm:auth_realm_uris()).
+    lists:filter(
+        fun bondy_router_peer:is_owner/1, bondy_realm:auth_realm_uris()
+    ).
 
 %% @private
 %% One realm's cells: a streamed pass that clears the expired and the

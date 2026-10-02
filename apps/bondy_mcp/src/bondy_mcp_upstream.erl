@@ -15,7 +15,7 @@ through the pin store.
 
 One instance per enabled `mcp.upstreams.$name` declaration, under
 `bondy_mcp_upstream_sup`. On startup (and on every retry after a failed
-attempt, with `bondy_retry` backoff — the upstream being down at boot
+attempt, with `bondy_connect_retry` backoff — the upstream being down at boot
 must not be fatal):
 
 1. opens an internal WAMP session, so `bondy_session_manager`'s monitor
@@ -93,7 +93,7 @@ application splices them into the callback arity): callers pass kwargs,
     registrations = #{} :: #{binary() => {any(), binary()}},
     %% Drifted definitions awaiting `approve/2`, by tool name.
     blocked = #{} :: #{binary() => map()},
-    retry :: bondy_retry:t() | undefined,
+    retry :: bondy_connect_retry:t() | undefined,
     retry_ref :: reference() | undefined
 }).
 
@@ -234,7 +234,7 @@ init([Conf]) ->
     %% the handler answers `bad_gateway` meanwhile.
     true = gproc:reg(gproc_key(Name), undefined),
 
-    Retry = bondy_retry:init({?MODULE, Name}, #{
+    Retry = bondy_connect_retry:init({?MODULE, Name}, #{
         deadline => 0,
         max_retries => 1000000,
         backoff_enabled => true,
@@ -320,7 +320,7 @@ terminate(_Reason, #state{conn = Conn}) ->
 attempt(State0) ->
     case do_refresh(State0) of
         {ok, State} ->
-            {_, Retry} = bondy_retry:succeed(State#state.retry),
+            {_, Retry} = bondy_connect_retry:succeed(State#state.retry),
             State#state{retry = Retry};
         {error, Reason, State} ->
             ?LOG_WARNING(#{
@@ -365,7 +365,7 @@ run([Step | Rest], State0) ->
 
 %% @private
 %% Resolved inside the retry loop rather than in `init/1` on purpose:
-%% `bondy_app` starts this application BEFORE `bondy_http_connector`, and
+%% `bondy_router_app` starts this application BEFORE `bondy_http_connector`, and
 %% resolving lazily removes that ordering (and any other: a service
 %% configured later is found later) instead of depending on it. The cost
 %% is that a misspelled service name retries forever — each attempt
@@ -750,12 +750,12 @@ schedule_retry(#state{retry_ref = Ref} = State) when Ref =/= undefined ->
     %% A retry is already scheduled.
     State;
 schedule_retry(#state{retry = Retry0} = State) ->
-    case bondy_retry:fail(Retry0) of
+    case bondy_connect_retry:fail(Retry0) of
         {max_retries, Retry} ->
-            {_, FreshRetry} = bondy_retry:succeed(Retry),
+            {_, FreshRetry} = bondy_connect_retry:succeed(Retry),
             schedule_retry(State#state{retry = FreshRetry});
         {_Delay, Retry} ->
-            Ref = bondy_retry:fire(Retry),
+            Ref = bondy_connect_retry:fire(Retry),
             State#state{retry = Retry, retry_ref = Ref}
     end.
 

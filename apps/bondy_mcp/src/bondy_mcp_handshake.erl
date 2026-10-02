@@ -22,7 +22,7 @@ transport id. Both halves are visible-ASCII, satisfying the transport
 specification's session-id character rule.
 
 The stored session is opened with `transport_id` set, which makes
-`bondy:send/3` deliver everything addressed to it — broker `EVENT`s — into
+`bondy_router_peer:send/3` deliver everything addressed to it — broker `EVENT`s — into
 the session's transport queue instead of its mailbox (`bondy.erl`'s
 `maybe_enqueue/3`). That queue IS the §12.2 notification backlog: a
 disconnected `GET` stream loses nothing, and reconnecting drains it.
@@ -245,7 +245,7 @@ event must not be accounted as one.
 
 bootstrap(RealmUri, Version, AuthSt, Peer, Listener) ->
     ok = ensure_door(),
-    TransportId = bondy_utils:uuid(),
+    TransportId = bondy_router_utils:uuid(),
     SessionId = bondy_session_id:new(),
     case
         bondy_http_transport_session_sup:start_child(

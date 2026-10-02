@@ -45,7 +45,7 @@ purpose.
 
 ## The password is not read directly
 
-It is declared as a `bondy_secret_resolver` reference and resolved through the
+It is declared as a `bondy_connect_secret_resolver` reference and resolved through the
 resolver, which is the path a production node uses. Reading the variable here
 with `os:getenv/1` would test one line less and be one line shorter.
 
@@ -86,7 +86,7 @@ all() ->
 
 init_per_suite(Config) ->
     _ = application:ensure_all_started(ssl),
-    %% `bondy_secret_resolver_aws_sm` calls `erlcloud_aws:auto_config/0`, which
+    %% `bondy_connect_secret_resolver_aws_sm` calls `erlcloud_aws:auto_config/0`, which
     %% needs the application running. Harmless when the `env` provider is in
     %% use, so it is unconditional rather than a branch on configuration.
     _ = application:ensure_all_started(erlcloud),
@@ -138,7 +138,7 @@ The credential came from the environment through the resolver.
 
 Asserted rather than assumed: `init_per_suite` declared the password as an
 `env` reference, so a successful authenticated send is evidence that
-`bondy_secret_resolver` resolved it. A relay whose credential failed to resolve
+`bondy_connect_secret_resolver` resolved it. A relay whose credential failed to resolve
 is dropped at startup rather than started unauthenticated, so its absence from
 the relay list would be the symptom.
 """.
@@ -331,8 +331,8 @@ more that can go wrong -- a region, a role, a JSON document with the password
 under one of its keys. Neither had ever been exercised end to end before this
 suite.
 
-`aws_sm` needs no registration: `bondy_secret_resolver` resolves an unknown
-provider through the conventional `bondy_secret_resolver_<name>` module, which
+`aws_sm` needs no registration: `bondy_connect_secret_resolver` resolves an unknown
+provider through the conventional `bondy_connect_secret_resolver_<name>` module, which
 is how a real node reaches it too.
 """.
 secret_ref() ->

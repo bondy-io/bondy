@@ -195,9 +195,9 @@ wait_mailbox(Pid, N, Remaining) ->
 %% (one clock, N ticks) and seqs 1..N — so `is_fast_install/3` classifies
 %% every one as a fast local install.
 mk_events(Origin, N) ->
-    Clock = bondy_hlc:new(),
+    Clock = bondy_connect_hlc:new(),
     [
-        mk_event(Origin, bondy_hlc:now(Clock), Seq)
+        mk_event(Origin, bondy_connect_hlc:now(Clock), Seq)
      || Seq <- lists:seq(1, N)
     ].
 

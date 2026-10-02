@@ -21,7 +21,7 @@ Startup is two-phase. Listeners marked `start_phase => early` are bound by
 and an orchestrator that cannot reach `/ping` for that long kills the node,
 which then reopens the same store and is killed again. `mount_routes/0` gives
 them their full route set once the services behind those routes are up.
-`bondy_app` sets the status to `ready` only after starting the normal phase,
+`bondy_router_app` sets the status to `ready` only after starting the normal phase,
 so `/ready` answers 503 throughout. Everything else comes up in that later
 phase.
 
@@ -204,7 +204,7 @@ Phase-selective rather than global because suspending `early` would take the
 liveness (`/ping`) and readiness (`/ready`) paths down with it: those answer on
 an `early` listener, so an orchestrator draining the node would read
 `econnrefused` as a dead node and hard-kill it instead of letting the drain
-finish — the opposite of what a grace period is for. `bondy_app:prep_stop/1`
+finish — the opposite of what a grace period is for. `bondy_router_app:prep_stop/1`
 therefore suspends `normal` only.
 """.
 -spec suspend(phase()) -> ok.
@@ -219,7 +219,7 @@ Resumes accepting new connections on the listeners in `Phase`, undoing
 
 Called by `bondy_listener_wamp_api` for the `bondy.listener.resume` procedure,
 which is the pairing this exists for: nothing in Bondy suspends a phase it
-intends to resume — `bondy_app:prep_stop/1` suspends `normal` on the way to
+intends to resume — `bondy_router_app:prep_stop/1` suspends `normal` on the way to
 stopping it — so taking a phase out of rotation and putting it back is an
 operator's action. It takes a phase for the same reason `suspend/1` does.
 
@@ -322,7 +322,7 @@ http_listeners() ->
 %%     accepted the bind, measured on Docker 29.7.2.
 %%
 %% Any of the three aborts boot, because `admin_local` is `early` and
-%% `bondy_app`'s `ok ?= start_probe_listeners()` propagates the error. That is
+%% `bondy_router_app`'s `ok ?= start_probe_listeners()` propagates the error. That is
 %% deliberate: a node that refuses to boot is loud and fixable, whereas one that
 %% boots without its administrable endpoint is discovered when someone is
 %% already locked out. `start_one/1` reports the diagnosis those errors need.
@@ -358,7 +358,7 @@ admin_local_spec() ->
     %% which `bondy_ct:node_env/2` works around with a per-peer directory.
     %%
     %% What blocks it is boot order, not effort. Any node identity comes from
-    %% Partisan, which `bondy_app:start/2` starts only AFTER
+    %% Partisan, which `bondy_router_app:start/2` starts only AFTER
     %% `bondy_config:init/1` returns — deliberately, because `init/1` spends
     %% its whole body editing Partisan's application environment by hand. This
     %% function runs inside `init/1`, so there is no node name yet. Worse,

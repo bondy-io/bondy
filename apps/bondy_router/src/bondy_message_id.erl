@@ -40,7 +40,7 @@ init() ->
         {write_concurrency, true},
         {decentralized_counters, true}
     ],
-    {ok, ?TAB} = bondy_table_manager:add(?TAB, Opts),
+    {ok, ?TAB} = bondy_connect_table_manager:add(?TAB, Opts),
     ok.
 
 -spec init_session(

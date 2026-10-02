@@ -579,7 +579,7 @@ http_to_wamp(Status, RespBody) ->
 %% replaced - `wamp.error.not_found' and `bondy.error.invalid_argument' - were
 %% neither WAMP nor Bondy URIs.
 status_to_error_uri(Status) ->
-    bondy_error:uri(status_to_error_type(Status)).
+    bondy_connect_error:uri(status_to_error_type(Status)).
 
 %% @private
 status_to_error_type(400) -> invalid_argument;

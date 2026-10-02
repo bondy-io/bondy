@@ -14,8 +14,8 @@
         "and is written in Erlang."},
     {vsn, "1.0.0-rc.pistachio"},
     {registered, []},
-    %% We pass the version number in the bondy_app:start/2 arguments
-    {mod, {bondy_app, [{vsn, "1.0.0-rc.pistachio"}]}},
+    %% We pass the version number in the bondy_router_app:start/2 arguments
+    {mod, {bondy_router_app, [{vsn, "1.0.0-rc.pistachio"}]}},
     {applications, [
         %% Erlang/OTP
         stdlib,
@@ -35,7 +35,7 @@
         oidcc,
         %% 3rd-party Utils
         %% Process registry / worker pools (bondy_jobs_sup et al.). Previously
-        %% started transitively via plum_db; bondy_app no longer starts plum_db,
+        %% started transitively via plum_db; bondy_router_app no longer starts plum_db,
         %% so bondy_router must declare it as a direct runtime dependency.
         gproc,
         %% 3rd-party Instrumentation
@@ -53,13 +53,13 @@
         bondy_wamp,
         bondy_msgpack,
         bondy_metrics,
-        bondy_stdlib,
+        bondy_connect_lib,
         bondy_regulator,
         %% bondy implements bondy_connect_local's handler behaviour and
         %% registers it at boot (the in-VM WAMP transport for co-located clients)
         bondy_connect_sdk
-        %% tuplespace, partisan and bondy_db are started manually by bondy_app
-        %% (partisan is `{partisan, load}` in the release; bondy_app owns
+        %% tuplespace, partisan and bondy_db are started manually by bondy_router_app
+        %% (partisan is `{partisan, load}` in the release; bondy_router_app owns
         %% starting it, before bondy_db). plum_db is no longer started.
     ]},
     {env, []},

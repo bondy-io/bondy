@@ -631,7 +631,7 @@ decode_history_cursor(M) ->
 %% `has_more => false`, which is a defect in this module rather than anything
 %% the caller did, and it falls through to an internal error.
 page_error(stream_deadline_exceeded, M) ->
-    Error = bondy_error:new(timeout, #{
+    Error = bondy_connect_error:new(timeout, #{
         message => ~"The alarm history walk ran out of time.",
         description =>
             <<
@@ -646,7 +646,7 @@ page_error(stream_deadline_exceeded, M) ->
 %% @private
 %% A bad cursor is the caller's, not the node's.
 page_error(Reason, M) when Reason == stale; Reason == malformed ->
-    Error = bondy_error:new(invalid_argument, #{
+    Error = bondy_connect_error:new(invalid_argument, #{
         message => ~"Invalid pagination cursor.",
         description =>
             <<

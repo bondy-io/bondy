@@ -258,7 +258,7 @@ peer add survives a remove (add-wins).
 -type dot_store() :: #{dot() => map_value()}.
 -type entries() :: #{map_key() => dot_store()}.
 -type context() :: bondy_dvvset:vector().
--type state() :: {entries(), context(), bondy_hlc:hlc()}.
+-type state() :: {entries(), context(), bondy_connect_hlc:hlc()}.
 -type op() ::
     {put, map_key(), map_value()}
     | {apply, map_key(), module(), term()}
@@ -418,7 +418,7 @@ reap_origins({Entries, CC, Hlc}, Retired) ->
             {{Entries, CC1, Hlc}, lists:usort(Reaped)}
     end.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc({_Entries, _CC, Hlc}) ->
     Hlc.

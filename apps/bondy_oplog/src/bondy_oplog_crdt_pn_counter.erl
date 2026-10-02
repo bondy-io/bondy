@@ -64,7 +64,7 @@ switch with no data migration.
 -type counter() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 -type state() :: #{
     counters := #{origin() => counter()},
-    hlc := bondy_hlc:hlc()
+    hlc := bondy_connect_hlc:hlc()
 }.
 -type op() :: {inc, integer()}.
 
@@ -135,7 +135,7 @@ apply_op(#{counters := C0, hlc := H0} = S, {inc, Delta}, Key) when
 to_value(#{counters := C}) ->
     maps:fold(fun(_O, {P, N, _S}, Acc) -> Acc + P - N end, 0, C).
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc(#{hlc := H}) -> H.
 
@@ -156,7 +156,7 @@ value — not a policy choice, true for any consumer) and every constituent
 operation is strictly below the stability point. A non-zero value is data
 and is kept at any stability point.
 """.
--spec stabilize(bondy_hlc:hlc(), state()) -> keep | discard.
+-spec stabilize(bondy_connect_hlc:hlc(), state()) -> keep | discard.
 
 stabilize(StableHlc, #{hlc := Hlc} = State) when Hlc < StableHlc ->
     case to_value(State) of

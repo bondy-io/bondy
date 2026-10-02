@@ -159,7 +159,7 @@ disable_bridge(Name) ->
     gen_server:call(?MODULE, {disable_bridge, Name}, timer:seconds(30)).
 
 -doc """
-Boot-time entry point, called once by `bondy_app` on the durable boot path
+Boot-time entry point, called once by `bondy_router_app` on the durable boot path
 (`start_normal_listeners/0`), after the `main` store is known to be open.
 
 Loads the bridges to manage — the `bridges` section of `bondy.conf` merged
@@ -167,14 +167,14 @@ over the permanent bridges this node persisted through the API, the former
 overriding the latter — and then starts every enabled one.
 
 The load reads and writes the durable `bondy_bridge_relay` table, which is
-why it lives here and NOT in `init/1`: the manager is a `bondy_sup` child
+why it lives here and NOT in `init/1`: the manager is a `bondy_router_sup` child
 that comes up on every boot, including a degraded one where `main` failed
 to open (`bondy_namespace_catalog:open_main_into/1`). Reading the table
 then raises `bridge_relay_table_unavailable`, and a raise from `init/1` or
 its continuation crash-loops this manager into
-`reached_max_restart_intensity`, taking `bondy_sup` — and the node the
+`reached_max_restart_intensity`, taking `bondy_router_sup` — and the node the
 catalogue deliberately left standing — down with it. On a degraded boot
-`bondy_app:start_services/1` never calls this, so the manager holds no
+`bondy_router_app:start_services/1` never calls this, so the manager holds no
 bridges and touches no table. Exercised end-to-end by
 `bondy_degraded_boot_SUITE`.
 

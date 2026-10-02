@@ -142,7 +142,7 @@ before the next write (pinned by `bondy_db_tier2_durability_test`).
 
 -type register_value() :: term().
 -type clock() :: bondy_dvvset:clock().
--type state() :: {clock(), bondy_hlc:hlc()}.
+-type state() :: {clock(), bondy_connect_hlc:hlc()}.
 -type op() :: {set, register_value()}.
 
 -export_type([state/0, op/0, register_value/0]).
@@ -275,7 +275,7 @@ reap_origins({{}, _Hlc} = State, _Retired) ->
     %% The bare empty clock `{}` (no entries) — nothing to reap.
     {State, []}.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc({_Clock, Hlc}) ->
     Hlc.

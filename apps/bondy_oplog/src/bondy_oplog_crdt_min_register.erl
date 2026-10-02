@@ -55,7 +55,7 @@ fold, so a table can switch with no data migration.
 %% bondy_oplog_crdt_commutative
 -export([apply_op/3]).
 
--type state() :: undefined | {integer(), bondy_hlc:hlc()}.
+-type state() :: undefined | {integer(), bondy_connect_hlc:hlc()}.
 -type op() :: {set, integer()}.
 
 -export_type([state/0, op/0]).
@@ -108,7 +108,7 @@ apply_op({Old, OldH}, {set, V}, Key) when is_integer(V) ->
 to_value(undefined) -> undefined;
 to_value({V, _H}) -> V.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc(undefined) -> 0;
 hlc({_V, H}) -> H.

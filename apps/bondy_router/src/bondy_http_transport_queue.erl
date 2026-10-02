@@ -178,8 +178,8 @@ delivered FIRST. See the `One queue` section above.
 Initialises the sharded queue tables and the metadata table.
 
 Creates `NumPartitions` anonymous ETS tables registered with
-`bondy_table_manager` under `{?MODULE, partition, Bucket}` keys. The
-tables are owned by `bondy_table_manager` so they survive the caller
+`bondy_connect_table_manager` under `{?MODULE, partition, Bucket}` keys. The
+tables are owned by `bondy_connect_table_manager` so they survive the caller
 (typically `bondy_http_transport_queue_manager`) crashing and being restarted
 by its supervisor — in-flight queued messages are not lost.
 
@@ -202,7 +202,7 @@ init() ->
         erlang:system_info(schedulers)
     ),
 
-    %% Sharded queue tables — anonymous, owned by bondy_table_manager so
+    %% Sharded queue tables — anonymous, owned by bondy_connect_table_manager so
     %% they survive the transport_queue_manager crashing and being
     %% restarted by its supervisor. Idempotent: existing tables are
     %% returned as-is on re-init.
@@ -217,7 +217,7 @@ init() ->
     Ring = lists:foldl(
         fun(Bucket, Acc) ->
             Key = {?MODULE, partition, Bucket},
-            {ok, Tab} = bondy_table_manager:get_or_create_anonymous(
+            {ok, Tab} = bondy_connect_table_manager:get_or_create_anonymous(
                 Key, PartitionOpts
             ),
             Acc#{Bucket => Tab}
@@ -230,7 +230,7 @@ init() ->
     persistent_term:put(?RING_KEY, Ring),
 
     %% Metadata table — named (single static atom, not a per-bucket leak)
-    %% and also owned by bondy_table_manager. Idempotent.
+    %% and also owned by bondy_connect_table_manager. Idempotent.
     MetaOpts = [
         set,
         {keypos, #bondy_http_transport_queue_meta.transport_id},
@@ -240,7 +240,7 @@ init() ->
         {write_concurrency, true},
         {decentralized_counters, true}
     ],
-    {ok, _} = bondy_table_manager:get_or_create(?META_TAB, MetaOpts),
+    {ok, _} = bondy_connect_table_manager:get_or_create(?META_TAB, MetaOpts),
 
     ok.
 

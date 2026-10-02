@@ -562,8 +562,10 @@ to_external(#entry{key = Key} = E, wamp_meta) ->
             Details
     end;
 to_external(#entry{key = Key} = E, default) ->
-    Ref = bondy_stdlib:and_then(E#entry.ref, fun bondy_ref:to_uri/1),
-    ORef = bondy_stdlib:and_then(E#entry.origin_ref, fun bondy_ref:to_uri/1),
+    Ref = bondy_connect_lib:and_then(E#entry.ref, fun bondy_ref:to_uri/1),
+    ORef = bondy_connect_lib:and_then(
+        E#entry.origin_ref, fun bondy_ref:to_uri/1
+    ),
 
     #{
         type => E#entry.type,

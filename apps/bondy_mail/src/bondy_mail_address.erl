@@ -5,7 +5,7 @@
 
 -module(bondy_mail_address).
 
--include_lib("bondy_stdlib/include/bondy_stdlib.hrl").
+-include_lib("bondy_connect_lib/include/bondy_connect_lib.hrl").
 
 -moduledoc """
 Validation of email addresses, and of the domain policy applied to a sender.

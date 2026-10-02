@@ -85,7 +85,7 @@ mk_event(Hlc, Seq) ->
     bondy_oplog_event:new(Key, {op, Seq}, undefined).
 
 append1(Pid, HLC, Seq) ->
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     E = mk_event(Hlc, Seq),
     bondy_oplog_wal:append(Pid, E).
 
@@ -144,7 +144,7 @@ bytes_total_grows_with_appends_test() ->
         Hdr = ?BONDY_OPLOG_WAL_SEGMENT_HEADER_BYTES,
         Before = maps:get(bytes_total, bondy_oplog_wal:info(Pid)),
         ?assertEqual(Hdr, Before),
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         {ok, _, _} = append1(Pid, HLC, 0),
         After = maps:get(bytes_total, bondy_oplog_wal:info(Pid)),
         ?assert(After > Before)
@@ -156,7 +156,7 @@ bytes_total_recomputed_on_reopen_test() ->
     try
         Opts = (base_opts())#{dir => Dir},
         {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         [{ok, _, _} = append1(P1, HLC, S) || S <- lists:seq(0, 4)],
         BytesA = maps:get(bytes_total, bondy_oplog_wal:info(P1)),
         ok = bondy_oplog_wal:close(P1),
@@ -181,12 +181,12 @@ bytes_total_decreases_after_sweep_test() ->
         min_live_segments => 1
     },
     with_wal(Opts, fun(Pid, _) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         [{ok, _, _} = append1(Pid, HLC, S) || S <- lists:seq(0, 4)],
         Before = maps:get(bytes_total, bondy_oplog_wal:info(Pid)),
         ok = bondy_oplog_wal:set_committed_segment(Pid, 9999),
         ok = bondy_oplog_wal:advance_snapshot_watermark(
-            Pid, bondy_hlc:now(HLC) + 1
+            Pid, bondy_connect_hlc:now(HLC) + 1
         ),
         After = maps:get(bytes_total, bondy_oplog_wal:info(Pid)),
         ?assert(After < Before)
@@ -199,7 +199,7 @@ wal_full_when_max_total_size_exceeded_test() ->
     %% writer's `backpressure` field reflects the at-cap state.
     Opts = #{max_total_wal_size => Hdr, max_segment_bytes => 8192},
     with_wal(Opts, fun(Pid, _) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         ?assertEqual({error, wal_full}, append1(Pid, HLC, 0)),
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(0, maps:get(append_count, Info)),
@@ -218,7 +218,7 @@ wal_full_when_max_live_segments_reached_test() ->
     with_wal(Opts, fun(Pid, _) ->
         %% Live count starts at 1 (the bootstrap head). The cap is
         %% hit immediately, so any append is refused.
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         ?assertEqual({error, wal_full}, append1(Pid, HLC, 0)),
         Info = bondy_oplog_wal:info(Pid),
         ?assertMatch(
@@ -286,7 +286,7 @@ wal_full_telemetry_emitted_test() ->
     {Ref, HandlerId} = attach_capture([[bondy_oplog, wal, wal_full]]),
     try
         with_wal(Opts, fun(Pid, _) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             ?assertEqual({error, wal_full}, append1(Pid, HLC, 0))
         end),
         [{Event, M, Meta} | _] = recv_events(Ref, 1, []),
@@ -305,7 +305,7 @@ wal_full_telemetry_debounced_test() ->
     {Ref, HandlerId} = attach_capture([[bondy_oplog, wal, wal_full]]),
     try
         with_wal(Opts, fun(Pid, _) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             [
                 ?assertEqual({error, wal_full}, append1(Pid, HLC, S))
              || S <- lists:seq(0, 9)
@@ -323,7 +323,7 @@ append_telemetry_emitted_test() ->
     {Ref, HandlerId} = attach_capture([[bondy_oplog, wal, append]]),
     try
         with_wal(#{}, fun(Pid, _) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             {ok, Hlc, _} = append1(Pid, HLC, 0),
             [{Event, M, Meta}] = recv_events(Ref, 1, []),
             ?assertEqual([bondy_oplog, wal, append], Event),
@@ -348,7 +348,7 @@ fsync_telemetry_emitted_test() ->
     {Ref, HandlerId} = attach_capture([[bondy_oplog, wal, fsync]]),
     try
         with_wal(#{}, fun(Pid, _) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             {ok, _, _} = append1(Pid, HLC, 0),
             %% per_write mode: fsync was issued during the append.
             [{Event, M, Meta} | _] = recv_events(Ref, 1, []),
@@ -366,7 +366,7 @@ durable_telemetry_emitted_test() ->
     {Ref, HandlerId} = attach_capture([[bondy_oplog, wal, durable]]),
     try
         with_wal(#{}, fun(Pid, _) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             drain(Ref),
             {ok, _, _} = append1(Pid, HLC, 0),
             [{Event, M, Meta} | _] = recv_events(Ref, 1, []),
@@ -385,7 +385,7 @@ rotate_telemetry_emitted_test() ->
         with_wal(
             #{max_segment_bytes => 256, max_batch_bytes => 200},
             fun(Pid, _) ->
-                HLC = bondy_hlc:new(),
+                HLC = bondy_connect_hlc:new(),
                 [{ok, _, _} = append1(Pid, HLC, S) || S <- lists:seq(0, 2)],
                 Events = recv_events(Ref, 3, []),
                 ?assert(length(Events) >= 1),
@@ -415,7 +415,7 @@ retention_sweep_telemetry_emitted_test() ->
             min_live_segments => 1
         },
         with_wal(Opts, fun(Pid, _) ->
-            HLC = bondy_hlc:new(),
+            HLC = bondy_connect_hlc:new(),
             [{ok, _, _} = append1(Pid, HLC, S) || S <- lists:seq(0, 4)],
             drain(Ref),
             {ok, _, _} = bondy_oplog_wal:retention_sweep(Pid),
@@ -449,7 +449,7 @@ info_exposes_backpressure_fields_test() ->
 
 head_lag_ms_populated_after_append_test() ->
     with_wal(#{}, fun(Pid, _) ->
-        HLC = bondy_hlc:new(),
+        HLC = bondy_connect_hlc:new(),
         ?assertEqual(
             undefined,
             maps:get(head_lag_ms, bondy_oplog_wal:info(Pid))

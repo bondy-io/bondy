@@ -57,7 +57,7 @@ authenticate(Req, RealmUri) ->
     case bondy_realm:is_security_enabled(RealmUri) of
         false ->
             #{
-                authid => bondy_utils:uuid(),
+                authid => bondy_router_utils:uuid(),
                 authroles => [],
                 is_anonymous => true
             };
@@ -131,7 +131,7 @@ anonymous(RealmUri, SourceIP, Req) ->
             case bondy_auth:authenticate(?WAMP_ANON_AUTH, <<>>, #{}, Ctxt) of
                 {ok, _, _} ->
                     #{
-                        authid => bondy_utils:uuid(),
+                        authid => bondy_router_utils:uuid(),
                         authroles => [<<"anonymous">>],
                         is_anonymous => true
                     };

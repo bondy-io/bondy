@@ -55,7 +55,7 @@ case, plus any raw transport `send/2` failure, both open-ended by nature).
 -doc """
 A failed operation.
 
-`kind => wamp` is an ERROR sent by the router. It is a `bondy_error:t()` - so
+`kind => wamp` is an ERROR sent by the router. It is a `bondy_connect_error:t()` - so
 it also carries `message`, `nature`, `details` and the rest - extended with the
 raw `args` and `kwargs` of the WAMP message. Prefer `uri` to identify it and
 `nature` to decide whether retrying can help.
@@ -69,7 +69,7 @@ raw `args` and `kwargs` of the WAMP message. Prefer `uri` to identify it and
         args := list(),
         kwargs := map(),
         message := binary(),
-        nature := bondy_error:nature(),
+        nature := bondy_connect_error:nature(),
         _ => _
     }
     | #{kind := client, reason := call_client_reason()}.

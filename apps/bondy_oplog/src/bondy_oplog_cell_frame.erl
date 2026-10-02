@@ -25,7 +25,7 @@ A projection adapter stores each cell as a binary frame:
 ```
 
 - `HlcBin` is a fixed 8-byte big-endian unsigned integer
-  (`bondy_hlc:hlc/0` is 64-bit non-negative). The leading
+  (`bondy_connect_hlc:hlc/0` is 64-bit non-negative). The leading
   `HlcLen:16` byte-length prefix preserves forward compatibility —
   future formats can carry larger HLC representations (HLC vectors,
   version vectors) without a frame-format migration.
@@ -107,7 +107,7 @@ look at the fold itself; the caller resolves the boolean via
 the CRDT `value_equals_state/0` callback).
 """.
 -spec encode(
-    Hlc :: bondy_hlc:hlc(),
+    Hlc :: bondy_connect_hlc:hlc(),
     StateBytes :: binary(),
     ValueBytes :: binary() | undefined,
     ValueEqualsState :: boolean()
@@ -139,7 +139,7 @@ fold), `ValueBytes` is returned as `undefined` — callers needing the
 value bytes for those folds use `StateBytes` directly.
 """.
 -spec decode_full(frame()) ->
-    {bondy_hlc:hlc(), binary(), binary() | undefined}.
+    {bondy_connect_hlc:hlc(), binary(), binary() | undefined}.
 
 decode_full(
     <<?VERSION:8, HasValueColumn:1, _Reserved:7, HlcLen:16/big-unsigned,
@@ -193,7 +193,7 @@ Decode the HEAD wire format produced by `extract_head/1` into
 Total over well-formed HEAD bytes; malformed input raises
 `error:function_clause`.
 """.
--spec decode_head(head_metadata()) -> {bondy_hlc:hlc(), binary()}.
+-spec decode_head(head_metadata()) -> {bondy_connect_hlc:hlc(), binary()}.
 
 decode_head(
     <<HlcLen:16/big-unsigned, HlcBin:HlcLen/binary, ValueBytes/binary>>

@@ -221,7 +221,7 @@ prop_bootstrap_absorbs() ->
 %% =============================================================================
 
 far_hlc(OffsetMs) ->
-    bondy_hlc:encode(
+    bondy_connect_hlc:encode(
         erlang:system_time(millisecond) + OffsetMs, 0
     ).
 

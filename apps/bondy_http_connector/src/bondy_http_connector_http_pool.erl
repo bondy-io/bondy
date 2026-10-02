@@ -7,7 +7,7 @@
 
 -moduledoc """
 A supervised hackney connection pool with automatic health-check retries using
-bondy_retry. The pool is restarted when the endpoint becomes available again.
+bondy_connect_retry. The pool is restarted when the endpoint becomes available again.
 
 ### Usage
 
@@ -32,13 +32,13 @@ bondy_http_connector_http_pool:start_link(my_api_pool,
 
 ### Key design points
 
-**Indefinite retry** — `deadline => 0` disables the deadline in `bondy_retry`. If `max_retries` is ever hit, `schedule_retry/1` resets the retry state via `succeed/1` and continues, so the pool never gives up.
+**Indefinite retry** — `deadline => 0` disables the deadline in `bondy_connect_retry`. If `max_retries` is ever hit, `schedule_retry/1` resets the retry state via `succeed/1` and continues, so the pool never gives up.
 
 **Health check on start** — `try_start_pool/1` does a HEAD request to verify the endpoint is actually reachable before marking the pool `up`. This avoids accepting requests into a dead pool.
 
 **Fast failure for callers** — while the pool is `down`, `request/5` returns `{error, pool_down}` immediately rather than hanging. Callers can decide whether to queue, retry themselves, or fail fast.
 
-**`bondy_retry:fire/1`** — uses the erlang timer mechanism so the gen_server gets a `{timeout, Ref, Id}` message, keeping everything async and OTP-idiomatic.
+**`bondy_connect_retry:fire/1`** — uses the erlang timer mechanism so the gen_server gets a `{timeout, Ref, Id}` message, keeping everything async and OTP-idiomatic.
 
 **Periodic liveness probe while up** — the health check above only runs at startup and while `down`, so on its own it leaves a service degrading mid-flight invisible until a live call happens to hit it. `liveness.*` config (`schema/bondy_http_connector.schema`) arms a self-rearming timer that re-probes on an interval while `up`, and after `failure_threshold` consecutive failures calls `do_mark_down/1`. Pool state flips back to `up` fail-open on the first successful recovery probe; the service-down alarm (`alarm_handler:set_alarm/1`, id `{http_connector_service_down, ServiceName}`) is gated separately by `success_threshold` consecutive successes so a flapping upstream doesn't flap the page while traffic still resumes as soon as it's reachable. See `bondy_http_connector_telemetry` for the emitted events and metric families.
 """.
@@ -56,7 +56,7 @@ bondy_http_connector_http_pool:start_link(my_api_pool,
     endpoint :: binary(),
     pool_opts :: proplists:proplist(),
     req_opts :: proplists:proplist(),
-    retry :: bondy_retry:t(),
+    retry :: bondy_connect_retry:t(),
     retry_ref :: reference() | undefined,
     status = down :: up | down,
     %% Periodic up-state health check (distinct from `retry`, which only
@@ -98,7 +98,7 @@ bondy_http_connector_http_pool:start_link(my_api_pool,
     basic_auth =>
         {User :: binary(), Pass :: binary()},
     %% Retry (ours)
-    retry_opts => bondy_retry:opts(),
+    retry_opts => bondy_connect_retry:opts(),
     %% Telemetry/alarm label (ours)
     service_name => binary(),
     %% Periodic up-state health check (ours)
@@ -219,7 +219,7 @@ init([Name, Endpoint, Opts]) ->
         backoff_type => jitter
     }),
 
-    Retry = bondy_retry:init({?MODULE, Name}, RetryOpts),
+    Retry = bondy_connect_retry:init({?MODULE, Name}, RetryOpts),
 
     State = #state{
         name = Name,
@@ -271,7 +271,7 @@ handle_info(
 handle_info({liveness_check, _Name}, State) ->
     %% Pool is down (or this is a stale timer message racing a down
     %% transition that already cancelled it) — the down-state
-    %% `bondy_retry` health check owns recovery; don't run a second,
+    %% `bondy_connect_retry` health check owns recovery; don't run a second,
     %% redundant probe cadence.
     {noreply, State};
 handle_info(_Msg, State) ->
@@ -350,7 +350,7 @@ try_start_pool(#state{name = Name} = State0) ->
                 description => "Pool health check failed, scheduling retry",
                 pool => Name,
                 reason => Reason,
-                retry_count => bondy_retry:count(State0#state.retry)
+                retry_count => bondy_connect_retry:count(State0#state.retry)
             }),
             schedule_retry(State0)
     end.
@@ -367,7 +367,7 @@ try_start_pool(#state{name = Name} = State0) ->
 mark_up(
     #state{name = Name, service_name = ServiceName, retry = Retry0} = State0
 ) ->
-    {_, Retry} = bondy_retry:succeed(Retry0),
+    {_, Retry} = bondy_connect_retry:succeed(Retry0),
     ?LOG_INFO(#{
         description => "Pool is up",
         pool => Name
@@ -466,7 +466,7 @@ liveness_url(Endpoint, LOpts) ->
 %% @private
 %% Only ever scheduled while `up` (see the `handle_info/2` guard) — a
 %% self-rearming periodic check independent of the down-state
-%% `bondy_retry` cadence, so a service that degrades without a live WAMP
+%% `bondy_connect_retry` cadence, so a service that degrades without a live WAMP
 %% call happening to hit it is still detected.
 do_liveness_check(#state{service_name = ServiceName} = State0) ->
     StartTs = erlang:monotonic_time(millisecond),
@@ -513,7 +513,7 @@ handle_probe_failure(#state{consec_failures = Failures0} = State0, Reason) ->
                 consecutive_failures => Failures,
                 reason => Reason
             }),
-            %% Recovery is now owned by the down-state `bondy_retry` loop
+            %% Recovery is now owned by the down-state `bondy_connect_retry` loop
             %% (`try_start_pool/1`, via `schedule_retry/1` inside
             %% `do_mark_down/1`), which re-arms the liveness timer through
             %% `mark_up/1` once it succeeds again — don't re-arm here.
@@ -624,17 +624,17 @@ opt_key({K, _}) -> K;
 opt_key(K) when is_atom(K) -> K.
 
 schedule_retry(#state{retry = Retry0} = State) ->
-    case bondy_retry:fail(Retry0) of
+    case bondy_connect_retry:fail(Retry0) of
         {max_retries, Retry} ->
             %% Reset and keep going — we want indefinite retries
-            {_, FreshRetry} = bondy_retry:succeed(Retry),
+            {_, FreshRetry} = bondy_connect_retry:succeed(Retry),
             ?LOG_WARNING(#{
                 description => "Max retries reached, resetting retry state",
                 pool => State#state.name
             }),
             schedule_retry(State#state{retry = FreshRetry});
         {_Delay, Retry} ->
-            Ref = bondy_retry:fire(Retry),
+            Ref = bondy_connect_retry:fire(Retry),
             State#state{
                 retry = Retry,
                 retry_ref = Ref

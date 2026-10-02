@@ -105,7 +105,7 @@ whose payload Bondy cannot read.
 -spec decode_call(wamp_call()) -> {ok, wamp_call()} | {error, wamp_error()}.
 
 decode_call(#call{options = #{ppt_scheme := _}} = M) ->
-    Reason = bondy_error:new(invalid_argument, #{
+    Reason = bondy_connect_error:new(invalid_argument, #{
         message => ~"Payload Passthru Mode is not supported on Bondy Meta API."
     }),
     {error,
@@ -509,7 +509,7 @@ maybe_error(Val, M) ->
     bondy_wamp_message:result(bondy_wamp_message:request_id(M), #{}, [Val]).
 
 error({not_authorized, Reason}, M) ->
-    Map = bondy_error:to_map(bondy_error:from_term(Reason)),
+    Map = bondy_connect_error:to_map(bondy_connect_error:from_term(Reason)),
 
     %% This clause has always put the error map in Args rather than a message,
     %% unlike every other error reply. The shape is kept so existing clients
@@ -538,13 +538,13 @@ no_such_procedure_error(#invocation{details = #{procedure := Uri}} = M) ->
     no_such_procedure_error(Uri, ?CALL, M#invocation.request_id).
 
 no_such_procedure_error(ProcUri, MType, ReqId) ->
-    Error = bondy_error:new(no_such_procedure, #{
+    Error = bondy_connect_error:new(no_such_procedure, #{
         details => #{procedure_uri => ProcUri}
     }),
     bondy_wamp_error:to_wamp(Error, MType, ReqId, #{}).
 
 no_such_registration_error(RegId) when is_integer(RegId) ->
-    Error = bondy_error:new(no_such_registration, #{
+    Error = bondy_connect_error:new(no_such_registration, #{
         details => #{registration_id => RegId}
     }),
     bondy_wamp_error:to_wamp(Error, ?UNREGISTER, RegId, #{}).
@@ -757,7 +757,7 @@ send_chunk(#call{request_id = ReqId}, Ctxt, Values, HasMore, Extras) ->
     %% displace the two this function is responsible for.
     Payload = Extras#{~"values" => Values, ~"has_more" => HasMore},
     Result = bondy_wamp_message:result(ReqId, Details, [Payload]),
-    bondy:send(
+    bondy_router_peer:send(
         bondy_context:realm_uri(Ctxt), bondy_context:ref(Ctxt), Result
     ).
 
@@ -802,7 +802,7 @@ unauthorized(Type, ReqId, Ctxt) ->
         $),
         $.
     >>,
-    Error = bondy_error:new(not_authorized, #{
+    Error = bondy_connect_error:new(not_authorized, #{
         message => Message,
         description => Description,
         details => #{
@@ -814,7 +814,7 @@ unauthorized(Type, ReqId, Ctxt) ->
 
 %% @private
 arity_error(Msg, Description, Details) ->
-    Error = bondy_error:new(invalid_argument, #{
+    Error = bondy_connect_error:new(invalid_argument, #{
         message => ~"Invalid number of positional arguments.",
         description => Description,
         details => Details
@@ -825,7 +825,7 @@ arity_error(Msg, Description, Details) ->
 
 %% @private
 bad_dry_run_error(Msg, Value) ->
-    Error = bondy_error:new(invalid_argument, #{
+    Error = bondy_connect_error:new(invalid_argument, #{
         message => ~"Invalid value for `dry_run`.",
         description =>
             <<
@@ -854,7 +854,7 @@ to_list(undefined) -> [];
 to_list(L) when is_list(L) -> L.
 
 do_deprecated_procedure_error(M, Uri) ->
-    Error = bondy_error:new(deprecated_procedure, #{
+    Error = bondy_connect_error:new(deprecated_procedure, #{
         details => #{procedure_uri => Uri}
     }),
     bondy_wamp_error:to_wamp(Error, M).

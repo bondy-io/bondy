@@ -159,7 +159,7 @@ local_readiness() ->
         catch
             _:_ -> 0
         end,
-    {partisan:node(), bondy_app:is_ready(), Instances}.
+    {partisan:node(), bondy_router_app:is_ready(), Instances}.
 
 %% =============================================================================
 %% PRIVATE

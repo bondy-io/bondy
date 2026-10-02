@@ -72,4 +72,4 @@ set(Key, Value) ->
 %% Kept as a call so the defaults are in place from boot rather than from the
 %% first secret.
 init_lhttpc_ssl_options() ->
-    bondy_secret_resolver_aws_sm:ensure_transport().
+    bondy_connect_secret_resolver_aws_sm:ensure_transport().

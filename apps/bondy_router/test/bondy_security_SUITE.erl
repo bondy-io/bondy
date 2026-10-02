@@ -193,8 +193,8 @@ create_groups(Config) ->
 
 api_client_add(Config) ->
     {create_groups, Prev} = ?config(saved_config, Config),
-    ClientId = bondy_utils:generate_fragment(48),
-    Secret = bondy_utils:generate_fragment(48),
+    ClientId = bondy_router_utils:generate_fragment(48),
+    Secret = bondy_router_utils:generate_fragment(48),
     Uri = ?config(realm_uri, Prev),
     In = #{
         <<"client_id">> => ClientId,
@@ -479,10 +479,10 @@ user_delete(Config) ->
 
 password_token_crud_1(Config) ->
     Uri = ?config(realm_uri, Config),
-    ClientId = bondy_utils:generate_fragment(48),
+    ClientId = bondy_router_utils:generate_fragment(48),
     Client = #{
         <<"client_id">> => ClientId,
-        <<"client_secret">> => bondy_utils:generate_fragment(48)
+        <<"client_secret">> => bondy_router_utils:generate_fragment(48)
     },
     {ok, _} = bondy_oauth2_client:add(Uri, Client),
     U = <<"ale">>,
@@ -778,7 +778,7 @@ new_user(Uri, U) ->
     {ok, _} = bondy_oauth2_resource_owner:add(Uri, R),
     U.
 
-%% Ownership must hold on a cluster of one. `bondy:lrw_nodes/2` selects over a
+%% Ownership must hold on a cluster of one. `bondy_router_peer:lrw_nodes/2` selects over a
 %% candidate set that INCLUDES the local node — `partisan:nodes()`, like
 %% `erlang:nodes/1`, excludes it, so a set built from that alone answers `[]` on
 %% a single-node cluster. Ownership built on that would answer `false`
@@ -788,15 +788,15 @@ single_node_owns_every_realm(Config) ->
     Uri = ?config(realm_uri, Config),
     Self = partisan:node(),
 
-    ?assertEqual([Self], bondy:lrw_nodes(Uri, 1)),
-    ?assert(bondy:is_owner(Uri)),
+    ?assertEqual([Self], bondy_router_peer:lrw_nodes(Uri, 1)),
+    ?assert(bondy_router_peer:is_owner(Uri)),
 
     %% Whatever the key, the only node owns it — no key may route to nobody.
     lists:foreach(
         fun(N) ->
             Key = <<"com.example.realm.", (integer_to_binary(N))/binary>>,
-            ?assertEqual([Self], bondy:lrw_nodes(Key, 1)),
-            ?assert(bondy:is_owner(Key))
+            ?assertEqual([Self], bondy_router_peer:lrw_nodes(Key, 1)),
+            ?assert(bondy_router_peer:is_owner(Key))
         end,
         lists:seq(1, 25)
     ).

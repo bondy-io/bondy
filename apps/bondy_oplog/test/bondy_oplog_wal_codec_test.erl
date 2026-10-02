@@ -53,11 +53,11 @@ writer_with_compression_roundtrips() ->
         retention_sweep_interval => 24 * 60 * 60 * 1000
     },
     {ok, Wal} = bondy_oplog_wal:start_link(Id, Opts),
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     %% Append a very compressible batch — bodies should shrink after
     %% the codec runs.
     Events = [
-        mk_event(bondy_hlc:now(HLC), Seq)
+        mk_event(bondy_connect_hlc:now(HLC), Seq)
      || Seq <- lists:seq(0, 9)
     ],
     {ok, _Acks} = bondy_oplog_wal:append_batch(Wal, Events),
@@ -80,9 +80,9 @@ writer_without_compression_still_works() ->
         retention_sweep_interval => 24 * 60 * 60 * 1000
     },
     {ok, Wal} = bondy_oplog_wal:start_link(Id, Opts),
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Events = [
-        mk_event(bondy_hlc:now(HLC), Seq)
+        mk_event(bondy_connect_hlc:now(HLC), Seq)
      || Seq <- lists:seq(0, 4)
     ],
     {ok, _Acks} = bondy_oplog_wal:append_batch(Wal, Events),
@@ -117,9 +117,9 @@ encrypted_writer_roundtrips() ->
         retention_sweep_interval => 24 * 60 * 60 * 1000
     },
     {ok, Wal} = bondy_oplog_wal:start_link(Id, Opts),
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Events = [
-        mk_event(bondy_hlc:now(HLC), Seq)
+        mk_event(bondy_connect_hlc:now(HLC), Seq)
      || Seq <- lists:seq(0, 4)
     ],
     {ok, _Acks} = bondy_oplog_wal:append_batch(Wal, Events),
@@ -141,9 +141,9 @@ encrypted_compressed_writer_roundtrips() ->
         retention_sweep_interval => 24 * 60 * 60 * 1000
     },
     {ok, Wal} = bondy_oplog_wal:start_link(Id, Opts),
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Events = [
-        mk_event(bondy_hlc:now(HLC), Seq)
+        mk_event(bondy_connect_hlc:now(HLC), Seq)
      || Seq <- lists:seq(0, 9)
     ],
     {ok, _Acks} = bondy_oplog_wal:append_batch(Wal, Events),

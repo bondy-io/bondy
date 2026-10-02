@@ -81,8 +81,8 @@ mk_event(Hlc, Seq) ->
 
 %% N events with strictly increasing HLCs (one clock, N ticks).
 mk_monotonic_events(N) ->
-    Clock = bondy_hlc:new(),
-    [mk_event(bondy_hlc:now(Clock), Seq) || Seq <- lists:seq(1, N)].
+    Clock = bondy_connect_hlc:new(),
+    [mk_event(bondy_connect_hlc:now(Clock), Seq) || Seq <- lists:seq(1, N)].
 
 %% Force `Events` (one single-event batch each) into the writer's mailbox
 %% deterministically: suspend, enqueue all N async in order, resume, then
@@ -179,8 +179,8 @@ group_commit_respects_max_cap_test() ->
 %% synchronous append/2 path).
 group_commit_append_is_durable_on_return_test() ->
     with_wal(#{group_commit => true}, fun(Pid, _Dir) ->
-        Clock = bondy_hlc:new(),
-        Hlc = bondy_hlc:now(Clock),
+        Clock = bondy_connect_hlc:new(),
+        Hlc = bondy_connect_hlc:now(Clock),
         E = mk_event(Hlc, 1),
         {ok, Hlc, {Seg, _Start}} = bondy_oplog_wal:append(Pid, E),
         Info = bondy_oplog_wal:info(Pid),
@@ -438,7 +438,7 @@ probe_rotation_event(MaxSegBytes) ->
             }
         ),
         try
-            find_rotation_index(Pid, bondy_hlc:new(), 1, 50)
+            find_rotation_index(Pid, bondy_connect_hlc:new(), 1, 50)
         after
             ok = bondy_oplog_wal:close(Pid)
         end
@@ -449,7 +449,7 @@ probe_rotation_event(MaxSegBytes) ->
 find_rotation_index(_Pid, _Clock, I, Max) when I > Max ->
     error({probe_no_rotation_within, Max});
 find_rotation_index(Pid, Clock, I, Max) ->
-    E = mk_event(bondy_hlc:now(Clock), I),
+    E = mk_event(bondy_connect_hlc:now(Clock), I),
     {ok, _Hlc, {Seg, _Off}} = bondy_oplog_wal:append(Pid, E),
     case Seg > 0 of
         true -> I;

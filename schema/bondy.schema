@@ -18,7 +18,7 @@
 %% the dedicated Partisan AAE channel, converging each node's view of the
 %% replicated tables. On by default. This is the single master switch: the sync
 %% scheduler process always runs, but with AAE off
-%% `bondy_app:maybe_setup_oplog_replication/0` wires no Partisan peer source, so
+%% `bondy_router_app:maybe_setup_oplog_replication/0` wires no Partisan peer source, so
 %% the scheduler has no peers and stays inert. A single-node deployment is
 %% unaffected either way — it has no peer to sync with, and the authentication
 %% freshness fence treats a lone node as vacuously fresh (see

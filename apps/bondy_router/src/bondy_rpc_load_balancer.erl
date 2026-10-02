@@ -183,7 +183,7 @@ validate_options(Opts0) ->
             Opts;
         #{strategy := jump_consistent_hash} ->
             error(
-                bondy_error:new(missing_required_value, #{
+                bondy_connect_error:new(missing_required_value, #{
                     message =>
                         ~"A value for option '_routing_key' or 'rkey' is required",
                     details => #{key => ~"_routing_key"}

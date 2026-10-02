@@ -51,7 +51,7 @@ A ranch handler for the wamp protocol over either tcp or tls transports.
     %% Monotonic ms timestamp of the most recent router-initiated ping,
     %% used to observe the RTT when the matching pong arrives.
     ping_sent_at :: optional(integer()),
-    ping_retry :: optional(bondy_retry:t()),
+    ping_retry :: optional(bondy_connect_retry:t()),
     hibernate = false :: boolean(),
     start_time :: integer(),
     active_n = once :: once | -32768..32767,
@@ -277,8 +277,8 @@ handle_info({?BONDY_REQ, Pid, _RealmUri, M}, St) when Pid =:= self() ->
     handle_outbound(M, St);
 handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, St) ->
     %% Here we receive the messages that either the router or another peer
-    %% have sent to us using bondy:send/2,3
-    %% ok = bondy:ack(Pid, Ref),
+    %% have sent to us using bondy_router_peer:send/2,3
+    %% ok = bondy_router_peer:ack(Pid, Ref),
     %% We send the message to the peer
     handle_outbound(M, St);
 handle_info(
@@ -286,7 +286,7 @@ handle_info(
 ) ->
     ?LOG_DEBUG(#{
         description => "Connection timeout, sending first ping",
-        attempts => bondy_retry:count(State#state.ping_retry)
+        attempts => bondy_connect_retry:count(State#state.ping_retry)
     }),
 
     %% ping_idle_timeout (not to be confused with idle_timeout)
@@ -295,7 +295,7 @@ handle_info(
 handle_info({timeout, Ref, ping_timeout}, #state{ping_tref = Ref} = State) ->
     ?LOG_DEBUG(#{
         description => "Ping timeout, retrying ping",
-        attempts => bondy_retry:count(State#state.ping_retry)
+        attempts => bondy_connect_retry:count(State#state.ping_retry)
     }),
     %% We will retry or fail depending on retry configuration and state
     maybe_send_ping(State);
@@ -423,7 +423,7 @@ source_ip(ProxyProtocol, PeerIP) ->
     end.
 
 peername(Transport, Socket) ->
-    case bondy_utils:peername(Transport, Socket) of
+    case bondy_router_utils:peername(Transport, Socket) of
         {ok, {local, _}} ->
             %% A Unix domain socket has no network peer; it is local by
             %% construction. Represent it as the loopback address so the
@@ -837,7 +837,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
     Timeout = maps:get(timeout, PingOpts),
     Attempts = maps:get(max_attempts, PingOpts),
 
-    Retry = bondy_retry:init(
+    Retry = bondy_connect_retry:init(
         ping_timeout,
         #{
             % disable, use max_retries only
@@ -850,7 +850,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
 
     State#state{
         ping_idle_timeout = IdleTimeout,
-        ping_payload = bondy_utils:generate_fragment(16),
+        ping_payload = bondy_router_utils:generate_fragment(16),
         ping_retry = Retry
     };
 maybe_enable_ping(#{enabled := false}, State) ->
@@ -885,7 +885,7 @@ reset_ping(#state{} = State) ->
     ok = cancel_timer(State#state.ping_tref),
 
     %% Reset retry state
-    {_, Retry} = bondy_retry:succeed(State#state.ping_retry),
+    {_, Retry} = bondy_connect_retry:succeed(State#state.ping_retry),
 
     Time = State#state.ping_idle_timeout,
     Ref = erlang:start_timer(Time, self(), ping_idle_timeout),
@@ -914,7 +914,7 @@ maybe_send_ping(#state{ping_idle_timeout = undefined} = State) ->
     %% ping disabled
     {noreply, State};
 maybe_send_ping(#state{} = State) ->
-    {Result, Retry} = bondy_retry:fail(State#state.ping_retry),
+    {Result, Retry} = bondy_connect_retry:fail(State#state.ping_retry),
     maybe_send_ping(Result, State#state{ping_retry = Retry}).
 
 %% @private
@@ -933,7 +933,7 @@ maybe_send_ping(_Time, #state{} = State0) ->
     ok = send_frame(Frame, State0),
 
     %% We schedule the next retry
-    Ref = bondy_retry:fire(State0#state.ping_retry),
+    Ref = bondy_connect_retry:fire(State0#state.ping_retry),
     State = State0#state{
         ping_tref = Ref,
         ping_sent_at = erlang:monotonic_time(millisecond)

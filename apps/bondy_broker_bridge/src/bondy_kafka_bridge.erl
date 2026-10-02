@@ -411,7 +411,7 @@ apply_action(Action) ->
             <<"acknowledge">> := _Ack
         } = Opts,
         Part = partition(Opts),
-        Data = bondy_utils:maybe_encode(Enc, Value),
+        Data = bondy_router_utils:maybe_encode(Enc, Value),
 
         Result =
             case ActionType of

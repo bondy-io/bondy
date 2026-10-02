@@ -147,7 +147,7 @@ applies here: a tier_0 sub-op needs only its own HLC to linearize).
 -type dot_store() :: bondy_oplog_crdt_nested_core:dot_store().
 -type fields() :: #{field_key() => dot_store()}.
 -type context() :: bondy_dvvset:vector().
--type state() :: {schema(), fields(), context(), bondy_hlc:hlc()}.
+-type state() :: {schema(), fields(), context(), bondy_connect_hlc:hlc()}.
 -type op() :: {apply, field_key(), term()}.
 
 -export_type([state/0, op/0, field_key/0, schema/0]).
@@ -309,7 +309,7 @@ Causal stabilization, two reductions in order of strength:
 
 `keep` when neither applies.
 """.
--spec stabilize(bondy_hlc:hlc(), state()) ->
+-spec stabilize(bondy_connect_hlc:hlc(), state()) ->
     keep | {keep, state()} | discard.
 
 stabilize(StableHlc, {Schema, Fields, CC, Hlc} = State) ->
@@ -355,7 +355,7 @@ force_reap_field({Schema, Fields, CC, Hlc}, FieldKey, RetiredOrigins) ->
     DS1 = bondy_oplog_crdt_nested_core:force_reap(DS0, RetiredOrigins),
     {Schema, Fields#{FieldKey => DS1}, CC, Hlc}.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc({_Schema, _Fields, _CC, Hlc}) ->
     Hlc.

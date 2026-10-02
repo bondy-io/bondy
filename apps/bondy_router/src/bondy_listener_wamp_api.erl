@@ -13,7 +13,7 @@ Suspending stops a listener accepting new connections and leaves established
 ones alone, which is what makes this a drain rather than a stop: use
 `bondy.listener.suspend`, wait for the sessions to finish, and the node has left
 rotation without dropping work. Nothing here stops a listener — that is
-`bondy_app`'s shutdown path.
+`bondy_router_app`'s shutdown path.
 
 Both procedures take a PHASE rather than a listener name, because that is the
 grain `bondy_listener_manager` suspends at and the grain the distinction matters
@@ -135,7 +135,7 @@ phase(_) -> error.
 
 %% @private
 invalid_phase_error(#call{} = M, Value) ->
-    Error = bondy_error:new(invalid_argument, #{
+    Error = bondy_connect_error:new(invalid_argument, #{
         message => ~"Unknown listener phase.",
         description =>
             ~"The phase must be one of \"early\", \"normal\" or \"all\".",

@@ -810,7 +810,7 @@ Returns a summary. A cell whose projection value cannot be read is skipped and
 counted, never treated as reclaimable: absence of evidence is not evidence of
 staleness.
 """.
--spec sweep_stable_cells(pid(), bondy_hlc:hlc()) ->
+-spec sweep_stable_cells(pid(), bondy_connect_hlc:hlc()) ->
     {ok, #{
         scanned := non_neg_integer(),
         discarded := non_neg_integer(),
@@ -847,7 +847,7 @@ need no new invariant.
 """.
 -spec sweep_stable_cells(
     pid(),
-    bondy_hlc:hlc(),
+    bondy_connect_hlc:hlc(),
     Opts :: #{
         max_cells => pos_integer() | infinity,
         cursor => undefined | term()

@@ -127,7 +127,7 @@ loss, not a bookkeeping-bloat nuisance — heed `reap_origins/2`'s own
 -type dot() :: bondy_oplog_crdt_aw_core:dot().
 -type outer_key() :: term().
 -type flat_value() :: term().
--type sub_value() :: {sub, module(), bondy_hlc:hlc(), term()}.
+-type sub_value() :: {sub, module(), bondy_connect_hlc:hlc(), term()}.
 -type value() :: flat_value() | sub_value().
 -type dot_store() :: #{dot() => value()}.
 -type entries() :: #{outer_key() => dot_store()}.
@@ -172,7 +172,7 @@ currently holds a flat (non-nested) value.
     Dot :: dot(),
     Ctx :: bondy_oplog_crdt_aw_core:vv(),
     SubMod :: module(),
-    Hlc :: bondy_hlc:hlc(),
+    Hlc :: bondy_connect_hlc:hlc(),
     SubOp :: term()
 ) -> entries().
 
@@ -246,7 +246,7 @@ foldable run. Value-preserving by construction: the fold IS the module's
 own convergence kernel.
 """.
 -spec stabilize_fold(
-    DotStore :: dot_store(), StableHlc :: bondy_hlc:hlc()
+    DotStore :: dot_store(), StableHlc :: bondy_connect_hlc:hlc()
 ) -> {folded, dot_store()} | unchanged.
 
 stabilize_fold(DotStore, StableHlc) ->

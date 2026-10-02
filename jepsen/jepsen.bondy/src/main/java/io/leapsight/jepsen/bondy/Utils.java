@@ -44,7 +44,7 @@ import java.util.stream.Collectors;
  *    strings (it drops its own entry, so every node lists every node).
  *    `cluster.peer_ip` must be an IP literal (schema validator
  *    `ip_address`), and peer discovery being on requires
- *    `cluster.tls.allow_insecure = on` (bondy_app:guard_peer_plane/0).
+ *    `cluster.tls.allow_insecure = on` (bondy_router_app:guard_peer_plane/0).
  *  - Admin API (`priv/specs/bondy_admin_api.json`, no security):
  *    `POST /realms/:realm_uri/users` with a JSON body calls
  *    `bondy.user.add(Realm, Body)` and answers with the user;

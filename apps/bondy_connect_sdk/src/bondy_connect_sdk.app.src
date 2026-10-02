@@ -17,7 +17,7 @@
         ssl,
         gun,
         telemetry,
-        bondy_stdlib,
+        bondy_connect_lib,
         bondy_wamp,
         bondy_regulator
     ]},

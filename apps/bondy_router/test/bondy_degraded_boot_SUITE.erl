@@ -7,7 +7,7 @@
 -moduledoc """
 Boots one node whose durable `main` database CANNOT open — a regular file
 squats on the directory `bondy_namespace_catalog` will try to create — and
-asserts the degraded posture `bondy_app:start_services/1` documents actually
+asserts the degraded posture `bondy_router_app:start_services/1` documents actually
 holds end-to-end, next to an identically configured CONTROL node whose store
 opens fine.
 
@@ -15,22 +15,22 @@ The degraded contract on this branch:
 
   1. the node STANDS UP: `bondy_router` is running, `main_status/0` is
      `failed`, the `bondy_db_main_unavailable` alarm is raised;
-  2. it does NOT present itself as ready: `bondy_app:is_ready/0` — the one
+  2. it does NOT present itself as ready: `bondy_router_app:is_ready/0` — the one
      oracle the `/ready` probe and the `bondy_node_ready` gauge answer from —
      is `false`, and the real `/ready` endpoint on the `early` `admin`
      listener answers 503; `bondy_config:get(status)` stays `initialising`
      because only `start_normal_listeners/0` promotes it;
   3. only the `early` listeners are bound — the `normal`-phase listener in
      the peer inventory never opens — and the bridge-relay manager, a
-     `bondy_sup` child that is up on every boot, holds no bridges because its
+     `bondy_router_sup` child that is up on every boot, holds no bridges because its
      store load is part of `start_bridges/0`, which the degraded path never
      calls;
   4. the supervision tree HOLDS over a window: the pre-fix failure modes were
-     a VM halt (`configure_services/0` raising through `bondy_app:start/2`,
+     a VM halt (`configure_services/0` raising through `bondy_router_app:start/2`,
      observed in production on 2026-09-02) and a crash loop
      (`bondy_bridge_relay_manager` reading the store from its `init/1`
      continuation until `reached_max_restart_intensity` collapsed
-     `bondy_sup`);
+     `bondy_router_sup`);
   5. durable operations fail with their documented error instead of killing
      the node, and the ephemeral registry half is alive.
 
@@ -40,9 +40,9 @@ the suite covers the property, not the call sites that were fixed. The
 control node pins the other half of every gate: a healthy node takes the
 durable path, IS ready, and has all of its listeners.
 
-Why this is a CT suite and not only `bondy_app_degraded_boot_test`: that
+Why this is a CT suite and not only `bondy_router_app_degraded_boot_test`: that
 eunit module mocks the catalogue and the listener manager and can only
-assert which branch `start_services/1` takes. It cannot see a `bondy_sup`
+assert which branch `start_services/1` takes. It cannot see a `bondy_router_sup`
 child that reads the store on its own, nor what the probe actually answers.
 """.
 
@@ -137,7 +137,7 @@ node_is_not_ready(Config) ->
     ?assertEqual(
         initialising, erpc:call(Node, bondy_config, get, [status, undefined])
     ),
-    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])),
+    ?assertNot(erpc:call(Node, bondy_router_app, is_ready, [])),
     %% The probe itself, over HTTP, on the `early` admin listener — which
     %% must therefore be bound on a degraded node for the probe to exist.
     ?assertEqual(503, admin_get(Node, "/ready")),
@@ -156,7 +156,7 @@ only_early_listeners_and_no_bridges(Config) ->
         {ok, _},
         erpc:call(Node, bondy_listener_manager, listener, [?NORMAL_LISTENER])
     ),
-    %% The manager is up (a `bondy_sup` child) and has read nothing.
+    %% The manager is up (a `bondy_router_sup` child) and has read nothing.
     ?assert(
         is_pid(erpc:call(Node, erlang, whereis, [bondy_bridge_relay_manager]))
     ),
@@ -208,7 +208,7 @@ healthy_control_takes_the_durable_path(Config) ->
     ?assertEqual(
         ready, erpc:call(Node, bondy_config, get, [status, undefined])
     ),
-    ?assert(erpc:call(Node, bondy_app, is_ready, [])),
+    ?assert(erpc:call(Node, bondy_router_app, is_ready, [])),
     ?assertEqual(204, admin_get(Node, "/ready")),
     Bound = bound_listeners(Node),
     ?assert(lists:member(admin, Bound)),
@@ -284,7 +284,7 @@ a_leftover_handle_is_not_open(Config) ->
     ?assertEqual(
         failed, erpc:call(Node, bondy_namespace_catalog, main_status, [])
     ),
-    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])).
+    ?assertNot(erpc:call(Node, bondy_router_app, is_ready, [])).
 
 %% Once the squatter is gone, a restarted catalogue opens `main`, and neither
 %% the status nor the alarm may still report the earlier failure. The node
@@ -303,7 +303,7 @@ a_reopened_main_is_no_longer_failed(Config) ->
     ),
     Alarms = erpc:call(Node, bondy_alarm_handler, get_alarms, []),
     ?assertNot(lists:keymember(bondy_db_main_unavailable, 1, Alarms)),
-    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])).
+    ?assertNot(erpc:call(Node, bondy_router_app, is_ready, [])).
 
 %% A node that booted ready is NOT READY from the moment its catalogue stops
 %% until a restarted catalogue has opened `main` again, including while a
@@ -318,14 +318,14 @@ a_serving_node_is_not_ready_until_main_reopens(Config) ->
     ]),
     Aside = MainDir ++ ".aside",
     ok = stop_catalogue(Node),
-    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])),
+    ?assertNot(erpc:call(Node, bondy_router_app, is_ready, [])),
     ok = file:rename(MainDir, Aside),
     ok = file:write_file(MainDir, <<"squatter">>),
     ok = start_catalogue(Node),
     ?assertEqual(
         failed, erpc:call(Node, bondy_namespace_catalog, main_status, [])
     ),
-    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])),
+    ?assertNot(erpc:call(Node, bondy_router_app, is_ready, [])),
     ok = stop_catalogue(Node),
     ok = file:delete(MainDir),
     ok = file:rename(Aside, MainDir),
@@ -335,7 +335,7 @@ a_serving_node_is_not_ready_until_main_reopens(Config) ->
     ),
     Alarms = erpc:call(Node, bondy_alarm_handler, get_alarms, []),
     ?assertNot(lists:keymember(bondy_db_main_unavailable, 1, Alarms)),
-    ?assert(erpc:call(Node, bondy_app, is_ready, [])).
+    ?assert(erpc:call(Node, bondy_router_app, is_ready, [])).
 
 %% =============================================================================
 %% HELPERS
@@ -354,13 +354,17 @@ control_node(Config) ->
 %% @private
 stop_catalogue(Node) ->
     erpc:call(
-        Node, supervisor, terminate_child, [bondy_sup, bondy_namespace_catalog]
+        Node, supervisor, terminate_child, [
+            bondy_router_sup, bondy_namespace_catalog
+        ]
     ).
 
 %% @private
 start_catalogue(Node) ->
     {ok, _} = erpc:call(
-        Node, supervisor, restart_child, [bondy_sup, bondy_namespace_catalog]
+        Node, supervisor, restart_child, [
+            bondy_router_sup, bondy_namespace_catalog
+        ]
     ),
     ok.
 
@@ -411,7 +415,7 @@ supervised_pids(Node) ->
     [
         erpc:call(Node, erlang, whereis, [Name])
      || Name <- [
-            bondy_sup,
+            bondy_router_sup,
             bondy_namespace_catalog,
             bondy_bridge_relay_manager
         ]

@@ -1,0 +1,27 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_connect_lib,
+ [{description,
+   "Bondy's shared library: data structures, clocks, errors — and "
+   "bondy_connect_table_manager, the ETS owner-of-last-resort every Bondy app "
+   "borrows tables from, started by this app's supervisor so it is up "
+   "before any of them."},
+  {vsn, "1.0.0"},
+  {registered, [bondy_connect_lib_sup, bondy_connect_table_manager]},
+  {mod, {bondy_connect_lib_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    resulto,
+    backoff,
+    key_value
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.

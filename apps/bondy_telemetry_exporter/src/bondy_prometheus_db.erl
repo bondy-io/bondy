@@ -1175,7 +1175,7 @@ families() ->
         {bondy_alarm_active, "1 per active alarm, labelled by alarm id.", gauge,
             fun alarm_rows/0},
         {bondy_node_ready,
-            "1 when the node reports ready (the same bondy_app:is_ready/0 "
+            "1 when the node reports ready (the same bondy_router_app:is_ready/0 "
             "oracle the /ready probe serves).", gauge, fun node_ready/0}
     ].
 
@@ -1202,7 +1202,7 @@ alarms() ->
 %% three conditions — a node whose durable `main` DB failed to open exported
 %% `bondy_node_ready 1` while `/ready` answered 503.
 node_ready() ->
-    try bondy_app:is_ready() of
+    try bondy_router_app:is_ready() of
         true -> [{[], 1}];
         false -> [{[], 0}]
     catch
@@ -1309,11 +1309,11 @@ frontier_seq_rows() ->
 %% where they are acted on — the `bondy_oplog_frontier_hole` alarm's details
 %% and its log line.
 frontier_hole_rows() ->
-    pending_rows(fun bondy_interval_set:size/1).
+    pending_rows(fun bondy_connect_interval_set:size/1).
 
 %% @private
 frontier_pending_seq_rows() ->
-    pending_rows(fun bondy_interval_set:flat_size/1).
+    pending_rows(fun bondy_connect_interval_set:flat_size/1).
 
 %% @private
 pending_rows(F) ->

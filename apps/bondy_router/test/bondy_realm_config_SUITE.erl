@@ -9,7 +9,7 @@
 %% apply must have.
 %%
 %% The subject is `bondy_realm:from_file(File, #{declarative => true})` — the
-%% exact call `bondy_realm:apply_config/0` makes from `bondy_app:start/2`, so
+%% exact call `bondy_realm:apply_config/0` makes from `bondy_router_app:start/2`, so
 %% these cases exercise the boot path itself rather than a near-equivalent.
 %%
 %% The properties under test:

@@ -119,7 +119,7 @@ apply_cell(TableName, Band, Key, Value, Hlc) ->
     ).
 
 hlc() ->
-    bondy_hlc:now(bondy_hlc:new()).
+    bondy_connect_hlc:now(bondy_connect_hlc:new()).
 
 %% A realm with a group, a user and a group grant so the sync has cells in
 %% several tables. No password — the sync test does not exercise auth.

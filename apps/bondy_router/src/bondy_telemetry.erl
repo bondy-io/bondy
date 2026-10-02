@@ -64,14 +64,16 @@ Also provides trace-identifier generation.
 -doc """
 Generates a W3C Trace Context `trace-id`: 32 lowercase hex characters.
 
-Shares its representation with the `trace_id` carried by `bondy_error:t()`, so
+Shares its representation with the `trace_id` carried by `bondy_connect_error:t()`, so
 a request identifier and an error correlation identifier are the same kind of
 value and can be propagated to an OpenTelemetry collector unchanged.
 """.
 -spec trace_id() -> binary().
 
 trace_id() ->
-    bondy_uuidv7:format(bondy_uuidv7:new(), #{mode => compact_hex}).
+    bondy_connect_uuidv7:format(bondy_connect_uuidv7:new(), #{
+        mode => compact_hex
+    }).
 
 -doc """
 The trace id carried by a WAMP options or EVENT.Details map, or `undefined`.

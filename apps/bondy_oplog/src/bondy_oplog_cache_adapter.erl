@@ -99,7 +99,7 @@ See `bondy_oplog_projection_adapter` for the persistent-state surface.
 -callback close(handle()) -> ok.
 
 -callback get(handle(), bucket(), Key :: term()) ->
-    {ok, {Value :: term(), Hlc :: bondy_hlc:hlc()}} | not_found.
+    {ok, {Value :: term(), Hlc :: bondy_connect_hlc:hlc()}} | not_found.
 
 -callback ticket(handle()) -> Ticket :: term().
 
@@ -107,7 +107,7 @@ See `bondy_oplog_projection_adapter` for the persistent-state surface.
     handle(),
     bucket(),
     Key :: term(),
-    {Value :: term(), Hlc :: bondy_hlc:hlc()},
+    {Value :: term(), Hlc :: bondy_connect_hlc:hlc()},
     Ticket :: term()
 ) -> ok.
 

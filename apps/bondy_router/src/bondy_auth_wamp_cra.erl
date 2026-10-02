@@ -92,7 +92,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
             authmethod => ?WAMP_CRA_AUTH,
             authprovider => ?BONDY_AUTH_PROVIDER,
             nonce => bondy_password_cra:nonce(),
-            timestamp => bondy_utils:system_time_to_rfc3339(
+            timestamp => bondy_router_utils:system_time_to_rfc3339(
                 Microsecs, [{offset, "Z"}, {unit, microsecond}]
             ),
             session => ExtSessionId

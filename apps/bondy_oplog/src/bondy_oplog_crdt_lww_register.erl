@@ -98,13 +98,13 @@ undefined    -> <<0>>
 -type register_value() :: term().
 -type state() ::
     undefined
-    | {set, register_value(), bondy_hlc:hlc()}
-    | {cleared, bondy_hlc:hlc()}.
+    | {set, register_value(), bondy_connect_hlc:hlc()}
+    | {cleared, bondy_connect_hlc:hlc()}.
 -type op() ::
     {set, register_value()}
     | clear
-    | {set, bondy_hlc:hlc(), register_value()}
-    | {clear, bondy_hlc:hlc()}.
+    | {set, bondy_connect_hlc:hlc(), register_value()}
+    | {clear, bondy_connect_hlc:hlc()}.
 
 -export_type([state/0, op/0]).
 
@@ -199,7 +199,7 @@ to_value(undefined) -> undefined;
 to_value({set, V, _H}) -> V;
 to_value({cleared, _H}) -> undefined.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc(undefined) -> 0;
 hlc({set, _, H}) -> H;
@@ -224,7 +224,7 @@ A live `{set, V, H}` is never discarded: it carries the value. Nothing in its
 representation is redundant once stable either, so there is no `{keep, _}`
 reduction to make — the HLC is still needed to order it against future writes.
 """.
--spec stabilize(bondy_hlc:hlc(), state()) -> keep | discard.
+-spec stabilize(bondy_connect_hlc:hlc(), state()) -> keep | discard.
 
 stabilize(StableHlc, {cleared, H}) when H < StableHlc ->
     discard;

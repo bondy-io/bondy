@@ -324,7 +324,7 @@ format_consumer_offset(#consumer_offset{
     commit_count = Count,
     schema_version = Version
 }) ->
-    bondy_consult:encode([
+    bondy_connect_consult:encode([
         {committed_segment, Seg},
         {committed_frame_offset, Off},
         {committed_hlc, Key},
@@ -360,7 +360,7 @@ validate_snapshot_watermark_version(V) ->
 
 %% @private
 format_snapshot_watermark(Key) ->
-    bondy_consult:encode([
+    bondy_connect_consult:encode([
         {snapshot_watermark_version, ?BONDY_LOG_SNAPSHOT_WATERMARK_VERSION},
         {hlc, Key}
     ]).

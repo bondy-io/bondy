@@ -32,7 +32,7 @@ the latest read-relevant state of every running instance:
 | `overlay_tab`  | `init` of the instance gen_server (immutable thereafter) |
 | `fused`        | `init` (immutable thereafter) |
 
-The table is borrowed from `bondy_table_manager`, its heir, so its rows
+The table is borrowed from `bondy_connect_table_manager`, its heir, so its rows
 outlive a crash of this process and a restarted registry claims them back;
 the rows are written by the instances, which keep running across it
 (`bondy_db_bookie_restart_test`).
@@ -149,7 +149,7 @@ table's lifecycle tied to a supervisor child.
     %% (`pending_intervals_bounded_by_holes`), so a permanently unroutable
     %% bucket costs one interval for that origin however many later seqs fold
     %% behind it.
-    pending = #{} :: #{binary() => bondy_interval_set:t()},
+    pending = #{} :: #{binary() => bondy_connect_interval_set:t()},
     %% Demand-based applier->instance flow control; the contract is at the
     %% applier's own `#state.install_in_flight`. Published once at instance
     %% init. `undefined` between the entry's creation and the instance's
@@ -213,7 +213,7 @@ table's lifecycle tied to a supervisor child.
 -record(state, {}).
 
 -type fast_path() :: #{
-    hlc := bondy_hlc:t(),
+    hlc := bondy_connect_hlc:t(),
     seq := atomics:atomics_ref(),
     overlay_counters := atomics:atomics_ref(),
     origin := bondy_oplog_origin:t(),
@@ -649,7 +649,7 @@ so this is `#{}` on a well behaved replica, and its size is a direct measure of
 how many holes the instance is carrying. Local and volatile: never shipped to a
 peer, never checkpointed. See the `pending` field note.
 """).
--spec pending(instance_id()) -> #{binary() => bondy_interval_set:t()}.
+-spec pending(instance_id()) -> #{binary() => bondy_connect_interval_set:t()}.
 
 pending(InstanceId) ->
     case field(InstanceId, #entry.pending) of
@@ -674,7 +674,7 @@ do individually.
 -spec frontier_and_pending(instance_id()) ->
     {
         #{binary() => non_neg_integer()},
-        #{binary() => bondy_interval_set:t()}
+        #{binary() => bondy_connect_interval_set:t()}
     }.
 
 frontier_and_pending(InstanceId) when is_binary(InstanceId) ->
@@ -996,7 +996,7 @@ merge_applied(InstanceId, Applied0) when
 %% @private
 add_applied(Origin, Seqs, F, P) ->
     Prefix = maps:get(Origin, F, 0),
-    Set0 = maps:get(Origin, P, bondy_interval_set:new()),
+    Set0 = maps:get(Origin, P, bondy_connect_interval_set:new()),
     %% Seqs at or below the prefix are ALREADY claimed and must not re-enter
     %% pending: once there they no longer continue the prefix, so nothing would
     %% ever absorb them and the set would grow without bound. This is the
@@ -1008,7 +1008,7 @@ add_applied(Origin, Seqs, F, P) ->
     Set = lists:foldl(
         fun
             (Seq, Acc) when Seq > Prefix ->
-                bondy_interval_set:add_element(Seq, Acc);
+                bondy_connect_interval_set:add_element(Seq, Acc);
             (_Seq, Acc) ->
                 Acc
         end,
@@ -1031,7 +1031,7 @@ absorb_all([Origin | Rest], F, P) ->
 %% and drop from pending everything the new prefix covers.
 %%
 %% The set is canonically ordered AND adjacency-coalesced
-%% (`bondy_interval_set`), so only its HEAD can continue the prefix: one match,
+%% (`bondy_connect_interval_set`), so only its HEAD can continue the prefix: one match,
 %% no walk. Seqs are >= 1, which is what makes `{0, P}` mean "everything at or
 %% below the prefix" — `subtract/2` splits a run straddling the bound rather
 %% than dropping it.
@@ -1042,7 +1042,7 @@ absorb(Origin, Prefix, Set, F, P) ->
         Prefix ->
             {F, P#{Origin => Set}};
         New ->
-            case bondy_interval_set:subtract(Set, [{0, New}]) of
+            case bondy_connect_interval_set:subtract(Set, [{0, New}]) of
                 [] -> {F#{Origin => New}, maps:remove(Origin, P)};
                 Rest -> {F#{Origin => New}, P#{Origin => Rest}}
             end
@@ -1268,7 +1268,7 @@ set_remote_gen(InstanceId, Ref) when is_binary(InstanceId) ->
 
 init([]) ->
     process_flag(trap_exit, true),
-    {ok, ?TABLE} = bondy_table_manager:add_or_claim(?TABLE, [
+    {ok, ?TABLE} = bondy_connect_table_manager:add_or_claim(?TABLE, [
         named_table,
         set,
         public,

@@ -61,7 +61,7 @@ stateDiagram-v2
     peername :: binary() | undefined,
     source_ip :: inet:ip_address() | undefined,
     auth_timeout :: pos_integer(),
-    ping_retry :: optional(bondy_retry:t()),
+    ping_retry :: optional(bondy_connect_retry:t()),
     ping_payload :: optional(binary()),
     ping_idle_timeout :: optional(non_neg_integer()),
     idle_timeout :: pos_integer(),
@@ -525,7 +525,7 @@ handle_event(internal, {ping, Data}, _, State) ->
     %% We keep all timers
     keep_state_and_data;
 handle_event(info, {?BONDY_REQ, Pid, RealmUri, M}, _, State) ->
-    %% A local bondy:send(), we need to forward to client
+    %% A local bondy_router_peer:send(), we need to forward to client
     ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to client",
         message => M
@@ -589,7 +589,7 @@ handle_event(EventType, EventContent, StateName, _) ->
 
 %% @private
 peername(Transport, Socket) ->
-    case bondy_utils:peername(Transport, Socket) of
+    case bondy_router_utils:peername(Transport, Socket) of
         {ok, {_, _} = Peername} ->
             Peername;
         {ok, NonIPAddr} ->
@@ -1065,7 +1065,7 @@ session_id(RealmUri, #state{sessions_by_realm = Map}) ->
 
 %% @private
 maybe_gen_authid(anonymous) ->
-    bondy_utils:uuid();
+    bondy_router_utils:uuid();
 maybe_gen_authid(UserId) ->
     UserId.
 
@@ -1079,7 +1079,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
     Timeout = maps:get(timeout, PingOpts),
     Attempts = maps:get(max_attempts, PingOpts),
 
-    Retry = bondy_retry:init(
+    Retry = bondy_connect_retry:init(
         ping_timeout,
         #{
             % disable, use max_retries only
@@ -1092,7 +1092,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
 
     State#state{
         ping_idle_timeout = IdleTimeout,
-        ping_payload = bondy_utils:generate_fragment(16),
+        ping_payload = bondy_router_utils:generate_fragment(16),
         ping_retry = Retry
     };
 maybe_enable_ping(#{enabled := false}, State) ->
@@ -1112,7 +1112,7 @@ ping_succeed(#state{ping_retry = undefined} = State) ->
     %% ping disabled
     State;
 ping_succeed(#state{} = State) ->
-    {_, Retry} = bondy_retry:succeed(State#state.ping_retry),
+    {_, Retry} = bondy_connect_retry:succeed(State#state.ping_retry),
     State#state{ping_retry = Retry}.
 
 %% @private
@@ -1120,7 +1120,7 @@ ping_fail(#state{ping_retry = undefined} = State) ->
     %% ping disabled
     State;
 ping_fail(#state{} = State) ->
-    {_, Retry} = bondy_retry:fail(State#state.ping_retry),
+    {_, Retry} = bondy_connect_retry:fail(State#state.ping_retry),
     State#state{ping_retry = Retry}.
 
 %% @private
@@ -1135,7 +1135,7 @@ maybe_send_ping(#state{ping_retry = undefined} = State, Actions0) ->
     ],
     {keep_state_and_data, Actions};
 maybe_send_ping(#state{} = State, Actions0) ->
-    case bondy_retry:get(State#state.ping_retry) of
+    case bondy_connect_retry:get(State#state.ping_retry) of
         Time when is_integer(Time) ->
             %% We send a ping
             Bin = State#state.ping_payload,

@@ -291,7 +291,7 @@ unroutable_bucket_keeps_the_replay_cursor(Dir) ->
 
 %% A peer-authored cell at an explicit seq — the shape anti-entropy delivers.
 append_peer(Id, Origin, Seq, Bucket, Key, Value) ->
-    Hlc = bondy_hlc:encode(
+    Hlc = bondy_connect_hlc:encode(
         erlang:system_time(millisecond) + 1000 + Seq, 0
     ),
     Event = bondy_oplog_event:new(

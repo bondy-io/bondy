@@ -44,7 +44,7 @@
 %% using one peer name boot on each other's storage. This suite runs second and
 %% its peer died opening the other's MST pack store manifest
 %% (`{pack_store_open, {manifest, {_, file_io_server, invalid_unicode}}}`),
-%% restarting until `bondy_sup` hit its restart intensity — surfacing as a
+%% restarting until `bondy_router_sup` hit its restart intensity — surfacing as a
 %% `noproc` from an unrelated supervisor in `init_per_suite`. Peer PORTS are
 %% derived from the index rather than the name and are unchanged; suites within
 %% a run are sequential, so they do not overlap.
@@ -1234,7 +1234,7 @@ do_stale_read(Band, Key) ->
 %% One manual pull of every durable `main/*` instance from `Peer` — the
 %% hand-driven replacement for a scheduler live-sync round. Threads the
 %% node's configured `sync_session_opts` (the Partisan transport +
-%% channel `bondy_app` wired for the scheduler) — without them
+%% channel `bondy_router_app` wired for the scheduler) — without them
 %% `bondy_oplog:sync/2` defaults to the inline transport, which treats a
 %% node-atom peer as a (nonexistent) local instance id.
 do_stale_sync_main_from(Peer) ->

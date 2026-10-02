@@ -26,7 +26,7 @@ forever.
 malformed, the message is too large, the credentials are wrong. `transient`
 means the condition is in the relay, the network or the moment: a 4xx, a
 timeout, a TLS handshake that failed. This is the same axis as
-`bondy_error`'s `nature` field, so a classification here maps onto the error
+`bondy_connect_error`'s `nature` field, so a classification here maps onto the error
 catalogue without translation.
 """.
 

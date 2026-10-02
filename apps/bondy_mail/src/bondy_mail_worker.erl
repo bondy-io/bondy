@@ -63,7 +63,7 @@ next one is taken, which is also what makes `priority` mean something.
 
 ## Retry
 
-Transient failures retry on a jittered exponential backoff from `bondy_retry`,
+Transient failures retry on a jittered exponential backoff from `bondy_connect_retry`,
 bounded by both the relay's attempt count and the request's deadline --
 whichever runs out first. Permanent failures do not retry at all: a rejected
 recipient is rejected however many times it is offered.
@@ -612,7 +612,7 @@ attempt(Request, Message, Relay, Retry0, Attempt) ->
 
 %% @private
 retry(Request, Message, Relay, Retry0, Attempt, Reason) ->
-    case bondy_retry:fail(Retry0) of
+    case bondy_connect_retry:fail(Retry0) of
         {Delay, Retry} when is_integer(Delay) ->
             case sleep_within_deadline(Request, Delay) of
                 ok ->
@@ -645,7 +645,7 @@ expired(Request) ->
 
 %% @private
 new_retry(#bondy_mail_relay{} = Relay) ->
-    bondy_retry:init(?MODULE, #{
+    bondy_connect_retry:init(?MODULE, #{
         max_retries => Relay#bondy_mail_relay.retry_max_attempts,
         %% Bounded by attempts and by the request's deadline, checked
         %% separately, so no wall-clock deadline is set here.

@@ -79,7 +79,7 @@ cell whose value is `0` once it is causally stable.
 -type reading() :: {Stamp :: non_neg_integer(), Count :: integer()}.
 -type state() :: #{
     readings := #{origin() => reading()},
-    hlc := bondy_hlc:hlc()
+    hlc := bondy_connect_hlc:hlc()
 }.
 -type op() :: {set, reading()}.
 
@@ -144,7 +144,7 @@ to_value(State) ->
         {_Stamp, Count} -> Count
     end.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc(#{hlc := H}) -> H.
 
@@ -162,7 +162,7 @@ order_independent() ->
 `discard` once the value is `0` and every constituent operation is strictly
 below the stability point; a non-zero value is kept at any stability point.
 """.
--spec stabilize(bondy_hlc:hlc(), state()) -> keep | discard.
+-spec stabilize(bondy_connect_hlc:hlc(), state()) -> keep | discard.
 
 stabilize(StableHlc, #{hlc := Hlc} = State) when Hlc < StableHlc ->
     case to_value(State) of

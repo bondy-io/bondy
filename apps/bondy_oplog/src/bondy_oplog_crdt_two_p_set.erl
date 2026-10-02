@@ -70,7 +70,7 @@ the substrate stores a value column.
 
 -type elem() :: binary().
 -type set_t() :: ordsets:ordset(elem()).
--type state() :: {set_t(), set_t(), bondy_hlc:hlc()}.
+-type state() :: {set_t(), set_t(), bondy_connect_hlc:hlc()}.
 -type op() :: {add, elem()} | {rmv, elem()}.
 
 -export_type([state/0, op/0, elem/0]).
@@ -127,7 +127,7 @@ apply_op({Added, Removed, H0}, {rmv, Elem}, Key) when is_binary(Elem) ->
 to_value({Added, Removed, _H}) ->
     ordsets:subtract(Added, Removed).
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc({_A, _R, H}) -> H.
 

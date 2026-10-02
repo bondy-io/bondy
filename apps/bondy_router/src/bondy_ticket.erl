@@ -351,7 +351,7 @@ deriving the storage key, so a caller never has to.
 verify(Ticket, Opts) ->
     try
         {jose_jwt, RawClaims} = jose_jwt:peek(Ticket),
-        Claims0 = bondy_utils:to_existing_atom_keys(RawClaims),
+        Claims0 = bondy_router_utils:to_existing_atom_keys(RawClaims),
 
         #{
             authrealm := AuthRealmUri,
@@ -551,7 +551,7 @@ there is no write to hang a prune off. That residue is what this reclaims.
 >
 > Cells are read, filtered and written back over a last-write-wins store, so two
 > nodes sweeping one realm concurrently could resurrect what the other
-> reclaimed. Restricting each node to the realms it owns (`bondy:is_owner/1`)
+> reclaimed. Restricting each node to the realms it owns (`bondy_router_peer:is_owner/1`)
 > leaves a single writer per realm. The filter is therefore applied here rather
 > than left to the caller, and there is deliberately no "sweep everything"
 > variant.
@@ -718,7 +718,7 @@ do_issue(Session, Opts) ->
     ExpiresAt = IssuedAt + expiry_time_secs(Opts),
 
     Claims0 = #{
-        id => bondy_utils:uuid(),
+        id => bondy_router_utils:uuid(),
         authrealm => AuthRealmUri,
         authid => Authid,
         authmethod => bondy_session:authmethod(Session),
@@ -779,7 +779,7 @@ scope(Session, #{client_ticket := Ticket} = Opts, Uri) when
             bondy_auth_scope:new(Uri, ClientId, Id);
         {error, _Reason} ->
             error(
-                bondy_error:new(invalid_value, #{
+                bondy_connect_error:new(invalid_value, #{
                     description =>
                         ~"The value for 'client_ticket' is not valid.",
                     message => <<
@@ -1036,7 +1036,9 @@ revoke_all_for(Table, Bucket, Authid) ->
 %% already collapsed each SSO realm's members onto one bucket, so filtering its
 %% result decides ownership at the bucket grain — the only correct one.
 owned_auth_realm_uris() ->
-    lists:filter(fun bondy:is_owner/1, bondy_realm:auth_realm_uris()).
+    lists:filter(
+        fun bondy_router_peer:is_owner/1, bondy_realm:auth_realm_uris()
+    ).
 
 %% @private
 %% One realm's cells. A failure is recorded and the sweep CONTINUES: one
@@ -1249,7 +1251,7 @@ is_expired(#{expires_at := Exp}, Now) ->
 %% @private
 %% The open bondy_db `bondy_ticket` table handle. Raises if the catalogue has
 %% not provisioned it — the table is a hard dependency (the catalogue, a
-%% `bondy_sup` child, opens it at boot, well before any auth flow issues or
+%% `bondy_router_sup` child, opens it at boot, well before any auth flow issues or
 %% revokes a ticket).
 table() ->
     case bondy_namespace_catalog:table(?BONDY_DB_TICKET_TAB) of

@@ -545,7 +545,7 @@ load_config(Map, State) when is_map(Map) ->
             {Error, State}
     end;
 load_config(FName, State) when is_list(FName) orelse is_binary(FName) ->
-    case bondy_utils:json_consult(FName) of
+    case bondy_router_utils:json_consult(FName) of
         {ok, Spec} ->
             ?LOG_INFO(#{
                 description => "Loading configuration file",

@@ -220,9 +220,11 @@ it).
 
 -type realm() :: binary().
 
--type entry() :: {Value :: term(), Hlc :: bondy_hlc:hlc()}.
+-type entry() :: {Value :: term(), Hlc :: bondy_connect_hlc:hlc()}.
 
--type row() :: {Key :: binary(), Value :: term(), Hlc :: bondy_hlc:hlc()}.
+-type row() :: {
+    Key :: binary(), Value :: term(), Hlc :: bondy_connect_hlc:hlc()
+}.
 
 -type db() :: #{
     name := atom(),
@@ -230,7 +232,7 @@ it).
     topology_state := bondy_db_topology:state(),
     ets_provider := bondy_db_topology:state() | undefined,
     opts := map(),
-    hlc := bondy_hlc:t()
+    hlc := bondy_connect_hlc:t()
 }.
 
 -type projection_backend() :: leveled | ets.
@@ -243,7 +245,7 @@ it).
     %% resolves bucket + route + cache + owner through it, so an ephemeral
     %% table inside a leveled DB needs no special-casing downstream.
     db_topology := module(),
-    db_hlc := bondy_hlc:t(),
+    db_hlc := bondy_connect_hlc:t(),
     entity_type := atom(),
     namespace := atom(),
     shard_count := pos_integer(),
@@ -303,7 +305,7 @@ open(Name, Opts) when is_atom(Name), is_map(Opts) ->
                                 topology_state => State,
                                 ets_provider => EtsProvider,
                                 opts => Opts,
-                                hlc => bondy_hlc:new()
+                                hlc => bondy_connect_hlc:new()
                             },
                             {ok, Db};
                         {error, _} = Err ->
@@ -765,10 +767,10 @@ fold-specific events before calling `apply/4`.
 Strictly greater than the previous value returned by `tick/1` on the
 same DB.
 """.
--spec tick(Table :: table()) -> bondy_hlc:hlc().
+-spec tick(Table :: table()) -> bondy_connect_hlc:hlc().
 
 tick(#{db_hlc := Hlc}) ->
-    bondy_hlc:now(Hlc).
+    bondy_connect_hlc:now(Hlc).
 
 -doc """
 Deletes the cell at `(Realm, Key)` in `Table`.
@@ -1369,7 +1371,7 @@ probe_op_for(bondy_oplog_crdt_max_register) ->
 probe_op_for(bondy_oplog_crdt_min_register) ->
     {set, 0};
 probe_op_for(bondy_oplog_crdt_lww_register) ->
-    {set, bondy_hlc:now(bondy_hlc:new()), ?PROBE_TOKEN};
+    {set, bondy_connect_hlc:now(bondy_connect_hlc:new()), ?PROBE_TOKEN};
 probe_op_for(_Other) ->
     skip.
 

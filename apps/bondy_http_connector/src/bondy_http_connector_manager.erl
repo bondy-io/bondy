@@ -16,7 +16,7 @@ On startup:
 ## Resilient secret resolution
 Services with `auth_conf.secrets` are registered immediately even if their
 secrets haven't resolved yet. Secret resolution is attempted at startup
-and retried indefinitely with exponential backoff via `bondy_retry` if the
+and retried indefinitely with exponential backoff via `bondy_connect_retry` if the
 external provider is unreachable.
 
 ## Callee readiness
@@ -51,7 +51,7 @@ until the callee is recycled by the supervisor for an unrelated reason.
 -record(state, {
     services = [] :: list(),
     service_poolnames = #{} :: #{binary() => atom()},
-    pending_secrets = #{} :: #{binary() => {map(), bondy_retry:t()}}
+    pending_secrets = #{} :: #{binary() => {map(), bondy_connect_retry:t()}}
 }).
 
 %% API
@@ -201,9 +201,9 @@ handle_info(
                         service => ServiceName,
                         reason => Reason
                     }),
-                    case bondy_retry:fail(RetryState) of
+                    case bondy_connect_retry:fail(RetryState) of
                         {Time, NewRetry} when is_integer(Time) ->
-                            bondy_retry:fire(NewRetry),
+                            bondy_connect_retry:fire(NewRetry),
                             Pending1 = Pending#{
                                 ServiceName := {SecretsSpec, NewRetry}
                             },
@@ -246,7 +246,7 @@ resolve_secrets(Services) ->
                 {ok, CleanedService} ->
                     {[CleanedService | SvcAcc], PendAcc};
                 {not_ready, CleanedService, ServiceName, SecretsSpec} ->
-                    RetryState = bondy_retry:init(
+                    RetryState = bondy_connect_retry:init(
                         {resolve_secrets, ServiceName}, ?RETRY_OPTS
                     ),
                     {
@@ -298,8 +298,8 @@ resolve_service_secret(Service) ->
 schedule_retries(PendingSecrets) ->
     maps:map(
         fun(_ServiceName, {SecretsSpec, RetryState}) ->
-            {_Time, RetryState1} = bondy_retry:fail(RetryState),
-            bondy_retry:fire(RetryState1),
+            {_Time, RetryState1} = bondy_connect_retry:fail(RetryState),
+            bondy_connect_retry:fire(RetryState1),
             {SecretsSpec, RetryState1}
         end,
         PendingSecrets

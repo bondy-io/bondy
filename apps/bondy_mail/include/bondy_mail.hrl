@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--include_lib("bondy_stdlib/include/bondy_stdlib.hrl").
+-include_lib("bondy_connect_lib/include/bondy_connect_lib.hrl").
 
 -ifndef(BONDY_MAIL_HRL).
 -define(BONDY_MAIL_HRL, true).

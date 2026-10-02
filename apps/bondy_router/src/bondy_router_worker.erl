@@ -336,7 +336,7 @@ handle_cast(Fun, State) when is_function(Fun, 0) ->
             {noreply, State}
     after
         %% We cleanup, liberating the Fun from having to try..catch and do it
-        bondy:unset_process_metadata(),
+        bondy_router_peer:unset_process_metadata(),
         ok = release_usage(State)
     end;
 handle_cast({forward, To, Msg, FwdOpts} = M, State) ->

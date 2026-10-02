@@ -630,7 +630,7 @@ find_matches(Type, RealmUri, Uri, Opts) ->
     end.
 
 format_error(Reason, StackTrace) ->
-    bondy_error:format_error(Reason, StackTrace).
+    bondy_connect_error:format_error(Reason, StackTrace).
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
@@ -934,7 +934,7 @@ add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
 resolve_inconsistencies(_, _, []) ->
     ok;
 resolve_inconsistencies(Invoke, SessionId, L) ->
-    Groups = bondy_utils:groups_from_list(
+    Groups = bondy_router_utils:groups_from_list(
         fun(Entry) -> bondy_registry_entry:invocation_policy(Entry) end,
         L
     ),

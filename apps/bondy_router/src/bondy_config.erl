@@ -762,7 +762,7 @@ normalise_socket_opts(SocketOpts0) ->
     %% We default to listen on any i.e. 0.0.0.0 or :: depending on IPVer
     IP0 = key_value:get(ip, SocketOpts1, any),
     %% `inet` rather than `any`, because `any` is not a family:
-    %% `bondy_utils:get_ipaddr/2` has clauses for `(any, inet)` and
+    %% `bondy_router_utils:get_ipaddr/2` has clauses for `(any, inet)` and
     %% `(any, inet6)` but none for `(any, any)`, so an absent `ip_version` used
     %% to raise `function_clause` here — naming no listener — instead of
     %% listening on 0.0.0.0.
@@ -776,7 +776,7 @@ normalise_socket_opts(SocketOpts0) ->
     %% address always wins and `ip_version` decides only which wildcard an
     %% address-less listener binds.
     {Family0, SocketOpts2} = take(ip_version, SocketOpts1, inet),
-    {IP, Family} = bondy_utils:get_ipaddr_family(IP0, Family0),
+    {IP, Family} = bondy_router_utils:get_ipaddr_family(IP0, Family0),
     SocketOpts3 = key_value:put(ip, IP, SocketOpts2),
 
     %% This is for non-HTTP listeners. For HTTP we have the linger_timeout

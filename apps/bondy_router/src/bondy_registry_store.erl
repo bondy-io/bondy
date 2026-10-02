@@ -265,7 +265,7 @@ new(PartitionIndex) ->
     ],
 
     %% Registration tables
-    {ok, R1} = bondy_table_manager:add_or_claim(
+    {ok, R1} = bondy_connect_table_manager:add_or_claim(
         gen_name(reg_exact_idx_tab, PartitionIndex),
         [bag | Opts]
     ),
@@ -275,11 +275,11 @@ new(PartitionIndex) ->
     R3 = bondy_registry_ptrie:new(gen_name(reg_wc_idx_ptrie, PartitionIndex)),
 
     %% Subscription tables
-    {ok, S1} = bondy_table_manager:add_or_claim(
+    {ok, S1} = bondy_connect_table_manager:add_or_claim(
         gen_name(sub_local_exact_idx_tab, PartitionIndex),
         [bag | Opts]
     ),
-    {ok, S2} = bondy_table_manager:add_or_claim(
+    {ok, S2} = bondy_connect_table_manager:add_or_claim(
         gen_name(sub_remote_exact_idx_tab, PartitionIndex),
         [bag | Opts]
     ),
@@ -289,22 +289,22 @@ new(PartitionIndex) ->
     S4 = bondy_registry_ptrie:new(gen_name(sub_wc_idx_ptrie, PartitionIndex)),
 
     %% Common
-    {ok, C1} = bondy_table_manager:add_or_claim(
+    {ok, C1} = bondy_connect_table_manager:add_or_claim(
         gen_name(counters_tab, PartitionIndex),
         [set | key_value:put(keypos, 1, Opts)]
     ),
-    {ok, RIB1} = bondy_table_manager:add_or_claim(
+    {ok, RIB1} = bondy_connect_table_manager:add_or_claim(
         gen_name(rib_members_tab, PartitionIndex),
         [ordered_set | key_value:put(keypos, 1, Opts)]
     ),
 
     %% Local entry backend (created regardless of mode — tiny when unused —
     %% so the record shape does not depend on configuration).
-    {ok, L1} = bondy_table_manager:add_or_claim(
+    {ok, L1} = bondy_connect_table_manager:add_or_claim(
         gen_name(local_entry_tab, PartitionIndex),
         [ordered_set | key_value:put(keypos, 1, Opts)]
     ),
-    {ok, L2} = bondy_table_manager:add_or_claim(
+    {ok, L2} = bondy_connect_table_manager:add_or_claim(
         gen_name(local_session_idx_tab, PartitionIndex),
         [ordered_set | key_value:put(keypos, 1, Opts)]
     ),
@@ -2187,7 +2187,7 @@ merge_continuation(
 
     Acc = H#continuation{
         function = FN,
-        original = bondy_stdlib:or_else(C1, C2)
+        original = bondy_connect_lib:or_else(C1, C2)
     },
 
     merge_continuation(FN, T, Acc);

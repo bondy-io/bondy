@@ -1823,7 +1823,7 @@ from_file(Filename) ->
     ok | no_return().
 
 from_file(Filename, Opts) ->
-    case bondy_utils:json_consult(Filename) of
+    case bondy_router_utils:json_consult(Filename) of
         {ok, Realms} ->
             %% Because realms can have the sso_realm_uri and prototype
             %% properties which point to other realms, we need to ensure all
@@ -1911,7 +1911,7 @@ one, otherwise `Realm` itself.
 -spec auth_realm_uri(Realm :: t() | uri()) -> uri().
 
 auth_realm_uri(#realm{uri = Uri} = Realm) ->
-    bondy_stdlib:or_else(sso_realm_uri(Realm), Uri);
+    bondy_connect_lib:or_else(sso_realm_uri(Realm), Uri);
 auth_realm_uri(Uri) when is_binary(Uri) ->
     auth_realm_uri(fetch(Uri)).
 
@@ -2108,7 +2108,7 @@ resolve_master_admin_password() ->
 Idempotent one-shot hardening of an ALREADY-STORED master realm (D-1/D-2), for
 installations provisioned before the master-realm hardening. Fresh installs
 create the master realm already hardened, so this is a no-op for them. Called at
-boot (see `bondy_app`) after the master realm is guaranteed to exist. Guarded so
+boot (see `bondy_router_app`) after the master realm is guaranteed to exist. Guarded so
 a failure can never crash boot.
 """.
 -spec harden_master_realm() -> ok.

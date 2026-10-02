@@ -361,7 +361,7 @@ callback(#bondy_ref{}) ->
 
 to_uri(#bondy_ref{} = Ref) ->
     Nodestring = Ref#bondy_ref.nodestring,
-    SessionId = bondy_stdlib:or_else(Ref#bondy_ref.session_id, <<>>),
+    SessionId = bondy_connect_lib:or_else(Ref#bondy_ref.session_id, <<>>),
     Type = atom_to_binary(Ref#bondy_ref.type),
 
     Target =

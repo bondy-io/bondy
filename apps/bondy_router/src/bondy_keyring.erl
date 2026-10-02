@@ -6,13 +6,13 @@
 -module(bondy_keyring).
 -moduledoc """
 The node's data-encryption keyring: resolves an operator-provided **master key**
-(a key-encryption key) once via `bondy_secret_resolver`, caches it, and offers
+(a key-encryption key) once via `bondy_connect_secret_resolver`, caches it, and offers
 authenticated encryption (AES-256-GCM) for secret material at rest — today the
 realm signing/encryption keys (`bondy_realm`), and, when wired, the WAL body
 codec.
 
 The master key is a **32-byte** binary. It is named by a
-`bondy_secret_resolver:ref()` under the `security.master_key` config key, e.g.
+`bondy_connect_secret_resolver:ref()` under the `security.master_key` config key, e.g.
 
 ```erlang
 #{provider => env, var => "BONDY_SECRET_KEY", encoding => base64}
@@ -204,7 +204,7 @@ lookup_key(KeyId) ->
 %% =============================================================================
 
 %% @private
-%% Build the `bondy_secret_resolver:ref()` for the master key from config. The
+%% Build the `bondy_connect_secret_resolver:ref()` for the master key from config. The
 %% whole `[security, master_key]` value is read once and its fields extracted
 %% in-memory — reading deeper paths (e.g. `[security, master_key, provider]`)
 %% would crash when the key is unset (`undefined`, not a container). Accepts both
@@ -288,7 +288,7 @@ do_resolve_key() ->
         undefined ->
             error(master_key_not_configured);
         Ref ->
-            case bondy_secret_resolver:resolve(Ref) of
+            case bondy_connect_secret_resolver:resolve(Ref) of
                 {ok, Key} when byte_size(Key) =:= ?KEY_SIZE ->
                     Key;
                 {ok, Other} ->

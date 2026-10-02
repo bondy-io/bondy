@@ -134,13 +134,13 @@ close(Pid) ->
     bondy_log_wal:close(Pid).
 
 -spec append(wal(), bondy_oplog_event:t()) ->
-    {ok, bondy_hlc:hlc(), position()} | {error, term()}.
+    {ok, bondy_connect_hlc:hlc(), position()} | {error, term()}.
 
 append(Pid, Event) ->
     bondy_log_wal:append(Pid, Event).
 
 -spec append_batch(wal(), [bondy_oplog_event:t(), ...]) ->
-    {ok, [{bondy_hlc:hlc(), position()}, ...]} | {error, term()}.
+    {ok, [{bondy_connect_hlc:hlc(), position()}, ...]} | {error, term()}.
 
 append_batch(Pid, Events) ->
     bondy_log_wal:append_batch(Pid, Events).
@@ -171,7 +171,7 @@ info(Pid) ->
 reader_view(Pid) ->
     bondy_log_wal:reader_view(Pid).
 
--spec advance_snapshot_watermark(wal(), bondy_hlc:hlc()) ->
+-spec advance_snapshot_watermark(wal(), bondy_connect_hlc:hlc()) ->
     ok | {error, term()}.
 
 advance_snapshot_watermark(Pid, Hlc) ->

@@ -5,7 +5,7 @@
 
 -module(bondy_wamp_error).
 -moduledoc """
-Projects a `bondy_error:t()` onto the WAMP wire, and back.
+Projects a `bondy_connect_error:t()` onto the WAMP wire, and back.
 
 This is the only place a WAMP `ERROR` or `ABORT` payload is derived from an
 error value, so every peer sees the same shape whatever produced the error.
@@ -14,7 +14,7 @@ error value, so every peer sees the same shape whatever produced the error.
 
 - `ErrorUri` is the error's `uri`, which is its normative identity.
 - `Args` is `[Message]`, a single human-readable sentence.
-- `KWArgs` is `bondy_error:to_map/1`: binary keys, JSON-encodable values.
+- `KWArgs` is `bondy_connect_error:to_map/1`: binary keys, JSON-encodable values.
 
 `KWArgs` is backwards compatible with the payload Bondy has always emitted. The
 keys `code`, `message` and `description` keep their historical values; `uri`,
@@ -39,7 +39,7 @@ New clients should key off `uri` rather than `code`.
 Builds a WAMP `ERROR` in reply to `Source`.
 """.
 -spec to_wamp(
-    Error :: bondy_error:t() | any(),
+    Error :: bondy_connect_error:t() | any(),
     Source :: bondy_wamp_message:error_source()
 ) -> wamp_error() | no_return().
 
@@ -51,7 +51,7 @@ Builds a WAMP `ERROR` in reply to `Source`, merging `Details` into the message
 details.
 """.
 -spec to_wamp(
-    Error :: bondy_error:t() | any(),
+    Error :: bondy_connect_error:t() | any(),
     Source :: bondy_wamp_message:error_source(),
     Details :: map()
 ) -> wamp_error() | no_return().
@@ -59,7 +59,7 @@ details.
 to_wamp(Error0, Source, Details) when is_map(Details) ->
     #{uri := Uri, message := Message} = Error = coerce(Error0),
     bondy_wamp_message:error_from(
-        Source, Details, Uri, [Message], bondy_error:to_map(Error)
+        Source, Details, Uri, [Message], bondy_connect_error:to_map(Error)
     ).
 
 -doc """
@@ -69,7 +69,7 @@ Use this when the originating message is not available, e.g. when replying to a
 request that has already been consumed.
 """.
 -spec to_wamp(
-    Error :: bondy_error:t() | any(),
+    Error :: bondy_connect_error:t() | any(),
     RequestType :: pos_integer(),
     RequestId :: id(),
     Details :: map()
@@ -83,7 +83,7 @@ to_wamp(Error0, RequestType, RequestId, Details) when is_map(Details) ->
         Details,
         Uri,
         [Message],
-        bondy_error:to_map(Error)
+        bondy_connect_error:to_map(Error)
     ).
 
 -doc """
@@ -92,27 +92,29 @@ Builds a WAMP `ABORT` from an error.
 `ABORT` has no payload, only details, so the projection is folded into the
 details map under the same keys a peer would find in an `ERROR`'s `KWArgs`.
 """.
--spec to_abort(Error :: bondy_error:t() | any()) ->
+-spec to_abort(Error :: bondy_connect_error:t() | any()) ->
     wamp_abort() | no_return().
 
 to_abort(Error0) ->
     #{uri := Uri} = Error = coerce(Error0),
-    bondy_wamp_message:abort(bondy_error:to_map(Error), Uri).
+    bondy_wamp_message:abort(bondy_connect_error:to_map(Error), Uri).
 
 -doc """
 Rebuilds an error value from a WAMP `ERROR` received from a peer.
 
-The peer's `KWArgs` is untrusted: it is fed through `bondy_error:from_term/1`,
+The peer's `KWArgs` is untrusted: it is fed through `bondy_connect_error:from_term/1`,
 which sanitises it. Only the error URI is taken at face value, because it is the
 one part of the message the protocol requires to be a URI.
 """.
--spec from_wamp(Message :: wamp_error()) -> bondy_error:t().
+-spec from_wamp(Message :: wamp_error()) -> bondy_connect_error:t().
 
 from_wamp(#error{error_uri = Uri, args = Args, kwargs = KWArgs}) ->
     Base =
         case KWArgs of
-            #{} when map_size(KWArgs) > 0 -> bondy_error:from_term(KWArgs);
-            _ -> bondy_error:from_term(Uri)
+            #{} when map_size(KWArgs) > 0 ->
+                bondy_connect_error:from_term(KWArgs);
+            _ ->
+                bondy_connect_error:from_term(Uri)
         end,
 
     %% The URI on the wire wins over anything reconstructed from the payload.
@@ -129,9 +131,9 @@ from_wamp(#error{error_uri = Uri, args = Args, kwargs = KWArgs}) ->
 
 %% @private
 coerce(Error) ->
-    case bondy_error:is_type(Error) of
+    case bondy_connect_error:is_type(Error) of
         true -> Error;
-        false -> bondy_error:from_term(Error)
+        false -> bondy_connect_error:from_term(Error)
     end.
 
 %% @private

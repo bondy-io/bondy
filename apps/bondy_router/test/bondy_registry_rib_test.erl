@@ -459,9 +459,9 @@ concurrent_writers(Tab) ->
     EA = entry(registration, ?EXACT_MATCH, ?INVOKE_SINGLE, Uri),
     EB = entry(registration, ?EXACT_MATCH, ?INVOKE_SINGLE, Uri),
     Self = self(),
-    ok = meck:new(bondy_hlc, [passthrough, no_link]),
+    ok = meck:new(bondy_connect_hlc, [passthrough, no_link]),
     try
-        ok = meck:expect(bondy_hlc, now, fun(Clock) ->
+        ok = meck:expect(bondy_connect_hlc, now, fun(Clock) ->
             case get(hold_at_stamp) of
                 undefined ->
                     ok;
@@ -495,7 +495,7 @@ concurrent_writers(Tab) ->
             {ok, {#{count := 2}, _}}, bondy_db:read(Table, ?REALM, Key)
         )
     after
-        meck:unload(bondy_hlc),
+        meck:unload(bondy_connect_hlc),
         _ = bondy_registry_rib:on_entry_removed(self(), Tab, EA),
         _ = bondy_registry_rib:on_entry_removed(self(), Tab, EB)
     end.
@@ -773,7 +773,7 @@ make_tmpdir() ->
     ok = filelib:ensure_path(Base),
     Base.
 
-%% The real store is claimed via bondy_table_manager (a bondy app process) by
+%% The real store is claimed via bondy_connect_table_manager (a bondy app process) by
 %% the reactor; here a bare named table suffices — the rib functions resolve
 %% it by name. Another test (or an app boot sharing this BEAM) may have
 %% created it already; reuse it — this test's realm/URIs are unique to it.

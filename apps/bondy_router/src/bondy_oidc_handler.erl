@@ -79,8 +79,8 @@ do_handle_login(Req0, State, RealmUri) ->
 
 %% @private
 do_login_redirect(Req0, State, RealmUri, Provider, Config) ->
-    StateToken = bondy_utils:uuid(),
-    Nonce = bondy_utils:uuid(),
+    StateToken = bondy_router_utils:uuid(),
+    Nonce = bondy_router_utils:uuid(),
     CodeVerifier = base64:encode(crypto:strong_rand_bytes(32), #{
         mode => urlsafe, padding => false
     }),
@@ -466,7 +466,7 @@ do_issue_ticket(
             CookieSameSite = same_site_atom(
                 maps:get(cookie_same_site, Config, <<"lax">>)
             ),
-            CsrfToken = bondy_utils:uuid(),
+            CsrfToken = bondy_router_utils:uuid(),
             Req1 = set_ticket_cookie(
                 Req0,
                 RealmUri,
@@ -957,7 +957,9 @@ reply_json_error(StatusCode, ErrorBin, Req) ->
     %% `error' carries the RFC 6749 code and is retained; the standard error
     %% payload is added alongside it.
     Body = maps:put(
-        ~"error", ErrorBin, bondy_error:to_map(bondy_error:from_term(ErrorBin))
+        ~"error",
+        ErrorBin,
+        bondy_connect_error:to_map(bondy_connect_error:from_term(ErrorBin))
     ),
     ReplyBody = json:encode(Body),
     cowboy_req:reply(

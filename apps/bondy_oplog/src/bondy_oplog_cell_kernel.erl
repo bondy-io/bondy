@@ -219,7 +219,7 @@ ValueEqualsState}`. `ValueBytes` is `undefined` exactly when
 ) ->
     {
         NewState :: term(),
-        Hlc :: bondy_hlc:hlc(),
+        Hlc :: bondy_connect_hlc:hlc(),
         StateBytes :: binary(),
         ValueBytes :: binary() | undefined,
         ValueEqualsState :: boolean()
@@ -245,7 +245,7 @@ when the CRDT exports it (tier_2); tier_0 CRDTs ignore it.
 ) ->
     {
         NewState :: term(),
-        Hlc :: bondy_hlc:hlc(),
+        Hlc :: bondy_connect_hlc:hlc(),
         StateBytes :: binary(),
         ValueBytes :: binary() | undefined,
         ValueEqualsState :: boolean()
@@ -284,9 +284,9 @@ a per-event state-based fold), then the CRDT's `hlc/1`.
 -spec interpret_overlay(
     Kernel :: t(),
     State0 :: term(),
-    Hlc0 :: bondy_hlc:hlc(),
+    Hlc0 :: bondy_connect_hlc:hlc(),
     Events :: [bondy_oplog_event:t()]
-) -> {NewState :: term(), NewHlc :: bondy_hlc:hlc()}.
+) -> {NewState :: term(), NewHlc :: bondy_connect_hlc:hlc()}.
 
 interpret_overlay(_Kernel, State, Hlc, []) ->
     {State, Hlc};
@@ -349,7 +349,7 @@ State}` a reduced state; `keep` no change. A fold that declares no
 `stabilize/2` yields `not_supported`, which callers MUST treat as "reclaim
 nothing" — never as "reclaimable".
 """.
--spec stabilize(t(), bondy_hlc:hlc(), State :: term()) ->
+-spec stabilize(t(), bondy_connect_hlc:hlc(), State :: term()) ->
     keep | {keep, term()} | discard | not_supported.
 
 stabilize({crdt, Mod}, StableHlc, State) ->

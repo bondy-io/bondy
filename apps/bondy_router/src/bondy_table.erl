@@ -9,7 +9,7 @@ A thin wrapper over ETS tables with key/value semantics.
 
 Provides `new/3`, `get/2,3`, `find/2`, `put/3`, `delete/2` and
 `update_counter/3` over named ETS tables, optionally managed by
-`bondy_table_manager`, and normalises ETS errors into `badtable`/`badkey`.
+`bondy_connect_table_manager`, and normalises ETS errors into `badtable`/`badkey`.
 """.
 
 -type update_op() ::
@@ -57,7 +57,7 @@ new(Name, Access, Managed) when
 
     case Managed of
         true ->
-            {ok, Name} = bondy_table_manager:add_or_claim(Name, Opts),
+            {ok, Name} = bondy_connect_table_manager:add_or_claim(Name, Opts),
             Name;
         false ->
             ets:new(Name, Opts)

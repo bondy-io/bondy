@@ -485,7 +485,7 @@ tools_call_unregistered_is_retryable(Config) ->
 %% SEP-414 end to end, inbound: a request's `_meta.traceparent` /
 %% `tracestate` / `baggage` reach the callee's INVOCATION details as the
 %% router's trace extension options, verbatim — through the handler's
-%% mapping, `bondy:call`, the dealer's carry and the SDK's decode. The
+%% mapping, `bondy_router_peer:call`, the dealer's carry and the SDK's decode. The
 %% completion event carries the same context as its `trace` metadata —
 %% the §15.4 span contract, asserted at the telemetry seam.
 tools_call_maps_meta_trace_context(Config) ->

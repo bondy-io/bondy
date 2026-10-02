@@ -22,7 +22,7 @@ waiting_for_network   (network down, partisan-gated)
 ```
 
 `connecting` opens the transport (and owns the reconnect/backoff loop via
-`bondy_retry`); `handshaking` runs the raw-socket transport handshake (passive)
+`bondy_connect_retry`); `handshaking` runs the raw-socket transport handshake (passive)
 then switches the socket to active and sends the HELLO the protocol layer
 produces; `establishing` feeds inbound CHALLENGE/WELCOME/ABORT records to the
 protocol layer until it reports `established` (or aborts); `established` services
@@ -34,13 +34,13 @@ A dropped session is re-established in-process: on a transport failure the
 session state is torn down (in-flight calls fail-fast with `{error, disconnected}`,
 in-flight workers are stopped, established registrations/subscriptions are
 cleared but the **declared** set is kept), then `connecting` retries with
-`bondy_retry` backoff. On re-establish the declared REGISTER/SUBSCRIBE set is
+`bondy_connect_retry` backoff. On re-establish the declared REGISTER/SUBSCRIBE set is
 replayed. When partisan network monitoring is available, a network-down failure
 parks in `waiting_for_network` until the network recovers. The initial connect
 is fail-fast by default (configurable via `reconnect.retry_initial_connect`).
 
 A router `ABORT` is classified before it is treated as fatal. Every Bondy abort
-carries `bondy_error`'s `nature` key: `transient` means retrying the operation
+carries `bondy_connect_error`'s `nature` key: `transient` means retrying the operation
 unchanged could succeed, `permanent` means the request itself is at fault. A
 transient abort — the HELLO load-admission gate shedding new sessions under deep
 run queues with `wamp.error.unavailable` is the one that matters at scale —
@@ -94,11 +94,11 @@ authenticating and cleared on `established`. Progressive calls
     session :: bondy_connect_session:t() | undefined,
     ready_waiters = [] :: [gen_statem:from()],
     %% Resilience
-    reconnect_retry :: bondy_retry:t() | undefined,
+    reconnect_retry :: bondy_connect_retry:t() | undefined,
     retry_initial = false :: boolean(),
     established_once = false :: boolean(),
     %% Set when we enter `connecting` as the CONTINUATION of a retry episode
-    %% rather than the start of one, carrying the already-advanced `bondy_retry`
+    %% rather than the start of one, carrying the already-advanced `bondy_connect_retry`
     %% delay. `connecting(enter, ...)` resets the budget and reconnects
     %% immediately, which is right for a fresh disconnection but catastrophic
     %% for a router that keeps refusing the handshake — see
@@ -1640,7 +1640,7 @@ reconnect_after_failure(Reason, false, Data) ->
 
 %% @private
 backoff_into_connecting(Reason, #data{reconnect_retry = R0} = Data) ->
-    case bondy_retry:fail(R0) of
+    case bondy_connect_retry:fail(R0) of
         {Delay, R1} when is_integer(Delay) ->
             ?LOG_NOTICE(#{
                 description => "Will reconnect after delay.",
@@ -1659,7 +1659,7 @@ backoff_into_connecting(Reason, #data{reconnect_retry = R0} = Data) ->
 %% @private The backoff loop within `connecting': advance the retry state and
 %% schedule the next attempt, or give up once the budget is exhausted.
 backoff_retry(Reason, #data{reconnect_retry = R0} = Data) ->
-    case bondy_retry:fail(R0) of
+    case bondy_connect_retry:fail(R0) of
         {Delay, R1} when is_integer(Delay) ->
             ?LOG_NOTICE(#{
                 description => "Failed to connect; will retry after delay.",
@@ -1703,12 +1703,12 @@ reconnect_allowed(_Reason, #data{}) ->
 reset_reconnect_retry(#data{reconnect_retry = undefined} = Data) ->
     Data;
 reset_reconnect_retry(#data{reconnect_retry = R} = Data) ->
-    {_, R1} = bondy_retry:succeed(R),
+    {_, R1} = bondy_connect_retry:succeed(R),
     Data#data{reconnect_retry = R1}.
 
 %% @private
 init_reconnect_retry(#{enabled := true} = Opts) ->
-    bondy_retry:init(connect, Opts);
+    bondy_connect_retry:init(connect, Opts);
 init_reconnect_retry(_) ->
     undefined.
 
@@ -1842,7 +1842,7 @@ is_retriable(_) -> false.
 %% @private Whether a router ABORT describes a condition that could clear.
 %%
 %% The authority is the router's own `nature` key, which every Bondy ABORT
-%% carries (`bondy_error:to_map/1`): `transient` means "retrying the operation
+%% carries (`bondy_connect_error:to_map/1`): `transient` means "retrying the operation
 %% unchanged could succeed", `permanent` means the request itself is at fault
 %% and will fail identically forever. Trusting the flag rather than a URI table
 %% means a new transient condition on the router is handled by clients that
@@ -2035,7 +2035,7 @@ result_payload(#result{details = Details, args = Args, kwargs = KWArgs}) ->
 %% via resolve_pending/3 (route_app/2). `kind => wamp` discriminates this from
 %% a client-side `{error, Reason}` at the tag_error/1 boundary.
 %%
-%% The payload is a `bondy_error:t()` carrying the router's error, with `kind`,
+%% The payload is a `bondy_connect_error:t()` carrying the router's error, with `kind`,
 %% `args` and `kwargs` retained so existing matches keep working. `message` and
 %% `nature` are the useful additions: a caller can tell a retryable refusal from
 %% a permanent one without parsing the URI.

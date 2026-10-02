@@ -581,7 +581,8 @@ tools_call(Id, Params, RealmUri, AuthSt, Req, St) ->
                 )};
         {error, Other} ->
             ?LOG_ERROR(#{
-                description => "Unexpected bondy:call error on MCP tools/call",
+                description =>
+                    "Unexpected bondy_router_peer:call error on MCP tools/call",
                 reason => Other
             }),
             _ = bondy_mcp_audit:record(
@@ -1360,7 +1361,7 @@ input_required(Id, ErrorMap, RealmUri, Name, Arguments, AuthSt, Audit, Resume) -
             Continuation =
                 case Resume of
                     #{continuation := C} -> C;
-                    undefined -> bondy_utils:uuid()
+                    undefined -> bondy_router_utils:uuid()
                 end,
             SealResult =
                 case State of
@@ -1571,9 +1572,9 @@ allow_decision(RealmUri) ->
 
 %% @private
 %% The WAMP call, era-routed. Modern requests use the blocking
-%% `bondy:call/5`. Handshake requests split it into its own two exported
-%% halves — `bondy:cast/5`, which yields the WAMP request id, and
-%% `bondy:check_response/4` — registering the in-flight call in between
+%% `bondy_router_peer:call/5`. Handshake requests split it into its own two exported
+%% halves — `bondy_router_peer:cast/5`, which yields the WAMP request id, and
+%% `bondy_router_peer:check_response/4` — registering the in-flight call in between
 %% so `notifications/cancelled` (and session close) can cancel it with
 %% the original caller context (§12.5); the dealer then answers THIS
 %% blocked process with the cancellation error. The WAMP cancel mode is
@@ -1599,18 +1600,18 @@ do_mcp_call(Procedure, EntryOpts, TraceOpts, Args, KwArgs, Ctxt, St) ->
     ),
     case maps:get(era, St, modern) of
         modern ->
-            bondy:call(Procedure, Opts, Args, KwArgs, Ctxt);
+            bondy_router_peer:call(Procedure, Opts, Args, KwArgs, Ctxt);
         handshake ->
             #{hs_handle := Handle, rpc_id := Id} = St,
             Mode = maps:get(<<"cancel_mode">>, EntryOpts, <<"killnowait">>),
-            case bondy:cast(Procedure, Opts, Args, KwArgs, Ctxt) of
+            case bondy_router_peer:cast(Procedure, Opts, Args, KwArgs, Ctxt) of
                 {ok, ReqId} ->
                     ok = bondy_mcp_handshake:register_inflight(Handle, Id, #{
                         req_id => ReqId,
                         ctxt => Ctxt,
                         mode => Mode
                     }),
-                    Result = bondy:check_response(
+                    Result = bondy_router_peer:check_response(
                         Procedure, ReqId, call_timeout(Opts), Ctxt
                     ),
                     ok = bondy_mcp_handshake:unregister_inflight(Handle, Id),
@@ -1635,7 +1636,7 @@ call_status({error, _}, _) ->
     internal_error.
 
 %% @private
-%% The same timeout derivation `bondy:call/5` applies.
+%% The same timeout derivation `bondy_router_peer:call/5` applies.
 call_timeout(Opts) ->
     case maps:get(<<"timeout">>, Opts, 0) of
         0 -> bondy_config:get(wamp_call_timeout);

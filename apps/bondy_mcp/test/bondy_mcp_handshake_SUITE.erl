@@ -329,7 +329,7 @@ established_requests_require_the_session(Config) ->
     %% client MUST re-initialize.
     Fake = binary_to_list(
         bondy_mcp_handshake:mint_session_id(
-            bondy_utils:uuid()
+            bondy_router_utils:uuid()
         )
     ),
     {404, _, #{<<"error">> := #{<<"code">> := -32001}}} = post_hs(
@@ -347,7 +347,7 @@ established_requests_require_the_session(Config) ->
         [
             {"mcp-session-id",
                 "other@203.0.113.9." ++
-                    binary_to_list(bondy_utils:uuid())}
+                    binary_to_list(bondy_router_utils:uuid())}
         ],
         req(3, <<"tools/list">>, #{})
     ),

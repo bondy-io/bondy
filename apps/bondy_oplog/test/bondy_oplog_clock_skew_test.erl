@@ -11,7 +11,7 @@
 -define(BITS, ?BONDY_HLC_LOGICAL_BITS).
 
 %% Pack a physical millisecond value with a logical counter, the way
-%% `bondy_hlc:encode/2` does.
+%% `bondy_connect_hlc:encode/2` does.
 hlc(PhysMs, Logical) ->
     (PhysMs bsl ?BITS) bor Logical.
 

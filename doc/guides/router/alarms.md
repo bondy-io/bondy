@@ -64,7 +64,7 @@ flag deliberately does not travel through the alarm — see
 of the handler reporting it is recorded outside the alarm state and only
 mirrored as an alarm.
 
-`m:bondy_app`'s `is_ready/0` is the single readiness oracle, and reads the
+`m:bondy_router_app`'s `is_ready/0` is the single readiness oracle, and reads the
 published flag rather than calling the handler: `/ready` is polled per node per
 second, and a `gen_event:call` would serialise that poll behind whatever else
 the shared `alarm_handler` manager is doing.

@@ -141,10 +141,10 @@ fetch_secret(
     ServiceName
 ) ->
     %% Delegate the raw fetch to the shared, provider-pluggable resolver
-    %% (`aws_sm` is served by `bondy_secret_resolver_aws_sm`); this module keeps
+    %% (`aws_sm` is served by `bondy_connect_secret_resolver_aws_sm`); this module keeps
     %% the service-specific JSON-field → auth-var mapping on top.
     Ref = maps:with([provider, secret_id, region], Spec),
-    case bondy_secret_resolver:resolve(Ref) of
+    case bondy_connect_secret_resolver:resolve(Ref) of
         {ok, SecretString} ->
             json:decode(SecretString);
         {error, Reason} ->

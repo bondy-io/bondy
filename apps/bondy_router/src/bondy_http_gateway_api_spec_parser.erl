@@ -1086,7 +1086,7 @@ cannot be read, contains invalid JSON, or the spec fails validation.
 -spec from_file(file:filename()) -> {ok, any()} | {error, any()}.
 
 from_file(Filename) ->
-    case bondy_utils:json_consult(Filename) of
+    case bondy_router_utils:json_consult(Filename) of
         {ok, Spec} when is_map(Spec) ->
             {ok, parse(Spec, get_context_proxy())};
         {ok, _} ->
@@ -1167,7 +1167,7 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
     %% via AAE before the realm it targets, so skip routes whose realm does not
     %% exist and rebuild later (the api_gateway reactor / realm lifecycle
     %% re-trigger `rebuild_dispatch_tables/0`) rather than crash the gateway under
-    %% `bondy_sup`.
+    %% `bondy_router_sup`.
     build_dispatch_table(L, RulesToAdd, skip).
 
 %% @private
@@ -1997,9 +1997,9 @@ mops_eval(Expr, Ctxt) ->
                 %% `bondy_gateway_error_utf8_test`.
                 <<"message">> => iolist_to_binary([
                     <<"There was an error evaluating the MOPS expression '">>,
-                    bondy_error:to_binary(Expr),
+                    bondy_connect_error:to_binary(Expr),
                     "' with value '",
-                    bondy_error:format_term(Term),
+                    bondy_connect_error:format_term(Term),
                     "'"
                 ]),
                 <<"description">> =>

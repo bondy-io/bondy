@@ -71,7 +71,7 @@ The value is `true` iff any enable dot is live.
 -type dot() :: bondy_oplog_crdt_aw_core:dot().
 -type dots() :: #{dot() => true}.
 -type context() :: bondy_dvvset:vector().
--type state() :: {dots(), context(), bondy_hlc:hlc()}.
+-type state() :: {dots(), context(), bondy_connect_hlc:hlc()}.
 -type op() :: enable | disable.
 
 -export_type([state/0, op/0]).
@@ -202,7 +202,7 @@ HLC-governed, the class for which a scalar frontier licenses the reduction
 Strict bound: a dot at exactly `StableHlc` may be undelivered.
 A live flag (`true`) is data and is kept at any stability point.
 """.
--spec stabilize(bondy_hlc:hlc(), state()) -> keep | discard.
+-spec stabilize(bondy_connect_hlc:hlc(), state()) -> keep | discard.
 
 stabilize(StableHlc, {Dots, _CC, Hlc}) when
     map_size(Dots) =:= 0 andalso Hlc < StableHlc
@@ -211,7 +211,7 @@ stabilize(StableHlc, {Dots, _CC, Hlc}) when
 stabilize(_StableHlc, _State) ->
     keep.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc({_Dots, _CC, Hlc}) ->
     Hlc.

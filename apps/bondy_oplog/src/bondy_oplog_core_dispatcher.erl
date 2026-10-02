@@ -173,7 +173,7 @@ Publish an event to every matching subscriber. Walk runs in the caller
 process — no gen_server round-trip. Returns `ok` whether or not any
 subscriber was matched.
 """.
--spec publish(atom(), term(), bondy_hlc:hlc(), term()) -> ok.
+-spec publish(atom(), term(), bondy_connect_hlc:hlc(), term()) -> ok.
 
 publish(NS, Key, Hlc, Op) ->
     fanout({bondy_oplog_core_event, NS, Key, Hlc, Op}, NS, Key).
@@ -194,7 +194,7 @@ the merge replaced.
 -spec publish_merge(
     NS :: atom(),
     Key :: term(),
-    Hlc :: bondy_hlc:hlc(),
+    Hlc :: bondy_connect_hlc:hlc(),
     Op :: term(),
     Old :: term() | undefined
 ) -> ok.

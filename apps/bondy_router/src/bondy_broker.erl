@@ -206,7 +206,7 @@ publish(ReqId, Opts, TopicUri, Args, KWArgs, Ctxt) when
             {error, Reason};
         Class:Reason:Stacktrace ->
             SessionId = bondy_context:session_id(Ctxt),
-            ExtId = bondy_utils:external_session_id(SessionId),
+            ExtId = bondy_router_utils:external_session_id(SessionId),
             ?LOG_WARNING(#{
                 description => "Error while publishing",
                 class => Class,
@@ -246,7 +246,7 @@ If the last argument is a pid, it registers the pid as a subscriber
 subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     %% We preallocate an id so that we can keep the same even when the process
     %% is restarted by the supervisor.
-    Id = bondy_stdlib:lazy_or_else(
+    Id = bondy_connect_lib:lazy_or_else(
         maps:get(subscription_id, Opts, undefined),
         fun bondy_message_id:global/0
     ),
@@ -344,29 +344,31 @@ forward(M, Ctxt) ->
             case maps:get(acknowledge, Opts, false) of
                 true ->
                     Reply = not_authorized_error(M, Reason),
-                    bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+                    bondy_router_peer:send(
+                        RealmUri, bondy_context:ref(Ctxt), Reply
+                    );
                 false ->
                     ok
             end;
         _:{not_authorized, Reason} ->
             Reply = not_authorized_error(M, Reason),
-            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+            bondy_router_peer:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
-            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+            bondy_router_peer:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         Class:Reason:Stacktrace ->
             %% The log entry and the reply are projections of one error
             %% value, so the trace_id the caller is given is the one the log
             %% can be searched by.
-            Error = bondy_error:internal(Class, Reason, Stacktrace),
-            ?LOG_ERROR((bondy_error:to_log_map(Error))#{
+            Error = bondy_connect_error:internal(Class, Reason, Stacktrace),
+            ?LOG_ERROR((bondy_connect_error:to_log_map(Error))#{
                 description =>
                     ~"Error while evaluating inbound message. Returning ERROR",
                 data => M
             }),
 
             Reply = bondy_wamp_error:to_wamp(Error, M),
-            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
+            bondy_router_peer:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 
 -doc """
@@ -520,7 +522,9 @@ do_forward(#subscribe{} = M, Ctxt) ->
     case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
         {ok, {Entry, true}} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)),
+            bondy_router_peer:send(
+                RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)
+            ),
             %% WAMP 10.3.1 A wamp.subscription.on_subscribe event MUST always
             %% be fired subsequent to a wamp.subscription.on_create event,
             %% since the first subscribe results in both the creation of the
@@ -529,20 +533,24 @@ do_forward(#subscribe{} = M, Ctxt) ->
             on_subscribe(Entry);
         {ok, {Entry, false}} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)),
+            bondy_router_peer:send(
+                RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)
+            ),
             on_subscribe(Entry);
         {error, {already_exists, Entry}} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id));
+            bondy_router_peer:send(
+                RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)
+            );
         {error, timeout} ->
             Error = bondy_wamp_error:to_wamp(
-                bondy_error:new(timeout, #{
+                bondy_connect_error:new(timeout, #{
                     message =>
                         ~"Request timed out waiting for subcription response."
                 }),
                 M
             ),
-            bondy:send(RealmUri, Ref, Error)
+            bondy_router_peer:send(RealmUri, Ref, Error)
     end;
 do_forward(#unsubscribe{} = M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
@@ -552,7 +560,7 @@ do_forward(#unsubscribe{} = M, Ctxt) ->
         ok ->
             ReqId = M#unsubscribe.request_id,
             Reply = bondy_wamp_message:unsubscribed(ReqId),
-            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+            bondy_router_peer:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         {error, not_found} ->
             throw(not_found)
     end;
@@ -578,7 +586,7 @@ do_forward(#publish{} = M, Ctxt) ->
     case maps:get(acknowledge, Opts, false) of
         true ->
             Reply = bondy_wamp_message:published(ReqId, PubId),
-            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+            bondy_router_peer:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         false ->
             ok
     end.
@@ -603,7 +611,7 @@ not_found_error(M, _Ctxt) ->
         end,
 
     bondy_wamp_error:to_wamp(
-        bondy_error:new(no_such_subscription, #{
+        bondy_connect_error:new(no_such_subscription, #{
             message => Msg,
             description => ~"The unsubscribe request failed.",
             details => #{subscription_id => M#unsubscribe.subscription_id}
@@ -616,7 +624,7 @@ not_found_error(M, _Ctxt) ->
 %% @private
 not_authorized_error(M, Reason) ->
     bondy_wamp_error:to_wamp(
-        bondy_error:new(not_authorized, #{message => Reason}), M
+        bondy_connect_error:new(not_authorized, #{message => Reason}), M
     ).
 
 %% @private
@@ -743,7 +751,9 @@ do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin) when
                             %% subscription options to remove unwanted info in
                             %% Details
                             Event = MakeEvent(EntryId),
-                            ok = bondy:send(RealmUri, Subscriber, Event)
+                            ok = bondy_router_peer:send(
+                                RealmUri, Subscriber, Event
+                            )
                     end;
                 {false, _} ->
                     ok
@@ -995,14 +1005,14 @@ send_retained(Entry) ->
         RealmUri, Topic, SessionId, Policy
     ),
 
-    bondy_utils:foreach(
+    bondy_router_utils:foreach(
         fun
             ({continue, Cont}) ->
                 bondy_retained_message_manager:match(Cont);
             (M) ->
                 Event = bondy_retained_message:to_event(M, SubsId),
                 try
-                    bondy:send(RealmUri, Ref, Event)
+                    bondy_router_peer:send(RealmUri, Ref, Event)
                 catch
                     _:_ -> ok
                 end

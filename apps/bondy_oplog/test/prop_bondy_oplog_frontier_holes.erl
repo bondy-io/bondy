@@ -70,7 +70,7 @@ set_gen() ->
                 oneof([A, ?LET(W, integer(0, 3), {A, A + W})])
             )
         ),
-        bondy_interval_set:from_list(L)
+        bondy_connect_interval_set:from_list(L)
     ).
 
 observation_gen() ->
@@ -91,7 +91,7 @@ prop_seq_gaps_matches_model() ->
         {Prefix, Set},
         {prefix_gen(), set_gen()},
         ?APPLY:seq_gaps(Prefix, Set) =:=
-            model_gaps(Prefix, bondy_interval_set:to_flat_list(Set))
+            model_gaps(Prefix, bondy_connect_interval_set:to_flat_list(Set))
     ).
 
 prop_missing_is_the_absent_count() ->
@@ -100,7 +100,7 @@ prop_missing_is_the_absent_count() ->
         {prefix_gen(), set_gen()},
         begin
             Gaps = ?APPLY:seq_gaps(Prefix, Set),
-            Points = bondy_interval_set:to_flat_list(Set),
+            Points = bondy_connect_interval_set:to_flat_list(Set),
             lists:sum([To - From + 1 || {From, To} <- Gaps]) =:=
                 length(model_absent(Prefix, Points))
         end
@@ -132,8 +132,8 @@ prop_detector_matches_model() ->
              || A <- Arrivals
             ],
             {VV, Pending} = bondy_oplog_registry:frontier_and_pending(Id),
-            Held = bondy_interval_set:to_flat_list(
-                maps:get(Origin, Pending, bondy_interval_set:new())
+            Held = bondy_connect_interval_set:to_flat_list(
+                maps:get(Origin, Pending, bondy_connect_interval_set:new())
             ),
             model_gaps(maps:get(Origin, VV, 0), Held ++ Batch) =:=
                 detect(Id, Origin, Batch)
@@ -374,17 +374,17 @@ opens_a_hole(Arrivals) ->
         fun(Seqs, {P, S}) ->
             absorb(P, lists:foldl(fun add/2, S, [X || X <- Seqs, X > P]))
         end,
-        {0, bondy_interval_set:new()},
+        {0, bondy_connect_interval_set:new()},
         Arrivals
     ),
     Set =/= [].
 
-add(Seq, S) -> bondy_interval_set:add_element(Seq, S).
+add(Seq, S) -> bondy_connect_interval_set:add_element(Seq, S).
 
 absorb(P, [N | _] = S) when is_integer(N), N =:= P + 1 ->
-    absorb(N, bondy_interval_set:subtract(S, [{0, N}]));
+    absorb(N, bondy_connect_interval_set:subtract(S, [{0, N}]));
 absorb(P, [{Min, Max} | _] = S) when Min =:= P + 1 ->
-    absorb(Max, bondy_interval_set:subtract(S, [{0, Max}]));
+    absorb(Max, bondy_connect_interval_set:subtract(S, [{0, Max}]));
 absorb(P, S) ->
     {P, S}.
 

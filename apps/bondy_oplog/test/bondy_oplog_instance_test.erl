@@ -109,7 +109,7 @@ idempotent_append_remote() ->
     Id = mk_id(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     PeerKey = bondy_oplog_event:key(
-        bondy_hlc:encode(erlang:system_time(millisecond) + 1000, 0),
+        bondy_connect_hlc:encode(erlang:system_time(millisecond) + 1000, 0),
         <<"peer-origin-aaaa">>,
         1
     ),
@@ -128,7 +128,7 @@ deterministic_root_across_replicas() ->
     Events = [
         bondy_oplog_event:new(
             bondy_oplog_event:key(
-                bondy_hlc:encode(1_000_000_000 + N, 0),
+                bondy_connect_hlc:encode(1_000_000_000 + N, 0),
                 <<"peer-origin-fixed">>,
                 N
             ),
@@ -212,7 +212,7 @@ truncate_prefix_advances_watermark() ->
     Base = erlang:system_time(millisecond) + 1_000_000,
     MkEvent = fun(N) ->
         Key = bondy_oplog_event:key(
-            bondy_hlc:encode(Base + N, 0),
+            bondy_connect_hlc:encode(Base + N, 0),
             <<"peer-twwm-aaaa">>,
             N
         ),
@@ -236,7 +236,7 @@ truncate_prefix_advances_watermark() ->
     ?assertEqual(2, bondy_oplog:size(Id)),
     %% Fresh peer event past the watermark: installs normally.
     FreshKey = bondy_oplog_event:key(
-        bondy_hlc:encode(Base + 100, 0),
+        bondy_connect_hlc:encode(Base + 100, 0),
         <<"peer-twwm-aaaa">>,
         100
     ),
@@ -350,7 +350,7 @@ divergent_remote_events_are_quarantined() ->
     Id = mk_id(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Key = bondy_oplog_event:key(
-        bondy_hlc:encode(erlang:system_time(millisecond) + 1000, 0),
+        bondy_connect_hlc:encode(erlang:system_time(millisecond) + 1000, 0),
         <<"peer-origin-zzzz">>,
         1
     ),

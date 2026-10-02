@@ -38,7 +38,7 @@ table their specs declare; there is no per-table or per-domain gate.
 
 ## Lifecycle
 
-This module is a `gen_server` (a child of `bondy_sup`). Because `bondy_db`
+This module is a `gen_server` (a child of `bondy_router_sup`). Because `bondy_db`
 keeps leveled supervisors on-demand and **owned by the `open/2` caller**, the
 catalogue process owns the `main` DB's `bondy_db_leveled_sup` for its lifetime:
 
@@ -173,7 +173,7 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 %% API
 %% =============================================================================
 
--doc "Starts the catalogue process (a `bondy_sup` child).".
+-doc "Starts the catalogue process (a `bondy_router_sup` child).".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 
 start_link() ->
@@ -833,7 +833,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({'EXIT', Sup, Reason}, #state{leveled_sup = Sup} = State) ->
-    %% Our leveled sup died — stop so bondy_sup restarts us and re-opens.
+    %% Our leveled sup died — stop so bondy_router_sup restarts us and re-opens.
     ?LOG_ERROR(#{
         description => "bondy_db main leveled supervisor died",
         reason => Reason
@@ -876,7 +876,7 @@ do_open_main(Specs) ->
         ok ->
             do_open_main_reconciled(Specs, Dir);
         {error, Reason} ->
-            %% A raise here crashes this `init/1` and takes `bondy_sup` — and
+            %% A raise here crashes this `init/1` and takes `bondy_router_sup` — and
             %% the node — down with it, so an unusable main directory must
             %% flow into `open_main_into/1`'s degrade branch like any other
             %% open failure. `bondy_degraded_boot_SUITE` boots a node with a

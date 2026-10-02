@@ -271,7 +271,7 @@ great deal to its host by design.
 | Writes to the filesystem | **yes** | Data dir, WAL, leveled files, logs, admin unix socket. | *(documented, `doc/guides/deployment/platform_directories.md`, "The directories")* |
 | Spawns OS child processes | **yes, conditionally** | Two sites, both cryptosign signing via an operator-configured helper binary: `apps/bondy_router/src/bondy_bridge_relay_client.erl:1094` and `apps/bondy_wamp/src/bondy_wamp_cryptosign.erl:305`, each `open_port({spawn_executable, Filename}, [{args, …}])`. Present only when a bridge relay or client is configured with `cryptosign.exec`. Search: `grep -rn "os:cmd\|open_port" apps/*/src/` — 2 hits, both above. No `os:cmd` anywhere. | *(documented, the two call sites above)* |
 | Reads environment variables | **yes** | Node name, cookie, and secret refs (`BONDY_SECRET_KEY` and friends). | *(documented, `apps/bondy_router/src/bondy_keyring.erl` moduledoc)* |
-| Installs signal handlers | **yes** | `apps/bondy_router/src/bondy_signal_handler.erl` replaces the default `erl_signal_handler` (`bondy_app.erl:454-455`). It starts an orderly shutdown on `SIGTERM` and delegates every other signal to the OTP default. | *(documented, `apps/bondy_router/src/bondy_signal_handler.erl:5-11`)* |
+| Installs signal handlers | **yes** | `apps/bondy_router/src/bondy_signal_handler.erl` replaces the default `erl_signal_handler` (`bondy_router_app.erl:454-455`). It starts an orderly shutdown on `SIGTERM` and delegates every other signal to the OTP default. | *(documented, `apps/bondy_router/src/bondy_signal_handler.erl:5-11`)* |
 
 > Bondy **does** spawn child processes, so the useful statement is the bounded
 > one: the only two sites are cryptosign signing helpers, the executable path
@@ -454,7 +454,7 @@ verdict. *(documented, `_plans/2026-08-29-rate-limit-scopes-design.md` R2)*
 | **`hackney`** | Outbound HTTP for the gateway `forward` action and the HTTP connector. | Upstream. |
 | **`ranch`** | Socket acceptor pool under every listener, including the Unix-domain admin socket. | Upstream. |
 | **`gproc`** | Process registry on the session and registry paths. | Upstream. |
-| **`bondy_mst`, `bondy_cbor`, `bondy_stdlib`, `mops`** | First-party, vendored into the umbrella. | **In model.** Not deferred upstream. `mops` was an external git dependency until 2026-08-30; see P-MOPS-BOUNDED. |
+| **`bondy_mst`, `bondy_cbor`, `bondy_connect_lib`, `mops`** | First-party, vendored into the umbrella. | **In model.** Not deferred upstream. `mops` was an external git dependency until 2026-08-30; see P-MOPS-BOUNDED. |
 | **Kafka / AWS SNS / Mailgun / SendGrid / SMTP clients** | Transport correctness for egress. | Upstream, but see D-EGRESS-TAINT. |
 
 **Routing rule.** A dependency that fails its own documented contract, where

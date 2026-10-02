@@ -66,7 +66,7 @@ an enable that observed every disable.
 
 -type context() :: bondy_dvvset:vector().
 -type state() :: {
-    bondy_oplog_crdt_rw_core:cell(), context(), bondy_hlc:hlc()
+    bondy_oplog_crdt_rw_core:cell(), context(), bondy_connect_hlc:hlc()
 }.
 -type op() :: enable | disable.
 
@@ -177,7 +177,7 @@ the reduction (`proofs/isabelle/Stabilization.thy`,
 exactly `StableHlc` may be undelivered. A live flag (`true`) is data and
 is kept at any stability point.
 """.
--spec stabilize(bondy_hlc:hlc(), state()) -> keep | discard.
+-spec stabilize(bondy_connect_hlc:hlc(), state()) -> keep | discard.
 
 stabilize(StableHlc, {_Cell, _CC, Hlc} = State) when Hlc < StableHlc ->
     case to_value(State) of
@@ -187,7 +187,7 @@ stabilize(StableHlc, {_Cell, _CC, Hlc} = State) when Hlc < StableHlc ->
 stabilize(_StableHlc, _State) ->
     keep.
 
--spec hlc(state()) -> bondy_hlc:hlc().
+-spec hlc(state()) -> bondy_connect_hlc:hlc().
 
 hlc({_Cell, _CC, Hlc}) ->
     Hlc.

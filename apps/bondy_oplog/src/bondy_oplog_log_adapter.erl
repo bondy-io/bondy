@@ -77,7 +77,7 @@ frame_magic() ->
 is_valid(#bondy_oplog_event{}) -> true;
 is_valid(_) -> false.
 
--spec key(bondy_oplog_event:t()) -> bondy_hlc:hlc().
+-spec key(bondy_oplog_event:t()) -> bondy_connect_hlc:hlc().
 
 key(Event) ->
     bondy_oplog_event:key_hlc(bondy_oplog_event:key(Event)).

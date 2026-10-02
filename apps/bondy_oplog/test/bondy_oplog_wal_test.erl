@@ -70,7 +70,7 @@ with_wal(Opts, Fun) ->
 
 %% Builds an event with `Hlc` and a deterministic `Seq`. Each test that
 %% wants strictly-monotonic events should source `Hlc` from a single
-%% `bondy_hlc:t()` instance via `bondy_hlc:now/1`.
+%% `bondy_connect_hlc:t()` instance via `bondy_connect_hlc:now/1`.
 mk_event(Hlc, Seq) ->
     Key = bondy_oplog_event:key(Hlc, origin(), Seq),
     bondy_oplog_event:new(Key, {op, Hlc}, undefined).
@@ -109,7 +109,7 @@ open_creates_dir_and_segment_test() ->
 %% truncated-tail case (a frame that must NOT count) is
 %% `bondy_oplog_wal_recovery_test:open_max_seq_excludes_truncated_tail_test`.
 open_returns_max_seq_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
@@ -126,7 +126,7 @@ open_returns_max_seq_test() ->
         Seqs = [3, 7, 5],
         _ = [
             {ok, _, _} = bondy_oplog_wal:append(
-                P1, mk_event(bondy_hlc:now(HLC), Seq)
+                P1, mk_event(bondy_connect_hlc:now(HLC), Seq)
             )
          || Seq <- Seqs
         ],
@@ -164,7 +164,7 @@ expect_open_error(Expected, Fun) ->
 %% reopen, verify state is restored. Per-write fsync means everything
 %% appended before close survives.
 reopen_recovers_clean_wal_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     Dir = mktemp_dir(),
     try
         Opts = #{dir => Dir, origin => origin()},
@@ -172,7 +172,7 @@ reopen_recovers_clean_wal_test() ->
         %% Append a handful of events, capture HLCs.
         Hlcs = [
             begin
-                E = mk_event(bondy_hlc:now(HLC), Seq),
+                E = mk_event(bondy_connect_hlc:now(HLC), Seq),
                 {ok, H, _} = bondy_oplog_wal:append(P1, E),
                 H
             end
@@ -199,7 +199,7 @@ reopen_recovers_clean_wal_test() ->
             maps:get(last_key, InfoAfter)
         ),
         %% Continue appending after reopen; new HLC must be > all prior.
-        E2 = mk_event(bondy_hlc:now(HLC), 6),
+        E2 = mk_event(bondy_connect_hlc:now(HLC), 6),
         {ok, H6, _} = bondy_oplog_wal:append(P2, E2),
         ?assert(H6 > lists:last(Hlcs)),
         ok = bondy_oplog_wal:close(P2)
@@ -262,7 +262,7 @@ single_append_test() ->
     end).
 
 append_1000_events_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, Dir) ->
         Events = generate_events(HLC, 1000, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -283,7 +283,7 @@ append_1000_events_test() ->
     end).
 
 hlc_returned_matches_event_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 5, 1),
         Pairs = [
@@ -308,7 +308,7 @@ rotation_creates_new_segment_test() ->
     %% A small event encodes to ~50–80 bytes of frame; setting the cap
     %% just above one frame guarantees rotation on the second append.
     %% We use 200 bytes so 1 event fits but 2 do not.
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{max_segment_bytes => 200}, fun(Pid, Dir) ->
         Events = generate_events(HLC, 4, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -340,7 +340,7 @@ rotation_creates_new_segment_test() ->
     end).
 
 manifest_updated_after_rotation_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{max_segment_bytes => 200}, fun(Pid, Dir) ->
         Events = generate_events(HLC, 3, 1),
         [bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -365,7 +365,7 @@ manifest_updated_after_rotation_test() ->
     end).
 
 rotation_resets_offset_test() ->
-    HLC = bondy_hlc:new(),
+    HLC = bondy_connect_hlc:new(),
     with_wal(#{max_segment_bytes => 200}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 3, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
@@ -406,7 +406,7 @@ close_is_idempotent_test() ->
 generate_events(_HLC, 0, _) ->
     [];
 generate_events(HLC, N, Seq) ->
-    Hlc = bondy_hlc:now(HLC),
+    Hlc = bondy_connect_hlc:now(HLC),
     [mk_event(Hlc, Seq) | generate_events(HLC, N - 1, Seq + 1)].
 
 is_strictly_increasing([_]) ->

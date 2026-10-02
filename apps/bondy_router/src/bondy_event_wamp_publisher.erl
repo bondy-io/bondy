@@ -52,7 +52,7 @@ handle_event(Event, State) ->
         ok ->
             {ok, State};
         {ok, {Fun, PartitionKey0}} ->
-            PartitionKey = bondy_stdlib:lazy_or_else(
+            PartitionKey = bondy_connect_lib:lazy_or_else(
                 PartitionKey0,
                 fun bondy_wamp_utils:rand_uniform/0
             ),

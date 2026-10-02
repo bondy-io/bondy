@@ -264,8 +264,8 @@ encode(#?MODULE{} = M) ->
 %% `~tw` rather than `~p` for layout: one line per term, so manifests diff
 %% across versions.
 %%
-%% This is the same two-step as `bondy_consult:encode/1` in the umbrella's
-%% `bondy_stdlib`, which this library cannot depend on (it builds standalone
+%% This is the same two-step as `bondy_connect_consult:encode/1` in the umbrella's
+%% `bondy_connect_lib`, which this library cannot depend on (it builds standalone
 %% from its own `rebar.config`); that module's tests pin every term class.
 consult_encode(Terms) ->
     unicode:characters_to_binary([io_lib:format("~tw.~n", [T]) || T <- Terms]).
