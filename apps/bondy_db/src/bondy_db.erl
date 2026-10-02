@@ -840,7 +840,13 @@ refused to install it (it will never reach the projection);
 `{error, {instance_unavailable, Id}}` the moment the shard's instance
 dies with the write pending (in both the write is durable and still
 pending — the caller cannot tell whether it has been applied since); or
-the WAL's own refusal (`{error, backpressure}`, ...).
+the append's own refusal. `backpressure`, `working_set_full`,
+`wal_full`, `wal_unavailable` and `invalid_op` mean the event was not
+written. A WAL writer that fails mid-append answers with its failure
+(`{datasync_failed, _}`, `{write_failed, _}`, or the reason it stopped
+with): like `timeout`, the event may still be durable and be applied once
+the shard restarts, so retrying a non-idempotent op can apply it twice
+(`bondy_oplog_seq_seed_restart_test`).
 """.
 -spec apply(
     Table :: table(),
@@ -912,7 +918,8 @@ possibly-busy instance); only the commit barrier is skipped.
 No write→readable latency sample is recorded — the metric measures
 exactly the barrier this variant does not have.
 
-An op the table's CRDT cannot apply is refused as in `apply/4`.
+An op the table's CRDT cannot apply is refused as in `apply/4`, and an
+`{error, _}` says whether the event was written as it does there.
 """.
 -spec apply_async(
     Table :: table(),
@@ -1017,7 +1024,8 @@ A `tier_2` (causal-context-stamped) table is refused with
 `{error, {tier_2_batch_unsupported, _}}`: its per-cell context read cannot be
 folded into one frame — apply those cells individually with `apply/4`.
 
-Returns `ok` once every shard frame is durable and committed, or `{error, _}`.
+Returns `ok` once every shard frame is durable and committed, or `{error, _}`,
+read per shard frame as for `apply/4`.
 One write whose op the table's CRDT cannot apply refuses the whole batch with
 `{error, {invalid_op, Event}}` before any frame is appended.
 An empty batch is `ok`.

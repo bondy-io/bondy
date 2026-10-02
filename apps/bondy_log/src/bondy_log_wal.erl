@@ -1789,10 +1789,9 @@ group_commit_append(State0, From, Events) ->
                     %% A drained batch hit a fatal rotation failure (fd
                     %% gone). Be conservative: reply an error to every
                     %% caller in the group — the good frames may or may
-                    %% not have reached disk; recovery's break-and-
-                    %% truncate reconciles the tail on restart and a
-                    %% client retry is idempotent (content-addressed).
-                    %% Then stop for a supervisor restart + recovery.
+                    %% not have reached disk, so an error here does not
+                    %% mean the frame is lost. Then stop for a
+                    %% supervisor restart + recovery.
                     reply_all([{F, {error, Reason}} || {F, _} <- Oks]),
                     reply_all(Errs),
                     gen_server:reply(FatalFrom, {error, Reason}),

@@ -39,10 +39,15 @@
 %% `failed_datasync_does_not_remint_its_seq` makes one WAL datasync fail. The
 %% refused append's frame is already in the segment, so the seq the instance
 %% hands back must not be minted again while that frame can survive: every
-%% own-origin seq in the log must be distinct.
+%% own-origin seq in the log must be distinct. The refusal does not mean the
+%% write is lost: the frame survives the restart and its value is applied.
 %% `append_to_a_stopping_writer_is_refused` stands a process that exits with
-%% a stop reason in for the WAL writer: the append must be refused with
-%% `{error, wal_unavailable}`, not raise, and its seq must be handed back.
+%% a stop reason in for the WAL writer: the append must be refused with that
+%% reason, not raise and not `wal_unavailable` (which says nothing was
+%% written), and its seq must be handed back.
+%% `append_after_the_overlay_died_is_refused` kills the instance, and with it
+%% the overlay table the caller staged its row on, before that writer exits:
+%% the rollback finds the table gone and the append is still refused.
 %% =============================================================================
 -module(bondy_oplog_seq_seed_restart_test).
 
@@ -70,6 +75,9 @@ seq_seed_restart_test_() ->
             end},
             {timeout, 60, fun() ->
                 append_to_a_stopping_writer_is_refused(Dir)
+            end},
+            {timeout, 60, fun() ->
+                append_after_the_overlay_died_is_refused(Dir)
             end}
         ]
     end}.
@@ -379,7 +387,12 @@ failed_datasync_does_not_remint_its_seq(Dir) ->
          || E <- read_all(It, []),
             bondy_oplog_event:key_origin(bondy_oplog_event:key(E)) =:= Origin
         ],
-        ?assertEqual(lists:usort(Seqs), lists:sort(Seqs))
+        ?assertEqual(lists:usort(Seqs), lists:sort(Seqs)),
+        ok = bondy_oplog_test_projection:drain(InstId),
+        ?assertMatch(
+            {<<"refused">>, _},
+            bondy_oplog_core:read(NS, primary, <<"refused">>)
+        )
     after
         ok = bondy_oplog:stop_instance(InstId),
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
@@ -409,7 +422,7 @@ append_to_a_stopping_writer_is_refused(Dir) ->
             after
                 ok = bondy_oplog_registry:set_wal_pid(InstId, Wal)
             end,
-        ?assertEqual({error, wal_unavailable}, Refused),
+        ?assertEqual({error, {datasync_failed, eio}}, Refused),
         Next = bondy_oplog:append(
             InstId, {cell_apply, ?B, <<"n">>, {set, 99_001, <<"n">>}}
         ),
@@ -417,6 +430,39 @@ append_to_a_stopping_writer_is_refused(Dir) ->
             bondy_oplog_event:key_seq(First) + 1,
             bondy_oplog_event:key_seq(Next)
         )
+    after
+        ok = bondy_oplog:stop_instance(InstId),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj)
+    end.
+
+append_after_the_overlay_died_is_refused(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    Origin = bondy_oplog_origin:new(),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    try
+        {ok, _} = open_pack_instance(InstId, NS, Dir, Origin),
+        _ = append_batch(InstId, 1, 1),
+        Inst = bondy_oplog_instance:whereis(InstId),
+        Wal = bondy_oplog_registry:wal_pid(InstId),
+        Stopping = spawn(fun() ->
+            receive
+                {'$gen_call', _, _} ->
+                    Ref = monitor(process, Inst),
+                    exit(Inst, kill),
+                    receive
+                        {'DOWN', Ref, process, Inst, _} -> ok
+                    end,
+                    exit({datasync_failed, eio})
+            end
+        end),
+        ok = bondy_oplog_registry:set_wal_pid(InstId, Stopping),
+        ?assertEqual(
+            {error, {datasync_failed, eio}},
+            try_append(InstId, <<"r">>)
+        ),
+        ok = await_subtree_restart(InstId, Inst, Wal, 10_000)
     after
         ok = bondy_oplog:stop_instance(InstId),
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),

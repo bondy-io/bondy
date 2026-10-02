@@ -293,7 +293,8 @@ The row is answered by whichever process evicts it: `{Alias, ok}` once the
 event is installed — its projection write committed, its MST entry
 published — or `{Alias, {error, rejected}}` when the applier refuses it
 (`verify_event/2` failed). A refused append (this call's `{error, _}`
-return) stages no row and sends nothing.
+return) leaves no row and sends nothing, though a WAL writer failure can
+still leave the event durable (`bondy_oplog_instance:append_fast/3`).
 
 The interest travels with the row from the moment the row exists, which
 is before the WAL frame the applier reads — so the answer cannot be

@@ -630,7 +630,12 @@ gen_server hop entirely.
 
 Returns the assigned `event_key()` on success, `{error, backpressure}`
 or `{error, working_set_full}` if backpressure caps would be
-breached, and `{error, wal_unavailable}` if the WAL is mid-restart.
+breached, and `{error, wal_unavailable}` if the WAL is mid-restart;
+none of these wrote the event. A WAL writer that fails mid-append
+answers with its failure (`{datasync_failed, _}`, `{write_failed, _}`,
+or the reason it stopped with), after which the event may still be
+durable and be applied once the subtree restarts
+(`bondy_oplog_seq_seed_restart_test`).
 
 Callers should not use this directly; route through
 `bondy_oplog:append/2,3`, which checks fast-path eligibility from
@@ -737,10 +742,10 @@ event in-process, ships the whole batch through the WAL as one
 atomic frame, inserts every overlay row in a single `ets:insert/2`,
 and bumps the overlay-counters atomics once.
 
-The WAL's `append_batch/2` is all-or-nothing: either every event
-becomes durable or the entire batch is rejected. The fast path
-inherits that semantic — on `{error, _}` no overlay row is written
-and the caller can retry. The rejected batch's seq range is returned
+The WAL's `append_batch/2` writes the batch as one frame. On
+`{error, _}` the staged overlay rows are removed, and whether the frame
+was written follows the same rules as for `append_fast/3`. The rejected
+batch's seq range is returned
 to the counter when it is still the topmost reservation
 (`release_seq_range/3`), keeping each origin's sequence gap-free —
 per-origin contiguity is what makes a max-Seq frontier readable as
@@ -1039,20 +1044,21 @@ fast_wal_append_batch_to({disk, WalPid}, Events) ->
     wal_append_batch(WalPid, Events).
 
 %% @private
-%% One disk-WAL batch append with the writer-death exits normalised to
-%% `{error, wal_unavailable}` — shared by the caller-side fast path
-%% (registry-resolved pid) and the gen_server's `do_append_local/4`
-%% (cached, monitored pid). A call that exits, whatever the writer's stop
-%% reason, may have written its frame; the writer's exit restarts this
-%% instance's subtree, which seeds the seq counter above every frame the
-%% recovered log holds (`bondy_oplog_seq_seed_restart_test`).
+%% One disk-WAL batch append, shared by the caller-side fast path
+%% (registry-resolved pid) and the gen_server's `do_append_local/4` (cached,
+%% monitored pid). A writer gone before the call wrote nothing:
+%% `{error, wal_unavailable}`. A writer that exits during the call may have
+%% written the frame, so its stop reason is returned as the writer's own
+%% fatal reply would be (`bondy_oplog_seq_seed_restart_test`).
 wal_append_batch(WalPid, Events) ->
     try bondy_oplog_wal:append_batch(WalPid, Events) of
         {ok, _Entries} -> ok;
         {error, _} = Err -> Err
     catch
-        exit:noproc -> {error, wal_unavailable};
-        exit:{_, {gen_server, call, [WalPid | _]}} -> {error, wal_unavailable}
+        exit:{noproc, {gen_server, call, [WalPid | _]}} ->
+            {error, wal_unavailable};
+        exit:{Reason, {gen_server, call, [WalPid | _]}} ->
+            {error, Reason}
     end.
 
 ?DOC("""
@@ -5145,11 +5151,18 @@ stage_overlay_rows(Tab, Rows) ->
     end.
 
 %% @private
+%% A dead tid (see `stage_overlay_rows/2`) took its rows with it, so there is
+%% nothing left to roll back.
 unstage_overlay_rows(Tab, Ctrs, Events) ->
-    lists:foreach(
-        fun(E) -> ets:delete(Tab, bondy_oplog_event:key(E)) end,
-        Events
-    ),
+    try
+        lists:foreach(
+            fun(E) -> ets:delete(Tab, bondy_oplog_event:key(E)) end,
+            Events
+        )
+    catch
+        error:badarg ->
+            ok
+    end,
     overlay_counters_sub(Ctrs, length(Events)),
     ok.
 
