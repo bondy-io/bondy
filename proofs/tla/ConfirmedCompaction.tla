@@ -4,9 +4,10 @@
 (* lets a replica truncate, and whether that knowledge survives the next   *)
 (* round.                                                                  *)
 (*                                                                         *)
-(* The mechanism as shipped, established by reading the code               *)
+(* The mechanism this model was built from, read from the code           *)
 (* (bondy_oplog_sync_session, bondy_oplog_peer_state,                      *)
-(* bondy_oplog_compaction, bondy_oplog_instance):                          *)
+(* bondy_oplog_compaction, bondy_oplog_instance) under the root rule; the  *)
+(* code now ships the VV rule and the truncation cap described below:      *)
 (*                                                                         *)
 (*   - A round is a PULL: r asks p for the pages it lacks under p's        *)
 (*     advertised root, merges the whole root into its own tree, then       *)
@@ -36,7 +37,8 @@
 (* is left to the scheduler's phase; on the ETS backend the page GC makes  *)
 (* the stall the common case whenever the trees differ.                    *)
 (*                                                                         *)
-(* The rule under proof (Rule = "rootvv"): r certifies that p holds e if e *)
+(* The VV rule (Rule = "rootvv"), shipped (witness/1 keeps {Root, VV},    *)
+(* peer_first_hole/2): r certifies that p holds e if e                     *)
 (* is in p's recorded root OR e.seq =< p's recorded applied VV at e's      *)
 (* origin. The VV is the witness that survives p's compaction; under the   *)
 (* shipped prefix hold it is a contiguous bound for remote origins, and    *)
@@ -45,10 +47,20 @@
 (*                                                                         *)
 (* Scope. All replicas are members from the start and have completed one  *)
 (* (empty) round with every peer before any write (rows exist). No         *)
-(* recency filter, no mst_retention, no catalogue rebootstrap: the claim   *)
-(* is that with every member live, confirmed compaction never needs any   *)
-(* of them. Keys carry an explicit HLC so truncation is by KEY ORDER, as   *)
-(* shipped, not per-origin. Sessions are atomic.                           *)
+(* mst_retention, no catalogue rebootstrap. Keys carry an explicit HLC so  *)
+(* truncation is by KEY ORDER, as shipped, not per-origin. Sessions are    *)
+(* atomic.                                                                 *)
+(*                                                                         *)
+(* Partitions and the witness set. A link between two replicas can be cut *)
+(* and healed; a round needs the link. Witnesses = "fresh" is the shipped  *)
+(* recency filter: bondy_oplog_peer_state:get_instance_peer_states/1 drops *)
+(* a row whose last_seen is older than peer_timeout_ms, modelled as an     *)
+(* Expire step that may fire whenever no round has refreshed the row.      *)
+(* Witnesses = "members" is the rule under proof: every member's row      *)
+(* bounds compaction until the member is retired. With MaxRetire = 0 it is *)
+(* the witness set every configuration before partitions assumed. Retire  *)
+(* is the operator's permanent removal of a member; its own unsynced      *)
+(* events are given up, so NoLoss and NoGap exclude them.                  *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
 
@@ -59,7 +71,8 @@ CONSTANTS
                  \* at a mint: 0 is a global clock (skew only from a replica
                  \* not having seen a peer's events yet), each extra unit
                  \* admits a mint that sorts above that many unseen events
-    Rule,        \* "root" (shipped) | "rootvv" (root OR applied-VV witness)
+    Rule,        \* "root" (earlier) | "rootvv" (root OR applied-VV
+                 \* witness, shipped)
     AsyncApply,  \* TRUE: remote events are folded by a separate Replay step
                  \* (the applier-backed durable instance); FALSE: folded
                  \* inline in the round (the fused instance)
@@ -67,17 +80,23 @@ CONSTANTS
                  \* root differing from the current tree becomes unreadable
                  \* (ETS backend); "none": no GC between rounds (the pack
                  \* backend inside its hourly collection interval)
+    Witnesses,   \* "fresh" (shipped recency filter) | "members"
+    MaxCuts,     \* link cuts a behaviour may make
+    MaxRetire,   \* members the operator may retire
     CapAtUnapplied \* TRUE: a truncation point is capped strictly below the
                  \* first local key this replica has not applied — the
                  \* watermark door's hold, applied at every truncation site.
-                 \* FALSE: as shipped, the compaction sites truncate at the
-                 \* frontier or the watermark regardless.
+                 \* FALSE: the compaction sites truncate at the frontier or
+                 \* the watermark regardless. The code ships TRUE
+                 \* (capped_truncation_point/2).
 
 ASSUME Replicas \subseteq Nat /\ 0 \notin Replicas
 ASSUME Skew \in Nat
 ASSUME Rule \in {"root", "rootvv"}
 ASSUME Sweep \in {"all", "none"}
 ASSUME CapAtUnapplied \in BOOLEAN
+ASSUME Witnesses \in {"fresh", "members"}
+ASSUME MaxCuts \in Nat /\ MaxRetire \in Nat
 
 Origins == Replicas
 Event   == [org : Origins, seq : 1..MaxSeq]
@@ -96,9 +115,15 @@ VARIABLES
     hasRoot,  \* [Replica -> [Replica -> BOOLEAN]]  row carries a root
     usable,   \* [Replica -> [Replica -> BOOLEAN]]  the root's pages are readable
     row,      \* [Replica -> [Replica -> BOOLEAN]]  peer_state row exists
-    vv        \* [Replica -> [Replica -> [Origin -> 0..MaxSeq]]]  recorded VV
+    vv,       \* [Replica -> [Replica -> [Origin -> 0..MaxSeq]]]  recorded VV
+    link,     \* [Replica -> [Replica -> BOOLEAN]]  the two can reach each other
+    fresh,    \* [Replica -> [Replica -> BOOLEAN]]  row seen within the timeout
+    retired,  \* SUBSET Replica  members the operator removed
+    cuts      \* link cuts made so far
 
-vars == <<hlc, minted, tree, applied, wm, root, hasRoot, usable, row, vv>>
+net  == <<link, fresh, retired, cuts>>
+vars == <<hlc, minted, tree, applied, wm, root, hasRoot, usable, row, vv, net>>
+Live == Replicas \ retired
 
 Minted == {e \in Event : e.seq =< minted[e.org]}
 
@@ -133,14 +158,20 @@ Confirmed(r, p, e) ==
     \/ hasRoot[r][p] /\ usable[r][p] /\ e \in root[r][p]
     \/ Rule = "rootvv" /\ e.seq =< vv[r][p][e.org]
 
-\* The peers whose knowledge bounds r's compaction. Shipped: rows with a
-\* root (bondy_oplog_compaction:compact/1 drops rootless rows). Under the
-\* VV rule every row constrains: a rootless row with a zero VV holds
-\* compaction until a round against that peer records what it applied.
-Peers(r) ==
+\* The peers whose knowledge bounds r's compaction. Under the root rule:
+\* rows with a root. Under the VV rule every row constrains
+\* (bondy_oplog_compaction:compact/1 passes rootless rows): a rootless row
+\* with a zero VV holds compaction until a round against that peer records
+\* what it applied.
+Rows(r) ==
     IF Rule = "root"
         THEN {p \in Replicas \ {r} : hasRoot[r][p]}
         ELSE {p \in Replicas \ {r} : row[r][p]}
+
+Peers(r) ==
+    IF Witnesses = "fresh"
+        THEN {p \in Rows(r) : fresh[r][p]}
+        ELSE Rows(r) \ retired
 
 \* The confirmed down-set of r's tree: local keys every local key at or
 \* below which is confirmed by every peer. compute_frontier_for/2 returns
@@ -170,6 +201,10 @@ TypeOK ==
     /\ usable  \in [Replicas -> [Replicas -> BOOLEAN]]
     /\ row     \in [Replicas -> [Replicas -> BOOLEAN]]
     /\ vv      \in [Replicas -> [Replicas -> [Origins -> 0..MaxSeq]]]
+    /\ link    \in [Replicas -> [Replicas -> BOOLEAN]]
+    /\ fresh   \in [Replicas -> [Replicas -> BOOLEAN]]
+    /\ retired \in SUBSET Replicas
+    /\ cuts    \in 0..MaxCuts
 
 Init ==
     /\ hlc     = [o \in Origins |-> [s \in 1..MaxSeq |-> 0]]
@@ -182,6 +217,10 @@ Init ==
     /\ usable  = [r \in Replicas |-> [p \in Replicas |-> FALSE]]
     /\ row     = [r \in Replicas |-> [p \in Replicas |-> p # r]]
     /\ vv      = [r \in Replicas |-> [p \in Replicas |-> [o \in Origins |-> 0]]]
+    /\ link    = [r \in Replicas |-> [p \in Replicas |-> TRUE]]
+    /\ fresh   = [r \in Replicas |-> [p \in Replicas |-> p # r]]
+    /\ retired = {}
+    /\ cuts    = 0
 
 (***************************************************************************)
 (* Mint: the new key sorts above every key this replica has seen (the HLC  *)
@@ -191,6 +230,7 @@ Init ==
 (* (the applier writes them before their MST install).                    *)
 (***************************************************************************)
 Mint(r) ==
+    /\ r \in Live
     /\ minted[r] < MaxSeq
     /\ LET s    == minted[r] + 1
            e    == Ev(r, s)
@@ -202,7 +242,7 @@ Mint(r) ==
             /\ minted'  = [minted EXCEPT ![r] = s]
             /\ tree'    = [tree EXCEPT ![r] = @ \cup {e}]
             /\ applied' = [applied EXCEPT ![r] = @ \cup {e}]
-    /\ UNCHANGED <<wm, root, hasRoot, usable, row, vv>>
+    /\ UNCHANGED <<wm, root, hasRoot, usable, row, vv, net>>
 
 (***************************************************************************)
 (* A complete round of r pulling from p.                                   *)
@@ -221,15 +261,19 @@ Mint(r) ==
 (***************************************************************************)
 Sync(r, p) ==
     /\ r # p
+    /\ {r, p} \subseteq Live
+    /\ link[r][p]
+    /\ UNCHANGED <<link, retired, cuts>>
     /\ IF tree[p] = {} THEN
          /\ vv' = [vv EXCEPT ![r][p] = VV(applied[p])]
          /\ UNCHANGED <<hlc, minted, tree, applied, wm, root, hasRoot,
-                        usable, row>>
+                        usable, row, fresh>>
        ELSE IF tree[p] = tree[r] THEN
          /\ root'    = [root    EXCEPT ![r][p] = tree[p], ![p][r] = tree[p]]
          /\ hasRoot' = [hasRoot EXCEPT ![r][p] = TRUE, ![p][r] = TRUE]
          /\ usable'  = [usable  EXCEPT ![r][p] = TRUE, ![p][r] = TRUE]
          /\ vv'      = [vv EXCEPT ![r][p] = VV(applied[p])]
+         /\ fresh'   = [fresh EXCEPT ![r][p] = TRUE, ![p][r] = TRUE]
          /\ UNCHANGED <<hlc, minted, tree, applied, wm, row>>
        ELSE
          LET union   == tree[r] \cup tree[p]
@@ -256,17 +300,19 @@ Sync(r, p) ==
                                              /\ (~gcRan \/ root[r][q] = nt)],
                           ![p][r] = TRUE]
          /\ vv'      = [vv EXCEPT ![r][p] = VV(applied[p])]
+         /\ fresh'   = [fresh EXCEPT ![r][p] = TRUE, ![p][r] = TRUE]
          /\ UNCHANGED <<hlc, minted, wm, row>>
 
 (***************************************************************************)
 (* The applier folds what the rounds delivered, with the prefix hold.      *)
 (***************************************************************************)
 Replay(r) ==
+    /\ r \in Live
     /\ AsyncApply
     /\ LET na == ContigClosure(applied[r] \cup tree[r])
        IN /\ na # applied[r]
           /\ applied' = [applied EXCEPT ![r] = na]
-    /\ UNCHANGED <<hlc, minted, tree, wm, root, hasRoot, usable, row, vv>>
+    /\ UNCHANGED <<hlc, minted, tree, wm, root, hasRoot, usable, row, vv, net>>
 
 (***************************************************************************)
 (* One compaction cycle. With a frontier strictly above the watermark:     *)
@@ -294,6 +340,7 @@ Cut(r, k) ==
           /\ (CapAtUnapplied => \A h \in blocked : Below(e, h) /\ e # h)}
 
 Compact(r) ==
+    /\ r \in Live
     /\ Peers(r) # {}
     /\ LET D == Down(r)
        IN IF D # {} /\ ~AtOrBelowWm(r, MaxKey(D)) THEN
@@ -316,13 +363,51 @@ Compact(r) ==
                /\ tree'   = [tree EXCEPT ![r] = nt]
                /\ usable' = [usable EXCEPT ![r] = SweptAt(r, nt)]
                /\ UNCHANGED <<applied, wm>>
-    /\ UNCHANGED <<hlc, minted, root, hasRoot, row, vv>>
+    /\ UNCHANGED <<hlc, minted, root, hasRoot, row, vv, net>>
+
+(***************************************************************************)
+(* The network and the operator.                                           *)
+(***************************************************************************)
+CutLink(r, p) ==
+    /\ r # p /\ link[r][p] /\ cuts < MaxCuts
+    /\ link' = [link EXCEPT ![r][p] = FALSE, ![p][r] = FALSE]
+    /\ cuts' = cuts + 1
+    /\ UNCHANGED <<hlc, minted, tree, applied, wm, root, hasRoot, usable,
+                   row, vv, fresh, retired>>
+
+HealLink(r, p) ==
+    /\ r # p /\ ~link[r][p]
+    /\ link' = [link EXCEPT ![r][p] = TRUE, ![p][r] = TRUE]
+    /\ UNCHANGED <<hlc, minted, tree, applied, wm, root, hasRoot, usable,
+                   row, vv, fresh, retired, cuts>>
+
+\* peer_timeout_ms passes without a completed round between them. last_seen
+\* is written only by bondy_oplog_peer_state:record_sync_complete/5, after a
+\* completed round, so a reachable peer goes stale too (rounds that error,
+\* or a scheduler sampling other peers). Only the recency filter reads
+\* `fresh`, so under "members" the step is disabled.
+Expire(r, p) ==
+    /\ Witnesses = "fresh"
+    /\ r # p /\ fresh[r][p]
+    /\ fresh' = [fresh EXCEPT ![r][p] = FALSE]
+    /\ UNCHANGED <<hlc, minted, tree, applied, wm, root, hasRoot, usable,
+                   row, vv, link, retired, cuts>>
+
+Retire(p) ==
+    /\ p \in Live /\ Cardinality(retired) < MaxRetire
+    /\ retired' = retired \cup {p}
+    /\ UNCHANGED <<hlc, minted, tree, applied, wm, root, hasRoot, usable,
+                   row, vv, link, fresh, cuts>>
 
 Next ==
     \/ \E r \in Replicas : Mint(r)
     \/ \E r \in Replicas, p \in Replicas : Sync(r, p)
     \/ \E r \in Replicas : Replay(r)
     \/ \E r \in Replicas : Compact(r)
+    \/ \E r \in Replicas, p \in Replicas : CutLink(r, p)
+    \/ \E r \in Replicas, p \in Replicas : HealLink(r, p)
+    \/ \E r \in Replicas, p \in Replicas : Expire(r, p)
+    \/ \E p \in Replicas : Retire(p)
 
 Spec == Init /\ [][Next]_vars
 
@@ -345,9 +430,19 @@ FairSpec == Spec /\ Fairness
 \* An event some replica has not applied is still shippable: it sits in a
 \* tree somewhere. Its violation is the state the frontier-gap check and
 \* the catalogue rebootstrap exist to repair.
+\* A retired member's own events are excluded: retiring it gives them up.
 NoLoss ==
-    \A q \in Replicas : \A e \in Minted :
-        e \notin applied[q] => \E r \in Replicas : e \in tree[r]
+    \A q \in Live : \A e \in {x \in Minted : x.org \in Live} :
+        e \notin applied[q] => \E r \in Live : e \in tree[r]
+
+\* No live replica is ever left needing a catalogue re-bootstrap: once a
+\* live replica has truncated an event of a live origin, every live replica
+\* has applied it or still holds it to apply. Stronger than NoLoss, which
+\* only asks that some tree still holds it.
+NoGap ==
+    \A p, q \in Live : \A e \in {x \in Minted : x.org \in Live} :
+        (e \in applied[p] /\ e \notin tree[p])
+            => (e \in applied[q] \/ e \in tree[q])
 
 \* The hypothesis the VV witness rests on (and Dot_Exactness needs).
 PrefixClosed ==

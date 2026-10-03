@@ -228,21 +228,24 @@ implementation second.
 Two cheaper routes were considered and rejected. Ordering the collectors so
 reclamation always runs before compaction cannot be guaranteed — compaction
 can be licensed while stability is unreachable. And deferring compaction
-while a reclamation backlog exists inverts the trade this design is built
-on: a silent member would then block *compaction* too, turning bounded
-projection bytes into unbounded log and tree growth.
+while a reclamation backlog exists would couple the two collectors for
+nothing on a durable database, where both already wait for every cluster
+member, and on the in-memory `registry` database would let a silent member
+grow its history without bound.
 
 ## What could have been, and why not
 
 Two simpler designs were rejected, and the reasons are instructive.
 
-*Timeout-based peer exclusion.* The compaction machinery drops peers unheard
-from for `peer_timeout_ms`, and for compaction that is right: a dropped peer
-pays with a resync, not with correctness. Reclamation has no such fallback — a
-peer dropped by timeout and returning later would resurrect deleted data — so
-reclamation uses a strict, membership-supplied reading of the same table, and
-the two readings are deliberately separate functions rather than one function
-with a flag.
+*Timeout-based peer exclusion.* Dropping peers unheard from for a timeout lets
+a peer return holding state the others no longer account for. Reclamation
+would resurrect deleted data; compaction would lose, once both sides had
+truncated, the writes each side of a partition accepted alone
+(`proofs/tla/ConfirmedCompaction_RootVV3_Fresh_Partition.cfg` violates
+`NoLoss`). Both therefore use the strict, membership-supplied reading of the
+peer-state table; the recency-filtered reading is a separate function, which
+only the in-memory `registry` database's compaction uses, accepting that
+loss.
 
 *Node names as origins.* Names are addresses; they outlive the state they
 point at. Every system whose correctness rests on per-actor monotonic

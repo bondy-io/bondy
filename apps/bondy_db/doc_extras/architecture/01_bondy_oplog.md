@@ -478,9 +478,9 @@ behind the fastest few) calls
 `bondy_oplog_compaction:compact/1` for each instance, which:
 
 1. computes a **stability frontier** from per-peer witnesses — the
-   recorded root hash and the recorded applied frontier
-   (`bondy_oplog_peer_state` filters out peers older than
-   `peer_timeout_ms`, default 30 s). Because the frontier is derived
+   recorded root hash and the recorded applied frontier of every cluster
+   member, or, on a fused instance, of the peers heard from within
+   `peer_timeout_ms` (default 30 s). Because the frontier is derived
    from peer-synced state — which only ever reflects installed,
    published events — it is always at or below the installed
    watermark, so `compact/1` needs **no** overlay-drain barrier and

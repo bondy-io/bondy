@@ -13,12 +13,33 @@
 ?MODULEDOC("""
 Per-instance compaction.
 
-This module is a thin orchestrator: it asks
-`bondy_oplog_peer_state` for the current per-peer witnesses
-(recorded root and applied frontier) and delegates the heavy lifting
-to `bondy_oplog_instance:compact/2`, which runs the cycle
-(stability frontier → interpret_cog → snapshot → MST truncate →
-watermark advance) atomically inside the instance gen_server.
+This module is a thin orchestrator: it collects one witness (recorded root
+and applied frontier) per peer and delegates the heavy lifting to
+`bondy_oplog_instance:compact/2`, which runs the cycle (stability frontier →
+interpret_cog → snapshot → MST truncate → watermark advance) atomically inside
+the instance gen_server.
+
+## Witnesses
+
+Every peer that is a cluster member witnesses, reachable or not. The members
+are the full Partisan membership (`bondy_oplog_instance:reclamation_members/0`)
+and each must have a confirmed row
+(`bondy_oplog_peer_state:confirmed_peer_states/2`) however long it has been
+silent; a member drops out only through a Partisan `leave`. Until then, a
+member that is down or partitioned holds compaction: truncating what it has
+not received loses for good the writes each side accepted alone, once both
+sides have truncated (`proofs/tla/ConfirmedCompaction_RootVV3_Fresh_Partition.cfg`
+violates `NoLoss` under a recency filter; the `_Members_` configs hold it).
+When the membership is unreadable, solo, or has an unconfirmed member, no
+witness is passed: nothing is peer-confirmed, and only the watermark catch-up
+truncates.
+
+A fused instance (`bondy_oplog_registry:fused/1`; ephemeral, which
+`bondy_db:assert_fused_requires_ephemeral/2` enforces) is the exception: its witnesses are the peers heard from within
+`peer_timeout_ms` (`bondy_oplog_peer_state:get_instance_peer_states/1`). Its
+history lives in memory, so a down member must not hold it, and it may lose
+what a silent peer alone holds, as its retention policy already may
+(`bondy_oplog_instance` admits retention only on a fused instance).
 
 Called by:
 
@@ -32,7 +53,7 @@ Called by:
 ?DOC("""
 Runs one compaction cycle for `InstanceId`. Returns:
 
-- `{ok, no_change}` if no progress is possible (no peers, no
+- `{ok, no_change}` if no progress is possible (no confirmed members, no
   intersecting prefix, frontier ≤ current watermark).
 - `{ok, {compacted, NewWatermark, EventCount}}` on success.
 - `{error, Reason}` on failure.
@@ -43,15 +64,31 @@ Runs one compaction cycle for `InstanceId`. Returns:
     | {error, term()}.
 
 compact(InstanceId) when is_binary(InstanceId) ->
-    %% Every recency-live entry is a witness, INCLUDING a rootless one whose
-    %% rounds only ever completed against an empty peer tree: it confirms what
-    %% its recorded applied frontier covers and nothing more, so a live peer
-    %% that has applied none of our events holds compaction until it pulls
-    %% them. Treating such a row as constraining nothing truncates events a
-    %% live member never received (`proofs/tla/ConfirmedCompaction_Root3.cfg`
-    %% reaches `NoLoss` in 5 steps). Only a peer this table has never seen, or
-    %% one past `peer_timeout_ms`, is left to the bootstrap path.
-    bondy_oplog_instance:compact(
-        InstanceId,
-        bondy_oplog_peer_state:get_instance_peer_states(InstanceId)
-    ).
+    bondy_oplog_instance:compact(InstanceId, witnesses(InstanceId)).
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+witnesses(InstanceId) ->
+    case bondy_oplog_registry:fused(InstanceId) of
+        true -> bondy_oplog_peer_state:get_instance_peer_states(InstanceId);
+        false -> member_witnesses(InstanceId)
+    end.
+
+%% @private
+member_witnesses(InstanceId) ->
+    case bondy_oplog_instance:reclamation_members() of
+        {ok, Members} ->
+            case
+                bondy_oplog_peer_state:confirmed_peer_states(
+                    InstanceId, Members
+                )
+            of
+                {ok, States} -> States;
+                {unconfirmed, _} -> []
+            end;
+        error ->
+            []
+    end.

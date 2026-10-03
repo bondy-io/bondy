@@ -138,7 +138,9 @@ survives_compaction() ->
         {peer, awmapn_dummy}, I, LocalRoot
     ),
     bondy_oplog_peer_state:sync(),
-    {ok, {compacted, _, _}} = bondy_oplog:compact(I),
+    {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
+        I, [I, {peer, awmapn_dummy}]
+    ),
     {ok, {V, _}} = bondy_db:read(T, <<"r">>, <<"c">>),
     ?assertEqual(#{<<"k">> => [<<"v2">>]}, V),
     bondy_oplog_peer_state:forget_peer({peer, awmapn_dummy}),

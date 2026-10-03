@@ -91,9 +91,13 @@ flowchart TB
 `bondy_oplog_peer_state` records, per `(peer, instance)`, the most
 recent root hash observed on a successful sync and the applied
 frontier (per-origin version vector) the peer reported before that
-round, plus a `last_seen` timestamp. Peers we haven't heard from in
-`peer_timeout_ms` (default 30s) are filtered out — silent peers must
-not pin the watermark forever.
+round, plus a `last_seen` timestamp. Which rows witness depends on the
+instance (`bondy_oplog_compaction`): an instance that is not fused needs a
+confirmed row from every cluster member, however long it has been silent,
+so a down or partitioned member pins the watermark until it returns or is
+retired; a fused (in-memory) instance uses the rows heard from within
+`peer_timeout_ms` (default 30s), so its history does not grow in RAM
+while a member is down.
 
 The two witnesses answer different questions, and both are needed. The
 root says what the peer's *tree* holds — and a peer's tree loses exactly
@@ -166,8 +170,7 @@ those experiments. With the scheduler firing fairly
 normally under load and drains history fully once writes stop.
 
 What retention exists for is the residual risk the confirmed frontier
-cannot cover: a live-but-lagging peer (or one partitioned longer than
-`peer_timeout_ms` filters for) pins the frontier, and on the memory
+cannot cover: a live-but-lagging peer pins the frontier, and on the memory
 topology pinned history is RAM. Enabling the policy trades the
 soundness invariant peer confirmation provides — *never truncate what a
 live peer still lacks* — for a hard local bound; the recovery paths
@@ -1226,7 +1229,7 @@ snapshot.
 | Hazard | Catch |
 |---|---|
 | Two peers both compact to an empty MST and both advertise an `undefined` root, so a root comparison reports "in sync" without comparing anything. | Convergence is judged by the [applied frontier](#the-applied-frontier-the-convergence-oracle), a per-origin version vector that is compaction-invariant and equal even when both MSTs are empty; the MST root is not the oracle. |
-| Silent peer pins the watermark forever. | `peer_timeout_ms` filters stale peer entries (default 30s); the frontier ignores them. |
+| Silent peer pins the watermark forever. | On a durable instance it does, until it returns or a membership act retires it: forgetting past it would lose the writes it accepted alone (`proofs/tla/ConfirmedCompaction_RootVV3_Fresh_Partition.cfg`). A fused instance ignores peers silent past `peer_timeout_ms` (default 30s). |
 | Replica truncates a prefix the application still cares about. | `interpret_cog` must consume the prefix into the snapshot first. The compaction cycle is `frontier → events → interpret_cog → snapshot → truncate` — the snapshot is durable *before* the MST mutation. |
 | Two compactions race. | One-at-a-time guard in `bondy_oplog_instance`: a second `compact` request while one is in flight replies `{ok, no_change}`. |
 | A replica's OWN root loses pages (observed live: 2 pages absent from an ephemeral store, Fly s16). | Two-sided recovery. Peer side: the responder's `root_unservable` answer is benign per round, but the session enriches it to `root_unservable_behind` when the peer's applied frontier is strictly ahead; three consecutive strikes escalate to a catalogue re-bootstrap (the snapshot producer reads the peer's PROJECTION, servable even when its MST is not). Broken-node side: once the unservable streak passes the threshold AND every recency-live peer's recorded frontier dominates the local one, the compaction tick REBUILDS the MST (drops the tree, advances the watermark, keeps projection + frontier) — `mst_rebuilt` telemetry. Without both halves the pair deadlocks: every round errors, no round completes, the frontier-gap verdict never fires, and nothing on the shard can ever compact. |
@@ -1358,6 +1361,7 @@ Implementation:
       re-truncate on AE integration.
     - `below_or_equal_watermark/2` — append-side filter.
 - `bondy_oplog_peer_state.erl` — per-(peer, instance) root cache;
+  `confirmed_peer_states/2` requires every member,
   `get_instance_peer_states/1` filters by `peer_timeout_ms` (default
   30 000 ms).
 - `bondy_oplog_compaction_checkpoint.erl` + `_ets.erl` + `_file.erl` —

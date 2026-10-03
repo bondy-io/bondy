@@ -698,14 +698,15 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc Recency window for a peer's last-seen state to count toward
-%% compaction's view of cluster liveness; a peer silent longer than this is
-%% excluded from compaction's stability read, so a permanently-departed peer
-%% eventually stops holding compaction back on its own. Governs the
-%% compaction scheduler ONLY — projection-cell reclamation (`db.reclaim`)
-%% uses a strict, membership-based reading with no recency filter, so a
-%% silent member holds reclamation down until retired by an explicit
-%% membership act (`db.origin_retirement`); no timeout changes that.
+%% @doc Recency window for a peer's last-seen state. A peer silent longer
+%% than this stops holding back MST compaction of the in-memory `registry`
+%% database, and does not count as live when an instance whose own MST root
+%% has become unservable decides whether it may rebuild that tree. It bounds
+%% neither compaction of durable databases nor projection-cell reclamation:
+%% both use the full cluster membership with no recency filter, so a member
+%% that is down or partitioned holds both back until it returns or is retired
+%% by an explicit membership act (`db.origin_retirement`); no timeout changes
+%% that.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.compaction.peer_timeout", "bondy_oplog.peer_timeout_ms", [

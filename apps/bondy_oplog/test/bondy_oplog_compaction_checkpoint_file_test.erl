@@ -163,7 +163,7 @@ compaction_does_not_continue_past_an_unsynced_checkpoint_test() ->
         Result = with_io_fault_lock(fun() ->
             ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
             try
-                bondy_oplog:compact(Id)
+                bondy_oplog_test_helpers:compact_among(Id, [Id, Peer])
             catch
                 exit:Reason -> {exit, Reason}
             end
@@ -409,7 +409,9 @@ instance_init_fails_loudly_on_corrupt_checkpoint() ->
             {peer, dummy_corrupt}, Id, LocalRoot
         ),
         bondy_oplog_peer_state:sync(),
-        {ok, {compacted, _, _}} = bondy_oplog:compact(Id),
+        {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
+            Id, [Id, {peer, dummy_corrupt}]
+        ),
         ok = bondy_oplog:stop_instance(Id),
         %% Corrupt the persisted checkpoint.
         Path = checkpoint_path(Tmp, Id),
@@ -487,7 +489,9 @@ default_file_when_storage_path() ->
             {peer, def_fp_peer}, Id, LocalRoot
         ),
         bondy_oplog_peer_state:sync(),
-        {ok, {compacted, _, _}} = bondy_oplog:compact(Id),
+        {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
+            Id, [Id, {peer, def_fp_peer}]
+        ),
         %% Expected on-disk path: same sharded instance dir as MST/WAL.
         Sharded = bondy_oplog_path:storage_path(Id, Tmp, sharded),
         ExpectedFile = filename:join(Sharded, "checkpoint.etf"),
@@ -518,7 +522,9 @@ default_ets_when_ephemeral() ->
             {peer, def_eph_peer}, Id, LocalRoot
         ),
         bondy_oplog_peer_state:sync(),
-        {ok, {compacted, _, _}} = bondy_oplog:compact(Id),
+        {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
+            Id, [Id, {peer, def_eph_peer}]
+        ),
         %% Checkpoint is in ETS, queryable in-memory.
         ?assertMatch({ok, _, _}, bondy_oplog:compaction_checkpoint(Id))
     after
@@ -553,7 +559,9 @@ checkpoint_persists_via_default() ->
             {peer, def_p_peer}, Id, LocalRoot
         ),
         bondy_oplog_peer_state:sync(),
-        {ok, {compacted, _, _}} = bondy_oplog:compact(Id),
+        {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
+            Id, [Id, {peer, def_p_peer}]
+        ),
         {ok, W1, S1} = bondy_oplog:compaction_checkpoint(Id),
         ok = bondy_oplog:stop_instance(Id),
         {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),

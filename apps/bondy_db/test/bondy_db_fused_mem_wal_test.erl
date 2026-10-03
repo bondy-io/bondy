@@ -139,7 +139,9 @@ compaction_bounds_mst() ->
         {peer, fmw_compact_dummy}, Id, Root
     ),
     bondy_oplog_peer_state:sync(),
-    Result = bondy_oplog:compact(Id),
+    Result = bondy_oplog_test_helpers:compact_among(
+        Id, [Id, {peer, fmw_compact_dummy}]
+    ),
     bondy_oplog_peer_state:forget_peer({peer, fmw_compact_dummy}),
     After = live_size(Id),
     %% Diagnostics surface in the eunit output if the assertion fails.
@@ -177,7 +179,9 @@ compaction_under_concurrent_writes() ->
                         {peer, fmw_cc_dummy}, Id, Root
                     ),
                     bondy_oplog_peer_state:sync(),
-                    _ = bondy_oplog:compact(Id)
+                    _ = bondy_oplog_test_helpers:compact_among(
+                        Id, [Id, {peer, fmw_cc_dummy}]
+                    )
                 end
         end
      || _ <- lists:seq(1, 10)
@@ -196,7 +200,7 @@ compaction_under_concurrent_writes() ->
         {peer, fmw_cc_dummy}, Id, Root2
     ),
     bondy_oplog_peer_state:sync(),
-    _ = bondy_oplog:compact(Id),
+    _ = bondy_oplog_test_helpers:compact_among(Id, [Id, {peer, fmw_cc_dummy}]),
     Live = live_size(Id),
     ?debugFmt("concurrent compaction: final live_size=~p", [Live]),
     bondy_oplog_peer_state:forget_peer({peer, fmw_cc_dummy}),

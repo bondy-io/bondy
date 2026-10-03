@@ -140,7 +140,10 @@ compaction_under_remote() ->
     Root = bondy_oplog:root_hash(Ib),
     bondy_oplog_peer_state:record_sync_complete({peer, fconv_dummy}, Ib, Root),
     bondy_oplog_peer_state:sync(),
-    ?assertMatch({ok, {compacted, _, _}}, bondy_oplog:compact(Ib)),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_test_helpers:compact_among(Ib, [Ib, {peer, fconv_dummy}])
+    ),
     %% Projection survived the truncate; cursor re-anchored. All three keys
     %% (two remote, one local) still read back.
     ?assertEqual(<<"a1">>, val(bondy_db:read(Tb, <<"r">>, <<"k1">>))),

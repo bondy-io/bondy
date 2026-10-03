@@ -6358,8 +6358,9 @@ mst_has_entries_at_or_below(MST, Watermark) ->
 %% =============================================================================
 
 -doc """
-The membership set for causal-stability reclamation: the full known Partisan
-membership minus this node. The ONLY member source reclamation may use.
+The membership set for causal-stability reclamation and MST compaction
+(`bondy_oplog_compaction:compact/1`): the full known Partisan membership minus
+this node. The ONLY member source either may use.
 
 Deliberately NOT `bondy_oplog_peer_source:peers_for/2` — that returns a random
 sample (default 3), and a sample confirms a frontier the unsampled members

@@ -735,7 +735,7 @@ compaction_truncates_held_event_of_retired_origin() ->
 %% compact (every later round re-ships e1 to A, whose door drops it
 %% again). A's recorded applied frontier covers e1, so B compacts.
 %% Drives the production entry (`bondy_oplog_compaction:compact/1`), the
-%% one that reads `bondy_oplog_peer_state`.
+%% one that reads `bondy_oplog_peer_state`, with A and B as the members.
 peer_compaction_does_not_stall_ours() ->
     A = start_applier_instance(),
     B = start_applier_instance(),
@@ -747,7 +747,8 @@ peer_compaction_does_not_stall_ours() ->
     ok = bondy_oplog_peer_state:sync(),
     %% B confirmed A's root (the swap), so A compacts e1.
     ?assertMatch(
-        {ok, {compacted, _, 1}}, bondy_oplog_compaction:compact(A)
+        {ok, {compacted, _, 1}},
+        bondy_oplog_test_helpers:compact_among(A, [A, B])
     ),
     ?assertEqual(0, bondy_oplog:size(A)),
 
@@ -771,7 +772,7 @@ peer_compaction_does_not_stall_ours() ->
     %% ...and the recorded applied frontier covers both.
     ?assertEqual(2, maps:get(AOrigin, VVA)),
 
-    ok = compact_to_empty(B),
+    ok = compact_to_empty(B, [A, B]),
     ?assertEqual(KA2, bondy_oplog:current_watermark(B)),
 
     teardown(A),
@@ -805,13 +806,15 @@ rootless_live_peer_holds_compaction() ->
     ),
     ?assertEqual(1, bondy_oplog:size(B)),
 
-    ?assertEqual({ok, no_change}, bondy_oplog_compaction:compact(B)),
+    ?assertEqual(
+        {ok, no_change}, bondy_oplog_test_helpers:compact_among(B, [A, B, C])
+    ),
     ?assertEqual(1, bondy_oplog:size(B)),
 
     ?assertMatch({ok, _}, bondy_oplog:sync(C, B)),
     ok = bondy_oplog_peer_state:sync(),
     ?assertEqual(1, bondy_oplog:size(C)),
-    ok = compact_to_empty(B),
+    ok = compact_to_empty(B, [A, B, C]),
 
     teardown(A),
     teardown(B),
@@ -1496,9 +1499,9 @@ wait_past_ms(Ms) ->
 %% refusal (`{ok, no_change}`) is the failure this guards. The applier is
 %% settled first so a not-yet-folded remote event cannot make the cap hold
 %% for a reason unrelated to the witness under test.
-compact_to_empty(Id) ->
+compact_to_empty(Id, Cluster) ->
     ok = bondy_oplog_applier:barrier(bondy_oplog_registry:applier_pid(Id)),
-    case bondy_oplog_compaction:compact(Id) of
+    case bondy_oplog_test_helpers:compact_among(Id, Cluster) of
         {ok, {compacted, _, _}} -> await_size(Id, 0, 0);
         Other -> erlang:error({compaction_refused, Other})
     end.

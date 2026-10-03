@@ -160,11 +160,15 @@ on a tick are skipped that round and retried on the next.
 
 Duration, default `30s`.
 
-Listed to state a boundary: this recency filter applies to **compaction**'s
-reading of peer state only. Reclamation uses the strict, membership-based
-reading with no recency filter — a silent member holds reclamation down
-until retired by a membership act (`db.origin_retirement`), and no
-timeout changes that.
+Listed to state a boundary: this recency filter bounds neither reclamation
+nor MST compaction of durable databases. Both use the strict,
+membership-based reading with no recency filter — a member that is down or
+partitioned holds both down until it returns or is retired by a membership
+act (`db.origin_retirement`), and no timeout changes that. The filter
+applies to MST compaction of the in-memory `registry` database, whose
+history must not grow while a member is down, and decides which peers count
+as live when an instance whose own root has become unservable considers
+rebuilding its tree.
 
 ## Telemetry
 
@@ -238,9 +242,11 @@ Metadata: `instance_id`.
 
 ### `[bondy_oplog, peer_state, excluded]`
 
-Emitted when compaction's recency-filtered read drops an aged-out peer.
-Telemetry only, by design — it fires on every compaction tick for as long as
-a peer stays silent, and a log line at that rate would storm.
+Emitted when a recency-filtered read drops an aged-out peer: compaction of
+the in-memory `registry` database, or an unservable-root rebuild deciding
+which peers are live. Telemetry only, by design — it fires on every registry
+compaction tick for as long as a peer stays silent, and a log line at that
+rate would storm.
 
 ### The stall log
 

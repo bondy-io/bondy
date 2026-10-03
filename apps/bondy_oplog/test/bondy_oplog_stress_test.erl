@@ -119,7 +119,9 @@ hlc_seeds_from_persisted_watermark() ->
         {peer, dummy_hlc}, Id, LocalRoot
     ),
     bondy_oplog_peer_state:sync(),
-    {ok, {compacted, Watermark, _}} = bondy_oplog:compact(Id),
+    {ok, {compacted, Watermark, _}} = bondy_oplog_test_helpers:compact_among(
+        Id, [Id, {peer, dummy_hlc}]
+    ),
     %% Stop and re-open with same path.
     ok = bondy_oplog:stop_instance(Id),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),

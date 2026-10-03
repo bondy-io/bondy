@@ -52,7 +52,7 @@ compact_after_sync_advances_watermark() ->
     ok = converge(A, B),
     ?assertMatch(
         {ok, {compacted, _, 20}},
-        bondy_oplog:compact(A)
+        bondy_oplog_test_helpers:compact_among(A, [A, B])
     ),
     ?assertNotEqual(undefined, bondy_oplog:current_watermark(A)),
     ok.
@@ -64,7 +64,10 @@ compaction_truncates_mst() ->
     ok = converge(A, B),
     SizeBefore = bondy_oplog:size(A),
     ?assertEqual(10, SizeBefore),
-    ?assertMatch({ok, {compacted, _, _}}, bondy_oplog:compact(A)),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_test_helpers:compact_among(A, [A, B])
+    ),
     ?assertEqual(0, bondy_oplog:size(A)).
 
 %% After A compacts and B re-sends the same (now-stable) events to A
@@ -75,7 +78,7 @@ watermark_filter_drops_old_remote_events() ->
     ok = append_cells(A, 1, 5),
     ok = append_cells(B, 6, 10),
     ok = converge(A, B),
-    {ok, {compacted, _, _}} = bondy_oplog:compact(A),
+    {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(A, [A, B]),
     ?assertEqual(0, bondy_oplog:size(A)),
     Cells = bondy_oplog_test_projection:cells(A),
     ?assertEqual(10, length(Cells)),
@@ -90,8 +93,8 @@ deterministic_watermark_across_replicas() ->
     ok = append_cells(A, 1, 8),
     ok = append_cells(B, 9, 16),
     ok = converge(A, B),
-    {ok, {compacted, WA, _}} = bondy_oplog:compact(A),
-    {ok, {compacted, WB, _}} = bondy_oplog:compact(B),
+    {ok, {compacted, WA, _}} = bondy_oplog_test_helpers:compact_among(A, [A, B]),
+    {ok, {compacted, WB, _}} = bondy_oplog_test_helpers:compact_among(B, [A, B]),
     ?assertEqual(WA, WB),
     ?assertEqual(
         bondy_oplog_test_projection:cells(A),
@@ -103,9 +106,11 @@ idempotent_compact() ->
     ok = append_cells(A, 1, 4),
     ok = append_cells(B, 5, 8),
     ok = converge(A, B),
-    {ok, {compacted, W1, _}} = bondy_oplog:compact(A),
+    {ok, {compacted, W1, _}} = bondy_oplog_test_helpers:compact_among(A, [A, B]),
     %% Second compact with no new events ⇒ no_change.
-    ?assertEqual({ok, no_change}, bondy_oplog:compact(A)),
+    ?assertEqual(
+        {ok, no_change}, bondy_oplog_test_helpers:compact_among(A, [A, B])
+    ),
     ?assertEqual(W1, bondy_oplog:current_watermark(A)).
 
 %% Helpers

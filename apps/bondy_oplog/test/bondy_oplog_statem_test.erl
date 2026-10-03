@@ -204,7 +204,7 @@ compact_a(A, B, _S) ->
                 PeerKey, A, BRoot
             ),
             bondy_oplog_peer_state:sync(),
-            _ = bondy_oplog:compact(A),
+            _ = bondy_oplog_test_helpers:compact_among(A, [A, PeerKey]),
             ok
     end.
 
@@ -219,7 +219,7 @@ compact_b(A, B, _S) ->
                 PeerKey, B, ARoot
             ),
             bondy_oplog_peer_state:sync(),
-            _ = bondy_oplog:compact(B),
+            _ = bondy_oplog_test_helpers:compact_among(B, [B, PeerKey]),
             ok
     end.
 

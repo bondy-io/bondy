@@ -12,6 +12,7 @@
 -export([frame/3]).
 -export([frame/4]).
 -export([value_of/2]).
+-export([compact_among/2]).
 
 %% Build a V2 cell frame for the given fold state. Equivalent to what
 %% the applier writes through `bondy_oplog_cell_apply` —
@@ -45,6 +46,23 @@ frame(Strategy, State, Hlc, false) ->
 
 value_of(Strategy, State) ->
     (crdt_mod(Strategy)):to_value(State).
+
+%% One compaction cycle of `Id` as a member of `Cluster`. Instances in one BEAM
+%% share a single Partisan membership, so it is mocked for the call to
+%% `Cluster` minus `Id`: over the inline transport a peer is addressed by its
+%% instance id, which is what its peer-state rows are keyed by.
+-spec compact_among(binary(), [term()]) -> term().
+
+compact_among(Id, Cluster) ->
+    ok = meck:new(partisan_peer_service, [passthrough]),
+    try
+        ok = meck:expect(partisan_peer_service, members, fun() ->
+            {ok, [partisan:node() | Cluster -- [Id]]}
+        end),
+        bondy_oplog:compact(Id)
+    after
+        meck:unload(partisan_peer_service)
+    end.
 
 %% Resolve a `fold_module` label to its native CRDT twin (PR-Z).
 crdt_mod(Strategy) ->

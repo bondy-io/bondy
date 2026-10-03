@@ -36,14 +36,17 @@ had no holes:
 ## How a hole forms
 
 Anti-entropy is pull-only: a replica integrates a peer's whole tree once it
-holds every page of that tree. Compaction, meanwhile, truncates history that
-every *confirmed* peer has applied — and the confirmation set is
-recency-filtered, so a replica silent past `db.aae.peer_timeout` no longer
-holds truncation back.
+holds every page of that tree. Compaction of a durable database truncates
+only history every cluster member has confirmed, however long a member has
+been silent, so it opens no hole. Other truncations can: compaction of the
+in-memory `registry` database stops waiting for a member silent past
+`db.compaction.peer_timeout`, its `mst_retention` truncates by local policy, an instance whose own root has
+become unservable drops its tree once every recently-heard peer covers it,
+and the merge drops a pulled event that sorts below the local watermark.
 
 The hazardous interleaving needs three steps. A replica falls silent; the
-live peers write and then truncate past operations the silent replica never
-pulled; the peers keep writing, so their trees retain those origins' later
+live peers write and then truncate, by one of those paths, past operations
+the silent replica never pulled; the peers keep writing, so their trees retain those origins' later
 operations. When the silent replica rejoins and integrates a peer's tree, it
 receives the later operations with the earlier ones gone from every live
 tree. Folding that batch applies operation 7 over missing 5 and 6. That is the

@@ -367,7 +367,9 @@ roundtrip_with_live_instance() ->
             {peer, e2e_peer}, Id, LocalRoot
         ),
         bondy_oplog_peer_state:sync(),
-        {ok, {compacted, W1, _}} = bondy_oplog:compact(Id),
+        {ok, {compacted, W1, _}} = bondy_oplog_test_helpers:compact_among(
+            Id, [Id, {peer, e2e_peer}]
+        ),
         {ok, W1, S1} = bondy_oplog:compaction_checkpoint(Id),
         ok = bondy_oplog:stop_instance(Id),
 

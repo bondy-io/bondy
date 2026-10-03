@@ -1186,21 +1186,22 @@ maybe_unservable_behind(Result, _Instance, _PeerFrontier) ->
 %% THE FRONTIER-GAP CHECK. Fires on a SUCCESSFUL round when the peer's PRE-round
 %% applied frontier is still strictly ahead of ours after the round.
 %%
-%% The frontier adoption in this module rests on "a peer having compacted an
-%% event implies this node already held it", and both compaction flavours break
-%% that by design: `mst_retention` truncates by local policy with no
-%% confirmation at all, and the durable peer-confirmed frontier is
-%% RECENCY-FILTERED (`bondy_oplog_peer_state:get_instance_peer_states/1`),
-%% dropping a replica silent past `peer_timeout_ms` so compaction can proceed
-%% without it. Either way the missing events were compacted away at the peer and
-%% can never arrive by page-sync, so adopting would flip the convergence oracle
-%% to CONVERGED over silently missing data. The session fails with
-%% `{frontier_gap, Origins}` instead and the scheduler flags a catalogue
-%% rebootstrap, whose install + finalize supply BOTH the data and the frontier.
-%% This check IS the recovery half of the recency filter's liveness trade —
-%% without it a stale-peer rejoin silently loses whatever was truncated past it
-%% (`bondy_oplog_compaction_cluster_SUITE`'s stale-peer rejoin case). A third
-%% cause — this replica withheld the peer's frontier at its last bootstrap
+%% The frontier adoption in this module rests on "a peer having dropped an
+%% event from its tree implies this node already held it". Compaction of an
+%% instance that is not fused keeps that (`bondy_oplog_compaction`); other
+%% truncations do not: a fused instance's compaction stops waiting for a peer
+%% silent past `peer_timeout_ms`, its `mst_retention` truncates by local
+%% policy with no confirmation, the
+%% unservable-root self-heal drops a tree once every recency-live peer covers
+%% it, the operator's `truncate_prefix/2` truncates where told, and the merge
+%% applies and drops a pulled event that sorts below the watermark
+%% (`bondy_oplog_bootstrap_rederive_test:watermark_door_leaves_a_gap/0`). The
+%% missing events then can never arrive by page-sync, so adopting would flip the
+%% convergence oracle to CONVERGED over silently missing data. The session fails
+%% with `{frontier_gap, Origins}` instead and the scheduler flags a catalogue
+%% rebootstrap, whose install + finalize supply BOTH the data and the frontier
+%% (`bondy_oplog_compaction_cluster_SUITE`'s prefix-hole case). A further cause
+%% — this replica withheld the peer's frontier at its last bootstrap
 %% (`adopt_frontier/3`) — resolves the same way;
 %% `bondy_oplog_sync_scheduler:maybe_flag_rebootstrap/3` enumerates them.
 %%

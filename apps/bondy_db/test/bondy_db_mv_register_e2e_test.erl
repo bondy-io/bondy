@@ -140,7 +140,9 @@ survives_compaction() ->
         {peer, mvreg_dummy}, I, LocalRoot
     ),
     bondy_oplog_peer_state:sync(),
-    {ok, {compacted, _, _}} = bondy_oplog:compact(I),
+    {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
+        I, [I, {peer, mvreg_dummy}]
+    ),
     {ok, {V, _}} = bondy_db:read(T, <<"r">>, <<"k">>),
     ?assertEqual([<<"v2">>], V),
     bondy_oplog_peer_state:forget_peer({peer, mvreg_dummy}),

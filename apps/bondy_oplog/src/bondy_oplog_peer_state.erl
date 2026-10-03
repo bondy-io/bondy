@@ -24,27 +24,25 @@ the last time we heard from the peer at all.
 
 - Sync sessions write here on successful completion (one root hash per
   `(peer, instance)`).
-- Compaction reads here to compute the stability frontier — the
-  largest event key every fresh peer has confirmed, by its recorded root
-  (received) or its recorded applied frontier (folded, and possibly
-  compacted since).
+- Compaction and reclamation read here to compute the stability
+  frontier — the largest event key every witness has confirmed, by its
+  recorded root (received) or its recorded applied frontier (folded, and
+  possibly compacted since).
 
 ## Two readings, for two different safety requirements
 
 **Recency-filtered** (`get_instance_peer_states/1,2`) — entries older than
-`now - peer_timeout_ms` (app env, default 30 000ms) are excluded, so a silent
-peer does not indefinitely block GC.
+`now - peer_timeout_ms` (app env, default 30 000ms) are excluded: the peers
+heard from recently.
 
-This is sound for **MST compaction**, its only consumer: truncating past events
-a peer never received costs that peer a bulk resync via the bootstrap path, not
-correctness. Liveness is the right trade there — a dead node must not stall
-compaction until an operator notices.
-
-It is **not** sound for anything that reclaims irreversibly. A peer partitioned
-for `peer_timeout_ms + 1` is silently dropped from the frontier, stability
-advances without it, and it may return holding a concurrent write. For MST
-compaction that is a resync; for projection-cell reclamation it is permanent,
-silent resurrection with no fallback (see BONDY_DB_DELETE_DESIGN.md §3.3).
+It is **not** sound for anything that must not lose history or reclaims. A
+peer partitioned for `peer_timeout_ms + 1` is silently left out, stability
+advances without it, and it may return holding writes no other member has.
+Truncating the MST on this reading loses them once both sides have truncated
+(`proofs/tla/ConfirmedCompaction_RootVV3_Fresh_Partition.cfg` violates
+`NoLoss`), which only a fused instance's compaction accepts
+(`bondy_oplog_compaction`); reclaiming projection cells on it resurrects
+deleted data.
 
 **Strict** (`confirmed_peer_states/2`) — no recency filter, and membership is
 supplied by the caller rather than inferred from who happens to be in this
@@ -55,7 +53,8 @@ replicated membership act — a Partisan `leave`, never a timeout; peer
 discovery only joins (see `bondy_oplog_origin_retirement`).
 
 The distinction is deliberate: these are not two ways of asking the same
-question. Reclamation MUST use the strict reading.
+question. Reclamation, and compaction of any instance that is not fused, MUST
+use the strict reading.
 
 ## Concurrency
 
@@ -298,9 +297,8 @@ peers. Each entry is a map with `peer`, `instance`, `root_hash`,
 
 get_instance_peer_states(Instance) ->
     Cutoff = os:system_time(millisecond) - peer_timeout_ms(),
-    %% One unfiltered select, partitioned here: compaction calls this on every
-    %% GC tick, so a second select purely to report exclusions would double the
-    %% cost of the hot path.
+    %% One unfiltered select, partitioned here, so reporting the exclusions
+    %% costs no second select.
     {Fresh, Excluded} = lists:partition(
         fun(#{last_seen := Seen}) -> Seen >= Cutoff end,
         get_instance_peer_states(Instance, 0)
@@ -309,8 +307,8 @@ get_instance_peer_states(Instance) ->
     Fresh.
 
 ?DOC("""
-Strict reading of the peer states for `Instance`, for callers that reclaim
-irreversibly.
+Strict reading of the peer states for `Instance`, for callers that drop
+history or reclaim irreversibly.
 
 `Members` is the set of peers that must have confirmed — supplied by the
 caller, because this table only knows peers it has synced with at least once
@@ -323,8 +321,7 @@ members still missing, so a caller can log or expose why stability is not
 advancing.
 
 Contrast `get_instance_peer_states/1`, which drops peers unheard-from within
-`peer_timeout_ms`. That is correct for MST compaction (a dropped peer resyncs
-via bootstrap) and unsound here (a dropped peer resurrects deleted data).
+`peer_timeout_ms`, and is unsound for any caller that must not lose history.
 """).
 -spec confirmed_peer_states(instance_id(), Members :: [peer_id()]) ->
     {ok, [peer_state_entry()]} | {unconfirmed, [peer_id()]}.
@@ -399,7 +396,7 @@ info() ->
 
 ?DOC("""
 Returns the configured `peer_timeout_ms` from app env, defaulting to
-30 000ms. Hot path on every stale-filter read.
+30 000ms. Read on every recency-filtered read.
 """).
 -spec peer_timeout_ms() -> non_neg_integer().
 
@@ -407,15 +404,11 @@ peer_timeout_ms() ->
     bondy_oplog_config:peer_timeout_ms().
 
 %% @private
-%% A recency-filtered read that drops a peer is silently weakening the stability
-%% frontier: compaction then advances as though that peer had confirmed, and the
-%% peer must bootstrap when it returns. That is the intended trade, but it must
-%% not be invisible — an operator seeing repeated bootstraps needs to be able to
-%% connect them to a peer that keeps ageing out.
-%% Telemetry only, deliberately no log: compaction reads this on every GC tick
-%% (default 1s), and a level-triggered log line would storm for as long as a
-%% peer stays silent. Telemetry handlers can aggregate or rate-limit; a log
-%% statement here cannot.
+%% A peer left out of a recency-filtered read must not be invisible: an
+%% operator needs to connect the decision taken without it to a peer that keeps
+%% ageing out. Telemetry only, deliberately no log: a level-triggered log line
+%% would storm for as long as the peer stays silent, and telemetry handlers can
+%% aggregate or rate-limit where a log statement here cannot.
 report_excluded(_Instance, []) ->
     ok;
 report_excluded(Instance, Excluded) ->

@@ -53,12 +53,14 @@ flowchart LR
 | Applied frontier | Per shard, per origin: the highest folded sequence. It reads as a contiguous prefix because the hold above never lets this path fold past a gap. Equal frontiers across nodes mean the same event set was applied — the convergence oracle the operator-visible metrics report. |
 | Frontier-gap detection | After a complete round, a peer frontier still ahead of the local one (per origin, after a settle) is a verdict: the peer applied events this node can no longer obtain by page sync — they were compacted away everywhere. One verdict may be a transient; two schedule repair. |
 | Catalogue rebootstrap | The repair: reinstall the peer's materialised cells and adopt its frontier, supplying in one act both the values and the bookkeeping that page sync can no longer deliver. The node's own events survive in its local log throughout. |
-| Stability frontier & compaction | The garbage-collection license. A shard certifies, by containment proofs against every confirmed peer's tree, a point below which every replica holds every event; history below it may be truncated and tombstones reclaimed. The confirmation set is recency-filtered — a peer silent past `db.compaction.peer_timeout` stops holding compaction back, which is precisely why the frontier-gap/rebootstrap pair exists. |
+| Stability frontier & compaction | The garbage-collection license. A shard certifies, by containment proofs against every confirmed peer's tree, a point below which every replica holds every event; history below it may be truncated and tombstones reclaimed. On a durable database every cluster member confirms, reachable or not, until a membership act retires it. The in-memory `registry` database confirms on the peers heard from within `db.compaction.peer_timeout`, so its history does not grow while a member is down; that, retention, an unservable-root rebuild and the merge dropping an event below the watermark are why the frontier-gap/rebootstrap pair exists. |
 
 ## The failure that shapes this view
 
 Truncation and lag can interleave: a node falls silent; its peers write,
-confirm among themselves, and truncate; the peers keep writing. When the
+confirm among themselves, and truncate registry history past it (the
+recency filter or retention; a durable database waits for it); the peers
+keep writing. When the
 silent node returns, the history between its position and the truncation
 point exists nowhere as pages. Three mechanisms make this episode boring
 instead of corrupting:
