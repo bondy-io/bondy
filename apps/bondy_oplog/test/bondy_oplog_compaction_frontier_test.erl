@@ -1,21 +1,14 @@
 %% =============================================================================
-%% Equivalence tests for `bondy_oplog_instance:compute_frontier_for/2` — the
-%% O(diff), read-only stability frontier.
+%% Tests for `bondy_oplog_instance:compute_frontier_for/2`, the stability
+%% frontier over durable-frontier witnesses.
 %%
 %% The frontier is the largest local key K such that every local key `=< K` is
-%% confirmed by EVERY peer root. The new implementation walks the read-only
-%% structural diff to the first genuine divergence (filtering structural
-%% false-positives with `bondy_mst:get/3`); the reference is the previous O(N)
-%% set longest-common-prefix, inlined here as `oracle_frontier/2`. The two must
-%% agree on every local/peer configuration.
-%%
-%% Construction: all peer roots must be reachable in the local MST's store (as
-%% they are in production after anti-entropy sync). We build one lineage on a
-%% single ETS store — where `free` tombstones (`freed_at`) but keeps the
-%% page — so every intermediate root stays readable. Peer roots are built
-%% first (capturing each root hash as the table advances), then the local tree
-%% is built last from the final peer, so the live handle's root is the local
-%% root while its store still holds every peer root.
+%% covered by EVERY witness: its `{Origin, Seq}` is at or below the witness's
+%% entry for its origin. The implementation stops a single ascending fold at
+%% the first uncovered key; the reference, `oracle_frontier/2`, takes the
+%% longest covered prefix of the sorted key list. The two must agree on every
+%% local/witness configuration. Event keys `{HLC, Origin, Seq}` with one HLC
+%% per seq keep HLC order and seq order aligned.
 %% =============================================================================
 
 -module(bondy_oplog_compaction_frontier_test).
@@ -23,83 +16,37 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% -----------------------------------------------------------------------------
-%% Lineage construction (single ETS store, all roots reachable)
+%% Construction
 %% -----------------------------------------------------------------------------
 
-ets_tree(Name) ->
-    bondy_mst:new(#{
+tree(Name, Keys) ->
+    T = bondy_mst:new(#{
         store => bondy_mst_ets_store,
         store_opts => #{name => list_to_binary(Name)},
         merger => fun(_K, _V1, V2) -> V2 end
-    }).
+    }),
+    lists:foldl(fun(K, A) -> bondy_mst:put(A, K) end, T, Keys).
 
-%% Reshape the tree from keyset `From` to keyset `To` via deletes + puts
-%% (value `true`); MST history-independence makes the resulting root the
-%% canonical root for `To` regardless of path.
-reshape(T, From, To) ->
-    ToSet = sets:from_list(To),
-    FromSet = sets:from_list(From),
-    T1 = lists:foldl(
-        fun(K, A) -> bondy_mst:delete(A, K) end,
-        T,
-        [K || K <- From, not sets:is_element(K, ToSet)]
-    ),
-    lists:foldl(
-        fun(K, A) -> bondy_mst:put(A, K) end,
-        T1,
-        [K || K <- To, not sets:is_element(K, FromSet)]
-    ).
-
-%% Build one lineage; return {[RootHashPerKeyset], FinalHandle}.
-build_lineage(Name, Keysets) ->
-    {RootsRev, _Prev, FinalT} =
-        lists:foldl(
-            fun(Ks, {Acc, Prev, T}) ->
-                T1 = reshape(T, Prev, Ks),
-                {[bondy_mst:root(T1) | Acc], Ks, T1}
-            end,
-            {[], [], ets_tree(Name)},
-            Keysets
-        ),
-    {lists:reverse(RootsRev), FinalT}.
-
-%% PeerKeysets are built first, the local keyset last; the local handle holds
-%% every peer root in its store.
-setup(Name, PeerKeysets, LocalKeys) ->
-    {Roots, Local} = build_lineage(Name, PeerKeysets ++ [LocalKeys]),
-    {Local, lists:droplast(Roots)}.
+ekey(Origin, Seq) ->
+    bondy_oplog_event:key(Seq, Origin, Seq).
 
 %% -----------------------------------------------------------------------------
-%% Reference frontier: the previous O(N) set longest-common-prefix
+%% Reference frontier: the longest covered prefix of the sorted keys
 %% -----------------------------------------------------------------------------
 
 oracle_frontier(_Local, []) ->
     undefined;
-oracle_frontier(Local, Roots0) ->
-    case [R || R <- Roots0, is_binary(R)] of
-        [] ->
-            undefined;
-        Roots ->
-            PeerSets = [keys_set_at_root(Local, R) || R <- Roots],
-            lcp(sorted_keys(Local), PeerSets, undefined)
-    end.
+oracle_frontier(Local, VVs) ->
+    Keys = lists:reverse(
+        bondy_mst:fold(Local, fun({K, _V}, A) -> [K | A] end, [])
+    ),
+    lcp(Keys, VVs, undefined).
 
-keys_set_at_root(Local, R) ->
-    bondy_mst:fold(
-        Local,
-        fun({K, _V}, A) -> sets:add_element(K, A) end,
-        sets:new([{version, 2}]),
-        [{root, R}]
-    ).
-
-sorted_keys(Local) ->
-    lists:reverse(bondy_mst:fold(Local, fun({K, _V}, A) -> [K | A] end, [])).
-
-lcp([], _PeerSets, Acc) ->
+lcp([], _VVs, Acc) ->
     Acc;
-lcp([K | Rest], PeerSets, Acc) ->
-    case lists:all(fun(S) -> sets:is_element(K, S) end, PeerSets) of
-        true -> lcp(Rest, PeerSets, K);
+lcp([K | Rest], VVs, Acc) ->
+    case lists:all(fun(VV) -> bondy_oplog_event:covered(K, VV) end, VVs) of
+        true -> lcp(Rest, VVs, K);
         false -> Acc
     end.
 
@@ -108,131 +55,68 @@ lcp([K | Rest], PeerSets, Acc) ->
 %% -----------------------------------------------------------------------------
 
 scenarios() ->
+    O1 = <<"o1">>,
+    O2 = <<"o2">>,
+    L = [ekey(O1, 1), ekey(O1, 2), ekey(O1, 3), ekey(O2, 4)],
     [
-        %% {Name, PeerKeysets, LocalKeys, ExpectedFrontier}
-        {"peer_subset", [lists:seq(1, 6)], lists:seq(1, 10), 6},
-        {"identical", [lists:seq(1, 10)], lists:seq(1, 10), 10},
-        {"peer_superset", [lists:seq(1, 10)], lists:seq(1, 6), 6},
-        {"gap_in_middle", [[1, 2, 3, 5, 6, 7, 8, 9, 10]], lists:seq(1, 10), 3},
-        {"two_peers_min", [lists:seq(1, 8), lists:seq(1, 5)], lists:seq(1, 10),
-            5},
-        {"disjoint", [lists:seq(6, 10)], lists:seq(1, 5), undefined},
-        {"no_peers", [], lists:seq(1, 10), undefined},
-        {"empty_local", [lists:seq(1, 5)], [], undefined},
-        {"two_full_peers", [lists:seq(1, 10), lists:seq(1, 10)],
-            lists:seq(1, 10), 10},
-        {"peer_extra_and_hole", [[1, 2, 3, 11, 12]], lists:seq(1, 10), 3}
+        %% {Name, Witnesses, LocalKeys, ExpectedFrontier}
+        {"covers_a_prefix", [#{O1 => 2}], L, ekey(O1, 2)},
+        {"covers_all", [#{O1 => 3, O2 => 4}], L, ekey(O2, 4)},
+        {"covers_more_than_held", [#{O1 => 9, O2 => 9}], L, ekey(O2, 4)},
+        %% The least witness decides.
+        {"two_witnesses_min", [#{O1 => 3, O2 => 4}, #{O1 => 1}], L,
+            ekey(O1, 1)},
+        %% An entry below a key's seq stops the prefix there.
+        {"entry_too_low", [#{O1 => 1, O2 => 3}], L, ekey(O1, 1)},
+        %% The first key uncovered: nothing is confirmed.
+        {"first_key_uncovered", [#{O2 => 4}], L, undefined},
+        %% An unknown witness confirms nothing, nor do no witnesses at all.
+        {"unknown_witness", [#{O1 => 3, O2 => 4}, undefined], L, undefined},
+        {"no_witness", [], L, undefined},
+        {"empty_local", [#{O1 => 3}], [], undefined}
     ].
 
 frontier_scenarios_test_() ->
     [
         {Name, fun() ->
-            {Local, PeerRoots} = setup(
-                "frontier_" ++ Name, PeerKeysets, LocalKeys
-            ),
-            New = bondy_oplog_instance:compute_frontier_for(Local, PeerRoots),
-            Oracle = oracle_frontier(Local, PeerRoots),
-            ?assertEqual(Oracle, New),
-            ?assertEqual(Expected, New)
+            Local = tree("frontier_" ++ Name, Keys),
+            New = bondy_oplog_instance:compute_frontier_for(Local, Witnesses),
+            ?assertEqual(Expected, New),
+            ?assertEqual(oracle_frontier(Local, Witnesses), New)
         end}
-     || {Name, PeerKeysets, LocalKeys, Expected} <- scenarios()
+     || {Name, Witnesses, Keys, Expected} <- scenarios()
     ].
 
 %% -----------------------------------------------------------------------------
-%% Applied-frontier witnesses: a key is confirmed by the peer's root OR by
-%% its recorded applied VV. The oracle above is root-only, so these are
-%% hand-checked against the rule directly. Event keys `{HLC, Origin, Seq}`
-%% with one HLC per seq keep HLC order and seq order aligned.
-%% -----------------------------------------------------------------------------
-
-ekey(Origin, Seq) ->
-    bondy_oplog_event:key(Seq, Origin, Seq).
-
-vv_witness_scenarios() ->
-    O1 = <<"o1">>,
-    O2 = <<"o2">>,
-    L = [ekey(O1, 1), ekey(O1, 2), ekey(O1, 3), ekey(O2, 4)],
-    [
-        %% {Name, PeerKeysets, Witness(RootIndex | undefined, VV), Local, Expected}
-        %% Rootless: only the VV confirms — o1 up to seq 2.
-        {"rootless_vv", [], {undefined, #{O1 => 2}}, L, ekey(O1, 2)},
-        %% Rootless, no VV: nothing confirmed.
-        {"rootless_no_vv", [], {undefined, undefined}, L, undefined},
-        %% Rootless, VV covering everything.
-        {"rootless_vv_all", [], {undefined, #{O1 => 3, O2 => 4}}, L,
-            ekey(O2, 4)},
-        %% The peer compacted seq 1 (root holds 2..4 only); its VV covers
-        %% it: no hole — the ping-pong case.
-        {"root_lost_prefix_vv_covers",
-            [[ekey(O1, 2), ekey(O1, 3), ekey(O2, 4)]], {1, #{O1 => 3, O2 => 4}},
-            L, ekey(O2, 4)},
-        %% Same root, no VV: seq 1 is a hole (root-only rule).
-        {"root_lost_prefix_no_vv", [[ekey(O1, 2), ekey(O1, 3), ekey(O2, 4)]],
-            {1, undefined}, L, undefined},
-        %% Root holds seq 1 only; VV covers o1 to 3 but not o2: frontier 3.
-        {"root_and_vv_union", [[ekey(O1, 1)]], {1, #{O1 => 3}}, L, ekey(O1, 3)},
-        %% A VV entry below the key's seq confirms nothing extra.
-        {"vv_too_low", [[ekey(O1, 1)]], {1, #{O1 => 1, O2 => 3}}, L,
-            ekey(O1, 1)}
-    ].
-
-vv_witness_test_() ->
-    [
-        {Name, fun() ->
-            {Local, Roots} = setup("vvw_" ++ Name, PeerKeysets, LocalKeys),
-            Root =
-                case RootIdx of
-                    undefined -> undefined;
-                    I -> lists:nth(I, Roots)
-                end,
-            Witness = #{root_hash => Root, frontier => VV},
-            ?assertEqual(
-                Expected,
-                bondy_oplog_instance:compute_frontier_for(Local, [Witness])
-            )
-        end}
-     || {Name, PeerKeysets, {RootIdx, VV}, LocalKeys, Expected} <-
-            vv_witness_scenarios()
-    ].
-
-%% -----------------------------------------------------------------------------
-%% Randomised sweep: new == oracle on many random local/peer configurations
+%% Randomised sweep: new == oracle on random local/witness configurations
 %% -----------------------------------------------------------------------------
 
 random_sweep_test() ->
-    %% Deterministic seed for reproducibility.
     _ = rand:seed(exsss, {17, 42, 99}),
-    Universe = lists:seq(1, 30),
+    Origins = [<<"a">>, <<"b">>, <<"c">>],
     lists:foreach(
         fun(N) ->
-            NPeers = 1 + rand:uniform(3),
-            PeerKeysets = [
-                random_subset(Universe)
-             || _ <- lists:seq(1, NPeers)
+            Keys = [
+                ekey(lists:nth(rand:uniform(3), Origins), S)
+             || S <- lists:seq(1, 20), rand:uniform() < 0.7
             ],
-            LocalKeys = random_subset(Universe),
-            {Local, PeerRoots} = setup(
-                "sweep_" ++ integer_to_list(N), PeerKeysets, LocalKeys
-            ),
-            New = bondy_oplog_instance:compute_frontier_for(Local, PeerRoots),
-            Oracle = oracle_frontier(Local, PeerRoots),
-            case New =:= Oracle of
-                true ->
-                    ok;
-                false ->
-                    erlang:error(
-                        {frontier_mismatch, #{
-                            n => N,
-                            peers => PeerKeysets,
-                            local => LocalKeys,
-                            new => New,
-                            oracle => Oracle
-                        }}
-                    )
-            end
+            Witnesses = [
+                maps:from_list([{O, rand:uniform(21) - 1} || O <- Origins])
+             || _ <- lists:seq(1, 1 + rand:uniform(3))
+            ],
+            Local = tree("sweep_" ++ integer_to_list(N), Keys),
+            New = bondy_oplog_instance:compute_frontier_for(Local, Witnesses),
+            Oracle = oracle_frontier(Local, Witnesses),
+            New =:= Oracle orelse
+                erlang:error(
+                    {frontier_mismatch, #{
+                        n => N,
+                        witnesses => Witnesses,
+                        keys => Keys,
+                        new => New,
+                        oracle => Oracle
+                    }}
+                )
         end,
         lists:seq(1, 80)
     ).
-
-random_subset(Universe) ->
-    [K || K <- Universe, rand:uniform() < 0.6].

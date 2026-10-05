@@ -76,10 +76,10 @@ compaction_persists_truncated_root(Dir) ->
         %% With commit_every => 1 the root is durable before compaction.
         ?assertNotEqual(undefined, disk_root(PackDir)),
 
-        Root = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         ?assertEqual(0, bondy_oplog:size(InstId)),
 

@@ -285,11 +285,11 @@ The remedy applies uniformly to applier-backed durable, retention-fused and
 fused-at-defaults instances. A live fused re-bootstrap is sound on three
 counts. The install runs in the instance gen_server itself, atomic with
 respect to the fused drain, so there is no mid-install interleaving. Every op
-the replace-mode install can clobber is either peer-confirmed — a fused peer
-folds at integrate before its root is confirmable, so the op is in the
-snapshot — or still retained in the local MST, peer-confirmed compaction
-being unable to have truncated it, and
-`bondy_oplog_instance:rederive_projection/1` restores it after the bootstrap;
+the install can replace is either peer-confirmed — a fused peer folds at
+integrate before its root is confirmable, so the op is in the snapshot — or
+still retained in the local MST, peer-confirmed compaction being unable to
+have truncated it, and `bondy_oplog_instance:rederive_projection/1` restores
+it before the peer's frontier is adopted;
 under `mst_retention` the retained window bounds this leg, which is that
 policy's documented residual trade. Finalizing the bootstrap does not
 truncate the MST, so unshared local-origin events survive for peers to
@@ -1489,8 +1489,10 @@ maybe_flag_rebootstrap(_InstanceId, _Peer, _Reason) ->
 %% bootstrap session is already running, so dispatch nothing: live pulls would
 %% fail with the same terminal reason and waste cap slots. `{pending, Peer}` —
 %% flagged by a prior `peer_pages_unavailable` exit; dispatch a re-bootstrap
-%% instead of live syncs, `Peer` being the one that reported the unavailability.
-%% `none` — the normal live path.
+%% instead of live syncs, `Peer` being the one that reported the unavailability;
+%% `{pending, undefined}` when the instance holds a re-fold mark that only a
+%% re-bootstrap clears (`bondy_oplog_instance:owes_install/1`). `none` — the
+%% normal live path.
 rebootstrap_state(InstanceId) ->
     _ = ensure_table(?REBOOTSTRAP_TAB),
     case select_inflight_count({'_', InstanceId, bootstrap, '_', '_'}) > 0 of
@@ -1499,8 +1501,17 @@ rebootstrap_state(InstanceId) ->
         false ->
             case ets:lookup(?REBOOTSTRAP_TAB, InstanceId) of
                 [{InstanceId, Peer}] -> {pending, Peer};
-                [] -> none
+                [] -> owed_rebootstrap(InstanceId)
             end
+    end.
+
+%% @private
+owed_rebootstrap(InstanceId) ->
+    try bondy_oplog_instance:owes_install(InstanceId) of
+        true -> {pending, undefined};
+        false -> none
+    catch
+        _:_ -> none
     end.
 
 %% @private

@@ -38,7 +38,7 @@ flowchart LR
     SS --> INT[Integrate & fold<br/>with prefix hold]
     INT --> FR[Applied frontier]
     FR --> GAP{frontier gap?}
-    GAP -->|twice| RB[Catalogue rebootstrap<br/>reinstall cells + adopt frontier]
+    GAP -->|twice| RB[Catalogue rebootstrap<br/>reinstall cells + re-fold + adopt frontier]
     FR --> STAB[Stability frontier<br/>certified by containment]
     STAB --> CMP[Compaction<br/>truncate certified history]
 ```
@@ -52,7 +52,7 @@ flowchart LR
 | Integration & fold | Merges the peer's tree and folds the new events through the applier — the same fold local writes take. The fold enforces [per-origin prefix closure](../database/prefix_closure.md): an origin's events beyond a contiguity gap are held, re-presented until the gap fills or repair supplies them, and never counted by the frontier. |
 | Applied frontier | Per shard, per origin: the highest folded sequence. It reads as a contiguous prefix because the hold above never lets this path fold past a gap. Equal frontiers across nodes mean the same event set was applied — the convergence oracle the operator-visible metrics report. |
 | Frontier-gap detection | After a complete round, a peer frontier still ahead of the local one (per origin, after a settle) is a verdict: the peer applied events this node can no longer obtain by page sync — they were compacted away everywhere. One verdict may be a transient; two schedule repair. |
-| Catalogue rebootstrap | The repair: reinstall the peer's materialised cells and adopt its frontier, supplying in one act both the values and the bookkeeping that page sync can no longer deliver. The node's own events survive in its local log throughout. |
+| Catalogue rebootstrap | The repair: reinstall the peer's materialised cells, re-fold the node's own logged events over them, then adopt the peer's frontier, supplying both the values and the bookkeeping that page sync can no longer deliver. The node's own events survive in its local log throughout, and a crash mid-repair re-folds them at restart. While it repairs, the node serves neither a snapshot nor its frontier to peers. |
 | Stability frontier & compaction | The garbage-collection license. A shard certifies, by containment proofs against every confirmed peer's tree, a point below which every replica holds every event; history below it may be truncated and tombstones reclaimed. On a durable database every cluster member confirms, reachable or not, until a membership act retires it. The in-memory `registry` database confirms on the peers heard from within `db.compaction.peer_timeout`, so its history does not grow while a member is down; that, retention, an unservable-root rebuild and the merge dropping an event below the watermark are why the frontier-gap/rebootstrap pair exists. |
 
 ## The failure that shapes this view
@@ -72,7 +72,8 @@ instead of corrupting:
    visible to the gap check on every round — detection is deterministic,
    not incidental.
 3. The **rebootstrap** repairs from the peer's materialised cells — the
-   values live on, even though the events that produced them do not.
+   values live on, even though the events that produced them do not — and
+   re-folds the node's own events over them.
 
 The visible arc in the metrics: a burst of held events on the returning
 node, frontier-gap verdicts, one scheduled rebootstrap per affected shard,

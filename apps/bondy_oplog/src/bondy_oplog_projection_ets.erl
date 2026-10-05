@@ -59,9 +59,7 @@ This adapter deliberately does **not** export the optional `head/3`
 fast-path. The HEAD path exists to skip a journal hop on durable backends;
 for an in-RAM `ordered_set` `get/3` already returns the full frame with no
 I/O, so a separate HEAD read buys nothing. The substrate falls back to
-`get/3 + bondy_oplog_cell_frame:extract_head/1`. (A test-only wrapper,
-`bondy_oplog_projection_head_counting`, adds `head/3` around this adapter
-to exercise the fast-path; production reads use the fallback.)
+`get/3 + bondy_oplog_cell_frame:extract_head/1`.
 """).
 
 -behaviour(bondy_oplog_projection_adapter).

@@ -136,7 +136,7 @@ compaction_bounds_mst() ->
     Root = bondy_oplog:root_hash(Id),
     ?assert(is_binary(Root)),
     ok = bondy_oplog_peer_state:record_sync_complete(
-        {peer, fmw_compact_dummy}, Id, Root
+        {peer, fmw_compact_dummy}, Id, bondy_oplog_registry:frontier(Id)
     ),
     bondy_oplog_peer_state:sync(),
     Result = bondy_oplog_test_helpers:compact_among(
@@ -176,7 +176,9 @@ compaction_under_concurrent_writes() ->
             is_binary(Root) andalso
                 begin
                     bondy_oplog_peer_state:record_sync_complete(
-                        {peer, fmw_cc_dummy}, Id, Root
+                        {peer, fmw_cc_dummy},
+                        Id,
+                        bondy_oplog_registry:frontier(Id)
                     ),
                     bondy_oplog_peer_state:sync(),
                     _ = bondy_oplog_test_helpers:compact_among(
@@ -195,9 +197,9 @@ compaction_under_concurrent_writes() ->
     %% leaves live_size in the tens of thousands; working compaction keeps it
     %% to a small recent tail.
     _ = bondy_oplog_instance:await_apply(Id, 5000),
-    Root2 = bondy_oplog_instance:root_hash(Id),
+    Witness = bondy_oplog_registry:frontier(Id),
     ok = bondy_oplog_peer_state:record_sync_complete(
-        {peer, fmw_cc_dummy}, Id, Root2
+        {peer, fmw_cc_dummy}, Id, Witness
     ),
     bondy_oplog_peer_state:sync(),
     _ = bondy_oplog_test_helpers:compact_among(Id, [Id, {peer, fmw_cc_dummy}]),

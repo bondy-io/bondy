@@ -135,9 +135,9 @@ survives_compaction() ->
     ok = bondy_db:apply(T, <<"r">>, <<"k">>, {set, <<"v2">>}),
     I = instance_of(T),
     %% Single-replica self-peer so the compaction watermark can advance.
-    LocalRoot = bondy_oplog:root_hash(I),
+    Witness = bondy_oplog_registry:frontier(I),
     bondy_oplog_peer_state:record_sync_complete(
-        {peer, mvreg_dummy}, I, LocalRoot
+        {peer, mvreg_dummy}, I, Witness
     ),
     bondy_oplog_peer_state:sync(),
     {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(

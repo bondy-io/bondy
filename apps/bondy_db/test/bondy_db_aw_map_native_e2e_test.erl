@@ -133,9 +133,9 @@ survives_compaction() ->
     ok = bondy_db:apply(T, <<"r">>, <<"c">>, {put, <<"k">>, <<"v1">>}),
     ok = bondy_db:apply(T, <<"r">>, <<"c">>, {put, <<"k">>, <<"v2">>}),
     I = instance_of(T),
-    LocalRoot = bondy_oplog:root_hash(I),
+    Witness = bondy_oplog_registry:frontier(I),
     bondy_oplog_peer_state:record_sync_complete(
-        {peer, awmapn_dummy}, I, LocalRoot
+        {peer, awmapn_dummy}, I, Witness
     ),
     bondy_oplog_peer_state:sync(),
     {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(

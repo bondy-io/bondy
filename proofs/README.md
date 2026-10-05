@@ -16,8 +16,10 @@ or the TLA+ modules again. `tla/README.md` carries the long-form narrative
 the conclusions.
 
 **Status:** builds clean under Isabelle2025-2. No `sorry`, no `oops`, no
-`axiomatization`. Scope is the stabilization argument only; datatype
-convergence is *not* covered (see [Scope](#scope)).
+`axiomatization`. Scope is the stabilization argument and the
+observed-remove kernel step; datatype convergence is covered only at the step
+level (see [Scope](#scope)). The session builds on the vendored AFP `CRDT`
+entry, which `isabelle/ROOTS` registers.
 
 ```
 cd proofs/isabelle && isabelle build -D .
@@ -39,6 +41,7 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `Frontier_Writers.thy` | Why the applied frontier needs ONE writer, not four: in a max-merge, unsoundness is upward-closed, so one over-claiming writer defeats every conservative one and a cap at another call site is void (`join_absorbs_unsound`, `cap_cannot_repair`); the sparse `#{Origin => Seq}` max is sound **iff** the underlying set is prefix-closed (`max_sound_iff_prefix`); folding behind a contiguity admission test evaluated AFTER bucket resolution preserves prefix-closure of the FOLDED set (the oplog keeps recording receipt) (`fold_preserves_prefix_closed`); and boot reconstruction equals the incremental value when boot RE-FOLDS rather than declares (`reconstruction_agrees`); a claim derived from the oplog is unsound w.r.t. the projection (`receipt_log_overclaims`). It also models the RESTART, which is where the defect lives: a four-set state (checkpoint, claimed, folded, received) with the invariant `claimed subset-of folded`. Declaring the oplog folded at restart breaks it (`shipped_restart_breaks_soundness`, `shipped_restart_overclaims`); re-folding from the checkpoint preserves it (`refold_restart_preserves_soundness`) and never regresses below the checkpoint (`refold_no_regression`). The same oplog-derived claim is SOUND for the replica's own origin (`own_origin_oplog_claim_is_sound`), which is why the writer must be split rather than removed. Design: `_design/applied_frontier.md` |
 | `Frontier_Pending.thy` | The applied frontier ACROSS A SCHEDULE, which the two theories above cannot express. The shipped `claim/2` is sound exactly under batch visibility (`shipped_sound_when_visible`) and unsound the moment a batch boundary falls between the hole and the claim (`shipped_split_batch_overclaims`). The sharpening: **no writer whose state is one integer per origin is both sound and eventually complete** (`no_scalar_writer_sound_and_complete`) — a diagonal over two schedules that carry NO failures, so better failure reporting cannot close it. The prefix-plus-pending pair, carried across a schedule, denotes the folded set exactly (`pending_exact`), reports the largest sound claim (`pending_sound`, `pending_maximal`), never regresses (`pending_no_regression`), is complete once delivery ends prefix-closed (`pending_complete`), costs nothing when it is (`pending_zero_cost_when_healthy`) and one interval per hole when it is not (`pending_intervals_bounded_by_holes`). Also: one writer is still required (`union_absorbs_unsound`), the two columns need no atomic write (`torn_read_is_sound`), and the pending half may be volatile (`dropping_pending_is_sound`, `refold_restores_exactness`). Design: `_design/applied_frontier_pending.md` |
 | `Confirmed_Compaction.thy` | Compaction by peer confirmation: certifying a peer by its recorded root OR its recorded applied VV, with truncation capped below the first un-applied key, never makes an un-applied event unshippable (`no_loss`) and never drops one (`no_drop`) |
+| `Aw_Kernel.thy` | Re-delivery to a dotted cell kernel, one whose causal context grows by exactly each applied operation's context and dot (the kernels built on `aw_core:cc_absorb/3`). The guard of `cell_kernel:apply/6`, skipping an operation whose dot the context covers, makes re-delivery a no-op under any delivery (`dotted_kernel.guarded_redelivery_noop`) and never fires on causal, at-most-once, per-origin-FIFO delivery (`dotted_kernel.guarded_eq_step`). It needs causal delivery (`guard_needs_causal_delivery`), which a hold gives when each batch folds in key order and only events whose context stays within per-origin tops that every later-folded event exceeds (`causal_hold_delivers_causally`, under H3 and distinct dots). The `aw_set`/`aw_map` cell (`nested_core:put/5`, `put_nested/7`, `rmv/3`) is an instance; without the guard a re-delivered add restores a removed key (`shipped_redelivery_resurrects`); per key each step is the AFP `ORSet` interpretation (`put_is_orset`, `putn_is_orset`, `rmv_is_orset`) |
 
 | TLA+ module | Question |
 | --- | --- |
@@ -51,6 +54,9 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `MuxBucketSkip.tla` | Can the applied-frontier VV claim an event whose cell was never installed because its BUCKET had no context? Two independent channels — the fold and the bootstrap adoption — and which mechanisms are load-bearing for each. |
 | `FrontierPending.tla` | Can the applied frontier be maintained by ONE INTEGER per origin, given that batch boundaries are set by drain timing? Which of the three claim rules survives restarts, the compaction door and every interleaving? |
 | `ConfirmedCompaction.tla` | Is a peer's recorded ROOT the right witness for what it holds? Does confirmed compaction converge, and do the compaction sites honour the watermark door's hold? |
+| `LiveRebootstrapRefold.tla` | Does a live catalogue re-bootstrap lose a local event, or leave a frontier claiming an event no cell reflects, under trailing-round failures, crashes and replicas re-bootstrapping from each other? |
+| `JoinInstall.tla` | Can a catalogue install that joins the peer's cell into the local one, rather than replacing it, leave a cell that differs from the fold of every event, once cells are discarded by stabilization or reaped of a retired origin? |
+| `ReplayReanchor.tla` | Can a compaction move the applier's replay cursor past an event the applier has not folded, so that no later replay presents it? |
 | `RibCountReap.tla` | Does a registry RIB cell's `count` settle on its owner's live registrations when the owner reboots under a new origin and both `self_heal` and the `force_reap` reap act on the old one? |
 
 ## Scope
@@ -553,6 +559,177 @@ Clean with `CapAtUnapplied`: the truncation point is capped strictly below
 the first un-applied local key (the door's own rule at every truncation
 site), which also makes the async catch-up vacuous.
 
+### `LiveRebootstrapRefold.tla` — the live catalogue re-bootstrap
+
+A cell is the set of events folded into it, which the guarded fold of
+`Aw_Kernel.thy` licenses (`guarded_redelivery_noop`, `putn_is_orset`). The
+frontier is durable only in the checkpoint; a crash is either a node crash
+(the frontier is the checkpoint's) or a one_for_all subtree restart (the
+registry row survives and the checkpoint is merged into it). Two invariants:
+`NoStrandedEvent` (no event the replay has passed is missing from the cell)
+and `ClaimSound` (the frontier claims only what the cell reflects or a pending
+full re-fold will fold). Two replicas, `MaxSeq = 2` unless noted.
+
+| Config | Order | Result |
+|---|---|---|
+| `_Shipped_NoFault`, `_Shipped_Trigger` | shipped | clean (24,773 and 607,801 states) |
+| `_Shipped_TrailFail` | shipped, trailing round fails | **`ClaimSound` violated** in 8 steps — the B-4 loss |
+| `_Shipped_Crash` | shipped, crash | **`NoStrandedEvent` violated** in 7 steps |
+| `_Proposed_TrailFail` | proposed | clean, liveness included (282,532 states) |
+| `_Proposed_Crash` | proposed | clean (935,875 states) |
+| `_Proposed_TrailFail_Crash` | proposed | clean (1,094,565 states) |
+| `_Proposed_TwoFaults_TwoCrashes` | proposed, `MaxSeq = 1` | clean (398,073 states) |
+| `_Proposed_3R_Safety` | proposed, 3 replicas, `MaxSeq = 1` | exhaustive run exceeds a 6 GB state cap; **19.3M simulated traces clean** |
+| `_NoMarker_Crash` | no re-fold mark | **`NoStrandedEvent` violated** |
+| `_SkipIfOlder_TrailFail`, `_Crash` | a newer local cell is kept | **`ClaimSound` violated** |
+| `_LateRederive_TrailFail` | re-fold after the trailing round | **`NoStrandedEvent` violated** |
+| `_NoServeGuard_TwoFaults` | a replica serves while re-bootstrapping | **`ClaimSound` violated** — two replicas re-bootstrapping from each other |
+| `_MergeFrontier_3R_Safety` | frontier max-merged across the re-fold | **`ClaimSound` violated** (simulation, 3 replicas) |
+| `_Proposed_WriteFailCounted` | proposed, a failed install write counted installed | **`ClaimSound` violated** in 8 steps — the peer frontier adopted over a cell the write missed |
+| `_Proposed_WriteFailAborts` | proposed, a failed install write fails the batch (failed-stream path) | clean, liveness included (1,384,623 states) |
+
+The proposed order: an unconditional install; a durable re-fold mark written
+before the first install batch; a re-fold that resets the frontier and runs
+before finalize, clearing the mark with the checkpoint of what it rebuilt; a
+replica that serves neither snapshot nor frontier while the mark is set; an
+install write that fails ends the session without a finalize. Each
+ingredient has an ablation above that fails. Not modelled: compaction,
+holds, several cells, chunked installs, and a peer reading the frontier other
+than at session start.
+
+### `JoinInstall.tla` — a join install against stabilization and reap
+
+One add-wins cell. Receipt (the MST) is separate from application (the cell);
+an anti-entropy round merges the peer's whole MST; the replay folds causally,
+as `causal_tops/4` holds it; the sweep catches the replay up before it
+discards an empty cell; a retired origin's events never fold. Invariant
+`SettledSound`: once a replica has received and folded every event, its cell
+is the fold of all of them. `MaxSeq = 2` with two replicas, `1` with three.
+
+| Config | Install | Result |
+|---|---|---|
+| `_OpPath`, `_OpPath_3R`, `_OpPath_Reap_3R` | none, shipped receipt stability | clean (2,390, 7,152 and 40,946 states) |
+| `_Replace_Shipped` | replace then re-fold the MST, receipt stability | **violated** in 8 steps — the installed cell holds an add the MST lacks; the sweep deletes the cell after its remove, and the add then arrives and folds |
+| `_Replace_Guarded` | same, applied stability, sweep waits for the MST | **violated** in 14 steps — the peer's context, rebuilt after a discard, covers a remove but no longer the add it removed, so the re-fold skips the remove |
+| `_Join_ReceiptStability` | join, receipt stability | **violated** in 7 steps — a replica discards on its peer's receipt, then joins the peer's cell that has not folded the remove |
+| `_Join_EarlySweep` | join, applied stability | **violated** in 9 steps — as `_Replace_Shipped` |
+| `_Join_Reap_Uncovered_3R` | join, applied, sweep waits, reap | **violated** in 10 steps — a reaped context no longer covers a removed dot the peer still holds |
+| `_Join`, `_Join_3R` | join, applied stability, sweep waits for the MST | clean (10,896 and 45,006 states) |
+| `_Join_Reap_3R` | same, reap, the join counts a retired origin's dots as covered | clean (395,692 states) |
+| `_Join_ClaimSkip`, `_Join_ClaimSkip_3R` | join, applied stability, the replay skips a claimed event instead of the sweep waiting | clean (12,708 and 48,438 states) |
+| `_Join_ClaimSkip_Reap_3R` | same, reap, retired dots covered | clean (550,594 states) |
+| `_Join_ClaimSkip_ReceiptStability` | same, receipt stability | **violated** in 7 steps — skipping does not replace applied stability |
+| `_Replace_ClaimSkip`, `_Replace_ClaimSkip_3R` | replace and re-fold, the replay skips claimed events | **violated** in 14 steps with two replicas (as `_Replace_Guarded`); clean with three at `MaxSeq = 1` |
+| `_OpPath_ClaimSkip_3R`, `_OpPath_ClaimSkip_Reap_3R` | none, skipping claimed events | clean, the same state counts as without |
+| `_Join_ClaimSkip_Crash` | join, applied, skipping; a crash rolls the claims back to the last checkpoint and the cell to any state since the last sync | **violated** in 9 steps — a peer confirms a remove, its crash rolls the remove out of its cell, and a join copies the add back |
+| `_Join_ClaimSkip_Crash_RefoldFirst`, `_3E` | same, the boot replay re-folds own events before a local write folds | **violated** in 9 steps — the discard is durable, the claims that license it are not, and the boot replay re-folds the add onto the deleted cell |
+| `_Join_ClaimSkip_CrashKeepsCell`, `_RefoldFirst` | same, the crash keeps the cell | **violated** in 10 and 11 steps — as above, with no lost write |
+| `_Join_ClaimSkip_Crash_DurableStability_3E` | rollback crash, a discard needs every event the cell's context covers in every member's last checkpoint, its own included | **violated** in 9 steps — a local write folds before the replay re-folds an own add the crash rolled back, and its dot makes the kernel skip that add |
+| `_Join_ClaimSkip_CrashKeepsCell_DurableStability_RefoldFirst` | crash keeps the cell, both conditions | clean (72,527,133 states) |
+| `_Join_ClaimSkip_Crash_DurableStability_RefoldFirst_3E` | rollback crash, both conditions, three events | clean (6,150,489 states) |
+| `_Join_ClaimSkip_Crash_HlcStability_RefoldFirst_3E` | rollback crash; the sweep's form of durable stability: the cell's HLC is below the HLC of the earliest event the replica claims above the least of every member's checkpointed claims; a durable install mark holds the sweep until a checkpoint reads that install's claims; a source serves only a cell its claims cover | clean (18,048,161 states) |
+| `_Join_ClaimSkip_Crash_HlcStability_NoMark_RefoldFirst_3E` | same, no install mark | **violated** in 15 steps |
+| `_Join_ClaimSkip_Crash_HlcStability_NoServe_RefoldFirst_3E` | same, no serve guard | **violated** in 16 steps — a source that crashed after a fold serves the effect without its claim |
+| `_Join_ClaimSkip_Crash_HlcStability_CompactReceipt_RefoldFirst_3E` | the clean HLC run plus compaction, a peer confirming by receipt (root or reported claim) | **violated** in 8 steps — the bound's walk cannot see a truncated event a peer received but never folded |
+| `_Join_ClaimSkip_Crash_HlcStability_CompactDurable_RefoldFirst_3E` | same, every member, the replica included, confirming by its checkpointed claims; a truncation may be followed by any step before a checkpoint, as the watermark door's is | clean (24,779,701 states) |
+| `_Join_ClaimSkip_Crash_HlcStability_CompactDurable_Claimed_RefoldFirst_3E` | same, invariant `CompactedClaimed`: every truncated event stays claimed | clean (24,779,701 states) |
+| `_Join_ClaimSkip_Crash_HlcStability_CompactReceipt_Claimed_RefoldFirst_3E` | receipt, invariant `CompactedClaimed` | **violated** in 6 steps — a crash after a truncation its checkpoint did not follow restores claims without the truncated events |
+| `_Join_ClaimSkip_Crash_HlcStability_CompactDurable_Reap_RefoldFirst_3E` | durable compaction with reaping; an origin is retired once every member's checkpoint holds its events | clean (44,460,602 states) — with the retirement guard on applied claims instead, **violated** in 7 steps: a member that took the event's effect from an install crashes before its checkpoint, and retirement stops the event reaching it again |
+| `_Join_ClaimSkip_Crash_HlcStability_CompactDurable_Reap_Exempt_RefoldFirst_3E` | same, a retired origin's events count as confirmed by every member (`RetiredExempt`) | no violation in 60,318,462 states (depth 25) before the 6 GB state guard; not exhaustive |
+| `_Session_Join` | join as the code's session (`Session`): read the peer's frontier, install its cell, adopt the frontier at finalize, and end only once the replica claims the peer's frontier read again at finalize (`target`) | clean (93,690 states) |
+| `_Session_Join_NoTarget` | same, the install ends at adoption | **violated** in 13 steps — the frontier read before the stream claims less than the installed cell reflects; the sweep deletes the cell, then the unclaimed add arrives and folds |
+| `_Session_Join_ClaimSkip_Crash_HlcStability_CompactDurable_RefoldFirst_3E` | the clean compaction run as a session, with every guard: `mark`, `serve` (a marked source serves nothing), `replayed` (a source serves nothing before its boot replay), `target` | no violation in 54,658,464 states (depth 17) before the state guard; not exhaustive |
+| `_…_CompactDurable_NoTarget_RefoldFirst_3E` | same, no target | **violated** at depth 17 |
+| `_…_CompactDurable_NoMark_RefoldFirst_3E` | same, no mark | **violated** in 10 steps |
+| `_…_CompactDurable_NoReplayed_RefoldFirst_3E`, `_NoServe_` | same, without one serve guard | no violation in 56,503,829 and 57,286,461 states before the state guard; not exhaustive |
+| `_Session_Join_ClaimSkip_Crash_HlcStability_RefoldFirst_3E` | every guard, no compaction | no violation in 66,079,168 states (depth 18) before the state guard; not exhaustive |
+| `_Session_Join_ClaimSkip_Crash_HlcStability_NoReplayed_RefoldFirst_3E` | same, no `replayed` | **violated** at depth 19 — a source crashes after folding an add, a session installs its cell before the boot replay, and both frontiers it reads omit the add; the replica's mark clears with the add unclaimed, and the sweep deletes the cell before the add arrives |
+| `_Session_Join_ClaimSkip_Crash_HlcStability_NoServe_RefoldFirst_3E` | same, no `serve` | no violation in 75,630,359 states; with one install the guard cannot matter |
+| `_Session_Join_ClaimSkip_HlcStability_3R_2I`, `_NoServe_3R_2I` | three replicas, two installs, no crash: a session may read from a source that is itself mid-install | no violation in 57,085,801 and 56,526,581 states (depth 15) before the state guard; not exhaustive |
+| `_Session_Split_Join_ClaimSkip_HlcStability_2I` | the code's order (`SplitServe`): the source checks its serve guards when the session opens, serves batches before the initiator marks itself, and expires the cursor when it marks; invariant `SomeoneServes` too | **violated** at depth 11 — two replicas re-bootstrap from each other, each fetches a batch, both mark, both cursors expire, and neither can ever serve the other |
+| `_Session_Split_Early_Join_ClaimSkip_HlcStability_2I`, `_3R_3I` | same, the mark is written once the session opens, before any batch (`early`) | **violated** at depth 7 and 9 — the same mutual marking, before any batch |
+| `_Session_Split_Busy_Join_ClaimSkip_HlcStability_2I` | same, a replica does not start installing while it serves an open session (`busy`), the mark written at install | **violated** at depth 17 — the initiator's sweep deletes an emptied cell between the fetch and the install, and the stale batch joins its add back |
+| `_Session_Split_Early_Busy_Join_ClaimSkip_HlcStability_2I`, `_3R_3I`, `_Crash_HlcStability_2I` | both | clean: 699,863, 6,856,228 and 4,381,420 states |
+
+Without an install, stabilization and reap are sound under either
+confirmation. A join needs all three conditions; each ablation above fails.
+Skipping a claimed event can stand in for the sweep waiting on the MST.
+A replace with its re-fold fails even with the first two, because the
+re-fold trusts a context a discard has thinned. Across a crash, two more are
+needed: a discard needs durable claims, and the boot replay must re-fold own
+events before a local write folds. The second fails without any install or
+discard. The HLC form needs the install mark and the serve guard as well;
+the sweep need not checkpoint first, since the least vector already counts the
+replica's own checkpoint (without that guard the state graph is identical).
+Compaction keeps the HLC form sound only when every member, the truncating
+replica included, confirms a truncation by its checkpointed claims, as the
+bound does; confirmation by receipt lets the bound pass an event the walk can
+no longer see, and leaving the replica's own confirmation to the checkpoint
+after the truncation fails once the watermark door truncates with none. With
+the replica's own checkpoint required, a crash leaves no claim hole. Across a
+crash, retiring an origin needs every member to have checkpointed its events,
+not only applied them; given that, counting a retired origin's events as
+confirmed adds nothing the checkpoints do not already claim.
+A crash that keeps the cell is a special case of one that rolls it back. The
+rollback runs are bounded to three events (`MaxEvents`); the same bound finds
+every violation above. Not modelled: several cells, other kernels
+and reduced rewrites, the watermark door, pending claims, a
+crash that loses MST receipts.
+
+With `Session`, an install is the code's session: a node crash ends a stream,
+and every batch is served under the serve guards. The frontier the session
+adopts is read before the stream, so
+the installed cell can reflect events nothing claims; the mark must then stay
+until the replica claims the peer's frontier read again at finalize (in the
+code, `bondy_oplog_instance:install_target/2`, over a replace install), and a source
+must not serve before its boot replay, since until then its claims are the
+checkpoint's and its cell may reflect more. Both ablations fail. Whether a
+marked source must refuse to serve is not settled: a counterexample needs a
+session from a source that is itself mid-install, and every run that allows
+one stops at the state guard first. The rule is kept, because without it the
+target read from such a source omits effects that source took from its own
+install. `Session = FALSE` is the one-step install, under which every row
+above it was run. In the code's order (`SplitServe`) the mark must be written
+before the first batch is asked for, or the sweep deletes a cell the stale
+batch then resurrects, and a replica must not start installing while it serves
+an open session, or two replicas reading each other both end up owing an
+install no one can serve. A session that "busy" refuses releases its cursor at
+its source (`Refuse`); the action adds transitions but no new state, and the
+runs above repeat their counts with it. The model has no cursor expiry and no
+retry, so the livelock the release prevents, two refused sessions renewing
+each other's busy cursor, is argued from the code and not checked here. The
+code has both guards and the release (`bondy_oplog_instance:begin_install/1`,
+`bondy_oplog_catalogue_snapshot:release/2`, replayed in
+`bondy_oplog_bootstrap_rederive_test`). Not modelled: the applier claims an event after
+writing its cell, not in the same step; liveness, which `SomeoneServes`
+approximates as a safety invariant.
+
+### `ReplayReanchor.tla` — the replay cursor across a compaction
+
+One replica, a local origin and remote origins whose events arrive in any
+order, so some are held behind a gap. The applier's diff replay keeps its
+cursor while it holds an event; local writes never move the cursor; the
+instance's delivery and compaction casts reach the applier in order; a restart
+loses the mailbox and anchors as `compute_replay_anchor/1` does, and a
+drain-gated applier defers its boot replay to `open_drain_gate/1`. Invariant
+`Presentable`: once the mailbox is drained, every tree event the projection
+lacks is in the next replay's diff. Property `EventuallyApplied`.
+
+| Config | Rule | Result |
+|---|---|---|
+| `_Shipped_NoRestart` | cursor := post-truncate root | **`Presentable` violated** in 7 steps — a held event under the new cursor |
+| `_Shipped_Gated` | same, gated restart | **`Presentable` violated** in 7 steps — the owed full fold cancelled |
+| `_Shipped_Gated_2R_Safety` | same, two remote origins | **`Presentable` violated** |
+| `_Guarded_NoRestart` | re-anchor unless a fold is owed (an unclaimed boot anchor, or a hold), else undefined | clean, liveness included (14,320 states) |
+| `_Guarded_Open` | same, restart, ungated | clean, liveness included (52,140 states) |
+| `_Guarded_Gated` | same, gated restart | clean, liveness included (97,610 states) |
+| `_Guarded_Gated_2R_Safety` | same, two remote origins, `MaxSeq = 2` | clean (246,760 states) |
+
+Each half of the guard is necessary: without the hold half
+`_Guarded_NoRestart` violates `Presentable`, and without the anchor half
+`_Guarded_Gated` does. Not modelled: the fused instance (same rule, applied
+inline), several cells, page GC.
+
 ## Implementation status: proved vs built
 
 Verified by reading `apps/bondy_oplog/src` at the time of writing.
@@ -568,9 +745,11 @@ Verified by reading `apps/bondy_oplog/src` at the time of writing.
 | **Applied frontier as prefix + pending set** | **PROVED** (`Frontier_Pending.thy`); the one-integer alternative **refuted in general** (`no_scalar_writer_sound_and_complete`) and the earlier rule refuted concretely (`FrontierPending_MaxCap*`) | **BUILT** — `bondy_oplog_registry` carries a `pending` column beside `frontier` (`pending/1`, `frontier_and_pending/1`) and `merge_applied/2` writes the contiguous prefix, holding out-of-order seqs in `pending`. `merge_frontier/2` remains a pointwise max and is now the BOOTSTRAP writer only |
 | **Bootstrap frontier adoption** | **PROVED** (`Bucket_Skip_Soundness.adopt_if_complete_sound`), with the responder gate as a HYPOTHESIS; both halves refuted individually (`unconditional_adoption_unsound`, `adoption_unsound_without_serve_gate`) and by TLC (`MuxBucketSkip_Minus_AdoptIfComplete`, `_Minus_ServeGate`) | **BUILT** — both halves: the responder gate, and `bondy_oplog_sync_session:adopt_frontier/3`, which hands `finalize_catalogue_bootstrap/5` the peer's vector only over an install that reported no unroutable bucket |
 | Vector stability | `vector_stable` defined; **not certified by the substrate** | **NOT BUILT** |
-| Cross-origin causal delivery | absence **refutes `Convergence`** (`CellContextReap`) | **NOT BUILT** — no mechanism exists |
-| **Compaction confirmation by root OR applied VV** | **PROVED** (`Confirmed_Compaction.thy`: `no_loss`, `no_drop`); shipped root-only rule **refuted** (`ConfirmedCompaction_Root2*.cfg`) | **BUILT** — `bondy_oplog_compaction:compact/1` passes the peer-state entries; `compute_frontier_for/2` confirms by root or recorded applied VV (`vv_covers/2`), a rootless row constrains; pinned by `bondy_oplog_compaction_fused_test:peer_compaction_does_not_stall_ours` (the `Root2` trace) and `rootless_live_peer_holds_compaction` (the `Root3` trace), rule table in `bondy_oplog_compaction_frontier_test:vv_witness_test_` |
-| **Truncation capped below the first un-applied key** | **PROVED** (same theory, the `compact` rule's `C ⊆ applied`); shipped sites **refuted** (`_RootVV2_AsyncSweep_NoCap.cfg`, `NoDrop`) | **BUILT** — `capped_truncation_point/2` in `finalize_catalogue_compaction/3` (the one catalogue truncation site: frontier and watermark-catch-up paths both pass through it); pinned by `bondy_oplog_compaction_fused_test:compaction_holds_doored_event_until_applied_{watermark,frontier}_path` (the `NoCap` trace: the op reads `undefined` on the shipped code). Retired origins are exempt (`compaction_truncates_held_event_of_retired_origin`) — not in the model. The async catch-up the cap made vacuous is DELETED (instance + applier), so compaction has no fold path at all: `bondy_oplog_catalogue_compaction_test:compaction_makes_no_synchronous_applier_call` pins the only applier call left as the `advance_replayed_root/2` cast |
+| Cross-origin causal delivery | absence **refutes `Convergence`** (`CellContextReap`); a hold that folds nothing ahead of what it observed is causal (`Aw_Kernel.thy`, `causal_hold_delivers_causally`) | **BUILT** — `bondy_oplog_cell_apply:partition_contiguous/4` folds a batch in key order and holds an event whose stamped context names a seq past an origin's foldable top; pinned by `bondy_oplog_bootstrap_rederive_test:held_add_folds_after_a_later_add_that_saw_it` and `held_add_folds_after_its_remove`. `CellContextReap` is not re-run against the hold |
+| **Compaction confirmation by root OR applied VV** | **PROVED** (`Confirmed_Compaction.thy`: `no_loss`, `no_drop`); shipped root-only rule **refuted** (`ConfirmedCompaction_Root2*.cfg`) | **BUILT** — `bondy_oplog_instance:compaction_witnesses/1` supplies the peer-state entries; `compute_frontier_for/2` confirms by root or recorded applied VV (`bondy_oplog_event:covered/2`), a rootless row constrains; pinned by `bondy_oplog_compaction_fused_test:peer_compaction_does_not_stall_ours` (the `Root2` trace) and `rootless_live_peer_holds_compaction` (the `Root3` trace), rule table in `bondy_oplog_compaction_frontier_test:vv_witness_test_` |
+| **Truncation capped below the first un-applied key** | **PROVED** (same theory, the `compact` rule's `C ⊆ applied`); shipped sites **refuted** (`_RootVV2_AsyncSweep_NoCap.cfg`, `NoDrop`) | **BUILT** — `capped_truncation_point/2` in `finalize_catalogue_compaction/3` (the frontier path; the below-watermark trim, `trim_below_watermark/3`, and the watermark door apply the same hold through `door_truncate/3`); pinned by `bondy_oplog_compaction_fused_test:compaction_holds_doored_event_until_applied_{watermark,frontier}_path` (the `NoCap` trace: the op reads `undefined` on the shipped code). Retired origins are exempt (`compaction_truncates_held_event_of_retired_origin`) — not in the model. The async catch-up the cap made vacuous is DELETED (instance + applier), so compaction has no fold path at all: `bondy_oplog_catalogue_compaction_test:compaction_makes_no_synchronous_applier_call` pins the only applier call left as the `advance_replayed_root/2` cast |
+| **Live re-bootstrap order** | model-checked (`LiveRebootstrapRefold_Proposed_*`, two replicas exhaustive, three simulated); shipped order **refuted** (`_Shipped_TrailFail`, `_Shipped_Crash`) | **BUILT** — `bondy_oplog_applier:install_catalogue_batch/2` replaces every routable cell; `bondy_oplog_instance:begin_install/1` writes the re-fold mark before the session's first batch request; `bondy_oplog_instance:rederive_projection/1` resets the frontier (`bondy_oplog_registry:reset_frontier/1`) and re-folds before `finalize_catalogue_bootstrap/5`; a boot that finds the mark resets the frontier (`boot_frontier/2`); `bondy_oplog_instance:serving/1` gates snapshot init and `get_frontier`; a failed projection write fails the install batch (`bondy_oplog_applier:install_catalogue_batch/2`). Each counterexample is replayed in `bondy_oplog_bootstrap_rederive_test` |
+| **Replay cursor across compaction** | model-checked (`ReplayReanchor_Guarded_*`); shipped rule **refuted** (`_Shipped_NoRestart`, `_Shipped_Gated`) | **BUILT** — `bondy_oplog_applier:advance_replayed_root/2` re-anchors unless a fold is `owed` (a boot anchor that found an unclaimed event, or a hold), else drops the cursor to `undefined`; the fused twin is `fused_reanchor_cursor/2`. Pinned by `bondy_oplog_catalogue_compaction_test:held_event_folds_after_compaction/0`, `_fused/0` and `owed_refold_survives_compaction_before_gate/0` |
 | **Counter seed across restarts** | **PROVED** (`Seq_Seed.thy`); shipped rule **refuted** (`SeqSeed_Shipped.cfg`) | **BUILT** 2026-09-03 — `init/1` seeds from the restored frontier; `bondy_oplog_wal` records/recovers `max_seq` and calls `bondy_oplog_instance:seed_seq/2` before `set_wal_pid/2`; `fast_wal_target/1` resolves the WAL before the seq is reserved |
 
 ## The precise grade of the frontier
@@ -594,11 +773,13 @@ substrate does not certify this today.
 
 ## Open obligations
 
-1. **Cross-origin causal delivery is not supplied by anything, and its absence
-   is a proved convergence violation.** `CellContextReap` shows `Convergence`
+1. **Cross-origin causal delivery: built, model re-run open.** Its absence is
+   a proved convergence violation: `CellContextReap` shows `Convergence`
    failing in 6 steps under out-of-order delivery, reap on or off, via a
-   three-party inversion in which no origin has a per-origin gap. The shipped
-   `partition_contiguous/4` hold is per-origin and cannot see it. This is the
+   three-party inversion in which no origin has a per-origin gap.
+   `partition_contiguous/4` now also holds an event whose context observes past
+   an origin's foldable top, which `causal_hold_delivers_causally` shows is a
+   causal schedule; `CellContextReap` has not been re-run with that hold. This is the
    same distinction as the vector-vs-HLC stability gap recorded in
    `bondy_oplog_crdt_nested_core`'s moduledoc, and it is the sharpest open
    safety question in the development. Note the scope: origins and seqs are
@@ -633,10 +814,11 @@ substrate does not certify this today.
    replica outside it that can still mint below the frontier breaks the
    argument. `reclamation_members/0` and the stale-peer rejoin work bear on
    this; neither is modelled.
-6. **Datatype convergence.** Not attempted. The natural next step is
-   instantiating the Gomes/Kleppmann/Mulligan/Beresford locale (AFP entry
-   `CRDT`) for `aw_core`/`nested_core`, which assumes causal delivery as a
-   hypothesis — i.e. it consumes obligation 1.
+6. **Datatype convergence.** Partial. `Aw_Kernel.thy` relates each kernel
+   step to the AFP `ORSet` interpretation (Gomes/Kleppmann/Mulligan/Beresford,
+   entry `CRDT`, vendored in `isabelle/afp/CRDT` under its BSD licence), whose
+   convergence assumes causal, at-most-once delivery — it consumes
+   obligation 1. The network-level instantiation of the locale is not done.
 
 ### The contiguous claim with no hold and ungated compaction
 

@@ -138,7 +138,7 @@ text \<open>
   \<^item> @{text crash}: @{text "kill -9"} --- everything volatile is gone; a
     flushed-but-uncheckpointed truncation stays that way on disk.
   \<^item> @{text restart}: @{text "init/1"} seeds the counter and restores the
-    frontier (@{text "restore_frontier/2"}, @{text "frontier_from_mst/1"}).
+    frontier (@{text "boot_frontier/2"}, @{text "frontier_from_mst/1"}).
 \<close>
 
 inductive step :: "st \<Rightarrow> st \<Rightarrow> bool" where

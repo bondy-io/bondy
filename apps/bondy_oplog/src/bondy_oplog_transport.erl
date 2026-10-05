@@ -40,20 +40,29 @@ transport delivers them to the peer's responder which calls back into
 | Request                                | Reply                                                                  |
 |---|---|
 | `get_root`                             | `{ok, hash() \| undefined}` \| `{ok, hash() \| undefined, fingerprint()}` |
-| `get_frontier`                          | `{ok, #{origin() => seq()}}` \| `{ok, #{origin() => seq()}, fingerprint()}` |
+| `get_frontier`                          | `{ok, #{origin() => seq()}}` \| `{ok, #{origin() => seq()}, fingerprint(), #{origin() => seq()}}` \| `{error, {refold_owed, instance_id()}}` |
 | `get_origins`                          | `{ok, [origin()]}`                                                     |
 | `get_retired`                          | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                     | `{ok, #{hash() => page()}}`                                            |
-| `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor()}}}` \| `{ok, no_snapshot}` \| `{error, {tables_not_registered, instance_id()}}` |
+| `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor()}}}` \| `{ok, no_snapshot}` \| `{error, {tables_not_registered, instance_id()}}` \| `{error, {refold_owed, instance_id()}}` |
 | `{get_catalogue_snapshot_next, Cursor}`| `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {chunked_batch, {cursor(), [cell()], [cell_chunk()]}}}` \| `{ok, {done, [cell()]}}` \| `{error, cursor_expired}` |
+| `{release_catalogue_snapshot, Cursor}` | `{ok, ok}` |
 
-`get_catalogue_snapshot_init` is the one request a running instance
-refuses on its own state. `bondy_oplog_catalogue_snapshot:build_targets/2`
-enumerates the tables that have REGISTERED here, so an instance still
-filling its routing directory would ship a catalogue missing those
-buckets while `get_frontier` answered with the whole applied vector —
-and the initiator would install the one and adopt the other. The refusal
-is benign: the initiator's session ends and the next round retries.
+A running instance refuses two requests on its own state, and both refusals
+are benign: the initiator's session ends, or reads the frontier as unknown,
+and the next round retries.
+
+- `get_catalogue_snapshot_init` while its routing directory is still filling.
+  `bondy_oplog_catalogue_snapshot:build_targets/2` enumerates the tables that
+  have REGISTERED here, so the catalogue would miss those buckets while
+  `get_frontier` answered with the whole applied vector, and the initiator
+  would install the one and adopt the other.
+- `get_catalogue_snapshot_init` and `get_frontier` while it is itself
+  re-bootstrapping, from before its first batch request until its frontier
+  claims the frontier its source reported once the stream ended
+  (`bondy_oplog_instance:serving/1`): its cells may until then reflect events
+  its frontier does not claim. It does not start re-bootstrapping while a
+  snapshot cursor of its own is open (`bondy_oplog_instance:begin_install/1`).
 
 `watermark()` is the peer-observed max HLC across the catalogue
 projection at session start (per-shard high-water atomic from
@@ -111,14 +120,13 @@ the `Opts` argument.
     | {get_pages, Peer :: peer_id(), Root :: bondy_mst:hash(), [
         bondy_mst:hash()
     ]}
-    %% Swap-completion notice. The initiator tells the responder "I now hold
-    %% every page reachable from the root you advertised", naming that root.
-    %% Both sides then checkpoint the SAME root against each other, which is
-    %% what makes the stability frontier a shared object rather than two
-    %% unilateral observations. See BONDY_DB_DELETE_DESIGN.md §4.2.
-    | {confirm_root, Peer :: peer_id(), Root :: bondy_mst:hash()}
+    %% Swap-completion notice: the initiator of a completed round reports its
+    %% durable frontier, which the responder records against it.
+    | {confirm_frontier, Peer :: peer_id(),
+        Frontier :: #{binary() => non_neg_integer()}}
     | get_catalogue_snapshot_init
-    | {get_catalogue_snapshot_next, bondy_oplog_catalogue_cursor:cursor()}.
+    | {get_catalogue_snapshot_next, bondy_oplog_catalogue_cursor:cursor()}
+    | {release_catalogue_snapshot, bondy_oplog_catalogue_cursor:cursor()}.
 
 -type response() ::
     {ok, bondy_mst:hash() | undefined}

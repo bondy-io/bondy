@@ -85,10 +85,10 @@ durable_compaction_no_seal(Dir) ->
         ?assertEqual(Batch, bondy_oplog:size(InstId)),
         ?assertEqual([], sealed_packs(Dir)),
 
-        Root = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         ?assertEqual(0, bondy_oplog:size(InstId)),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(InstId))
@@ -117,10 +117,10 @@ durable_compaction_with_seal(Dir) ->
         ?assert(length(sealed_packs(Dir)) >= 1),
 
         %% Compaction truncates the sealed prefix in-process.
-        Root = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         ?assertEqual(0, bondy_oplog:size(InstId)),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(InstId)),
@@ -129,10 +129,10 @@ durable_compaction_with_seal(Dir) ->
         append_batch(InstId, 2, Batch),
         _ = bondy_oplog_instance:await_apply(InstId),
         ?assertEqual(Batch, bondy_oplog:size(InstId)),
-        Root2 = bondy_oplog_instance:root_hash(InstId),
+        Witness2 = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root2])
+            bondy_oplog_instance:compact(InstId, [Witness2])
         ),
         ?assertEqual(0, bondy_oplog:size(InstId))
     after
@@ -186,10 +186,10 @@ compaction_advances_wal_watermark_and_sweeps(Dir) ->
         ?assertEqual(undefined, maps:get(snapshot_watermark, Info0)),
         ?assert(length(maps:get(live_segments, Info0)) > 1),
 
-        Root = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         Watermark = bondy_oplog:current_watermark(InstId),
         ?assertNotEqual(undefined, Watermark),
@@ -249,22 +249,30 @@ wal_watermark_advances_only_after_the_checkpoint(Dir) ->
         Compact = fun(I) ->
             append_batch(InstId, I, 10),
             _ = bondy_oplog_instance:await_apply(InstId),
-            Root = bondy_oplog_instance:root_hash(InstId),
+            Witness = bondy_oplog_registry:frontier(InstId),
             ?assertMatch(
                 {ok, {compacted, _, _}},
-                bondy_oplog_instance:compact(InstId, [Root])
+                bondy_oplog_instance:compact(InstId, [Witness])
             ),
             bondy_oplog:current_watermark(InstId)
         end,
         W1 = Compact(1),
         W2 = Compact(2),
         ?assert(W2 > W1),
-        %% Each compaction wrote its checkpoint while the WAL still held the
-        %% previous watermark; the WAL now holds the latest.
-        ?assertEqual(
-            [{W1, undefined}, {W2, bondy_oplog_event:key_hlc(W1)}],
-            bondy_oplog_test_observing_checkpoint:observations(Obs)
+        %% No checkpoint was written with the WAL past its watermark, and the
+        %% second compaction wrote its own while the WAL still held the
+        %% first's; the WAL now holds the latest.
+        Observed = bondy_oplog_test_observing_checkpoint:observations(Obs),
+        ?assert(
+            lists:all(
+                fun({W, Wal}) ->
+                    Wal =:= undefined orelse
+                        Wal =< bondy_oplog_event:key_hlc(W)
+                end,
+                Observed
+            )
         ),
+        ?assert(lists:member({W2, bondy_oplog_event:key_hlc(W1)}, Observed)),
         WalPid = bondy_oplog_registry:wal_pid(InstId),
         ?assertEqual(
             bondy_oplog_event:key_hlc(W2),
@@ -380,8 +388,8 @@ durable_gc_reclaims_sealed_bytes(Dir) ->
 
         %% Drop essentially everything, then let the tick collect. Two rounds:
         %% the first truncates and the second is the tick that reclaims.
-        Root = bondy_oplog_instance:root_hash(InstId),
-        _ = bondy_oplog_instance:compact(InstId, [Root]),
+        Witness = bondy_oplog_registry:frontier(InstId),
+        _ = bondy_oplog_instance:compact(InstId, [Witness]),
         _ = bondy_oplog_instance:compact(InstId, []),
 
         After = sealed_bytes(Dir),

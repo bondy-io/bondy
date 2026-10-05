@@ -32,7 +32,10 @@ compaction_test_() ->
         {timeout, 30, fun compaction_truncates_mst/0},
         {timeout, 30, fun watermark_filter_drops_old_remote_events/0},
         {timeout, 30, fun deterministic_watermark_across_replicas/0},
-        {timeout, 30, fun idempotent_compact/0}
+        {timeout, 30, fun idempotent_compact/0},
+        {timeout, 30, fun unconfirmed_member_is_reported/0},
+        {timeout, 30, fun unreadable_membership_is_reported/0},
+        {timeout, 30, fun held_compaction_reaches_the_scheduler/0}
     ]}.
 
 compact_with_no_peers_is_no_change() ->
@@ -82,9 +85,11 @@ watermark_filter_drops_old_remote_events() ->
     ?assertEqual(0, bondy_oplog:size(A)),
     Cells = bondy_oplog_test_projection:cells(A),
     ?assertEqual(10, length(Cells)),
-    %% B has not compacted, so it still has all 10 events.
-    %% A pulls from B again; the filter must drop the old events.
-    {ok, _} = bondy_oplog:sync(A, B),
+    %% B has not compacted, so it still has all 10 events. A pulls from B
+    %% again; B confirmed them, so the door drops them.
+    bondy_oplog_test_helpers:with_cluster([A, B], fun() ->
+        {ok, _} = bondy_oplog:sync(A, B)
+    end),
     ?assertEqual(0, bondy_oplog:size(A)),
     ?assertEqual(Cells, bondy_oplog_test_projection:cells(A)).
 
@@ -113,7 +118,81 @@ idempotent_compact() ->
     ),
     ?assertEqual(W1, bondy_oplog:current_watermark(A)).
 
+%% A member that never confirmed holds the peer-confirmed truncation; the
+%% caller is told which member, and nothing is truncated.
+unconfirmed_member_is_reported() ->
+    {A, B} = mk_pair(),
+    ok = append_cells(A, 1, 5),
+    ok = converge(A, B),
+    Ghost = 'ghost@nowhere',
+    ?assertEqual(
+        {error, {unconfirmed, [Ghost]}},
+        bondy_oplog_test_helpers:compact_among(A, [A, B, Ghost])
+    ),
+    ?assertEqual(undefined, bondy_oplog:current_watermark(A)),
+    ?assertEqual(5, bondy_oplog:size(A)).
+
+%% An unreadable membership is not solo: nothing is truncated on its say-so.
+unreadable_membership_is_reported() ->
+    {A, B} = mk_pair(),
+    ok = append_cells(A, 1, 5),
+    ok = converge(A, B),
+    ok = meck:new(partisan_peer_service, [passthrough]),
+    try
+        ok = meck:expect(partisan_peer_service, members, fun() ->
+            error(unavailable)
+        end),
+        ?assertEqual({error, membership_unavailable}, bondy_oplog:compact(A))
+    after
+        meck:unload(partisan_peer_service)
+    end,
+    ?assertEqual(5, bondy_oplog:size(A)).
+
+%% Compaction waiting on a member with no confirmed row reaches a scheduler
+%% running the default trigger as the outcome `unconfirmed`.
+held_compaction_reaches_the_scheduler() ->
+    Id = mk_id(),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
+    ok = append_cells(Id, 1, 5),
+    Ghost = 'ghost@nowhere',
+    Self = self(),
+    HandlerId = {?MODULE, held_probe},
+    ok = telemetry:attach(
+        HandlerId,
+        [bondy_oplog, scheduler, gc, trigger_outcome],
+        fun(_, _, Meta, _) -> Self ! {outcome, Meta} end,
+        undefined
+    ),
+    ok = meck:new(partisan_peer_service, [passthrough]),
+    ok = meck:expect(partisan_peer_service, members, fun() ->
+        {ok, [partisan:node(), Ghost]}
+    end),
+    {ok, Sched} = bondy_oplog_gc_scheduler:start_link(#{
+        name => compaction_sched_probe, enabled => true, interval_ms => 100
+    }),
+    try
+        ?assertEqual(unconfirmed, await_outcome(Id, 2000))
+    after
+        gen_server:stop(Sched),
+        telemetry:detach(HandlerId),
+        meck:unload(partisan_peer_service)
+    end.
+
 %% Helpers
+
+await_outcome(Id, Timeout) ->
+    receive
+        {outcome, #{
+            scheduler := compaction_sched_probe,
+            instance_id := Id,
+            outcome := Outcome
+        }} ->
+            Outcome;
+        {outcome, _} ->
+            await_outcome(Id, Timeout)
+    after Timeout ->
+        error(no_outcome)
+    end.
 
 mk_id() ->
     list_to_binary(

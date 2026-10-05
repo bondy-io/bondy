@@ -237,7 +237,7 @@ local_fingerprint(Id) ->
 peer_sig(Peer, Id) ->
     Opts = #{timeout => 2000, channel => aae_channel()},
     try bondy_oplog_transport_partisan:request(Peer, Id, get_frontier, Opts) of
-        {ok, Map, Fp} when is_map(Map) -> {frontier, Map, Fp};
+        {ok, Map, Fp, _Durable} when is_map(Map) -> {frontier, Map, Fp};
         {ok, Map} when is_map(Map) -> {frontier, Map, undefined};
         _ -> not_found
     catch

@@ -96,13 +96,16 @@ compaction_syncs_before_the_truncation_is_durable(Dir) ->
     %% Past the pack writer's default root-flush interval, so the truncate
     %% itself writes the truncated root to disk.
     timer:sleep(300),
+    %% Checkpointed first, so the cycle's only sync is the truncation's.
+    ok = bondy_oplog_instance:persist_frontier(Id),
     Test = self(),
     ok = ?PROBE:set_sync(fun(_) ->
         Test ! {synced, disk_root(PackDir)},
         ok
     end),
     ?assertMatch(
-        {ok, {compacted, _, _}}, bondy_oplog_instance:compact(Id, [Root])
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(Id, [bondy_oplog_registry:frontier(Id)])
     ),
     ?assertEqual(0, bondy_oplog:size(Id)),
     ?assertEqual(
@@ -158,9 +161,9 @@ every_table_on_the_instance_has_its_indexes_flushed(Dir) ->
         Test ! {synced, H},
         ok
     end),
-    Root = bondy_oplog_instance:root_hash(Id),
+    Witness = bondy_oplog_registry:frontier(Id),
     ?assertMatch(
-        {ok, {compacted, _, _}}, bondy_oplog_instance:compact(Id, [Root])
+        {ok, {compacted, _, _}}, bondy_oplog_instance:compact(Id, [Witness])
     ),
     ?assertEqual(2, length(drain(flushed))),
     ?assertEqual([], Indexes -- drain(synced)).

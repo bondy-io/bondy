@@ -201,7 +201,7 @@ compact_a(A, B, _S) ->
         _ ->
             PeerKey = {peer, statem_b, A},
             bondy_oplog_peer_state:record_sync_complete(
-                PeerKey, A, BRoot
+                PeerKey, A, bondy_oplog_registry:frontier(B)
             ),
             bondy_oplog_peer_state:sync(),
             _ = bondy_oplog_test_helpers:compact_among(A, [A, PeerKey]),
@@ -216,7 +216,7 @@ compact_b(A, B, _S) ->
         _ ->
             PeerKey = {peer, statem_a, B},
             bondy_oplog_peer_state:record_sync_complete(
-                PeerKey, B, ARoot
+                PeerKey, B, bondy_oplog_registry:frontier(A)
             ),
             bondy_oplog_peer_state:sync(),
             _ = bondy_oplog_test_helpers:compact_among(B, [B, PeerKey]),

@@ -62,6 +62,7 @@ not the per-element cells.
 -export([order_independent/0]).
 -export([batchable/0]).
 -export([context_of/1]).
+-export([dotted_context/0]).
 -export([encode_state/1]).
 -export([decode_state/1]).
 %% bondy_oplog_crdt_commutative (tier_2 step)
@@ -168,6 +169,12 @@ to_value({Elems, _CC, _Hlc}) ->
 
 context_of({_Elems, CC, _Hlc}) ->
     CC.
+
+-doc "The context grows by exactly each applied operation's context and dot.".
+-spec dotted_context() -> true.
+
+dotted_context() ->
+    true.
 
 -spec hlc(state()) -> bondy_connect_hlc:hlc().
 

@@ -151,6 +151,14 @@ as the sole convergence kernel.
   context into the event `meta`, so `interpret_cog/2` can later resolve
   concurrency. tier_0 CRDTs do not export it.
 
+- `dotted_context() -> boolean()` — `true` when `context_of/1` is a version
+  vector over event dots that grows by exactly the context and the dot of each
+  operation applied (every kernel built on
+  `bondy_oplog_crdt_aw_core:cc_absorb/3`). The projection kernel then skips an
+  event whose dot the context already covers
+  (`bondy_oplog_cell_kernel:apply/6`). A context of per-cell write counters,
+  such as `bondy_dvvset:join/1`'s, is not one.
+
 - `reap_origins(State, RetiredOrigins) -> {NewState, Reaped}` — for a
   tier_2 CRDT: garbage-collect the per-cell causal context entries of
   permanently-retired origins. A tier_2 CRDT carries one version-vector
@@ -223,6 +231,8 @@ silently diverge.
 
 -callback context_of(State :: term()) -> Context :: term().
 
+-callback dotted_context() -> boolean().
+
 -callback reap_origins(
     State :: term(),
     RetiredOrigins :: [term()]
@@ -235,5 +245,6 @@ silently diverge.
     order_independent/0,
     state_to_op/1,
     context_of/1,
+    dotted_context/0,
     reap_origins/2
 ]).

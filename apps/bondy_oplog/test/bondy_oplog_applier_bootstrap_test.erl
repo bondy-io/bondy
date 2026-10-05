@@ -49,8 +49,8 @@ announces_on_this_groups_delta_not_the_batch_total_test() ->
         "a group that installed nothing must not ride a sibling's count"
     ).
 
-%% Every cell skipped on the per-cell HLC guard: nothing was replaced, so
-%% there is nothing to rebuild from.
+%% No cell of the group landed (none decoded): nothing was replaced, so there
+%% is nothing to rebuild from.
 skips_when_nothing_was_installed_test() ->
     ?assertEqual(
         skip,

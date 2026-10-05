@@ -292,11 +292,22 @@ reaped. That reverses at the next pass, which reaps again, so the window
 costs a round rather than correctness.
 
 The check is a table lookup rather than a caught exception, so a malformed
-match spec still fails loudly instead of reading as "nothing retired".
+match spec still fails loudly instead of reading as "nothing retired". Until
+anything is retired the answer is one `persistent_term` read
+(`has_retired/0`).
 """).
 -spec retired_set() -> #{binary() => []}.
 
 retired_set() ->
+    case has_retired() of
+        true -> table_retired();
+        false -> #{}
+    end.
+
+%% @private
+%% The retired origins as the table holds them. `has_retired/0`'s flag is
+%% published from this, so it must not consult the flag.
+table_retired() ->
     case ets:whereis(?TABLE) of
         undefined ->
             #{};
@@ -344,7 +355,7 @@ peers and unioned by `merge_retired/1`.
 -spec retired() -> [binary()].
 
 retired() ->
-    lists:sort(maps:keys(retired_set())).
+    lists:sort(maps:keys(table_retired())).
 
 ?DOC("""
 Whether ANY origin is retired on this node, as a single
@@ -525,7 +536,7 @@ loaded(#state{path = Path} = State) ->
 
 %% @private
 do_retire_loaded(Pairs, #state{path = Path} = State) ->
-    Retired = retired_set(),
+    Retired = table_retired(),
     New = [{O, R} || {O, R} <- Pairs, not is_map_key(O, Retired)],
     case New of
         [] ->

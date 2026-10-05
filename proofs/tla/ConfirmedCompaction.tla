@@ -62,7 +62,7 @@
 (* is the operator's permanent removal of a member; its own unsynced      *)
 (* events are given up, so NoLoss and NoGap exclude them.                  *)
 (***************************************************************************)
-EXTENDS Naturals, FiniteSets
+EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS
     Replicas,    \* a set of naturals (also the origin ids); 0 is reserved
@@ -83,6 +83,19 @@ CONSTANTS
     Witnesses,   \* "fresh" (shipped recency filter) | "members"
     MaxCuts,     \* link cuts a behaviour may make
     MaxRetire,   \* members the operator may retire
+    DoorRule,    \* "drop": after a merge the watermark door truncates the
+                 \* applied events at or below the watermark, and the
+                 \* compaction catch-up truncates at the watermark; it leaves
+                 \* a member a gap (Door_NoGap).
+                 \* "keep": neither truncates; compaction truncates the
+                 \* peer-confirmed prefix wherever it sits relative to the
+                 \* watermark, and never lowers the watermark. Two replicas
+                 \* then re-ship a confirmed event forever (Door_Keep_Live).
+                 \* "confirmed": compaction as under "keep"; the door drops
+                 \* only a key prefix of applied events at or below the
+                 \* watermark that every member's row confirms as recorded
+                 \* before this round (the shipped watermark_door/2).
+    MaxDepth,    \* bound for WithinDepth; unused unless a config constrains
     CapAtUnapplied \* TRUE: a truncation point is capped strictly below the
                  \* first local key this replica has not applied — the
                  \* watermark door's hold, applied at every truncation site.
@@ -95,6 +108,7 @@ ASSUME Skew \in Nat
 ASSUME Rule \in {"root", "rootvv"}
 ASSUME Sweep \in {"all", "none"}
 ASSUME CapAtUnapplied \in BOOLEAN
+ASSUME DoorRule \in {"drop", "keep", "confirmed"}
 ASSUME Witnesses \in {"fresh", "members"}
 ASSUME MaxCuts \in Nat /\ MaxRetire \in Nat
 
@@ -281,10 +295,15 @@ Sync(r, p) ==
                           THEN applied[r]
                           ELSE ContigClosure(applied[r] \cup union)
              held    == {e \in union : AtOrBelowWm(r, e) /\ e \notin na}
+             byAll(e) == \A q \in Peers(r) : Confirmed(r, q, e)
+             door(e) ==
+                 /\ DoorRule # "keep"
+                 /\ AtOrBelowWm(r, e)
+                 /\ e \in na
+                 /\ \A h \in held : Below(e, h) /\ e # h
+                 /\ DoorRule = "confirmed" => byAll(e)
              dropped == {e \in union :
-                           /\ AtOrBelowWm(r, e)
-                           /\ e \in na
-                           /\ \A h \in held : Below(e, h) /\ e # h}
+                           \A f \in union : Below(f, e) => door(f)}
              nt      == union \ dropped
              gcRan   == wm[r] # NoEvent /\ Sweep = "all"
          IN
@@ -343,7 +362,20 @@ Compact(r) ==
     /\ r \in Live
     /\ Peers(r) # {}
     /\ LET D == Down(r)
-       IN IF D # {} /\ ~AtOrBelowWm(r, MaxKey(D)) THEN
+       IN IF DoorRule # "drop" THEN
+            LET cut == IF D = {} THEN {} ELSE Cut(r, KeyOf(MaxKey(D)))
+                nt  == tree[r] \ cut
+                fld == {e \in cut : ~AtOrBelowWm(r, e)}
+                nwm == IF cut # {} /\ ~AtOrBelowWm(r, MaxKey(cut))
+                         THEN MaxKey(cut) ELSE wm[r]
+            IN /\ cut # {}
+               /\ tree'    = [tree EXCEPT ![r] = nt]
+               /\ applied' = IF AsyncApply
+                               THEN [applied EXCEPT ![r] = @ \cup fld]
+                               ELSE applied
+               /\ wm'      = [wm EXCEPT ![r] = nwm]
+               /\ usable'  = [usable EXCEPT ![r] = SweptAt(r, nt)]
+          ELSE IF D # {} /\ ~AtOrBelowWm(r, MaxKey(D)) THEN
             LET F   == MaxKey(D)
                 cut == Cut(r, KeyOf(F))
                 nt  == tree[r] \ cut
@@ -472,6 +504,16 @@ RoundConfirmsApplied ==
 
 \* Once minting is exhausted every tree empties and every replica has
 \* applied everything.
+\* The lemma NoGap rests on when only confirmed events leave a tree
+\* (DoorRule # "drop"): a peer whose row confirms an event still holds it in
+\* its tree or has applied it.
+ConfirmedHeld ==
+    \A r \in Live : \A q \in Peers(r) \cap Live : \A e \in Minted :
+        Confirmed(r, q, e) => (e \in tree[q] \/ e \in applied[q])
+
+\* Bounded exploration: no state deeper than MaxDepth steps.
+WithinDepth == TLCGet("level") < MaxDepth
+
 Converged ==
     /\ \A o \in Origins : minted[o] = MaxSeq
     /\ \A r \in Replicas : tree[r] = {}

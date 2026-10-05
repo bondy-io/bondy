@@ -137,8 +137,10 @@ compaction_under_remote() ->
     {ok, _} = bondy_oplog:sync(Ib, Ia),
     ?assertEqual(<<"a1">>, val(bondy_db:read(Tb, <<"r">>, <<"k1">>))),
     %% Self-peer at B's live root so the compaction frontier can advance.
-    Root = bondy_oplog:root_hash(Ib),
-    bondy_oplog_peer_state:record_sync_complete({peer, fconv_dummy}, Ib, Root),
+    Witness = bondy_oplog_registry:frontier(Ib),
+    bondy_oplog_peer_state:record_sync_complete(
+        {peer, fconv_dummy}, Ib, Witness
+    ),
     bondy_oplog_peer_state:sync(),
     ?assertMatch(
         {ok, {compacted, _, _}},

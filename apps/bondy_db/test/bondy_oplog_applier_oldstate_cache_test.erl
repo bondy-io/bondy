@@ -152,13 +152,11 @@ counter_coherent_across_batches() ->
 %% 3b. Coherence vs the catalogue-install write path (Architecture QA fix)
 %% =============================================================================
 
-%% A catalogue install (now always `replace` mode — PR-G removed merge-
-%% mode) writes the projection directly via `install_cell_unchecked/9`,
+%% A catalogue install writes the projection directly via `install_cell/9`,
 %% WITHOUT going through the write-through path. If the cache is not
 %% cleared, a subsequent live event folds against the pre-install
 %% OldState — a convergence break. This is the falsifying regression for
-%% the `do_install_catalogue_batch/4` cache clear; it FAILS against the
-%% pre-fix code.
+%% the `do_install_catalogue_batch/3` cache clear.
 merge_install_does_not_serve_stale_oldstate() ->
     B = <<"b">>,
     K = <<"k">>,
@@ -169,14 +167,11 @@ merge_install_does_not_serve_stale_oldstate() ->
         ok = bondy_oplog:await_apply(Id),
         ?assertEqual(<<"v_old">>, read_cell_value(Proj, B, K)),
 
-        %% Install a NEWER frame (HLC 50) directly — replace mode is
-        %% skip-if-older, so HLC 50 > 10 installs and writes the
-        %% projection directly, not via write-through. The cache still
-        %% holds the HLC-10 frame unless the install clears it.
+        %% Install a NEWER frame (HLC 50), which writes the projection
+        %% directly, not via write-through. The cache still holds the
+        %% HLC-10 frame unless the install clears it.
         Cell = encoded_lww_cell(B, K, 50, <<"v_installed">>),
-        {ok, _} = bondy_oplog_instance:install_catalogue_batch(
-            Id, {replace, [Cell]}
-        ),
+        {ok, _} = bondy_oplog_instance:install_catalogue_batch(Id, [Cell]),
         ?assertEqual(<<"v_installed">>, read_cell_value(Proj, B, K)),
 
         %% A live LWW set at HLC 30 must LOSE to the installed HLC-50

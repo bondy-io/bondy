@@ -157,7 +157,7 @@ compaction_does_not_continue_past_an_unsynced_checkpoint_test() ->
         ],
         ok = bondy_oplog:await_apply(Id),
         bondy_oplog_peer_state:record_sync_complete(
-            Peer, Id, bondy_oplog:root_hash(Id)
+            Peer, Id, bondy_oplog_registry:frontier(Id)
         ),
         bondy_oplog_peer_state:sync(),
         Result = with_io_fault_lock(fun() ->
@@ -404,9 +404,9 @@ instance_init_fails_loudly_on_corrupt_checkpoint() ->
          || I <- lists:seq(1, 3)
         ],
         ok = bondy_oplog:await_apply(Id),
-        LocalRoot = bondy_oplog:root_hash(Id),
+        Witness = bondy_oplog_registry:frontier(Id),
         bondy_oplog_peer_state:record_sync_complete(
-            {peer, dummy_corrupt}, Id, LocalRoot
+            {peer, dummy_corrupt}, Id, Witness
         ),
         bondy_oplog_peer_state:sync(),
         {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
@@ -484,9 +484,9 @@ default_file_when_storage_path() ->
          || I <- lists:seq(1, 3)
         ],
         ok = bondy_oplog:await_apply(Id),
-        LocalRoot = bondy_oplog:root_hash(Id),
+        Witness = bondy_oplog_registry:frontier(Id),
         bondy_oplog_peer_state:record_sync_complete(
-            {peer, def_fp_peer}, Id, LocalRoot
+            {peer, def_fp_peer}, Id, Witness
         ),
         bondy_oplog_peer_state:sync(),
         {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
@@ -517,9 +517,9 @@ default_ets_when_ephemeral() ->
          || I <- lists:seq(1, 3)
         ],
         ok = bondy_oplog:await_apply(Id),
-        LocalRoot = bondy_oplog:root_hash(Id),
+        Witness = bondy_oplog_registry:frontier(Id),
         bondy_oplog_peer_state:record_sync_complete(
-            {peer, def_eph_peer}, Id, LocalRoot
+            {peer, def_eph_peer}, Id, Witness
         ),
         bondy_oplog_peer_state:sync(),
         {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
@@ -554,9 +554,9 @@ checkpoint_persists_via_default() ->
          || I <- lists:seq(1, 3)
         ],
         ok = bondy_oplog:await_apply(Id),
-        LocalRoot = bondy_oplog:root_hash(Id),
+        Witness = bondy_oplog_registry:frontier(Id),
         bondy_oplog_peer_state:record_sync_complete(
-            {peer, def_p_peer}, Id, LocalRoot
+            {peer, def_p_peer}, Id, Witness
         ),
         bondy_oplog_peer_state:sync(),
         {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(

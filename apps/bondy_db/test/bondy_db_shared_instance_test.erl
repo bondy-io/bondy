@@ -168,10 +168,10 @@ compaction_preserves_all_tables({_Db, Users, Groups, _Sup, _Dir}) ->
     %% Compact every shard instance against its own root.
     lists:foreach(
         fun(InstanceId) ->
-            Root = bondy_oplog_instance:root_hash(InstanceId),
+            Witness = bondy_oplog_registry:frontier(InstanceId),
             ?assertMatch(
                 {ok, {compacted, _, _}},
-                bondy_oplog_instance:compact(InstanceId, [Root])
+                bondy_oplog_instance:compact(InstanceId, [Witness])
             )
         end,
         db_instances()

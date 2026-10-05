@@ -3,10 +3,11 @@
   SPDX-License-Identifier: Apache-2.0
 *)
 
-session Bondy_Stabilization = HOL +
+session Bondy_Stabilization = CRDT +
   description "
     Soundness of causal-stabilization reductions in bondy_db: what a scalar
-    HLC containment frontier does and does not license.
+    HLC containment frontier does and does not license; and the
+    observed-remove kernel step against the AFP ORSet.
   "
   options [document = false]
   theories
@@ -21,3 +22,4 @@ session Bondy_Stabilization = HOL +
     Confirmed_Compaction
     Frontier_Writers
     Frontier_Pending
+    Aw_Kernel

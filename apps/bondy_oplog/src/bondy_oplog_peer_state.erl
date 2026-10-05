@@ -16,18 +16,19 @@
 Node-shared peer-state registry.
 
 A single ETS `set` table per node, keyed by `{peer_id, instance_id}`.
-Records the most recent root hash observed for each `(peer, instance)`
-pair, plus the wall-clock timestamps of the last successful sync and
-the last time we heard from the peer at all.
+Records the most recent durable frontier reported for each `(peer, instance)`
+pair, plus the wall-clock timestamps of the last successful sync and the last
+time we heard from the peer at all.
 
 ## Roles
 
-- Sync sessions write here on successful completion (one root hash per
-  `(peer, instance)`).
+- Sync sessions write here on successful completion: the initiator records
+  the peer's durable frontier, and the peer records the initiator's, which the
+  initiator reports to it (`confirm_frontier`).
 - Compaction and reclamation read here to compute the stability
-  frontier — the largest event key every witness has confirmed, by its
-  recorded root (received) or its recorded applied frontier (folded, and
-  possibly compacted since).
+  frontier — the largest event key every member has confirmed by its
+  recorded durable frontier (folded and checkpointed, and possibly compacted
+  since).
 
 ## Two readings, for two different safety requirements
 
@@ -46,9 +47,9 @@ deleted data.
 
 **Strict** (`confirmed_peer_states/2`) — no recency filter, and membership is
 supplied by the caller rather than inferred from who happens to be in this
-table. Every member must have a checkpointed root or the call reports which do
-not, so a silent peer holds stability down instead of vanishing from the
-computation. Removing a permanently departed node is then an explicit,
+table. Every member must have a recorded durable frontier or the call reports
+which do not, so a silent peer holds stability down instead of vanishing from
+the computation. Removing a permanently departed node is then an explicit,
 replicated membership act — a Partisan `leave`, never a timeout; peer
 discovery only joins (see `bondy_oplog_origin_retirement`).
 
@@ -72,19 +73,12 @@ process can read it without round-tripping the gen_server.
 %% Stored as `set` ETS records keyed by the `peer_instance` 2-tuple.
 -record(peer_instance_state, {
     peer_instance :: {peer_id(), instance_id()},
-    %% `undefined` when every completed round so far found the peer's tree
-    %% empty (e.g. fully compacted): the round freshens the timestamps but
-    %% there is no root to confirm — and only a confirmed (binary) root
-    %% counts for stability.
-    root_hash :: binary() | undefined,
-    %% The peer's applied-frontier version vector as observed at the start
-    %% of the last completed round (`get_frontier`). `undefined` until a
-    %% round supplies one. Two consumers in `bondy_oplog_instance`: the
-    %% compaction frontier (`compute_frontier_for/2` — the witness that
-    %% survives the peer's own compaction, where its root does not) and
-    %% the unservable-own-root self-heal (a rebuild is licensed only when
-    %% every recency-live peer's recorded frontier dominates the local
-    %% one). Both only ever UNDER-claim on a stale value.
+    %% The peer's durable frontier (`bondy_oplog_instance:durable_frontier/1`),
+    %% as it last reported it. `undefined` until it reports a non-empty one.
+    %% Two consumers in `bondy_oplog_instance`: the stability frontier
+    %% (`compute_frontier_for/2`) and the unservable-own-root self-heal (a
+    %% rebuild is licensed only when every recency-live peer's recorded
+    %% frontier dominates the local one).
     frontier :: #{binary() => non_neg_integer()} | undefined,
     %% ms since UNIX epoch
     last_sync :: integer(),
@@ -99,7 +93,6 @@ process can read it without round-tripping the gen_server.
 -type peer_state_entry() :: #{
     peer := peer_id(),
     instance := instance_id(),
-    root_hash := binary() | undefined,
     frontier := #{binary() => non_neg_integer()} | undefined,
     last_sync := integer(),
     last_seen := integer()
@@ -115,13 +108,11 @@ process can read it without round-tripping the gen_server.
 %% Writes
 -export([record_sync_complete/3]).
 -export([record_sync_complete/4]).
--export([record_sync_complete/5]).
 -export([touch_peer/1]).
 -export([forget_peer/1]).
 -export([forget_instance/1]).
 
 %% Reads (direct ETS, no gen_server roundtrip)
--export([get_peer_root_hash/2]).
 -export([get_known_peers/1]).
 -export([get_known_peers/2]).
 -export([confirmed_peer_states/2]).
@@ -171,49 +162,41 @@ child_spec(Opts) ->
 %% =============================================================================
 
 ?DOC("""
-Records the successful completion of an anti-entropy round between the
-local replica and `Peer` for `Instance`. `RootHash` is the root hash
-shared by both replicas at the end of the round, or `undefined` when the
-peer's tree was empty (a fully-compacted quiescent shard) — the round
-still completed, so recency MUST advance, but there is nothing to
-confirm: a previously confirmed root is preserved, and a row that never
-had one stays unconfirmed (`confirmed_peer_states/2` requires a binary
-root).
+Records a completed anti-entropy round between the local replica and `Peer`
+for `Instance`, and `Frontier`, the durable frontier `Peer` reported.
+`undefined` (none reported) or an empty one refreshes recency and keeps the
+frontier recorded before, so the self-heal's domination gate never reads
+"claims nothing" as covering an empty local frontier. Keeping it is meant for a
+member whose durable frontier only grows; a member that lost its disk, or an
+ephemeral one that restarted, keeps confirming its old claims until it reports
+a non-empty frontier again.
 
 Updates `last_sync` and `last_seen` to `os:system_time(millisecond)`.
 """).
--spec record_sync_complete(peer_id(), instance_id(), binary() | undefined) ->
-    ok.
-
-record_sync_complete(Peer, Instance, RootHash) ->
-    record_sync_complete(
-        Peer, Instance, RootHash, os:system_time(millisecond)
-    ).
-
 -spec record_sync_complete(
-    peer_id(), instance_id(), binary() | undefined, integer()
+    peer_id(), instance_id(), #{binary() => non_neg_integer()} | undefined
 ) -> ok.
 
-record_sync_complete(Peer, Instance, RootHash, Now) ->
-    record_sync_complete(Peer, Instance, RootHash, undefined, Now).
+record_sync_complete(Peer, Instance, Frontier) ->
+    record_sync_complete(
+        Peer, Instance, Frontier, os:system_time(millisecond)
+    ).
 
 -spec record_sync_complete(
     peer_id(),
     instance_id(),
-    binary() | undefined,
     #{binary() => non_neg_integer()} | undefined,
     integer()
 ) -> ok.
 
-record_sync_complete(Peer, Instance, RootHash, Frontier, Now) ->
+record_sync_complete(Peer, Instance, Frontier, Now) ->
     gen_server:cast(
-        ?MODULE,
-        {record_sync_complete, Peer, Instance, RootHash, Frontier, Now}
+        ?MODULE, {record_sync_complete, Peer, Instance, Frontier, Now}
     ).
 
 ?DOC("""
 Updates `last_seen` for `Peer` across all instances without recording a
-new root hash. Used when the peer was contacted but the sync round
+new frontier. Used when the peer was contacted but the sync round
 itself was a no-op.
 """).
 -spec touch_peer(peer_id()) -> ok.
@@ -242,20 +225,6 @@ forget_instance(InstanceId) ->
 %% =============================================================================
 %% READS
 %% =============================================================================
-
-?DOC("""
-Returns the most recently recorded root hash from `Peer` for
-`Instance` (`undefined` when rounds have completed but only ever against
-an empty peer tree), or `not_found`.
-""").
--spec get_peer_root_hash(peer_id(), instance_id()) ->
-    {ok, binary() | undefined} | not_found.
-
-get_peer_root_hash(Peer, Instance) ->
-    case ets:lookup(?TABLE, {Peer, Instance}) of
-        [#peer_instance_state{root_hash = H}] -> {ok, H};
-        [] -> not_found
-    end.
 
 ?DOC("""
 Returns the list of peers that have any record for `Instance`,
@@ -290,8 +259,8 @@ get_known_peers(Instance, Since) ->
 
 ?DOC("""
 Returns the full per-peer record set for `Instance`, excluding stale
-peers. Each entry is a map with `peer`, `instance`, `root_hash`,
-`frontier`, `last_sync`, `last_seen`.
+peers. Each entry is a map with `peer`, `instance`, `frontier`, `last_sync`,
+`last_seen`.
 """).
 -spec get_instance_peer_states(instance_id()) -> [peer_state_entry()].
 
@@ -314,11 +283,11 @@ history or reclaim irreversibly.
 caller, because this table only knows peers it has synced with at least once
 and "never synced" is indistinguishable from "absent" here.
 
-Returns `{ok, States}` only when every member has a checkpointed root. There is
-**no recency filter**: a silent member holds stability down rather than being
-dropped, which is what makes reclamation safe. `{unconfirmed, Peers}` names the
-members still missing, so a caller can log or expose why stability is not
-advancing.
+Returns `{ok, States}` only when every member has a recorded durable frontier.
+There is **no recency filter**: a silent member holds stability down rather
+than being dropped, which is what makes reclamation safe.
+`{unconfirmed, Peers}` names the members still missing, so a caller can log or
+expose why stability is not advancing.
 
 Contrast `get_instance_peer_states/1`, which drops peers unheard-from within
 `peer_timeout_ms`, and is unsound for any caller that must not lose history.
@@ -332,15 +301,14 @@ confirmed_peer_states(_Instance, []) ->
     %% needs no confirmation at all.
     {ok, []};
 confirmed_peer_states(Instance, Members) when is_list(Members) ->
-    %% `0` ⇒ no recency filter, deliberately. A row whose `root_hash` is
-    %% `undefined` (rounds completed, but only ever against an empty peer
-    %% tree) proves recency, NOT confirmation — it must never satisfy the
+    %% `0` ⇒ no recency filter, deliberately. A row with no recorded
+    %% frontier proves recency, NOT confirmation — it must never satisfy the
     %% stability requirement.
     States = get_instance_peer_states(Instance, 0),
     Confirmed =
         #{
             maps:get(peer, S) => S
-         || S <- States, is_binary(maps:get(root_hash, S))
+         || S <- States, is_map(maps:get(frontier, S))
         },
 
     case [P || P <- Members, not is_map_key(P, Confirmed)] of
@@ -358,7 +326,6 @@ get_instance_peer_states(Instance, Since) ->
         {
             #peer_instance_state{
                 peer_instance = {'$1', '$2'},
-                root_hash = '$3',
                 frontier = '$6',
                 last_sync = '$4',
                 last_seen = '$5'
@@ -367,19 +334,18 @@ get_instance_peer_states(Instance, Since) ->
                 {'=:=', '$2', {const, Instance}},
                 {'>=', '$5', {const, Since}}
             ],
-            [{{'$1', '$3', '$6', '$4', '$5'}}]
+            [{{'$1', '$6', '$4', '$5'}}]
         }
     ],
     [
         #{
             peer => P,
             instance => Instance,
-            root_hash => H,
             frontier => F,
             last_sync => LS,
             last_seen => LSeen
         }
-     || {P, H, F, LS, LSeen} <- ets:select(?TABLE, MatchSpec)
+     || {P, F, LS, LSeen} <- ets:select(?TABLE, MatchSpec)
     ].
 
 ?DOC("""
@@ -459,36 +425,22 @@ handle_call(_Req, _From, State) ->
     {reply, {error, badcall}, State}.
 
 handle_cast(
-    {record_sync_complete, Peer, Instance, Hash, Frontier0, Now}, State
+    {record_sync_complete, Peer, Instance, Frontier0, Now}, State
 ) ->
     Key = {Peer, Instance},
-    %% A rootless completion (the peer's tree was empty) refreshes recency but
-    %% must not ERASE a previously confirmed root: the peer checkpointed that
-    %% root's content before compacting, so keeping it holds the stability
-    %% frontier where it was rather than regressing it to unconfirmed. The
-    %% recorded frontier is preserved for the same reason — regressing it
-    %% could license the unservable-root self-heal against stale knowledge,
-    %% whereas preserving it can only DELAY a rebuild.
     Prev =
         case ets:lookup(?TABLE, Key) of
             [#peer_instance_state{} = P] -> P;
             [] -> undefined
         end,
-    Root =
-        case {Hash, Prev} of
-            {undefined, #peer_instance_state{root_hash = PR}} -> PR;
-            {undefined, undefined} -> undefined;
-            _ -> Hash
-        end,
     Frontier =
         case {Frontier0, Prev} of
-            {undefined, #peer_instance_state{frontier = PF}} -> PF;
-            {undefined, undefined} -> undefined;
-            _ -> Frontier0
+            {F, _} when is_map(F), map_size(F) > 0 -> F;
+            {_, #peer_instance_state{frontier = PF}} -> PF;
+            {_, undefined} -> undefined
         end,
     Entry = #peer_instance_state{
         peer_instance = Key,
-        root_hash = Root,
         frontier = Frontier,
         last_sync = Now,
         last_seen = Now

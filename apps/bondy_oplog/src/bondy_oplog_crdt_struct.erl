@@ -126,6 +126,7 @@ applies here: a tier_0 sub-op needs only its own HLC to linearize).
 %% projection seam
 -export([batchable/0]).
 -export([context_of/1]).
+-export([dotted_context/0]).
 -export([decode_state/1]).
 -export([encode_state/1]).
 -export([hlc/1]).
@@ -246,6 +247,12 @@ stamps into the next write's `meta`.
 
 context_of({_Schema, _Fields, CC, _Hlc}) ->
     CC.
+
+-doc "The context grows by exactly each applied operation's context and dot.".
+-spec dotted_context() -> true.
+
+dotted_context() ->
+    true.
 
 -doc """
 Reap the causal-context entries of permanently-retired origins, mirroring

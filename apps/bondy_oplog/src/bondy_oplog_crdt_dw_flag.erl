@@ -57,6 +57,7 @@ an enable that observed every disable.
 -export([order_independent/0]).
 -export([batchable/0]).
 -export([context_of/1]).
+-export([dotted_context/0]).
 -export([removal_op/0]).
 -export([stabilize/2]).
 -export([encode_state/1]).
@@ -152,6 +153,12 @@ to_value({Cell, _CC, _Hlc}) ->
 
 context_of({_Cell, CC, _Hlc}) ->
     CC.
+
+-doc "The context grows by exactly each applied operation's context and dot.".
+-spec dotted_context() -> true.
+
+dotted_context() ->
+    true.
 
 -doc """
 The whole-cell removal for `bondy_db:delete/3`: a `disable` extends the

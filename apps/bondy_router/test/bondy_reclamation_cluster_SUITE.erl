@@ -12,7 +12,7 @@
 
 %% BONDY_DB_RECLAMATION_PLAN.md Step 9 — the capstone validation, over a
 %% 2-node Partisan cluster with live AAE (production paths only: writes and
-%% deletes through `bondy_db`, stability through the confirm_root swap the
+%% deletes through `bondy_db`, stability through the frontier swap the
 %% background sync performs, reclamation through
 %% `bondy_oplog_instance:reclaim_stable_cells/1`):
 %%
@@ -80,7 +80,7 @@ reclaim_after_convergence_no_resurrection(Config) ->
     [wait_converge(N2, B, nudge_key(K), nudge_val(B)) || {B, K} <- APairs],
     [wait_converge(N1, B, nudge_key(K), nudge_val(B)) || {B, K} <- BPairs],
 
-    %% Reclaim on both nodes. Stability needs confirm_root rounds from the
+    %% Reclaim on both nodes. Stability needs frontier-reporting rounds from the
     %% live sync, so poll with scheduler nudges until tombstones are
     %% physically discarded on each side.
     DeletedCount = length(APairs) + length(BPairs),
@@ -239,7 +239,7 @@ reclaim_once(Node) ->
     ]).
 
 %% @private
-%% Stability advances only as live-sync confirm_root rounds complete, so
+%% Stability advances only as live-sync frontier-reporting rounds complete, so
 %% poll, accumulating the (one-shot) discards until `Min` cells are gone.
 %%
 %% Each attempt also lands a round of CHURN — fresh writes with unique keys.

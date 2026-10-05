@@ -20,6 +20,7 @@
 %% Default cell bucket — substrate `read/3` aliases land on `<<>>`.
 -define(B, <<>>).
 -define(CRDT, bondy_oplog_crdt_lww_register).
+-define(HELD, <<"held">>).
 
 setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
@@ -43,7 +44,10 @@ catalogue_compaction_test_() ->
         {timeout, 30, fun idempotent_after_truncation/0},
         {timeout, 30, fun crdt_kernel_compaction_matches_from_scratch/0},
         {timeout, 30, fun remote_event_survives_catalogue_compaction/0},
-        {timeout, 30, fun compaction_makes_no_synchronous_applier_call/0}
+        {timeout, 30, fun compaction_makes_no_synchronous_applier_call/0},
+        {timeout, 30, fun held_event_folds_after_compaction/0},
+        {timeout, 30, fun held_event_folds_after_compaction_fused/0},
+        {timeout, 60, fun owed_refold_survives_compaction_before_gate/0}
     ]}.
 
 %% =============================================================================
@@ -79,10 +83,10 @@ truncates_and_preserves_reads() ->
         ?assert(bondy_oplog:size(InstId) >= 3),
 
         %% A peer converged to exactly our tree: frontier = whole tree.
-        Root = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         %% MST is bounded — the stable prefix is gone.
         ?assertEqual(0, bondy_oplog:size(InstId)),
@@ -123,14 +127,14 @@ idempotent_after_truncation() ->
     try
         ok = append_cell(InstId, <<"k">>, 5, <<"v">>),
         _ = bondy_oplog_instance:await_apply(InstId),
-        Root = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
         {ok, {compacted, W1, _}} =
-            bondy_oplog_instance:compact(InstId, [Root]),
+            bondy_oplog_instance:compact(InstId, [Witness]),
         ?assertEqual(0, bondy_oplog:size(InstId)),
         %% Nothing new to compact ⇒ no_change, watermark unchanged.
         ?assertEqual(
             {ok, no_change},
-            bondy_oplog_instance:compact(InstId, [Root])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         ?assertEqual(W1, bondy_oplog:current_watermark(InstId))
     after
@@ -189,10 +193,10 @@ crdt_kernel_compaction_matches_from_scratch() ->
         %% tree; the stable prefix is truncated. Do NOT read A before
         %% compacting, so post-truncation reads can only come from the
         %% projection (the checkpoint), not a warm cache.
-        ARoot = bondy_oplog_instance:root_hash(AId),
+        Witness = bondy_oplog_registry:frontier(AId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(AId, [ARoot])
+            bondy_oplog_instance:compact(AId, [Witness])
         ),
         ?assertEqual(0, bondy_oplog:size(AId)),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(AId)),
@@ -313,6 +317,61 @@ compaction_makes_no_synchronous_applier_call() ->
         close_shard(BC, BP)
     end.
 
+%% A remote event held behind its origin's gap sits above the local prefix a
+%% compaction truncates; the gap then fills. The held event must fold with it
+%% (`proofs/tla/ReplayReanchor_Shipped_NoRestart.cfg` is this schedule).
+held_event_folds_after_compaction() ->
+    held_event_folds_after_compaction(#{}).
+
+held_event_folds_after_compaction_fused() ->
+    held_event_folds_after_compaction(#{
+        fused => true, wal_backend => mem, durability => ephemeral, seed => true
+    }).
+
+held_event_folds_after_compaction(Opts) ->
+    with_held_event(Opts, fun(Id, NS, Src) ->
+        {ok, {compacted, _, 1}} = compact_own_root(Id),
+        ok = bondy_oplog_test_helpers:settle(Id),
+        ok = deliver_and_fold(Id, Src, 1),
+        ?assertEqual(2, remote_seq(Id, Src)),
+        ?assertEqual({<<"v2">>, 2}, bondy_oplog_core:read(NS, primary, ?HELD))
+    end).
+
+%% A drain-gated applier restarts while an event is held, so its boot anchor
+%% is undefined and the re-fold it owes waits for the gate. A compaction lands
+%% first; the re-fold must still present the held event
+%% (`proofs/tla/ReplayReanchor_Shipped_Gated.cfg`).
+owed_refold_survives_compaction_before_gate() ->
+    with_dir(fun(Dir) ->
+        Opts = #{
+            backend => bondy_mst_pack_store,
+            storage_path => unicode:characters_to_binary(Dir),
+            seed => true,
+            applier => #{drain_gated => true, commit_every => 1}
+        },
+        with_held_event(Opts, fun(Id, NS, Src) ->
+            _ = bondy_oplog:append(
+                Id, {cell_apply, ?B, <<"m">>, {set, 1, <<"m">>}}
+            ),
+            ok = bondy_oplog_test_projection:drain(Id),
+            Inst = bondy_oplog_instance:whereis(Id),
+            Wal = bondy_oplog_registry:wal_pid(Id),
+            true = exit(Inst, kill),
+            ok = bondy_oplog_test_helpers:await_subtree_restart(
+                Id, Inst, Wal, 10_000
+            ),
+            ?assertEqual(4, bondy_oplog:size(Id)),
+            {ok, {compacted, _, 1}} = compact_own_root(Id),
+            ok = bondy_oplog_test_helpers:open_gate(Id),
+            ok = bondy_oplog_test_helpers:settle(Id),
+            ok = deliver_and_fold(Id, Src, 1),
+            ?assertEqual(2, remote_seq(Id, Src)),
+            ?assertEqual(
+                {<<"v2">>, 2}, bondy_oplog_core:read(NS, primary, ?HELD)
+            )
+        end)
+    end).
+
 %% Drains the call-trace messages for `bondy_oplog_applier`, returning the
 %% `{Function, Arity}` of every call the traced process made.
 collect_applier_calls(Acc) ->
@@ -334,14 +393,77 @@ collect_applier_calls(Acc) ->
 compact_until_empty(_InstId, 0) ->
     {error, timeout};
 compact_until_empty(InstId, Retries) ->
-    Root = bondy_oplog_instance:root_hash(InstId),
-    _ = bondy_oplog_instance:compact(InstId, [Root]),
+    Witness = bondy_oplog_registry:frontier(InstId),
+    _ = bondy_oplog_instance:compact(InstId, [Witness]),
     case bondy_oplog:size(InstId) of
         0 ->
             ok;
         _ ->
             timer:sleep(10),
             compact_until_empty(InstId, Retries - 1)
+    end.
+
+%% Runs `Fun(Id, NS, Src)` on an instance holding, in key order: a local
+%% write `l`; seq 2 of the remote origin `Src`, held behind its missing seq 1;
+%% and seq 1 of another remote origin, which folded first and so anchored the
+%% replay cursor.
+with_held_event(Opts, Fun) ->
+    Id = mk_id(),
+    NS = ns_of(Id),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    Applier = maps:get(applier, Opts, #{}),
+    {ok, _} = bondy_oplog:start_instance(Id, Opts#{
+        origin => bondy_oplog_origin:new(),
+        applier => Applier#{cell_apply_target => {NS, primary, 0}}
+    }),
+    Src = {bondy_oplog_origin:new(), os:system_time(millisecond) + 60_000},
+    try
+        ok = bondy_oplog_test_helpers:open_gate(Id),
+        _ = bondy_oplog:append(
+            Id, {cell_apply, ?B, <<"l">>, {set, 10, <<"l">>}}
+        ),
+        ok = bondy_oplog_test_helpers:settle(Id),
+        {_, Base} = Src,
+        Anchor = {bondy_oplog_origin:new(), Base + 10},
+        ok = deliver_and_fold(Id, Anchor, 1),
+        ?assertEqual(1, remote_seq(Id, Anchor)),
+        ok = deliver_and_fold(Id, Src, 2),
+        ?assertEqual(0, remote_seq(Id, Src)),
+        ?assertEqual(3, bondy_oplog:size(Id)),
+        Fun(Id, NS, Src)
+    after
+        ok = bondy_oplog:stop_instance(Id),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj)
+    end.
+
+held_event({Origin, Base}, Seq) ->
+    bondy_oplog_event:new(
+        bondy_oplog_event:key(
+            bondy_connect_hlc:encode(Base + Seq, 0), Origin, Seq
+        ),
+        {cell_apply, ?B, ?HELD,
+            {set, Seq, <<"v", (integer_to_binary(Seq))/binary>>}},
+        undefined
+    ).
+
+deliver_and_fold(Id, Src, Seq) ->
+    ok = bondy_oplog:append_remote(Id, held_event(Src, Seq)),
+    bondy_oplog_test_helpers:settle(Id).
+
+remote_seq(Id, {Origin, _Base}) ->
+    maps:get(Origin, bondy_oplog_instance:frontier(Id), 0).
+
+compact_own_root(Id) ->
+    bondy_oplog_instance:compact(Id, [bondy_oplog_registry:frontier(Id)]).
+
+with_dir(Fun) ->
+    Dir = filename:join(["/tmp", os:getpid(), binary_to_list(mk_id())]),
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    try
+        Fun(Dir)
+    after
+        _ = file:del_dir_r(Dir)
     end.
 
 mk_id() ->

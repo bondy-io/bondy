@@ -114,9 +114,9 @@ hlc_seeds_from_persisted_watermark() ->
         bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(I))
      || I <- lists:seq(1, 5)
     ],
-    LocalRoot = bondy_oplog:root_hash(Id),
+    Witness = bondy_oplog_registry:frontier(Id),
     bondy_oplog_peer_state:record_sync_complete(
-        {peer, dummy_hlc}, Id, LocalRoot
+        {peer, dummy_hlc}, Id, Witness
     ),
     bondy_oplog_peer_state:sync(),
     {ok, {compacted, Watermark, _}} = bondy_oplog_test_helpers:compact_among(

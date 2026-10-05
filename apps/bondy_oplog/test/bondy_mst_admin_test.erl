@@ -362,9 +362,9 @@ roundtrip_with_live_instance() ->
          || I <- lists:seq(1, 5)
         ],
         ok = bondy_oplog:await_apply(Id),
-        LocalRoot = bondy_oplog:root_hash(Id),
+        Witness = bondy_oplog_registry:frontier(Id),
         bondy_oplog_peer_state:record_sync_complete(
-            {peer, e2e_peer}, Id, LocalRoot
+            {peer, e2e_peer}, Id, Witness
         ),
         bondy_oplog_peer_state:sync(),
         {ok, {compacted, W1, _}} = bondy_oplog_test_helpers:compact_among(

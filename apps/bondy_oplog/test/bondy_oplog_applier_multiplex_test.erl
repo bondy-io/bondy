@@ -633,10 +633,9 @@ partial_install_does_not_adopt_the_peer_frontier() ->
 %% A snapshot from a peer running a build that declares a table this one does
 %% not: its cells carry a bucket that resolves to no ctx here, so they are
 %% skipped and the projection ends up short of what the peer shipped. The
-%% install must NAME that bucket, because `skipped` alone cannot be told apart
-%% from the benign HLC-older skip, and
+%% install must NAME that bucket, because
 %% `bondy_oplog_sync_session:do_bootstrap_snapshot/6` decides whether to adopt
-%% the peer's applied frontier on exactly this distinction. Mutation-checked:
+%% the peer's applied frontier on it. Mutation-checked:
 %% drop the `unclaimable(Bucket, Acc)` wrapper in
 %% `bondy_oplog_applier:do_install_catalogue_batch/3` and the third assertion
 %% fails with `[]`.
@@ -673,11 +672,9 @@ install_names_the_buckets_it_could_not_route() ->
         TgtApplier, Skewed
     ),
     ?assertEqual([<<"table_c">>], maps:get(unclaimable, Counts)),
-    %% The unroutable cells are counted as skipped too, but that counter also
-    %% carries this batch's HLC-older re-install of the A cell, so it cannot
-    %% stand in for the set above.
-    ?assertEqual(2, maps:get(skipped, Counts)),
-    ?assertEqual(0, maps:get(installed, Counts)),
+    %% The A cell replaces its own earlier install.
+    ?assertEqual(1, maps:get(skipped, Counts)),
+    ?assertEqual(1, maps:get(installed, Counts)),
 
     teardown_two_tables(SrcId, SrcNsA, SrcNsB, SrcHA, SrcHB),
     teardown_two_tables(TgtId, TgtNsA, TgtNsB, TgtHA, TgtHB).

@@ -237,6 +237,28 @@ scheduler_events_are_counted() ->
         prometheus_counter:value(
             bondy_oplog_sync_scheduler_events_total, [<<"bootstrap_started">>]
         )
+    ),
+    [
+        ok = telemetry:execute(
+            [bondy_oplog, scheduler, gc, trigger_outcome],
+            #{count => 1},
+            #{scheduler => Name, instance_id => ?ID, outcome => unconfirmed}
+        )
+     || Name <- [probe_compaction, probe_reclaim, probe_reclaim]
+    ],
+    ?assertEqual(
+        1,
+        prometheus_counter:value(
+            bondy_oplog_gc_scheduler_events_total,
+            [<<"probe_compaction">>, <<"trigger_unconfirmed">>]
+        )
+    ),
+    ?assertEqual(
+        2,
+        prometheus_counter:value(
+            bondy_oplog_gc_scheduler_events_total,
+            [<<"probe_reclaim">>, <<"trigger_unconfirmed">>]
+        )
     ).
 
 mst_events_are_counted() ->

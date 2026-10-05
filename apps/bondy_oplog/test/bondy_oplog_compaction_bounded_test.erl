@@ -63,10 +63,10 @@ bounded_under_sustained_load() ->
                 SizeBefore = bondy_oplog:size(InstId),
                 %% A peer converged to exactly our tree ⇒ frontier = whole
                 %% tree ⇒ the stable prefix is dropped each cycle.
-                Root = bondy_oplog_instance:root_hash(InstId),
+                Witness = bondy_oplog_registry:frontier(InstId),
                 ?assertMatch(
                     {ok, {compacted, _, _}},
-                    bondy_oplog_instance:compact(InstId, [Root])
+                    bondy_oplog_instance:compact(InstId, [Witness])
                 ),
                 ?assertEqual(0, bondy_oplog:size(InstId)),
                 max(AccMax, SizeBefore)
@@ -102,7 +102,7 @@ diff_frontier_bounds_to_recent_batch() ->
         %% Batch 1: a peer confirms exactly this prefix.
         append_batch(InstId, 1, Batch),
         _ = bondy_oplog_instance:await_apply(InstId),
-        PeerRoot = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
 
         %% Batch 2: appended locally, NOT yet confirmed by the peer.
         append_batch(InstId, 2, Batch),
@@ -114,7 +114,7 @@ diff_frontier_bounds_to_recent_batch() ->
         %% truncates exactly the confirmed batch-1 prefix.
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [PeerRoot])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         ?assertEqual(Batch, bondy_oplog:size(InstId)),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(InstId))
@@ -150,7 +150,7 @@ watermark_reanchored_on_truncated_root() ->
         %% Batch 1: a peer confirms exactly this prefix.
         append_batch(InstId, 1, Batch),
         _ = bondy_oplog_instance:await_apply(InstId),
-        PeerRoot1 = bondy_oplog_instance:root_hash(InstId),
+        Witness1 = bondy_oplog_registry:frontier(InstId),
 
         %% Batch 2: local, unconfirmed.
         append_batch(InstId, 2, Batch),
@@ -160,7 +160,7 @@ watermark_reanchored_on_truncated_root() ->
         %% (a PARTIAL truncate: the tree is non-empty afterwards).
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [PeerRoot1])
+            bondy_oplog_instance:compact(InstId, [Witness1])
         ),
         Root2 = bondy_oplog_instance:root_hash(InstId),
         ?assertEqual(Batch, bondy_oplog:size(InstId)),
@@ -177,10 +177,10 @@ watermark_reanchored_on_truncated_root() ->
         %% root): batch 3, peer confirms the full tree, compaction drops it.
         append_batch(InstId, 3, Batch),
         _ = bondy_oplog_instance:await_apply(InstId),
-        Root3 = bondy_oplog_instance:root_hash(InstId),
+        Witness3 = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root3])
+            bondy_oplog_instance:compact(InstId, [Witness3])
         ),
         ?assertEqual(0, bondy_oplog:size(InstId))
     after

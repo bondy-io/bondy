@@ -1122,7 +1122,7 @@ do_peer_sig(InstId) ->
     try
         bondy_oplog_transport_partisan:request(Peer, InstId, get_frontier, Opts)
     of
-        {ok, Frontier, Fp} -> {Frontier, Fp};
+        {ok, Frontier, Fp, _Durable} -> {Frontier, Fp};
         Other -> error({peer_frontier_failed, Peer, InstId, Other})
     catch
         C:R -> error({peer_frontier_failed, Peer, InstId, {C, R}})
@@ -1159,7 +1159,7 @@ do_drain_all() ->
     ).
 
 %% @private
-%% Drain, then compact the instance to its CURRENT root (frontier = everything),
+%% Drain, then compact the instance to its CURRENT frontier (everything),
 %% emptying its MST. Mirrors `bondy_oplog_compaction_durable_test`. A no-op
 %% (`{ok, no_change}`) for an already-empty MST.
 do_compact(InstId) ->
@@ -1171,7 +1171,9 @@ do_compact(InstId) ->
         end,
     case bondy_oplog_instance:root_hash(InstId) of
         Root when is_binary(Root) ->
-            bondy_oplog_instance:compact(InstId, [Root]);
+            bondy_oplog_instance:compact(InstId, [
+                bondy_oplog_registry:frontier(InstId)
+            ]);
         _ ->
             {ok, no_change}
     end.

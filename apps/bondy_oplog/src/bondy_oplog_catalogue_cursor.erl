@@ -142,6 +142,8 @@ snapshot is a moving target across peer restarts.
 -export([advance/2]).
 -export([set_pending/2]).
 -export([discard/1]).
+-export([discard_instance/1]).
+-export([any_open/1]).
 -export([info/0]).
 
 %% gen_server callbacks
@@ -368,6 +370,42 @@ Drops the cursor immediately. Idempotent.
 discard(Cursor) when is_binary(Cursor) ->
     true = ets:delete(?TABLE, Cursor),
     ok.
+
+?DOC("""
+Drops every cursor open on `InstanceId`, so each session reading a snapshot
+of it gets `cursor_expired` on its next request and restarts from
+`get_catalogue_snapshot_init`. Called when the instance starts installing a
+snapshot of its own or restarts owing the replay of events its frontier does
+not claim, after which the cells those sessions are reading may no longer
+reflect the frontier they read at init (`bondy_oplog_instance:serving/1`).
+Idempotent.
+""").
+-spec discard_instance(instance_id()) -> ok.
+
+discard_instance(InstanceId) when is_binary(InstanceId) ->
+    _ = ets:select_delete(?TABLE, [
+        {#cursor{instance_id = InstanceId, _ = '_'}, [], [true]}
+    ]),
+    ok.
+
+?DOC("""
+Whether a cursor on `InstanceId` has not yet expired, so a session may still
+read it. An expired row still in the table is not counted, though `advance/2`
+would renew it; `bondy_oplog_instance:begin_install/1` deletes such rows with
+`discard_instance/1`.
+""").
+-spec any_open(instance_id()) -> boolean().
+
+any_open(InstanceId) when is_binary(InstanceId) ->
+    Now = erlang:monotonic_time(millisecond),
+    MS = [
+        {
+            #cursor{instance_id = InstanceId, expires_at = '$1', _ = '_'},
+            [{'>', '$1', Now}],
+            [true]
+        }
+    ],
+    ets:select(?TABLE, MS, 1) =/= '$end_of_table'.
 
 ?DOC("""
 Returns operational diagnostics. Cheap.

@@ -13,33 +13,26 @@
 ?MODULEDOC("""
 Per-instance compaction.
 
-This module is a thin orchestrator: it collects one witness (recorded root
-and applied frontier) per peer and delegates the heavy lifting to
-`bondy_oplog_instance:compact/2`, which runs the cycle (stability frontier →
-interpret_cog → snapshot → MST truncate → watermark advance) atomically inside
-the instance gen_server.
+This module is a thin orchestrator: it collects one witness (the durable
+frontier each peer last reported) per peer and delegates the heavy lifting to
+`bondy_oplog_instance:compact/2`, which runs the cycle atomically inside the
+instance gen_server.
 
 ## Witnesses
 
-Every peer that is a cluster member witnesses, reachable or not. The members
-are the full Partisan membership (`bondy_oplog_instance:reclamation_members/0`)
-and each must have a confirmed row
-(`bondy_oplog_peer_state:confirmed_peer_states/2`) however long it has been
-silent; a member drops out only through a Partisan `leave`. Until then, a
-member that is down or partitioned holds compaction: truncating what it has
-not received loses for good the writes each side accepted alone, once both
-sides have truncated (`proofs/tla/ConfirmedCompaction_RootVV3_Fresh_Partition.cfg`
-violates `NoLoss` under a recency filter; the `_Members_` configs hold it).
-When the membership is unreadable, solo, or has an unconfirmed member, no
-witness is passed: nothing is peer-confirmed, and only the watermark catch-up
-truncates.
-
-A fused instance (`bondy_oplog_registry:fused/1`; ephemeral, which
-`bondy_db:assert_fused_requires_ephemeral/2` enforces) is the exception: its witnesses are the peers heard from within
-`peer_timeout_ms` (`bondy_oplog_peer_state:get_instance_peer_states/1`). Its
-history lives in memory, so a down member must not hold it, and it may lose
-what a silent peer alone holds, as its retention policy already may
-(`bondy_oplog_instance` admits retention only on a fused instance).
+The witnesses are `bondy_oplog_instance:compaction_witnesses/1`, which the
+watermark door reads too. A member's frontier advances only when it writes a
+checkpoint, which each compaction cycle does when its frontier has moved, so a
+member whose cycles do not run holds compaction for every replica. A solo membership passes no witness, so nothing is
+truncated on peer confirmation. When the membership is unreadable or a member has no confirmed row,
+the instance still runs its cycle with no witness (page collection and, on a
+fused instance, retention) and the call returns the cause as an error, which
+the GC scheduler reports as its trigger outcome
+(`bondy_oplog_compaction_test:held_compaction_reaches_the_scheduler/0`). A
+member that confirmed and then went down keeps its row, so its stale frontier
+only stops the frontier advancing and the call returns `{ok, no_change}`:
+telling that apart from a peer that has not synced yet needs a recency bound
+this rule does not use. The reclamation scheduler reports that member (`no_frontier`).
 
 Called by:
 
@@ -53,9 +46,14 @@ Called by:
 ?DOC("""
 Runs one compaction cycle for `InstanceId`. Returns:
 
-- `{ok, no_change}` if no progress is possible (no confirmed members, no
-  intersecting prefix, frontier ≤ current watermark).
+- `{ok, no_change}` if no progress is possible (no intersecting prefix,
+  frontier ≤ current watermark).
 - `{ok, {compacted, NewWatermark, EventCount}}` on success.
+- `{error, {unconfirmed, Members}}` when those members have no recorded
+  frontier,
+  and `{error, membership_unavailable}` when the membership cannot be read.
+  Either is returned after the instance's cycle has run with no witness, whose
+  own outcome is then visible only through `[bondy_oplog, compaction, ok]`.
 - `{error, Reason}` on failure.
 """).
 -spec compact(instance_id()) ->
@@ -64,31 +62,12 @@ Runs one compaction cycle for `InstanceId`. Returns:
     | {error, term()}.
 
 compact(InstanceId) when is_binary(InstanceId) ->
-    bondy_oplog_instance:compact(InstanceId, witnesses(InstanceId)).
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-%% @private
-witnesses(InstanceId) ->
-    case bondy_oplog_registry:fused(InstanceId) of
-        true -> bondy_oplog_peer_state:get_instance_peer_states(InstanceId);
-        false -> member_witnesses(InstanceId)
-    end.
-
-%% @private
-member_witnesses(InstanceId) ->
-    case bondy_oplog_instance:reclamation_members() of
-        {ok, Members} ->
-            case
-                bondy_oplog_peer_state:confirmed_peer_states(
-                    InstanceId, Members
-                )
-            of
-                {ok, States} -> States;
-                {unconfirmed, _} -> []
-            end;
-        error ->
-            []
+    case bondy_oplog_instance:compaction_witnesses(InstanceId) of
+        {ok, Witnesses} ->
+            bondy_oplog_instance:compact(InstanceId, Witnesses);
+        {error, _} = Held ->
+            case bondy_oplog_instance:compact(InstanceId, []) of
+                {ok, _} -> Held;
+                {error, _} = Error -> Error
+            end
     end.

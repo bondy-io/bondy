@@ -311,7 +311,11 @@ nor any current member claims), and retires all of them. Retirement is
 monotone and idempotent, so repeating it is free.
 
 **Call this only after the departed node has been removed from the Partisan
-membership, and only once the cluster has converged on that node's events.**
+membership, and only once every member has applied and checkpointed that
+node's events** (each member's durable frontier, `get_frontier`, covers them):
+applied alone is not enough, since a member that crashes before its checkpoint
+loses the effect, and retirement then stops the events reaching it again
+(`proofs/tla/JoinInstall.tla`, `Retire`).
 Retiring bans the origin cluster-wide, so any of its events a replica has
 not yet applied become permanently unreachable to it. The complement is
 computed fail-closed — every current member must answer, or nothing is

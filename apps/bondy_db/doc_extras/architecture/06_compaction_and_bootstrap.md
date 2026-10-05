@@ -184,7 +184,7 @@ flowchart TB
     UD{"frontier past the watermark?"}
     RET{"mst_retention configured ∧ Fused ∧ HasProjection<br/>∧ (size > max_events ∨ oldest > max_age_ms)?"}
     RFRONT["frontier = whole applied tree (size breach)<br/>or newest key older than the age cutoff"]
-    CATCH["maybe_watermark_catchup — else {ok, no_change}"]
+    CATCH["trim_below_watermark — confirmed events at or below the watermark, else {ok, no_change}"]
 
     CF --> UD
     UD -->|yes| Frontier[peer-confirmed truncation — preferred, unchanged]
@@ -198,7 +198,7 @@ Key properties:
 - **Peer-confirmed first.** A confirmed frontier is strictly better —
   every peer already holds that prefix, so truncating it costs nobody a
   bootstrap. Retention fires only when the confirmed path yields
-  nothing (`retention_or_catchup/4` → `retention_frontier/3` in
+  nothing (`retention/4` → `retention_frontier/3` in
   `bondy_oplog_instance.erl`).
 - **Sound because ephemeral + projection-backed.** A restart wipes the
   instance anyway (no durability to protect) and the projection
@@ -252,21 +252,21 @@ What a peer that missed truncated history does:
   resolve_cell_apply_target/1`), and the installer runs in the fused
   gen_server over its own mux cell-apply source
   (`bondy_oplog_applier:install_catalogue_cells/3`, shared body).
-- **Live re-bootstraps re-derive the projection afterwards** — on fused
-  instances via `bondy_oplog_instance:rederive_projection/1` (the
-  fused counterpart of the applier's `rederive_projection_sync/1`,
-  routed by `bondy_oplog_sync_session`). The `replace`-mode install is
-  skip-if-older by HLC, which can clobber a per-Origin-accumulating
-  cell: the peer's higher-HLC copy may omit ops the peer had not
-  applied when its snapshot was cut, and the loss is invisible to the
-  convergence oracle (the local applied-frontier VV still covers the
-  clobbered ops). The rederive re-applies every retained MST event —
-  already-held ops are rejected by the kernel's causal metadata,
-  missing ops integrate. **This remedy is complete only for ops still
-  inside the retained window**: under peer-confirmed compaction that is
-  guaranteed (anything truncated is in everyone's cells already), which
-  is exactly why retention — which truncates past confirmation — is an
-  opt-in trade rather than a default.
+- **Every bootstrap re-derives the projection before adopting the
+  peer's frontier** (`bondy_oplog_instance:rederive_projection/1`, run by
+  the fused instance itself or by its applier). The install replaces each
+  shipped cell, so a local event the peer's copy omits is gone from the
+  cell while this replica's frontier still claims it, a loss the
+  convergence oracle cannot see. The rederive empties the frontier and
+  re-applies every retained MST event: ops the installed cell holds are
+  skipped by the kernel's causal metadata, missing ops integrate, and the
+  frontier is rebuilt from what folds. See [Re-bootstrap
+  ordering](#re-bootstrap-ordering) for why it runs before finalize.
+  **This remedy is complete only for ops still inside the retained
+  window**: under peer-confirmed compaction that is guaranteed (anything
+  truncated is in everyone's cells already), which is exactly why
+  retention — which truncates past confirmation — is an opt-in trade
+  rather than a default.
 
 ## The compaction cycle
 
@@ -695,7 +695,7 @@ answer the frontier request.
 
 The frontier holder and its max-merge live in `bondy_oplog_registry`; it
 is maintained on the apply path in `bondy_oplog_cell_apply` and
-restored at startup in `bondy_oplog_instance` (`restore_frontier` from the
+restored at startup in `bondy_oplog_instance` (`boot_frontier` from the
 checkpoint). The uncompacted range is not declared applied at startup: it is
 re-presented to the fold, and the frontier follows what materialises. Folding
 the live tree's event keys into the frontier instead would count RECEIPT,
@@ -733,9 +733,12 @@ sequenceDiagram
     loop until cursor exhausted
         New->>Peer: {get_catalogue_snapshot_next, Cursor}
         Peer-->>New: batch · chunked_batch · done
-        New->>Local: install_catalogue_batch({replace, Cells})
+        New->>Local: install_catalogue_batch(Cells)
+        Note over Local: the first batch writes the re-fold mark
         Local-->>New: installed · skipped · unclaimable
     end
+    New->>Local: rederive_projection
+    Note over Local: frontier reset · full re-fold · mark cleared
     alt every shipped cell routed here
         New->>Local: finalize with the peer's frontier
     else some bucket had no table
@@ -745,12 +748,15 @@ sequenceDiagram
     Note over New,Peer: plain AE picks up the live tail
 ```
 
-`install_catalogue_batch` writes cells in **replace** mode: each cell is
-written as-is, using the projection adapter's `head/3` fast path when
-exported. Bootstrap always streams into a fresh replica, so there is no
-surviving local state to merge against. The finalize step advances the
-watermark and calls `mark_live/1` last (see [Bootstrap completion
-ordering](#bootstrap-completion-ordering)).
+`install_catalogue_batch` **replaces** every cell whose bucket routes here,
+whatever its HLC: the replica starts from the peer's state rather than
+merging into its own. A live replica re-bootstrapping does have local
+state, and its events the peer lacks are folded back by the rederive that
+follows the install; keeping a newer local cell instead would let the
+adopted frontier claim peer events that cell never folded
+(`proofs/tla/LiveRebootstrapRefold_SkipIfOlder_TrailFail.cfg`). The
+finalize step advances the watermark and calls `mark_live/1` last (see
+[Bootstrap completion ordering](#bootstrap-completion-ordering)).
 
 **A cell too large to frame arrives in parts.** A value whose serialized
 size alone exceeds the sync byte ceiling cannot be shipped whole, so the
@@ -785,10 +791,8 @@ answer is *did everything the peer shipped land*, so the claim is
 adopted whole or not at all.
 
 `install_catalogue_batch` reports `unclaimable`: the buckets whose cells
-did not land for a reason no local value covers — an unregistered bucket,
-or a frame that would not decode. It excludes the benign HLC-older skip,
-where a newer local write is already present, which is why the plain
-`skipped` counter cannot decide this.
+did not land — an unregistered bucket, or a frame that would not decode.
+`skipped` counts those cells but cannot name their buckets.
 `bondy_oplog_sync_session:adopt_frontier/3` passes the peer's vector when
 that set is empty and nothing when it is not.
 
@@ -843,21 +847,62 @@ applier's hot-loop check syscall-free.
 ### Bootstrap completion ordering
 
 `bondy_oplog_sync_session:bootstrap_catalogue/3` completes in this
-order (`bondy_oplog_instance:finalize_catalogue_bootstrap/5`):
+order:
 
-1. The streamed cells are installed into the projection.
-2. The watermark advances, the peer's applied frontier is max-merged
-   (when adopted), and `persist_frontier` makes it durable in the
-   compaction checkpoint while absorbing the highest installed HLC
-   into the clock.
-3. `mark_live/1` writes the durable flag file — **the marker that
+1. Before the first install batch, the instance writes the **re-fold
+   mark** into its compaction checkpoint and expires the snapshot
+   sessions other replicas hold on it.
+2. The streamed cells are installed into the projection.
+3. The rederive empties the applied frontier, re-folds the whole MST over
+   the installed cells, and checkpoints the rebuilt frontier, which clears
+   the mark.
+4. `finalize_catalogue_bootstrap/5`: the watermark advances, the peer's
+   applied frontier is max-merged (when adopted), and `persist_frontier`
+   makes it durable in the compaction checkpoint while absorbing the
+   highest installed HLC into the clock.
+5. `mark_live/1` writes the durable flag file — **the marker that
    "everything before me succeeded."** A replica that was already
    `live` skips it.
-4. Plain AE picks up events past the new watermark.
+6. Plain AE picks up events past the new watermark. A failure here loses
+   nothing: the rederive already ran.
 
 `mark_live/1` MUST run after every other durable step. A crash before
-it leaves no flag file, so on restart the instance is `pre_bootstrap`
+it leaves no flag file, so on restart a fresh instance is `pre_bootstrap`
 again and the scheduler bootstraps it anew.
+
+### Re-bootstrap ordering
+
+Production instances are seeded `live`, so for them steps 1 to 4 are the
+whole story and the lifecycle flag protects nothing. The order is checked
+in `proofs/tla/LiveRebootstrapRefold.tla`, whose configs replay today's
+order and the proposed one under trailing-round failures and crashes; each
+ingredient below has a config that removes it and fails.
+
+- **Re-fold before finalize.** Re-folding only after the trailing AE round
+  loses the local events the install replaced whenever that round fails
+  (`_LateRederive_TrailFail`).
+- **The re-fold mark.** The frontier is checkpointed only at a clean stop,
+  a compaction commit and finalize, so after a crash between steps 2 and 3
+  the checkpoint claims events the replaced cells no longer reflect, and
+  the restart would anchor its replay past them (`_NoMarker_Crash`). A
+  boot that finds the mark trusts neither the checkpointed frontier nor
+  the one a subtree restart leaves in the registry row: it empties the
+  frontier, so the replay re-folds the whole MST, and the first full
+  replay clears the mark. While a boot re-fold is owed the instance
+  refuses to start another install.
+- **Reset, not merge.** A frontier max-merged across the rederive keeps
+  claiming events an earlier install carried and this one dropped
+  (`_MergeFrontier_3R_Safety`).
+- **No serving while the mark is set.** The install shrinks the cells, so
+  a replica mid-re-bootstrap would ship a snapshot below the frontier it
+  reports: the responder refuses `get_catalogue_snapshot_init` and
+  `get_frontier` (`bondy_oplog_instance:serving/1`), and the open sessions
+  on it expire (`_NoServeGuard_TwoFaults`).
+
+A stream that fails after installing still runs the rederive, since the
+scheduler consumes its re-bootstrap flag at dispatch and would not run
+another session for it. The tests in `bondy_oplog_bootstrap_rederive_test`
+replay these counterexamples on the real code.
 
 ### Genesis: `seed: true`
 
@@ -1151,9 +1196,11 @@ MST2 = watermark_door(HasProjection, State, MST1),
 ```
 
 The peer's pages are merged in, then the **watermark door**
-(`watermark_door/2`) re-truncates against the local watermark,
-dropping keys X has already compacted away — but it NEVER drops a
-never-applied event. The naive re-truncate's premise ("≤ watermark ⇒
+(`watermark_door/2`) re-truncates the keys at or below the local watermark
+that every compaction witness confirms (`compaction_witnesses/1`) — keys X has
+already compacted away and every member holds. A key some member has not
+confirmed stays, so X can still ship it to that member; and the door NEVER
+drops a never-applied event. The naive re-truncate's premise ("≤ watermark ⇒
 already folded here") is false for a peer event this replica never
 saw: under concurrent writes the peer-confirmed frontier and in-flight
 events race by design, so a just-minted peer event can arrive after
@@ -1233,7 +1280,7 @@ snapshot.
 | Replica truncates a prefix the application still cares about. | `interpret_cog` must consume the prefix into the snapshot first. The compaction cycle is `frontier → events → interpret_cog → snapshot → truncate` — the snapshot is durable *before* the MST mutation. |
 | Two compactions race. | One-at-a-time guard in `bondy_oplog_instance`: a second `compact` request while one is in flight replies `{ok, no_change}`. |
 | A replica's OWN root loses pages (observed live: 2 pages absent from an ephemeral store, Fly s16). | Two-sided recovery. Peer side: the responder's `root_unservable` answer is benign per round, but the session enriches it to `root_unservable_behind` when the peer's applied frontier is strictly ahead; three consecutive strikes escalate to a catalogue re-bootstrap (the snapshot producer reads the peer's PROJECTION, servable even when its MST is not). Broken-node side: once the unservable streak passes the threshold AND every recency-live peer's recorded frontier dominates the local one, the compaction tick REBUILDS the MST (drops the tree, advances the watermark, keeps projection + frontier) — `mst_rebuilt` telemetry. Without both halves the pair deadlocks: every round errors, no round completes, the frontier-gap verdict never fires, and nothing on the shard can ever compact. |
-| Peer ships events the local replica has already truncated. | The watermark door (`watermark_door/2` on page sync; `append_remote_below_watermark/3` on the live single-event path) drops re-shipped `key ≤ watermark` events **only when the applied VV proves they were folded here**; a never-applied event at or below the watermark (in-flight write racing the frontier) is folded inline (fused) or held for the applier's replay — dropping it unapplied was the silent per-replica data-loss class found by the compaction cluster suite's forensics. |
+| Peer ships events the local replica has already truncated. | The watermark door (`watermark_door/2` on page sync) drops re-shipped `key ≤ watermark` events only when they were folded here **and every compaction witness confirms them**; the live single-event path (`append_remote_below_watermark/3`) drops one only when the applied VV proves it was folded here; a never-applied event at or below the watermark (in-flight write racing the frontier) is folded inline (fused) or held for the applier's replay — dropping it unapplied was the silent per-replica data-loss class found by the compaction cluster suite's forensics. |
 | A dangling root (transient truncate + page-GC race) is advertised over AAE and read as "peer's tree is empty", so the initiator runs a zero-pull "complete" round a few fresh events behind the peer's honest frontier — a false standing-gap verdict per round. | The responder's `get_root` distinguishes the two `undefined`s: the aae-root guard's refusal answers `{error, {root_unservable, _}}` (session fails benignly, retries next tick) while only a genuinely empty tree (`root_hash/1 = undefined`) answers `undefined` — the joiner / fully-compacted-shard path keeps its semantics. `chase_refreshed_root` propagates a failed root re-request instead of reading it as "root unmoved". |
 | The local page GC sweeps pages a sync session pulled but has not yet merged (they are unreachable from the LOCAL root until `integrate_peer_root/2`), and `bondy_mst:merge/3` silently treats the missing subtrees as empty — a completed, `confirm_root`-checkpointed round that silently lost events. | Sessions pin the root they pull (`bondy_oplog_instance:pin_peer_root/2`; consumed by a successful integrate, TTL-expired otherwise) and `truncate_below_or_equal/4` passes the pins to `bondy_mst:gc/2` as KeepRoots; independently, `integrate_peer_root/2` re-checks `missing_set` **atomically with the merge** (same process as the GC) and answers a retryable `{error, {peer_pages_missing, _}}` instead of merging partially. |
 | `interpret_cog/2` is non-deterministic. | Convergence breaks silently. The behaviour documentation flags this as the invariant; PropEr suites for each CRDT verify it (`bondy_mst_crdt_SUITE.erl`). |
@@ -1344,7 +1391,7 @@ Implementation:
 - `bondy_oplog_instance.erl`:
     - `compute_frontier_for/2` — frontier as longest common prefix
       confirmed by each peer's recorded root or applied frontier.
-    - `retention_or_catchup/4` + `retention_frontier/3` +
+    - `retention/4` + `retention_frontier/3` +
       `retention_ctx/1` + `validate_retention/2` — [retention-bounded
       truncation](#retention-bounded-truncation-for-ephemeral-catalogue-instances)
       for `mst_retention` instances.
@@ -1370,7 +1417,7 @@ Implementation:
 - `bondy_oplog_sync_session.erl:bootstrap_catalogue/3` — the
   bootstrap: cursor-paginated cell stream
   (`get_catalogue_snapshot_init` / `..._next`),
-  `install_catalogue_batch` (replace mode), finalize +
+  `install_catalogue_batch`, the rederive, finalize +
   `mark_live/1` last.
 - `bondy_oplog_bootstrap_lifecycle.erl` — the `<instance_dir>/lifecycle.live`
   flag file + atomics mirror; `open/2`, `is_live/1`, `mark_live/1`.

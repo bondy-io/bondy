@@ -477,7 +477,9 @@ declare_metrics() ->
         {bondy_oplog_sync_scheduler_events_total,
             "Sync scheduler activity by event kind.", [event]},
         {bondy_oplog_gc_scheduler_events_total,
-            "GC scheduler activity by event kind.", [event]},
+            "GC scheduler activity by scheduler and event kind.", [
+                scheduler, event
+            ]},
         {bondy_oplog_peer_exclusions_total,
             "Sync peer exclusions (stale peer_state).", [instance_id]},
         {bondy_oplog_retirements_total, "Origin retirement outcomes.", [
@@ -965,9 +967,17 @@ do_handle_event([bondy_oplog, sync_scheduler, Event], _Meas, _Meta) ->
     counter(bondy_oplog_sync_scheduler_events_total, [Event], 1);
 do_handle_event([bondy_oplog, scheduler, gc, trigger_outcome], _Meas, Meta) ->
     Event = <<"trigger_", (label(maps:get(outcome, Meta, undefined)))/binary>>,
-    counter(bondy_oplog_gc_scheduler_events_total, [Event], 1);
-do_handle_event([bondy_oplog, scheduler, gc, Event], _Meas, _Meta) ->
-    counter(bondy_oplog_gc_scheduler_events_total, [Event], 1);
+    counter(
+        bondy_oplog_gc_scheduler_events_total,
+        [label(maps:get(scheduler, Meta, undefined)), Event],
+        1
+    );
+do_handle_event([bondy_oplog, scheduler, gc, Event], _Meas, Meta) ->
+    counter(
+        bondy_oplog_gc_scheduler_events_total,
+        [label(maps:get(scheduler, Meta, undefined)), Event],
+        1
+    );
 do_handle_event([bondy_oplog, peer_state, excluded], Meas, Meta) ->
     counter(
         bondy_oplog_peer_exclusions_total,

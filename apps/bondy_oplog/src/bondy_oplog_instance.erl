@@ -178,9 +178,11 @@ behind that barrier.
     %% fused instance has no applier, so it folds peer-merged events into
     %% the projection itself after `integrate_peer_root`. `undefined` →
     %% the next replay does a full fold; incremental thereafter. Mirrors
-    %% the applier's `last_replayed_root` and is re-anchored on the
-    %% post-truncate root by compaction (`finalize_catalogue_compaction`).
+    %% the applier's `last_replayed_root` and `owed`, and compaction
+    %% re-anchors it under the same rule
+    %% (`bondy_oplog_applier:advance_replayed_root/2`).
     last_replayed_root = undefined :: undefined | bondy_mst:hash(),
+    owed = false :: boolean(),
     %% AE-freshness shard keys bumped on every fused commit and after a
     %% remote replay, so secondary-index reads on those shards observe the
     %% fused writer's progress. Mirrors the applier's `ae_targets` (the
@@ -246,7 +248,8 @@ behind that barrier.
     watermark :: undefined | bondy_oplog_event:event_key(),
     %% Cached `{Watermark, Checkpoint}` from the compaction checkpoint
     %% store so the registry can publish it without re-reading the
-    %% store on every mutation. Refreshed on init and compact.
+    %% store on every mutation. Refreshed on init and on every checkpoint
+    %% write (`write_frontier_checkpoint/2`).
     cached_checkpoint :: undefined | {bondy_oplog_event:event_key(), term()},
     max_working_set :: pos_integer() | infinity,
     %% Cached size of the live MST (avoids a fold per append). Updated
@@ -380,7 +383,20 @@ behind that barrier.
     %% ABSORBING: a value that inherited a receipt-derived entry keeps the
     %% stamp however many sound writes follow it, because no later write
     %% lowers an entry. See `checkpoint_provenance/1`.
-    frontier_provenance = folded :: frontier_provenance()
+    frontier_provenance = folded :: frontier_provenance(),
+    %% Whether the projection may reflect events the frontier does not claim
+    %% because a catalogue install replaced cells: `installing` from the start
+    %% of the install until the session finalizes, `{target, VV}` from then
+    %% until the frontier claims `VV`, `refold` after a boot that found the
+    %% mark, `none` otherwise. See `begin_install/1`.
+    refold = none ::
+        none | installing | {target, #{binary() => non_neg_integer()}} | refold,
+    %% Whether the replay from the current replay anchor has presented every
+    %% event the frontier does not claim. See `serving/1`.
+    replayed = false :: boolean(),
+    %% The applied frontier the last checkpoint holds, which a crash restores
+    %% (`boot_frontier/2`). See `durable_frontier/1`.
+    durable_frontier = #{} :: #{binary() => non_neg_integer()}
 }).
 
 -type backend() :: map | ets | module().
@@ -515,8 +531,14 @@ behind that barrier.
 %% Bootstrap
 -export([mark_live/1]).
 -export([lifecycle_state/1]).
+-export([begin_install/1]).
 -export([install_catalogue_batch/2]).
 -export([rederive_projection/1]).
+-export([refolded/1]).
+-export([install_target/2]).
+-export([owes_install/1]).
+-export([serving/1]).
+-export([durable_frontier/1]).
 -export([finalize_catalogue_bootstrap/3]).
 -export([finalize_catalogue_bootstrap/4]).
 -export([finalize_catalogue_bootstrap/5]).
@@ -524,6 +546,7 @@ behind that barrier.
 -export([wal_opened/3]).
 -export([replay_anchor/1]).
 -export([reclamation_members/0]).
+-export([compaction_witnesses/1]).
 -export([reclaim_stable_cells/1]).
 -export([stability_point/1]).
 -export([register_table/4]).
@@ -1873,29 +1896,27 @@ compaction_checkpoint(Target) ->
 ?DOC("""
 Runs one compaction cycle inside the instance gen_server.
 
-`PeerWitnesses` is one witness per peer: a `bondy_oplog_peer_state:
-peer_state_entry()` (recorded root AND applied frontier — the production
-form, see `bondy_oplog_compaction:compact/1`) or a bare root hash (root
-only). The instance:
+`PeerWitnesses` is one durable frontier per peer (`durable_frontier/1`, as
+`compaction_witnesses/1` reads them; `undefined` confirms nothing). The
+instance:
 
-1. Computes the stability frontier — the largest event key K such
-   that every event with key ≤ K is confirmed by every witness: present
-   in the peer's recorded root, or at or below the peer's recorded applied
-   frontier for its origin (`compute_frontier_for/2`).
-2. Extracts events in `(currentWatermark, frontier]`.
-3. Calls the configured CRDT module's `interpret_cog/2` on top of
-   the previous snapshot's state.
-4. Persists the new snapshot at `frontier`.
-5. Truncates the MST up to and including `frontier`.
-6. Updates the watermark.
+1. Checkpoints its own frontier if it moved, then computes the stability
+   frontier — the largest event key K such that every event with key ≤ K is
+   covered by every peer's durable frontier and by its own
+   (`compute_frontier_for/2`).
+2. When it is above the watermark, caps it below the first never-applied key
+   (`capped_truncation_point/2`), truncates the MST up to it, persists the
+   checkpoint and advances the watermark to it.
+3. Otherwise truncates the events at or below the watermark that every
+   witness confirms, as the watermark door does after a merge; the watermark
+   stays.
 
-Returns `{ok, no_change}` if no advance is possible (no peers,
-empty intersection, frontier ≤ current watermark); otherwise
-`{ok, {compacted, NewWatermark, EventCount}}`.
+No witness confirms nothing. Returns `{ok, no_change}` if nothing was
+truncated, otherwise `{ok, {compacted, Watermark, EventCount}}`.
 """).
 -spec compact(
     instance_id() | pid(),
-    [bondy_oplog_peer_state:peer_state_entry() | bondy_mst:hash()]
+    [#{binary() => non_neg_integer()} | undefined]
 ) ->
     {ok, no_change}
     | {ok, {compacted, bondy_oplog_event:event_key(), non_neg_integer()}}
@@ -1970,45 +1991,39 @@ lifecycle_state(Pid) when is_pid(Pid) ->
 ?DOC("""
 Installs a batch of catalogue-snapshot cells into the instance's
 projection. Each cell is a `{Bucket, Key, Frame}` triple where `Frame`
-is the V2 cell frame produced by the peer's projection adapter.
-
-`Mode` is `replace` (fresh bootstrap) or `merge` (recovering
-bootstrap). See `bondy_oplog_applier:install_catalogue_batch/2` for
-the per-mode semantics. The arity-2 form is equivalent to
-`install_catalogue_batch(Inst, {replace, Cells})`.
-
-Returns `{ok, #{installed := _, skipped := _, unclaimable := _,
-merged := _, replaced_no_merge := _}}`. See
-`bondy_oplog_applier:install_catalogue_batch/2` for what `unclaimable`
-means and why `skipped` cannot substitute for it.
+is the V2 cell frame produced by the peer's projection adapter. Every
+routable cell replaces the local one; see
+`bondy_oplog_applier:install_catalogue_batch/2` for the semantics and for
+what the counts mean.
 
 Called by `bondy_oplog_sync_session:bootstrap_catalogue/3` between
-`get_catalogue_snapshot_init` and `finalize_catalogue_bootstrap/3`.
+`begin_install/1` and `finalize_catalogue_bootstrap/5`.
 """).
 -spec install_catalogue_batch(
-    instance_id() | pid(),
-    [bondy_oplog_transport:cell()]
-    | {replace | merge, [bondy_oplog_transport:cell()]}
+    instance_id() | pid(), [bondy_oplog_transport:cell()]
 ) ->
     {ok, #{
         installed := non_neg_integer(),
         skipped := non_neg_integer(),
         unclaimable := [binary()],
-        merged := non_neg_integer(),
-        replaced_no_merge := non_neg_integer()
+        max_hlc := non_neg_integer()
     }}
     | {error, term()}.
 
 install_catalogue_batch(InstanceId, Cells) when
     is_binary(InstanceId), is_list(Cells)
 ->
-    install_catalogue_batch(InstanceId, {replace, Cells});
-install_catalogue_batch(InstanceId, {replace, Cells}) when
-    is_binary(InstanceId)
-->
-    %% `replace` is the only supported mode; `merge` was removed.
-    %% Guard fails fast on a stray `{merge, _}` here rather than letting it
-    %% reach the applier (which would function_clause).
+    install_cells(InstanceId, Cells);
+install_catalogue_batch(Pid, Cells) when is_pid(Pid) ->
+    case bondy_oplog_registry:instance_id_by_sup_pid(Pid) of
+        {ok, InstanceId} ->
+            install_catalogue_batch(InstanceId, Cells);
+        not_found ->
+            {error, instance_not_found}
+    end.
+
+%% @private
+install_cells(InstanceId, Cells) ->
     case bondy_oplog_registry:fused(InstanceId) of
         true ->
             %% A fused instance has no applier to install into: the install runs in the
@@ -2031,36 +2046,152 @@ install_catalogue_batch(InstanceId, {replace, Cells}) when
                     {error, instance_not_running};
                 ApplierPid ->
                     bondy_oplog_applier:install_catalogue_batch(
-                        ApplierPid, {replace, Cells}
+                        ApplierPid, Cells
                     )
             end
-    end;
-install_catalogue_batch(Pid, ModeAndCells) when is_pid(Pid) ->
-    case bondy_oplog_registry:instance_id_by_sup_pid(Pid) of
-        {ok, InstanceId} ->
-            install_catalogue_batch(InstanceId, ModeAndCells);
-        not_found ->
-            {error, instance_not_found}
     end.
 
 -doc """
-The fused counterpart of
-`bondy_oplog_applier:rederive_projection_sync/1`: re-applies every
-retained MST event through the instance's own cell-apply source,
-restoring cells that a `replace`-mode catalogue install clobbered on a
-live re-bootstrap. Idempotent — re-delivered ops a cell already holds
-are rejected by the kernel's causal metadata. Fused instances only; an
-applier-backed instance takes the applier path in
-`bondy_oplog_sync_session`.
+Writes the re-fold mark (`serving/1`) before a catalogue session asks its
+source for the first batch, so no stale batch can be installed after the
+instance's own sweep has moved on (`proofs/tla/JoinInstall.tla`, guard
+"early"). A no-op while the mark says `installing`.
+
+`{error, {serving_snapshot, InstanceId}}`, writing nothing, while a catalogue
+snapshot cursor on the instance is open
+(`bondy_oplog_catalogue_cursor:any_open/1`): that session would read cells the
+install replaces (guard "busy"). The refused session releases the cursor it
+opened on its source (`bondy_oplog_catalogue_snapshot:release/2`), which is
+meant to stop two replicas re-bootstrapping from each other from keeping each
+other busy; the model has no cursor expiry or retry to check that. The two
+guards and the release are checked in
+`JoinInstall_Session_Split_Early_Busy_*.cfg`; neither guard suffices alone
+(`proofs/README.md`).
+
+Writing the mark deletes the instance's cursors that have expired but not been
+reaped, so a batch request already past its cursor lookup cannot renew one
+(`bondy_oplog_bootstrap_rederive_test`,
+`expired_cursor_is_not_renewed_after_the_mark`).
+""".
+-spec begin_install(instance_id()) ->
+    ok | {error, {serving_snapshot, instance_id()}} | {error, term()}.
+
+begin_install(InstanceId) ->
+    case ?MODULE:whereis(InstanceId) of
+        undefined -> {error, instance_not_running};
+        Pid -> gen_server:call(Pid, begin_install, infinity)
+    end.
+
+-doc """
+Re-derives the projection after a catalogue install: empties the applied
+frontier and replays the whole retained MST through the causal hold, so a cell
+the install replaced gets back the events its installed state does not carry
+(an event its installed context covers is skipped,
+`bondy_oplog_cell_kernel:apply/6`) and the frontier claims only what the replay
+folds. Leaves the re-fold mark (`install_target/2`). Runs in the instance for a
+fused instance and in its applier otherwise
+(`bondy_oplog_applier:rederive_projection_sync/1`).
 """.
 -spec rederive_projection(instance_id()) -> ok | {error, any()}.
 
 rederive_projection(InstanceId) when is_binary(InstanceId) ->
+    case bondy_oplog_registry:fused(InstanceId) of
+        true ->
+            case ?MODULE:whereis(InstanceId) of
+                undefined -> {error, instance_not_running};
+                Pid -> gen_server:call(Pid, rederive_projection, infinity)
+            end;
+        _ ->
+            case bondy_oplog_registry:applier_pid(InstanceId) of
+                undefined -> {error, instance_not_running};
+                Pid -> bondy_oplog_applier:rederive_projection_sync(Pid)
+            end
+    end.
+
+-doc """
+Reports that a replay from an undefined replay cursor has presented every
+event of the live MST, which ends the wait `serving/1` keeps for the replay
+anchor.
+""".
+-spec refolded(pid()) -> ok.
+
+refolded(Pid) when is_pid(Pid) ->
+    gen_server:call(Pid, refolded, infinity).
+
+-doc """
+Hands the instance the peer's applied frontier, read once its catalogue
+install has streamed. The re-fold mark stays until the instance's frontier
+claims `Target`, a retired origin's entry aside; the first compaction tick that
+finds it claimed checkpoints without the mark. Until then the installed cells
+may reflect events the peer applied while it streamed them, which the frontier
+it read before the stream does not claim
+(`proofs/tla/JoinInstall_Session_Join_NoTarget.cfg`;
+`bondy_oplog_bootstrap_rederive_test`,
+`install_holds_until_claims_cover_source`; for a retired origin,
+`bondy_oplog_frontier_reap_test`, `reaped_origin_holds_no_install_target`). A
+no-op when the session installed nothing.
+""".
+-spec install_target(instance_id(), #{binary() => non_neg_integer()}) ->
+    ok | {error, {instance_not_running, instance_id()}}.
+
+install_target(InstanceId, Target) when is_binary(InstanceId), is_map(Target) ->
     case ?MODULE:whereis(InstanceId) of
-        undefined ->
-            {error, instance_not_running};
-        Pid ->
-            gen_server:call(Pid, rederive_projection, infinity)
+        undefined -> {error, {instance_not_running, InstanceId}};
+        Pid -> gen_server:call(Pid, {install_target, Target}, infinity)
+    end.
+
+-doc """
+Whether the instance holds the re-fold mark with no session left to clear it:
+it booted with the mark, or a session installed and then ended before
+`install_target/2`. Only a catalogue re-bootstrap clears it, so
+`bondy_oplog_sync_scheduler` dispatches one. `false` when the instance is not
+running.
+""".
+-spec owes_install(instance_id()) -> boolean().
+
+owes_install(InstanceId) when is_binary(InstanceId) ->
+    case ?MODULE:whereis(InstanceId) of
+        undefined -> false;
+        Pid -> gen_server:call(Pid, owes_install)
+    end.
+
+-doc """
+`{error, {refold_owed, InstanceId}}` while the instance holds the re-fold mark:
+from the start of a catalogue install (`begin_install/1`) until its frontier
+claims the install's target (`install_target/2`), and after a restart that found the mark until a
+later session has done so (`owes_install/1`); also until the replay from the replay anchor
+has presented every event the frontier does not claim (`replay_anchor/1`),
+since until then a cell may reflect an event the frontier does not claim.
+`ok` otherwise, including when the instance is not running. Gates serving a
+catalogue snapshot or the applied frontier to a peer, which would otherwise
+install cells, or adopt a frontier, that the instance does not reflect
+(`proofs/tla/LiveRebootstrapRefold_NoServeGuard_TwoFaults.cfg`,
+`proofs/tla/JoinInstall_Session_Join_ClaimSkip_Crash_HlcStability_NoReplayed_RefoldFirst_3E.cfg`).
+""".
+-spec serving(instance_id()) -> ok | {error, {refold_owed, instance_id()}}.
+
+serving(InstanceId) when is_binary(InstanceId) ->
+    case ?MODULE:whereis(InstanceId) of
+        undefined -> ok;
+        Pid -> gen_server:call(Pid, serving, infinity)
+    end.
+
+-doc """
+On a durable backend, the applied frontier a restart would restore from the
+last checkpoint (`boot_frontier/2`); on an ephemeral one, which writes no
+frontier checkpoint, the live frontier. It is what a peer records of this
+replica (`bondy_oplog_peer_state`). `{error, {refold_owed, Id}}` when
+`serving/1` refuses, and `{error, {instance_not_running, Id}}` when the instance
+is not running.
+""".
+-spec durable_frontier(instance_id()) ->
+    {ok, #{binary() => non_neg_integer()}}
+    | {error, {refold_owed | instance_not_running, instance_id()}}.
+
+durable_frontier(InstanceId) when is_binary(InstanceId) ->
+    case ?MODULE:whereis(InstanceId) of
+        undefined -> {error, {instance_not_running, InstanceId}};
+        Pid -> gen_server:call(Pid, durable_frontier, infinity)
     end.
 
 ?DOC("""
@@ -2274,7 +2405,7 @@ finalize_catalogue_bootstrap(
     %% UNCLEAN restart (kill/crash, no `terminate`) would lose exactly those
     %% maxima and the convergence oracle would report DIVERGED forever despite
     %% holding all the data. Persisting into the checkpoint here closes that gap
-    %% so `restore_frontier/2` recovers them on any restart.
+    %% so `boot_frontier/2` recovers them on any restart.
     %% The same round-trip absorbs `MaxInstalledHlc` into the clock.
     case persist_frontier(InstanceId, MaxInstalledHlc) of
         ok when WasLive ->
@@ -2346,14 +2477,16 @@ wal_opened(Target, WalPid, MaxSeq) when
     gen_server:call(target(Target), {wal_opened, WalPid, MaxSeq}, infinity).
 
 ?DOC("""
-Where the applier must anchor its projection-replay cursor at boot:
-`undefined` to re-fold the live MST, or the current root to skip it.
+Where the applier must anchor its projection-replay cursor at boot, and
+whether a fold is owed: `{undefined, true}` to re-fold the live MST, or
+`{Root, false}` with the current root (`undefined` for an empty tree) to skip
+it. `bondy_oplog_applier:advance_replayed_root/2` reads the flag.
 
 Called once, from `bondy_oplog_applier:do_init_2/9`. Runs HERE, not in the
 applier, because the fold reads pack-store file descriptors, which are raw and
 bound to this process.
 
-`undefined` is returned exactly when the live MST holds a `cell_apply` event
+A fold is owed exactly when the live MST holds a `cell_apply` event
 the restored applied frontier does not claim. Such an event is one this replica
 RECEIVED but has no evidence of having MATERIALISED, and the two are genuinely
 different: `install_event/5` is the shared insert path for local and
@@ -2380,7 +2513,7 @@ re-fold itself is idempotent — cells are keyed and the commutative kernels
 guard on a per-origin `MaxSeq` (`bondy_oplog_crdt_g_counter:apply_op/3`).
 """).
 -spec replay_anchor(instance_id() | pid()) ->
-    undefined | bondy_mst:hash().
+    {undefined | bondy_mst:hash(), Owed :: boolean()}.
 
 replay_anchor(Target) ->
     gen_server:call(target(Target), replay_anchor, infinity).
@@ -2620,8 +2753,9 @@ init({InstanceId, Opts}) ->
     %% from truncation, so the over-claim disarms the repair too. That range
     %% is re-presented to the idempotent fold instead, leaving recovery only
     %% ever BEHIND the old claim (`proofs/isabelle/Frontier_Writers.thy`).
-    ok = restore_frontier(InstanceId, CachedCheckpoint),
-    FrontierProvenance = checkpoint_provenance(CachedCheckpoint),
+    {Refold, FrontierProvenance, DurableFrontier} = boot_frontier(
+        InstanceId, CachedCheckpoint
+    ),
     ok = report_frontier_provenance(InstanceId, Origin, FrontierProvenance),
     %% Seed the per-origin seq counter — the MINTED quantity, not the applied
     %% frontier; `minted_from_checkpoint/1` says why they must stay apart. In
@@ -2669,7 +2803,12 @@ init({InstanceId, Opts}) ->
         InstanceId, State#state.lifecycle
     ),
     State1 = maybe_init_fused(
-        State#state{frontier_provenance = FrontierProvenance}, Opts
+        State#state{
+            frontier_provenance = FrontierProvenance,
+            refold = Refold,
+            durable_frontier = DurableFrontier
+        },
+        Opts
     ),
     HeapMonitor = bondy_oplog_heap_monitor:arm(State1#state.heap_monitor),
     {ok, State1#state{heap_monitor = HeapMonitor}}.
@@ -2686,6 +2825,7 @@ maybe_init_fused(#state{fused = false} = State, _Opts) ->
 maybe_init_fused(#state{fused = true} = State, Opts) ->
     ApplierOpts = maps:get(applier, Opts, #{}),
     {ok, CellCtx} = bondy_oplog_applier:resolve_cell_apply_ctx(ApplierOpts),
+    {ReplayRoot, ReplayOwed} = Anchor = compute_replay_anchor(State),
     FD = #fused_drain{
         iter = undefined,
         cell_apply_ctx = CellCtx,
@@ -2704,11 +2844,10 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
             apply_batch_max_events, ApplierOpts, ?FUSED_APPLY_BATCH_MAX
         ),
         idle_waiter = undefined,
-        %% Same anchor rule as the applier (`replay_anchor/1`): the current
-        %% root when the restored frontier already claims every cell event in
-        %% the live MST, `undefined` when it does not. Paired with the
-        %% `fused_replay` kick below, which is then a cheap `no_change`.
-        last_replayed_root = compute_replay_anchor(State),
+        %% Same anchor rule as the applier (`replay_anchor/1`), paired with
+        %% the `fused_replay` kick below.
+        last_replayed_root = ReplayRoot,
+        owed = ReplayOwed,
         %% Published at `init/1`, which runs before this; the fused commit +
         %% remote replay bump them.
         ae_targets = bondy_oplog_registry:ae_targets(State#state.instance_id),
@@ -2728,7 +2867,7 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
     %% `capped_truncation_point/2` refuses to compact. `last_replayed_root =
     %% undefined` above makes this first replay a full fold.
     self() ! fused_replay,
-    State#state{fused_drain = FD}.
+    anchored(Anchor, State#state{fused_drain = FD}).
 
 %% @private
 %% Returns a fast-path bundle map when the configured validator is
@@ -3337,15 +3476,43 @@ do_handle_call(persist_frontier, _From, State) ->
     %% Reuse the exact `terminate/2` persist path (same checkpoint payload and
     %% watermark), just driven on demand — used after a catalogue bootstrap so
     %% the adopted frontier is durable before any restart. No-op on ephemeral.
-    Reply = maybe_persist_frontier(
-        State#state.instance_id,
-        State#state.backend,
-        State#state.watermark,
-        minted_seq(State#state.seq),
-        State#state.compaction_checkpoint,
-        State#state.compaction_checkpoint_state,
-        State#state.frontier_provenance
-    ),
+    case maybe_persist_frontier(State) of
+        {ok, State1} -> {reply, ok, State1};
+        {error, _} = Error -> {reply, Error, State}
+    end;
+do_handle_call(begin_install, _From, #state{refold = installing} = State) ->
+    {reply, ok, State};
+do_handle_call(begin_install, _From, #state{instance_id = Id} = State0) ->
+    case bondy_oplog_catalogue_cursor:any_open(Id) of
+        true ->
+            {reply, {error, {serving_snapshot, Id}}, State0};
+        false ->
+            case maybe_persist_frontier(State0#state{refold = installing}) of
+                {ok, State} ->
+                    ok = bondy_oplog_catalogue_cursor:discard_instance(Id),
+                    {reply, ok, State};
+                {error, _} = Error ->
+                    {reply, Error, State0}
+            end
+    end;
+do_handle_call(refolded, _From, State) ->
+    {reply, ok, State#state{replayed = true}};
+do_handle_call(
+    {install_target, Target}, _From, #state{refold = installing} = State
+) ->
+    {reply, ok, State#state{refold = {target, Target}}};
+do_handle_call({install_target, _Target}, _From, State) ->
+    {reply, ok, State};
+do_handle_call(owes_install, _From, #state{refold = Refold} = State) ->
+    {reply, Refold =:= refold orelse Refold =:= installing, State};
+do_handle_call(serving, _From, State) ->
+    {reply, serving_reply(State), State};
+do_handle_call(durable_frontier, _From, State) ->
+    Reply =
+        maybe
+            ok ?= serving_reply(State),
+            {ok, durable_frontier_of(State)}
+        end,
     {reply, Reply, State};
 do_handle_call({wal_opened, WalPid, MaxSeq}, _From, State0) ->
     %% Order matters — see `wal_opened/3`: the bump lands before either
@@ -3357,7 +3524,8 @@ do_handle_call({wal_opened, WalPid, MaxSeq}, _From, State0) ->
     ),
     {reply, ok, State1};
 do_handle_call(replay_anchor, _From, State) ->
-    {reply, compute_replay_anchor(State), State};
+    Anchor = compute_replay_anchor(State),
+    {reply, Anchor, anchored(Anchor, State)};
 do_handle_call(reclamation_stability_point, _From, State) ->
     {reply, reclamation_stability_point(State), State};
 do_handle_call({persist_frontier, AbsorbHlc}, From, State) when
@@ -3492,36 +3660,22 @@ do_handle_call(
 do_handle_call(
     rederive_projection,
     _From,
-    #state{
-        instance_id = Id,
-        mst = MST,
-        fused_drain = #fused_drain{cell_apply_source = Source}
-    } = State
+    #state{instance_id = Id, mst = MST, fused_drain = FD} = State
 ) ->
-    %% Full re-apply of every retained MST event, restoring a cell that a
-    %% `replace`-mode catalogue install clobbered on a live re-bootstrap (the
-    %% peer's higher-HLC cell can omit ops the peer had not applied when its
-    %% snapshot was cut). Re-delivering an op a cell already holds is idempotent
-    %% — the kernel's per-origin causal metadata rejects it — and a missing op
-    %% integrates; this is the op-based replacement for CvRDT `merge_states`.
-    %% Runs in the gen_server, serialized with the fused drain.
-    Pairs =
-        case MST of
-            undefined -> [];
-            _ -> bondy_mst:to_list(MST)
-        end,
-    %% Deliberately the non-holding mux: this is a one-shot full fold
-    %% with no replay cursor to re-present a held event — a hold here
-    %% would leave the projection missing it with nothing to retry.
-    Count = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-        Source, Id, Pairs, bondy_oplog_registry:origin(Id)
+    %% The applier's `rederive_projection` does the same: the reset and the
+    %% replay run in one process, so no apply claims between them.
+    ok = bondy_oplog_registry:reset_frontier(Id),
+    State1 = fused_replay_cell_events(
+        State#state{
+            fused_drain = FD#fused_drain{last_replayed_root = undefined}
+        }
     ),
     telemetry:execute(
         [bondy_oplog, instance, rederive_projection],
-        #{cells_applied => Count, pairs => length(Pairs)},
+        #{pairs => compute_live_size(MST)},
         #{instance_id => Id}
     ),
-    {reply, ok, State};
+    {reply, ok, State1};
 do_handle_call(
     {install_catalogue_batch, _Cells},
     _From,
@@ -4211,48 +4365,60 @@ fused_mem_gc(#state{instance_id = Id}, #fused_drain{iter = Iter}) ->
 %% (`integrate_peer_root`): with no applier, it folds the peer-merged events
 %% into the projection itself — diff the live MST from the replay cursor and
 %% apply the resulting cell pairs. The cursor advances so the next replay stays
-%% incremental; compaction re-anchors it on the post-truncate root
-%% (`finalize_catalogue_compaction`). Reads `State#state.mst` directly, not the
-%% registry, so it is correct before `maybe_publish/2` runs. Local events caught
+%% incremental; compaction moves it under `fused_reanchor_cursor/2`. Reads
+%% `State#state.mst` directly, not the registry, so it is correct before
+%% `maybe_publish/2` runs. Local events caught
 %% in the diff were already folded by the WAL drain; re-folding them is
 %% idempotent by the CRDT contract.
 fused_replay_cell_events(#state{fused_drain = undefined} = State) ->
     State;
-fused_replay_cell_events(
+fused_replay_cell_events(#state{mst = MST, fused_drain = FD} = State) ->
+    LastRoot = FD#fused_drain.last_replayed_root,
+    CurrentRoot = bondy_mst:root(MST),
+    maybe_refolded(LastRoot, fused_replay_diff(LastRoot, CurrentRoot, State)).
+
+%% @private
+fused_replay_diff(Root, Root, State) ->
+    State;
+fused_replay_diff(
+    LastRoot,
+    CurrentRoot,
     #state{mst = MST, instance_id = Id, origin = Origin, fused_drain = FD} =
         State
 ) ->
-    LastRoot = FD#fused_drain.last_replayed_root,
-    CurrentRoot = bondy_mst:root(MST),
-    case CurrentRoot of
-        LastRoot ->
-            State;
+    Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot, Id),
+    {_Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
+        FD#fused_drain.cell_apply_source,
+        Id,
+        Pairs,
+        Origin,
+        #{hold => true}
+    ),
+    %% Reads of a peer-authored value just became answerable — bump
+    %% the AE-freshness shards so a secondary-index read does not
+    %% refuse as stale.
+    ok = fused_bump_ae_targets(FD#fused_drain.ae_targets),
+    %% Prefix-closure hold: keep the cursor when events were held
+    %% so the next replay re-presents them;
+    %% see `bondy_oplog_cell_apply:apply_cell_pairs_mux/5`.
+    case Held of
+        0 ->
+            State#state{
+                fused_drain =
+                    FD#fused_drain{
+                        last_replayed_root = CurrentRoot, owed = false
+                    }
+            };
         _ ->
-            Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot, Id),
-            {_Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-                FD#fused_drain.cell_apply_source,
-                Id,
-                Pairs,
-                Origin,
-                #{hold => true}
-            ),
-            %% Reads of a peer-authored value just became answerable — bump
-            %% the AE-freshness shards so a secondary-index read does not
-            %% refuse as stale.
-            ok = fused_bump_ae_targets(FD#fused_drain.ae_targets),
-            %% Prefix-closure hold: keep the cursor when events were held
-            %% so the next replay re-presents them (idempotent re-fold);
-            %% see `bondy_oplog_cell_apply:apply_cell_pairs_mux/5`.
-            case Held of
-                0 ->
-                    State#state{
-                        fused_drain =
-                            FD#fused_drain{last_replayed_root = CurrentRoot}
-                    };
-                _ ->
-                    State
-            end
+            State#state{fused_drain = FD#fused_drain{owed = true}}
     end.
+
+%% @private
+%% A replay from an undefined cursor presented the whole MST.
+maybe_refolded(undefined, State) ->
+    State#state{replayed = true};
+maybe_refolded(_LastRoot, State) ->
+    State.
 
 %% @private
 %% The `integrate_peer_root` body, entered only after the handler's
@@ -4342,39 +4508,71 @@ deliver_remote(#state{} = State) ->
     end.
 
 %% @private
-%% THE WATERMARK DOOR. Truncates the merged tree at or below the watermark
-%% WITHOUT ever dropping a never-applied event.
-%%
-%% - No watermark, or no never-applied events at or below it → plain
-%%   truncate (the pre-existing behaviour; already-applied events at or
-%%   below the watermark are compacted history re-introduced by the
-%%   merge, and dropping them is the door's whole point).
-%% - Fused with a projection → fold the never-applied events into the
-%%   projection inline (`apply_cell_pairs_mux`, exactly the primitive
-%%   `fused_replay_cell_events/1` uses — same process, same sources),
-%%   re-check against the now-advanced VV, then truncate. Fold-before-
-%%   drop: the event's op survives in the projection, the VV witnesses
-%%   it honestly, and the MST stays bounded.
-%% - Applier-backed (the applier is the projection's single writer, so
-%%   this process must not fold cells) or fold failed → HOLD: truncate
-%%   only the prefix strictly below the smallest never-applied key. The
-%%   held events stay in the tree for the applier's replay (the
-%%   integrate handler casts `replay_cell_events`), and the catalogue
-%%   truncation site applies this same rule (`capped_truncation_point/2`).
-%%   The next door pass re-evaluates the held prefix against the VV and
-%%   truncates once applied.
+%% THE WATERMARK DOOR. After a merge, truncates the events at or below the
+%% watermark that every compaction witness confirms
+%% (`compaction_witnesses/1`), WITHOUT ever dropping a never-applied event. An
+%% event not every witness confirms stays in the tree, so this node can still
+%% ship it to the member that lacks it; dropping it on key order alone leaves
+%% that member a frontier gap (`proofs/tla/ConfirmedCompaction_RootVV3_Door_NoGap.cfg`
+%% against `_Door_Confirmed.cfg`; `bondy_oplog_bootstrap_rederive_test:
+%% applier_door_keeps_what_a_member_lacks/0`). Dropping the confirmed ones is
+%% what stops two replicas that both compacted re-shipping them to each other
+%% (`_RootVV2_Door_Confirmed_Live.cfg` converges, `_Door_Keep_Live.cfg` does
+%% not).
 watermark_door(#state{watermark = undefined}, MST) ->
     MST;
-watermark_door(#state{instance_id = Id, watermark = W} = State, MST) ->
-    case never_applied_at_or_below(Id, MST, W) of
+watermark_door(#state{watermark = W} = State, MST) ->
+    case mst_has_entries_at_or_below(MST, W) of
+        false ->
+            MST;
+        true ->
+            case witnesses(State#state.instance_id, State#state.fused) of
+                {ok, PeerVVs} ->
+                    trim_confirmed(State, MST, member_vvs(State, PeerVVs));
+                {error, _} ->
+                    MST
+            end
+    end.
+
+%% @private
+%% Truncates the confirmed prefix at or below the watermark.
+%%
+%% - Fused with a projection: fold the never-applied events at or below that
+%%   point into the projection inline (`apply_cell_pairs_mux`, the primitive
+%%   `fused_replay_cell_events/1` uses), re-check against the advanced VV, then
+%%   truncate.
+%% - Applier-backed (the applier is the projection's single writer) or the fold
+%%   failed: HOLD, truncating only strictly below the smallest never-applied
+%%   key, as `capped_truncation_point/2` does above the watermark. The applier's
+%%   replay folds the held events and a later pass truncates them.
+trim_confirmed(#state{watermark = W} = State, MST, Witnesses) ->
+    case confirmed_point(MST, W, Witnesses) of
+        undefined -> MST;
+        Point -> door_truncate(State, MST, Point)
+    end.
+
+%% @private
+%% The largest key at or below `W` that every witness confirms, or
+%% `undefined`. No witness confirms nothing.
+confirmed_point(_MST, _W, []) ->
+    undefined;
+confirmed_point(MST, W, Witnesses) ->
+    case compute_frontier_for(MST, Witnesses) of
+        undefined -> undefined;
+        Frontier -> min(Frontier, W)
+    end.
+
+%% @private
+door_truncate(#state{instance_id = Id} = State, MST, Point) ->
+    case never_applied_at_or_below(Id, MST, Point) of
         [] ->
-            truncate_below_or_equal(MST, W, State);
+            truncate_below_or_equal(MST, Point, State);
         Doored ->
             ok = door_fold(State, Doored),
-            case never_applied_at_or_below(Id, MST, W) of
+            case never_applied_at_or_below(Id, MST, Point) of
                 [] ->
                     ok = door_report(Id, folded, Doored),
-                    truncate_below_or_equal(MST, W, State);
+                    truncate_below_or_equal(MST, Point, State);
                 Held ->
                     ok = door_report(Id, held, Held),
                     MinHeld = lists:min([K || {K, _} <- Held]),
@@ -4408,12 +4606,7 @@ never_applied_at_or_below(Id, MST, W) ->
 %% the safe side for every caller here: nothing is treated as retired,
 %% so nothing is truncated on that account.
 applied_witness(Id) ->
-    Retired =
-        case bondy_oplog_origin_bans:has_retired() of
-            true -> bondy_oplog_origin_bans:retired_set();
-            false -> #{}
-        end,
-    {applied_vv(Id), Retired}.
+    {applied_vv(Id), bondy_oplog_origin_bans:retired_set()}.
 
 %% @private
 %% The door's predicate: an event the projection will still fold — its `{Origin,
@@ -4424,24 +4617,29 @@ applied_witness(Id) ->
 %% before any fold and never raise the VV, so without the exemption they would
 %% be held — and block the compaction cap — forever.
 never_applied(K, {VV, Retired}) ->
-    Origin = bondy_oplog_event:key_origin(K),
-    not is_map_key(Origin, Retired) andalso
-        bondy_oplog_event:key_seq(K) > maps:get(Origin, VV, 0).
+    not is_map_key(bondy_oplog_event:key_origin(K), Retired) andalso
+        not bondy_oplog_event:covered(K, VV).
 
 %% @private
 %% The smallest tree key at or below `Bound` that the projection has not
-%% applied, or `undefined`. Walks the tree in key order and stops at the
-%% first never-applied key or the first key above `Bound` (`bondy_mst:fold`
-%% has no early exit, so the stop is a throw): O(applied prefix), never
-%% O(tree). Reads sealed pages, so it must run in the instance process.
+%% applied, or `undefined`. Reads sealed pages, so it must run in the instance
+%% process.
 first_never_applied_at_or_below(Id, MST, Bound) ->
-    Witness = applied_witness(Id),
+    first_unconfirmed(MST, [applied_witness(Id)], Bound).
+
+%% @private
+%% The smallest tree key at or below `Bound` (`undefined`: no bound) that some
+%% witness `{VV, Retired}` has never applied (`never_applied/2`), or
+%% `undefined`. Walks the tree in key order and stops at the first such key or
+%% the first key above `Bound` (`bondy_mst:fold` has no early exit, so the stop
+%% is a throw): O(confirmed prefix), never O(tree).
+first_unconfirmed(MST, Witnesses, Bound) ->
     try
         bondy_mst:fold(
             MST,
             fun
-                ({K, _V}, Acc) when K =< Bound ->
-                    never_applied(K, Witness) andalso
+                ({K, _V}, Acc) when Bound =:= undefined; K =< Bound ->
+                    lists:any(fun(W) -> never_applied(K, W) end, Witnesses) andalso
                         throw({?MODULE, hold, K}),
                     Acc;
                 (_, Acc) ->
@@ -4585,9 +4783,8 @@ maybe_self_heal_unservable(State) ->
 
 %% @private
 %% True when every recency-live peer we have completed a round against
-%% has a recorded applied frontier that covers ours per-origin. A peer
-%% with NO recorded frontier (never supplied one) blocks the heal —
-%% unknown is not coverage.
+%% has a recorded durable frontier that covers ours per-origin. A peer
+%% with NO recorded frontier blocks the heal — unknown is not coverage.
 live_peers_dominate(Id) ->
     OurVV = applied_vv(Id),
     lists:all(
@@ -4729,18 +4926,18 @@ fused_bump_ae_targets(Targets) ->
     _ = bondy_oplog_core_registry:bump_ae_targets(Targets, Now),
     ok.
 
-terminate(_Reason, #state{
-    instance_id = InstanceId,
-    mst = MST,
-    backend = Backend,
-    watermark = Watermark,
-    seq = SeqRef,
-    compaction_checkpoint = CkptMod,
-    compaction_checkpoint_state = CkptState,
-    overlay = Overlay,
-    seal = Seal,
-    frontier_provenance = Provenance
-}) ->
+terminate(
+    _Reason,
+    #state{
+        instance_id = InstanceId,
+        mst = MST,
+        backend = Backend,
+        compaction_checkpoint = CkptMod,
+        compaction_checkpoint_state = CkptState,
+        overlay = Overlay,
+        seal = Seal
+    } = State
+) ->
     %% Kill any in-flight seal worker BEFORE closing the MST. The frozen
     %% incoming-sealing file stays on disk and the reopen recovery re-seals
     %% it; killing the worker first guarantees it is not still writing
@@ -4754,15 +4951,7 @@ terminate(_Reason, #state{
     %% WAL-replay-only frontier next boot.
     _ =
         try
-            maybe_persist_frontier(
-                InstanceId,
-                Backend,
-                Watermark,
-                minted_seq(SeqRef),
-                CkptMod,
-                CkptState,
-                Provenance
-            )
+            maybe_persist_frontier(State)
         catch
             _:_ -> ok
         end,
@@ -4839,42 +5028,34 @@ report_clock_skew(Key, PeerOrigin) ->
 %% =============================================================================
 
 %% @private
-%% Restore the applied-frontier oracle from the compaction checkpoint payload
-%% into the registry holder (a max-merge). The payload carries the version
-%% vector of the COMPACTED prefix, which the applier's WAL-tail replay can no
-%% longer observe. A `projection_managed` marker or a bare-CRDT checkpoint
-%% carries no frontier: the holder stays empty and WAL replay alone reconstructs
-%% it, so an origin whose events were ALL compacted away is momentarily
-%% under-counted — conservative (the oracle reads "behind", never a false IN
-%% SYNC) and self-healing at the next checkpoint write.
+%% The applied-frontier version vector a compaction checkpoint payload carries:
+%% the maxima of the COMPACTED prefix, which the applier's WAL-tail replay can
+%% no longer observe. A `projection_managed` marker or a bare-CRDT checkpoint
+%% carries none, so `#{}`: WAL replay alone then reconstructs the frontier, and
+%% an origin whose events were ALL compacted away is momentarily under-counted —
+%% conservative (the oracle reads "behind", never a false IN SYNC) and
+%% self-healing at the next checkpoint write.
 %%
-%% Goes through `merge_frontier/2` like every other frontier writer: that is
-%% where the retired-origin ceiling lives, and it is what makes a frontier reap
-%% survive a restart. A reap is not stored as a deletion — the checkpoint still
-%% carries the reaped origin's maximum — so writing `#entry.frontier` directly
-%% here would resurrect every reaped entry on every boot.
-restore_frontier(_InstanceId, undefined) ->
-    ok;
-restore_frontier(
-    InstanceId, {_W, {projection_managed, frontier, FrontierVV, _Minted, _Meta}}
+%% `boot_frontier/2` merges it through `merge_frontier/2` like every other
+%% frontier writer: that is where the retired-origin ceiling lives, and it is
+%% what makes a frontier reap survive a restart. A reap is not stored as a
+%% deletion — the checkpoint still carries the reaped origin's maximum — so
+%% writing `#entry.frontier` directly would resurrect every reaped entry on
+%% every boot.
+checkpoint_frontier(
+    {_W, {projection_managed, frontier, VV, _Minted, _Meta}}
 ) when
-    is_map(FrontierVV)
+    is_map(VV)
 ->
-    bondy_oplog_registry:merge_frontier(InstanceId, FrontierVV);
-restore_frontier(
-    InstanceId, {_W, {projection_managed, frontier, FrontierVV, _Minted}}
-) when
-    is_map(FrontierVV)
+    VV;
+checkpoint_frontier({_W, {projection_managed, frontier, VV, _Minted}}) when
+    is_map(VV)
 ->
-    bondy_oplog_registry:merge_frontier(InstanceId, FrontierVV);
-restore_frontier(
-    InstanceId, {_W, {projection_managed, frontier, FrontierVV}}
-) when
-    is_map(FrontierVV)
-->
-    bondy_oplog_registry:merge_frontier(InstanceId, FrontierVV);
-restore_frontier(_InstanceId, _Other) ->
-    ok.
+    VV;
+checkpoint_frontier({_W, {projection_managed, frontier, VV}}) when is_map(VV) ->
+    VV;
+checkpoint_frontier(_Other) ->
+    #{}.
 
 %% @private
 %% Classifies the frontier a checkpoint carries by the writer that produced it.
@@ -4899,18 +5080,82 @@ checkpoint_provenance(_Other) ->
     folded.
 
 %% @private
-%% The checkpoint's frontier payload. ONE constructor for both writers so the
-%% stamp cannot be present on one path and absent on the other; an unstamped
-%% write would read back as `receipt_derived` and alarm a healthy node.
+%% The checkpoint's frontier payload. ONE constructor for every writer so the
+%% stamps cannot be present on one path and absent on another; an unstamped
+%% write would read back as `receipt_derived` and alarm a healthy node, and a
+%% write that dropped the re-fold mark would let a restart trust a frontier its
+%% projection does not reflect.
 %%
-%% `Provenance` is the value's, carried from `init/1`, so an instance that
+%% The provenance is the value's, carried from `init/1`, so an instance that
 %% booted on an unstamped checkpoint keeps stamping `receipt_derived` however
 %% many sound writes follow. A reader predating the stamp treats the 5-tuple
 %% as unknown and restores no frontier, so downgrade is not supported.
-frontier_checkpoint(FrontierVV, MintedSeq, Provenance) ->
-    {projection_managed, frontier, FrontierVV, MintedSeq, #{
-        provenance => Provenance
-    }}.
+frontier_checkpoint(FrontierVV, MintedSeq, #state{} = State) ->
+    {projection_managed, frontier, FrontierVV, MintedSeq,
+        checkpoint_meta(State)}.
+
+%% @private
+serving_reply(#state{refold = none, replayed = true}) -> ok;
+serving_reply(#state{instance_id = Id}) -> {error, {refold_owed, Id}}.
+
+%% @private
+%% An owed anchor is undefined, so the replay from it is a full one, which
+%% `refolded/1` reports; the sessions open on the instance expire.
+anchored({undefined, true}, #state{instance_id = Id} = State) ->
+    ok = bondy_oplog_catalogue_cursor:discard_instance(Id),
+    State#state{replayed = false};
+anchored(_Anchor, State) ->
+    State#state{replayed = true}.
+
+%% @private
+durable_frontier_of(#state{backend = Backend} = State) ->
+    case is_durable_backend(Backend) of
+        true -> State#state.durable_frontier;
+        false -> bondy_oplog_registry:frontier(State#state.instance_id)
+    end.
+
+%% @private
+checkpoint_meta(#state{frontier_provenance = Provenance, refold = none}) ->
+    #{provenance => Provenance};
+checkpoint_meta(#state{frontier_provenance = Provenance}) ->
+    #{provenance => Provenance, refold_owed => true}.
+
+%% @private
+%% The applied frontier at boot, and its provenance. A checkpoint carrying the
+%% re-fold mark was written while a catalogue install may have replaced cells
+%% its frontier claims, so neither that frontier nor the one a subtree restart
+%% leaves in the registry row is trusted: the frontier is emptied, the replay
+%% anchor then owes a fold (`compute_replay_anchor/1`), and the full re-fold
+%% rebuilds it (`proofs/tla/LiveRebootstrapRefold_Proposed_Crash.cfg`). Nothing
+%% of an emptied frontier is inherited, so its provenance is `folded`, and it
+%% holds nothing durably.
+boot_frontier(InstanceId, Checkpoint) ->
+    VV = restored_frontier(Checkpoint),
+    case refold_owed(Checkpoint) of
+        true ->
+            ok = bondy_oplog_registry:reset_frontier(InstanceId),
+            {refold, folded, VV};
+        false ->
+            ok = bondy_oplog_registry:merge_frontier(InstanceId, VV),
+            {none, checkpoint_provenance(Checkpoint), VV}
+    end.
+
+%% @private
+%% The applied frontier a boot restores from `Checkpoint`: none when it
+%% carries the re-fold mark (`boot_frontier/2`).
+restored_frontier(Checkpoint) ->
+    case refold_owed(Checkpoint) of
+        true -> #{};
+        false -> checkpoint_frontier(Checkpoint)
+    end.
+
+%% @private
+refold_owed(
+    {_W, {projection_managed, frontier, _VV, _M, #{refold_owed := true}}}
+) ->
+    true;
+refold_owed(_Checkpoint) ->
+    false.
 
 %% @private
 %% Alarms a frontier inherited from a build that claimed a seq on RECEIPT
@@ -5014,38 +5259,41 @@ minted_seq(SeqRef) ->
 %% @private
 %% Persist the live applied-frontier version vector into the compaction
 %% checkpoint as `{projection_managed, frontier, FrontierVV}` so the next start
-%% restores the compacted-prefix maxima (see `restore_frontier/2`). Durable
+%% restores the compacted-prefix maxima (see `boot_frontier/2`). Durable
 %% backends only — an ephemeral instance has no checkpoint. A failed write,
 %% including its directory fsync or the projection sync, is returned.
-maybe_persist_frontier(
-    InstanceId, Backend, Watermark, MintedSeq, CkptMod, CkptState, Provenance
-) ->
+maybe_persist_frontier(#state{backend = Backend} = State) ->
     case is_durable_backend(Backend) of
-        false ->
-            ok;
-        true ->
-            maybe
-                {ok, Checkpoint} ?=
-                    synced_frontier_checkpoint(
-                        InstanceId, MintedSeq, Provenance
-                    ),
-                try
-                    CkptMod:put_checkpoint(CkptState, Watermark, Checkpoint)
-                catch
-                    error:{dir_fsync_failed, _, _} = Reason -> {error, Reason}
-                end
-            end
+        false -> {ok, State};
+        true -> write_frontier_checkpoint(State, State#state.watermark)
     end.
 
 %% @private
-%% The checkpoint payload claiming the applied frontier, read BEFORE the
+%% Writes the checkpoint claiming the applied frontier, read BEFORE the
 %% projection is synced: a claim made after the sync could name a write the
-%% sync did not cover (`bondy_oplog_projection_sync_test`).
-synced_frontier_checkpoint(InstanceId, MintedSeq, Provenance) ->
+%% sync did not cover (`bondy_oplog_projection_sync_test`). What a boot would
+%% restore from it becomes the durable frontier once the write returns.
+write_frontier_checkpoint(#state{} = State, Watermark) ->
+    #state{
+        instance_id = InstanceId,
+        seq = Seq,
+        compaction_checkpoint = CkptMod,
+        compaction_checkpoint_state = CkptState
+    } = State,
     FrontierVV = bondy_oplog_registry:frontier(InstanceId),
+    Checkpoint = frontier_checkpoint(FrontierVV, minted_seq(Seq), State),
     maybe
         ok ?= sync_projection(InstanceId),
-        {ok, frontier_checkpoint(FrontierVV, MintedSeq, Provenance)}
+        ok ?=
+            try
+                CkptMod:put_checkpoint(CkptState, Watermark, Checkpoint)
+            catch
+                error:{dir_fsync_failed, _, _} = Reason -> {error, Reason}
+            end,
+        {ok, State#state{
+            cached_checkpoint = {Watermark, Checkpoint},
+            durable_frontier = restored_frontier({Watermark, Checkpoint})
+        }}
     end.
 
 %% @private
@@ -5764,11 +6012,8 @@ do_append_remote(#state{} = State, Event) ->
 %% - Applied → the idempotent drop.
 append_remote_below_watermark(State, Key, Event) ->
     VV = applied_vv(State#state.instance_id),
-    NeverApplied =
-        bondy_oplog_event:key_seq(Key) >
-            maps:get(bondy_oplog_event:key_origin(Key), VV, 0),
-    case NeverApplied of
-        true ->
+    case bondy_oplog_event:covered(Key, VV) of
+        false ->
             telemetry:execute(
                 [bondy_oplog, instance, append_remote, doored],
                 #{count => 1},
@@ -5788,7 +6033,7 @@ append_remote_below_watermark(State, Key, Event) ->
                 seq => bondy_oplog_event:key_seq(Key)
             }),
             append_remote_install(State, Key, Event);
-        false ->
+        true ->
             telemetry:execute(
                 [bondy_oplog, instance, append_remote, filtered],
                 #{count => 1},
@@ -5950,7 +6195,7 @@ compute_replay_anchor(#state{mst = MST, instance_id = Id} = State) ->
     VV = bondy_oplog_registry:frontier(Id),
     case first_unclaimed_cell(MST, VV) of
         undefined ->
-            bondy_mst:root(MST);
+            {bondy_mst:root(MST), false};
         Key ->
             ?LOG_NOTICE(#{
                 description =>
@@ -5972,7 +6217,7 @@ compute_replay_anchor(#state{mst = MST, instance_id = Id} = State) ->
                 #{count => 1, live_size => State#state.live_size},
                 #{instance_id => Id}
             ),
-            undefined
+            {undefined, true}
     end.
 
 %% @private
@@ -5985,12 +6230,9 @@ first_unclaimed_cell(MST, VV) ->
             MST,
             fun
                 ({K, {{cell_apply, _B, _CK, _FE}, _Meta, _Prev, _Sig}}, Acc) ->
-                    Origin = bondy_oplog_event:key_origin(K),
-                    Seq = bondy_oplog_event:key_seq(K),
-                    case Seq > maps:get(Origin, VV, 0) of
-                        true -> throw({unclaimed, K});
-                        false -> Acc
-                    end;
+                    bondy_oplog_event:covered(K, VV) orelse
+                        throw({unclaimed, K}),
+                    Acc;
                 ({_K, _V}, Acc) ->
                     Acc
             end,
@@ -6245,8 +6487,8 @@ pinned_roots(#state{pinned_peer_roots = Pins}) ->
 
 %% @private
 %% Runs a full compaction cycle synchronously in the instance gen_server. The
-%% frontier is O(diff) (`compute_frontier_for/2`), so the cycle is cheap enough
-%% to run inline — and running here is what makes the durable (pack-store)
+%% frontier walk is O(confirmed prefix) (`compute_frontier_for/2`), so the cycle
+%% is cheap enough to run inline — and running here is what makes the durable (pack-store)
 %% backend work at all: the MST is read by the process that OWNS its sealed-pack
 %% fds, so `prim_file:pread` cannot raise `not_on_controlling_process`.
 %%
@@ -6267,41 +6509,66 @@ do_compact_sync(#state{} = State0, PeerWitnesses) ->
     %% Unservable-own-root self-heal runs on the compaction tick — the
     %% one periodic in-process hook — BEFORE the frontier computation
     %% (a rebuilt tree simply compacts as `no_change`).
-    State = maybe_collect_durable(
-        maybe_self_heal_unservable(State0)
+    State = checkpoint_moved_frontier(
+        maybe_collect_durable(maybe_self_heal_unservable(State0))
     ),
+    Witnesses = member_vvs(State, PeerWitnesses),
     Result = run_compaction(
         State#state.instance_id,
         State#state.mst,
         State#state.watermark,
-        PeerWitnesses,
+        Witnesses,
         retention_ctx(State)
     ),
     {Reply, State1} = commit_compaction(State, Started, Result),
-    ok = publish(State1),
-    {reply, Reply, State1}.
+    {Reply1, State2} = trim_below_watermark(Reply, State1, Witnesses),
+    ok = publish(State2),
+    {reply, Reply1, State2}.
+
+%% @private
+%% The compaction cycle's share of the door's rule, when the confirmed frontier
+%% did not pass the watermark: the events at or below the watermark that
+%% `Witnesses` confirm leave the tree, the watermark stays. The index writers
+%% are driven first, as before any truncation. The applier's
+%% replay cursor is left where it is: once its root is swept the next replay
+%% re-presents the whole tree, which the kernel guard makes idempotent.
+trim_below_watermark({ok, no_change} = Reply, State, Witnesses) ->
+    #state{mst = MST0, watermark = W} = State,
+    case W =/= undefined andalso mst_has_entries_at_or_below(MST0, W) of
+        false ->
+            {Reply, State};
+        true ->
+            Before = compute_live_size(MST0),
+            ok = drive_secondary_indexes(State),
+            MST = trim_confirmed(State, MST0, Witnesses),
+            LiveSize = compute_live_size(MST),
+            Reply1 =
+                case Before - LiveSize of
+                    0 -> Reply;
+                    Trimmed -> {ok, {compacted, W, Trimmed}}
+                end,
+            {Reply1, State#state{mst = MST, live_size = LiveSize}}
+    end;
+trim_below_watermark(Reply, State, _Witnesses) ->
+    {Reply, State}.
 
 %% @private
 run_compaction(
     InstanceId,
     MST,
     Watermark0,
-    PeerWitnesses,
+    Witnesses,
     Retention
 ) ->
     try
-        case compute_frontier_for(MST, PeerWitnesses) of
+        case compute_frontier_for(MST, Witnesses) of
             undefined ->
-                retention_or_catchup(
-                    InstanceId, MST, Watermark0, Retention
-                );
+                retention(InstanceId, MST, Watermark0, Retention);
             Frontier when
                 Watermark0 =/= undefined,
                 Frontier =< Watermark0
             ->
-                retention_or_catchup(
-                    InstanceId, MST, Watermark0, Retention
-                );
+                retention(InstanceId, MST, Watermark0, Retention);
             Frontier ->
                 %% The projection is the durable checkpoint, so compaction
                 %% only bounds the MST: no per-cycle `interpret_cog` re-fold of
@@ -6321,28 +6588,6 @@ run_compaction(
     end.
 
 %% @private
-%% Catch-up truncation. Reached when the peer-confirmed stability frontier did
-%% NOT advance past the existing durable watermark (it is `undefined`, or
-%% `=< Watermark0`). The MST may still hold entries `=< Watermark0` even
-%% though those entries are, by the watermark invariant, already materialised
-%% in the durable projection. This happens when a node page-syncs a peer's
-%% full (un-compacted) MST and then adopts that peer's watermark via a
-%% snapshot: it ends up with `watermark = X` but an MST still carrying
-%% `=< X`, permanently DIVERGED from a peer that already compacted its MST to
-%% `X` (the peer advertises an empty/compacted root, so this node's
-%% peer-confirmed frontier never advances and it never truncates — and it
-%% burns CPU re-pulling + failing to converge). Truncating the MST to the
-%% EXISTING watermark (no watermark advance) brings it in line. Safe: the
-%% watermark guarantees everything `=< X` is durable in the projection.
-maybe_watermark_catchup(_MST, undefined) ->
-    {ok, no_change};
-maybe_watermark_catchup(MST, Watermark0) ->
-    case mst_has_entries_at_or_below(MST, Watermark0) of
-        true -> {ok, {catalogue_compacted, Watermark0}};
-        false -> {ok, no_change}
-    end.
-
-%% @private
 %% True iff the MST's smallest key is `=< Watermark`, i.e. the MST still
 %% holds at least one entry the watermark says is already compacted. Event
 %% keys use the MST's default term-order comparator, so `=<` matches the
@@ -6358,9 +6603,9 @@ mst_has_entries_at_or_below(MST, Watermark) ->
 %% =============================================================================
 
 -doc """
-The membership set for causal-stability reclamation and MST compaction
-(`bondy_oplog_compaction:compact/1`): the full known Partisan membership minus
-this node. The ONLY member source either may use.
+The membership set for causal-stability reclamation and MST truncation
+(`compaction_witnesses/1`): the full known Partisan membership minus this node.
+The ONLY member source either may use.
 
 Deliberately NOT `bondy_oplog_peer_source:peers_for/2` — that returns a random
 sample (default 3), and a sample confirms a frontier the unsampled members
@@ -6392,14 +6637,109 @@ reclamation_members() ->
     end.
 
 -doc """
+The witnesses MST compaction (`bondy_oplog_compaction:compact/1`) and the
+watermark door truncate on: the durable frontier each peer last reported
+(`bondy_oplog_peer_state`), `undefined` for one it has not.
+
+On an instance that is not fused, every member witnesses, reachable or not:
+the full membership (`reclamation_members/0`), each with a confirmed row
+(`bondy_oplog_peer_state:confirmed_peer_states/2`) however long it has been
+silent. A member drops out only through a Partisan `leave`; until then a down
+or partitioned member holds truncation, because truncating what it has not
+received loses for good the writes each side accepted alone, once both sides
+have truncated (`proofs/tla/ConfirmedCompaction_RootVV3_Fresh_Partition.cfg`
+violates `NoLoss` under a recency filter; the `_Members_` configs hold it).
+
+- `{error, {unconfirmed, Members}}`: those members have no confirmed row.
+- `{error, membership_unavailable}`: the membership cannot be read. Not the
+  same as solo, which is `{ok, []}`.
+
+A fused instance (ephemeral, which `bondy_db:assert_fused_requires_ephemeral/2`
+enforces) witnesses the peers heard from within `peer_timeout_ms`
+(`bondy_oplog_peer_state:get_instance_peer_states/1`): its history lives in
+memory, so a down member must not hold it, and it may lose what a silent peer
+alone holds, as its retention policy already may (`validate_retention/2`
+admits retention only on a fused instance).
+""".
+-spec compaction_witnesses(instance_id()) ->
+    {ok, [#{binary() => non_neg_integer()} | undefined]}
+    | {error, {unconfirmed, [node()]} | membership_unavailable}.
+
+compaction_witnesses(InstanceId) when is_binary(InstanceId) ->
+    witnesses(InstanceId, bondy_oplog_registry:fused(InstanceId)).
+
+%% @private
+witnesses(InstanceId, true) ->
+    {ok, peer_vvs(bondy_oplog_peer_state:get_instance_peer_states(InstanceId))};
+witnesses(InstanceId, false) ->
+    case reclamation_members() of
+        {ok, Members} ->
+            case
+                bondy_oplog_peer_state:confirmed_peer_states(
+                    InstanceId, Members
+                )
+            of
+                {ok, States} -> {ok, peer_vvs(States)};
+                {unconfirmed, _} = Unconfirmed -> {error, Unconfirmed}
+            end;
+        error ->
+            {error, membership_unavailable}
+    end.
+
+%% @private
+peer_vvs(States) ->
+    [maps:get(frontier, S) || S <- States].
+
+%% @private
+%% The witnesses a truncation or the reclamation bound needs: every peer's
+%% durable frontier and this replica's own. With no peer there is nothing to
+%% confirm against, and nothing is confirmed.
+member_vvs(_State, []) ->
+    [];
+member_vvs(State, PeerVVs) ->
+    [durable_frontier_of(State) | PeerVVs].
+
+%% @private
+%% Checkpoints the applied frontier when it has moved past the durable one,
+%% so that the witnesses this replica and its peers read keep advancing
+%% between compactions. A failed write stops the instance, as a failed
+%% compaction checkpoint does. While the re-fold mark is held, the checkpoint
+%% that clears it is written once the frontier claims the install's target
+%% (`install_target/2`), and none before.
+checkpoint_moved_frontier(
+    #state{refold = {target, Target}, instance_id = Id} = State
+) ->
+    case bondy_oplog_registry:claims(Id, Target) of
+        true -> checkpoint(State#state{refold = none});
+        false -> State
+    end;
+checkpoint_moved_frontier(#state{refold = Refold} = State) when
+    Refold =/= none
+->
+    State;
+checkpoint_moved_frontier(#state{instance_id = Id} = State) ->
+    case bondy_oplog_registry:frontier(Id) =:= State#state.durable_frontier of
+        true -> State;
+        false -> checkpoint(State)
+    end.
+
+%% @private
+checkpoint(State) ->
+    case maybe_persist_frontier(State) of
+        {ok, State1} -> State1;
+        {error, Reason} -> error(Reason)
+    end.
+
+-doc """
 The causal-stability point for projection-cell reclamation: an HLC `h` such
 that no event with HLC `< h` can ever be delivered again (POLog Definition
 5.1).
 
 The chain runs inside the instance because it owns the MST: membership
 (`reclamation_members/0`) → strict all-member confirmation
-(`bondy_oplog_peer_state:confirmed_peer_states/2`) → frontier over the
-confirmed roots (`compute_frontier_for/2`) → the frontier key's HLC.
+(`bondy_oplog_peer_state:confirmed_peer_states/2`) → frontier over every
+member's durable frontier, this replica's included (`compute_frontier_for/2`)
+→ the frontier key's HLC.
 
 **Solo** (`members =:= []`) short-circuits to a fresh local tick: with no
 member that could contradict this node, every event it holds is stable, and —
@@ -6421,8 +6761,8 @@ any `{error, _}`:
   stability needs certifying. The steady state of a converged quiescent
   shard in a cluster — NOT operator-actionable, and reported distinctly so
   the actionable reasons below stay meaningful.
-- `{error, {unconfirmed, Peers}}` — members with no confirmed root; a silent
-  member holds stability down instead of vanishing (A4).
+- `{error, {unconfirmed, Peers}}` — members with no recorded durable frontier;
+  a silent member holds stability down instead of vanishing (A4).
 - `{error, no_frontier}` — no local key is confirmed by every member.
 - `{error, non_event_frontier}` — the frontier key is not an event key.
 """.
@@ -6593,13 +6933,14 @@ local_mst_empty(#state{mst = MST}) ->
 %% @private
 confirmed_stability_point(#state{mst = undefined}, _Members) ->
     {error, no_frontier};
-confirmed_stability_point(#state{instance_id = Id, mst = MST}, Members) ->
+confirmed_stability_point(#state{instance_id = Id, mst = MST} = State, Members) ->
     case bondy_oplog_peer_state:confirmed_peer_states(Id, Members) of
         {unconfirmed, Missing} ->
             {error, {unconfirmed, Missing}};
         {ok, States} ->
-            Roots = [maps:get(root_hash, S) || S <- States],
-            frontier_stability_point(compute_frontier_for(MST, Roots))
+            frontier_stability_point(
+                compute_frontier_for(MST, member_vvs(State, peer_vvs(States)))
+            )
     end.
 
 %% @private
@@ -6616,48 +6957,35 @@ frontier_stability_point(Key) ->
 
 %% @private
 %% The stability frontier: the largest local key K such that every local key `=<
-%% K` is CONFIRMED by EVERY peer witness. A witness is a
-%% `bondy_oplog_peer_state:peer_state_entry()` (or a bare root binary), and it
-%% confirms a key when EITHER the key is present, with the same value, in the
-%% peer's recorded root — the peer received it — OR the key's `{Origin, Seq}` is
-%% at or below the peer's recorded applied frontier — the peer folded it,
-%% whether or not it still holds it.
+%% K` is CONFIRMED by EVERY witness. A witness is a member's durable frontier
+%% (`durable_frontier/1`), and it confirms a key whose `{Origin, Seq}` it
+%% covers, or whose origin is retired (`never_applied/2`): retirement requires
+%% every member to have checkpointed that origin's events first
+%% (`bondy_oplog_origin_retirement:retire_dead/0`), and reaping then drops the
+%% frontier entry that recorded it. `undefined` confirms nothing; no witness
+%% confirms nothing either.
 %%
-%% ROOT ALONE IS THE WRONG WITNESS — do not reduce this rule to it. A root
-%% describes the peer's TREE, and the tree loses exactly what the peer
-%% compacted, so two replicas that both compact stop confirming each other's
-%% prefix and neither compacts again. The applied VV survives the peer's
-%% compaction and is exact for the same reason the watermark door's is: the peer
-%% folds each origin as a contiguous prefix. A rootless witness therefore
-%% CONSTRAINS rather than confirming nothing — "constrains nothing" loses an
-%% event to a live member — while a witness with neither root nor VV confirms
-%% nothing at all. All three rules are model-checked and proved for any
-%% membership: `proofs/tla/ConfirmedCompaction.tla`,
-%% `proofs/isabelle/Confirmed_Compaction.thy`.
-%%
-%% O(diff) and read-only: walk the structural diff against each peer root in key
-%% order to the first divergent key. The diff is a SUPERSET, so each candidate
-%% is re-checked against the root and then the VV before counting as a hole.
-%% Without a readable root the walk is over the tree itself. Only event keys can
-%% be VV-confirmed.
+%% Confirmation is by checkpointed claims, not receipt: the reclamation bound
+%% walks only the keys the tree still holds, so a key may leave it only once
+%% every member, this replica included, holds its effect durably
+%% (`proofs/tla/JoinInstall.tla`: the `CompactReceipt` configuration is
+%% violated, `CompactDurable` is clean). A frontier survives the member's own
+%% compaction, so two replicas that both compact keep confirming each other's
+%% prefix (`bondy_oplog_compaction_fused_test:peer_compaction_does_not_stall_ours/0`).
 compute_frontier_for(_MST, []) ->
     undefined;
-compute_frontier_for(MST, PeerWitnesses) ->
-    case [W || P <- PeerWitnesses, W <- [witness(P)], W =/= undefined] of
-        [] ->
-            undefined;
-        [_ | _] = Witnesses ->
-            case global_first_hole(MST, Witnesses) of
-                no_hole ->
-                    case bondy_mst:last(MST) of
-                        {K, _V} -> K;
-                        undefined -> undefined
-                    end;
-                Hole ->
-                    case bondy_mst:last_n(MST, Hole, 1) of
-                        [{K, _V}] -> K;
-                        [] -> undefined
-                    end
+compute_frontier_for(MST, VVs) ->
+    Retired = bondy_oplog_origin_bans:retired_set(),
+    case first_unconfirmed(MST, [{VV, Retired} || VV <- VVs], undefined) of
+        undefined ->
+            case bondy_mst:last(MST) of
+                {K, _V} -> K;
+                undefined -> undefined
+            end;
+        Hole ->
+            case bondy_mst:last_n(MST, Hole, 1) of
+                [{K, _V}] -> K;
+                [] -> undefined
             end
     end.
 
@@ -6705,15 +7033,13 @@ retention_ctx(#state{}) ->
     undefined.
 
 %% @private
-%% The no-peer-confirmed-frontier fallback chain: retention first (when
-%% configured and triggered), then the watermark catch-up. Both are
-%% reached exclusively when the peer-confirmed path yielded nothing past
-%% the watermark — a confirmed frontier is always preferred (every peer
-%% already holds that prefix, so truncating it costs nobody a bootstrap).
-retention_or_catchup(InstanceId, MST, Watermark0, Retention) ->
+%% Reached only when the peer-confirmed frontier yielded nothing past the
+%% watermark: a confirmed frontier is always preferred (every peer already
+%% holds that prefix, so truncating it costs nobody a bootstrap).
+retention(InstanceId, MST, Watermark0, Retention) ->
     case retention_frontier(MST, Watermark0, Retention) of
         undefined ->
-            maybe_watermark_catchup(MST, Watermark0);
+            {ok, no_change};
         {Kind, Frontier} ->
             telemetry:execute(
                 [bondy_oplog, compaction, retention],
@@ -6738,8 +7064,7 @@ retention_or_catchup(InstanceId, MST, Watermark0, Retention) ->
 %%
 %% Every returned frontier is a REAL key from the tree (the commit path
 %% calls `bondy_oplog_event:key_hlc/1` on it) and strictly above
-%% `Watermark0` (at-or-below means the tree holds only already-compacted
-%% keys — that is `maybe_watermark_catchup/2`'s case, not ours).
+%% `Watermark0` (what sits at or below it is `trim_below_watermark/3`'s).
 retention_frontier(_MST, _Watermark0, undefined) ->
     undefined;
 retention_frontier(MST, Watermark0, #{} = Ctx) ->
@@ -6797,104 +7122,9 @@ above_watermark(Kind, K, _Watermark) ->
     {Kind, K}.
 
 %% @private
-%% Normalises a `compute_frontier_for/2` element to `{Root, VV}` — a
-%% peer-state entry, a bare root, or `undefined` (a legacy rootless
-%% element, dropped: it carries no VV either, so it would confirm nothing
-%% and block every compaction with a witness this table never recorded).
-witness(#{root_hash := R, frontier := VV}) when
-    is_binary(R) orelse R =:= undefined, is_map(VV) orelse VV =:= undefined
-->
-    {R, VV};
-witness(R) when is_binary(R) ->
-    {R, undefined};
-witness(undefined) ->
-    undefined.
-
-%% @private
-%% Smallest local key confirmed by no witness of some peer, or `no_hole`
-%% when the local tree is fully confirmed by every peer.
-global_first_hole(MST, Witnesses) ->
-    lists:foldl(
-        fun(W, Acc) ->
-            case peer_first_hole(MST, W) of
-                no_hole -> Acc;
-                H -> min_hole(H, Acc)
-            end
-        end,
-        no_hole,
-        Witnesses
-    ).
-
-%% @private
-%% Term-order min; the instance MST's default comparator is `<`.
-min_hole(H, no_hole) -> H;
-min_hole(H, Acc) when H < Acc -> H;
-min_hole(_H, Acc) -> Acc.
-
-%% @private
-%% First (smallest) local key the witness `{R, VV}` does not confirm. With a
-%% root: walk the read-only structural diff against `R` in ascending key order,
-%% skipping present-and-equal false-positives and VV-covered keys; `no_hole`
-%% when local is a subset of the peer's root. Without a root — none recorded, or
-%% the recorded one references pages this store has already reclaimed — walk the
-%% tree to the first key the VV does not cover; with no VV either, that is the
-%% first local key, which defers compaction for this peer until its next round.
-peer_first_hole(MST, {undefined, VV}) ->
-    first_key_not_covered(MST, VV);
-peer_first_hole(MST, {R, VV}) ->
-    try
-        first_genuine_hole(MST, R, VV, bondy_mst:diff_to_list(MST, R))
-    catch
-        _:_ ->
-            first_key_not_covered(MST, VV)
-    end.
-
-%% @private
-first_genuine_hole(_MST, _R, _VV, []) ->
-    no_hole;
-first_genuine_hole(MST, R, VV, [{K, V} | Rest]) ->
-    case bondy_mst:get(MST, K, R) of
-        V ->
-            first_genuine_hole(MST, R, VV, Rest);
-        _ ->
-            case vv_covers(K, VV) of
-                true -> first_genuine_hole(MST, R, VV, Rest);
-                false -> K
-            end
-    end.
-
-%% @private
-%% The smallest tree key the VV does not cover, or `no_hole`. Ascending
-%% fold with a throw at the first miss, so O(covered prefix).
-first_key_not_covered(MST, VV) ->
-    try
-        bondy_mst:fold(
-            MST,
-            fun({K, _V}, Acc) ->
-                vv_covers(K, VV) orelse throw({?MODULE, hole, K}),
-                Acc
-            end,
-            no_hole
-        )
-    catch
-        throw:{?MODULE, hole, K} -> K
-    end.
-
-%% @private
-%% Whether the peer's recorded applied frontier covers `K`: an event key
-%% whose seq is at or below the VV's entry for its origin. A missing
-%% entry is seq 0 and a non-event key is never covered.
-vv_covers(_K, undefined) ->
-    false;
-vv_covers(K, VV) ->
-    bondy_oplog_event:is_key(K) andalso
-        bondy_oplog_event:key_seq(K) =<
-            maps:get(bondy_oplog_event:key_origin(K), VV, 0).
-
-%% @private
-%% Re-anchors the applier's replay cursor (`last_replayed_root`) on the
-%% post-truncate root so the next replay diff stays incremental. No-op
-%% when there is no applier (a fused instance).
+%% Offers the post-truncate root to the applier as its replay cursor;
+%% `bondy_oplog_applier:advance_replayed_root/2` decides whether to take it.
+%% No-op when there is no applier (a fused instance).
 advance_projection_watermark(InstanceId, NewRoot) ->
     case bondy_oplog_registry:applier_pid(InstanceId) of
         undefined ->
@@ -6947,9 +7177,9 @@ commit_compaction(State, _Started, {error, _} = Error) ->
 
 %% @private
 %% The MST-bounding tail of a catalogue compaction: persist the watermark
-%% checkpoint, truncate the stable prefix, re-anchor the applier's replay cursor
-%% (a CAST — never blocks on the applier) and recompute `live_size`. Makes NO
-%% synchronous applier call, so it is deadlock-free.
+%% checkpoint, truncate the stable prefix, offer the applier the post-truncate
+%% replay cursor (a CAST — never blocks on the applier) and recompute
+%% `live_size`. Makes NO synchronous applier call, so it is deadlock-free.
 %%
 %% The checkpoint envelope records the watermark; its state slot carries
 %% `{projection_managed, frontier, FrontierVV}` — "the materialised state is the
@@ -7034,34 +7264,19 @@ finalize_catalogue_compaction_commit(
     %% nor the MST holds an own-origin event and the checkpoint is the only
     %% durable record of the allocator's position. See
     %% `minted_from_checkpoint/1`.
-    Checkpoint =
-        case
-            synced_frontier_checkpoint(
-                StateF#state.instance_id,
-                minted_seq(StateF#state.seq),
-                StateF#state.frontier_provenance
-            )
-        of
-            {ok, C} -> C;
+    {StateC, CkptUs} = tc(fun() ->
+        case write_frontier_checkpoint(StateF, Frontier) of
+            {ok, S} -> S;
             {error, Reason} -> error(Reason)
-        end,
-    {ok, CkptUs} = tc(fun() ->
-        (StateF#state.compaction_checkpoint):put_checkpoint(
-            StateF#state.compaction_checkpoint_state,
-            Frontier,
-            Checkpoint
-        )
+        end
     end),
     %% Only now — the checkpoint is durable — may the WAL drop segments
     %% below `Frontier`. See `advance_wal_snapshot_watermark/2`.
     ok = advance_wal_snapshot_watermark(StateF#state.instance_id, Frontier),
     NewRoot = bondy_mst:root(MST1),
-    %% Re-anchor the projection replay cursor on the post-truncate (live)
-    %% root so the next replay diff stays incremental (the pre-truncate
-    %% root's pages are freed by the truncate, so a stale cursor would force
-    %% a full `to_list/1` fold every cycle). Non-fused: a cast to the
-    %% applier. Fused: no applier — the cursor lives in `#fused_drain{}` and
-    %% is re-anchored in `State1` below (`fused_reanchor_cursor/2`).
+    %% The replay cursor moves to the post-truncate root under the rule at
+    %% `bondy_oplog_applier:advance_replayed_root/2`: a cast to the applier,
+    %% or `fused_reanchor_cursor/2` in `State1` below.
     {ok, WatermarkUs} = tc(fun() ->
         case StateF#state.fused of
             true ->
@@ -7091,10 +7306,9 @@ finalize_catalogue_compaction_commit(
     _ = bondy_connect_hlc:update(
         StateF#state.hlc, bondy_oplog_event:key_hlc(Frontier)
     ),
-    State1 = StateF#state{
+    State1 = StateC#state{
         mst = MST1,
         watermark = Frontier,
-        cached_checkpoint = {Frontier, Checkpoint},
         live_size = LiveSize1,
         fused_drain = fused_reanchor_cursor(StateF#state.fused_drain, NewRoot)
     },
@@ -7152,12 +7366,15 @@ advance_wal_snapshot_watermark(InstanceId, Frontier) ->
     end.
 
 %% @private
-%% Re-anchors the fused replay cursor on the post-truncate root. No-op for a
+%% Re-anchors the fused replay cursor on the post-truncate root, under the
+%% rule `bondy_oplog_applier:advance_replayed_root/2` states. No-op for a
 %% non-fused instance (`fused_drain = undefined`).
 fused_reanchor_cursor(undefined, _NewRoot) ->
     undefined;
-fused_reanchor_cursor(#fused_drain{} = FD, NewRoot) ->
-    FD#fused_drain{last_replayed_root = NewRoot}.
+fused_reanchor_cursor(#fused_drain{owed = false} = FD, NewRoot) ->
+    FD#fused_drain{last_replayed_root = NewRoot};
+fused_reanchor_cursor(#fused_drain{} = FD, _NewRoot) ->
+    FD#fused_drain{last_replayed_root = undefined}.
 
 %% @private
 %% Compaction flush barrier. flush_sync every **durable** secondary-index writer

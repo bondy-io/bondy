@@ -59,6 +59,7 @@ The value is `true` iff any enable dot is live.
 -export([order_independent/0]).
 -export([batchable/0]).
 -export([context_of/1]).
+-export([dotted_context/0]).
 -export([reap_origins/2]).
 -export([removal_op/0]).
 -export([stabilize/2]).
@@ -154,6 +155,12 @@ to_value({Dots, _CC, _Hlc}) ->
 
 context_of({_Dots, CC, _Hlc}) ->
     CC.
+
+-doc "The context grows by exactly each applied operation's context and dot.".
+-spec dotted_context() -> true.
+
+dotted_context() ->
+    true.
 
 -doc """
 Reap the causal-context entries of permanently-retired origins (the

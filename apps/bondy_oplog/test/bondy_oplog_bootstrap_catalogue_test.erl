@@ -242,10 +242,10 @@ bootstrap_seeds_local_frontier() ->
 
     %% Compact the peer's MST empty — exactly node1's post-import state: the
     %% data lives in the projection + checkpoint, the MST is gone.
-    PeerRoot = bondy_oplog:root_hash(Peer),
+    Witness = bondy_oplog_registry:frontier(Peer),
     ?assertMatch(
         {ok, {compacted, _, _}},
-        bondy_oplog_instance:compact(Peer, [PeerRoot])
+        bondy_oplog_instance:compact(Peer, [Witness])
     ),
     ?assertEqual(undefined, bondy_oplog:root_hash(Peer)),
 
@@ -374,14 +374,10 @@ no_snapshot_falls_through_to_sync() ->
     teardown(Local).
 
 live_replica_recovers_lossless_via_anti_entropy() ->
-    %% A LIVE replica calling `bootstrap_catalogue` no longer pulls and
-    %% REPLACES from the peer snapshot — PR-G removed the CvRDT merge-mode.
-    %% It converges via op-based anti-entropy (`run/3`: MST page union +
-    %% per-cell replay), which is LOSSLESS: a local-only write the peer
-    %% never observed survives, and a cell both hold resolves by the op's
-    %% HLC (LWW). The replace-mode wipe a naive cutover would use could drop
-    %% the local-only cell, so this is the recovering-bootstrap convergence
-    %% gate for the cutover.
+    %% A LIVE replica's re-bootstrap replaces the cells the peer ships and
+    %% re-folds its own events over them: a local-only write the peer never
+    %% observed survives, and a cell both hold resolves by the op's HLC
+    %% (LWW).
     {Peer, _, _, _} = setup_instance(),
     {Local, _, _, _} = setup_instance(),
 

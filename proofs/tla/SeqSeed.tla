@@ -43,7 +43,7 @@
 (*     frontier checkpoint (`maybe_persist_frontier/5`).  A crash writes   *)
 (*     nothing.                                                            *)
 (*   - Restart: `init/1` seeds `SeqRef` from `max_local_seq(MST, Origin)`  *)
-(*     -- the LIVE tree only -- then `restore_frontier/2` max-merges the   *)
+(*     -- the LIVE tree only -- then `boot_frontier/2` max-merges the      *)
 (*     checkpoint VV and `frontier_from_mst/1` the tree keys into the      *)
 (*     registry frontier, and the applier replays the WAL from             *)
 (*     `max(last MST key, checkpoint watermark)`, bumping `SeqRef` as it   *)
@@ -236,7 +236,7 @@ Crash ==
     /\ pend' = 0
     /\ UNCHANGED <<seqRef, wal, cursor, fr, tree, ckpt, wm, acked>>
 
-\* `init/1` + `restore_frontier/2` + `frontier_from_mst/1` + the applier's
+\* `init/1` + `boot_frontier/2` + `frontier_from_mst/1` + the applier's
 \* `resume_position/2`.  The WAL tail past the resume position replays
 \* through `Apply`, which bumps `seqRef` as it goes -- exactly the shipped
 \* top-up.  What `Restart` seeds directly is the whole question.

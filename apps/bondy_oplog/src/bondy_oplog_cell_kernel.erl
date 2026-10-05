@@ -41,6 +41,14 @@ re-folding history. The value is `to_value(NewState)` directly — no delta.
 A **non-commutative** CRDT has no correct O(1) eager step; the kernel
 refuses it with a clear error (the per-cell live-log is a later step).
 
+For a CRDT whose context is over event dots (`dotted_context/0`), an event
+whose dot the cell's causal context already covers leaves the state unchanged. The replay hold delivers a cell's events causally
+(`proofs/isabelle/Aw_Kernel.thy`, `causal_hold_delivers_causally`), so a
+covered event was applied before, and applying it again is not idempotent for
+every kernel (an `aw_set` add folded after its remove restores the element).
+Skipping it makes re-delivery a no-op and changes nothing on a causal,
+at-most-once delivery (`proofs/isabelle/Aw_Kernel.thy`, `dotted_kernel`).
+
 ## `interpret_overlay/4` + `decode_value_bytes/2` — the read seam
 
 The read path (`bondy_oplog_core`) is the symmetric counterpart of the write
@@ -254,9 +262,15 @@ when the CRDT exports it (tier_2); tier_0 CRDTs ignore it.
 apply({crdt, Mod}, OldState, _OldValueOpt, Op, Key, Context) ->
     case crdt_order_independent(Mod) of
         true ->
-            NewState = bondy_oplog_crdt_commutative:apply_op(
-                Mod, OldState, Op, Key, Context
-            ),
+            NewState =
+                case covered(Mod, OldState, Key) of
+                    true ->
+                        OldState;
+                    false ->
+                        bondy_oplog_crdt_commutative:apply_op(
+                            Mod, OldState, Op, Key, Context
+                        )
+                end,
             Hlc = Mod:hlc(NewState),
             StateBytes = Mod:encode_state(NewState),
             ValueEqualsState = crdt_value_equals_state(Mod),
@@ -374,6 +388,21 @@ is_crdt_module(Mod) ->
 crdt_order_independent(Mod) ->
     erlang:function_exported(Mod, order_independent, 0) andalso
         Mod:order_independent().
+
+%% @private
+%% Whether the cell's causal context already covers the event's dot. Only a
+%% CRDT whose context is over event dots (`dotted_context/0`) can tell.
+covered(Mod, State, Key) ->
+    erlang:function_exported(Mod, dotted_context, 0) andalso
+        Mod:dotted_context() andalso
+        case Mod:context_of(State) of
+            Ctx when is_list(Ctx) ->
+                bondy_oplog_crdt_aw_core:dot_observed(
+                    bondy_oplog_crdt_aw_core:dot_of(Key), Ctx
+                );
+            _ ->
+                false
+        end.
 
 %% @private
 crdt_value_equals_state(Mod) ->

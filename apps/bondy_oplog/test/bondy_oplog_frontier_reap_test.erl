@@ -41,6 +41,7 @@ frontier_reap_test_() ->
         fun reap_frontier_is_idempotent/0,
         fun reap_frontier_ignores_unknown_instance/0,
         fun retired_origin_never_re_enters_the_frontier/0,
+        fun reaped_origin_holds_no_install_target/0,
         fun solo_reaps_no_frontier/0,
         fun get_retired_answers_the_retirement_set/0,
         fun universal_is_the_intersection_of_member_sets/0,
@@ -341,6 +342,20 @@ retired_origin_never_re_enters_the_frontier() ->
     ?assertEqual(
         false, maps:is_key(O, bondy_oplog_instance:frontier(Id))
     ),
+    ok = bondy_oplog:stop_instance(Id).
+
+%% An install's target names an origin whose frontier entry is then reaped.
+%% The entry never rises again, so the frontier must still claim the target;
+%% an origin it lacks that is not retired keeps it unclaimed.
+reaped_origin_holds_no_install_target() ->
+    Id = mk_id(),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
+    O = <<"reap-target">>,
+    ok = bondy_oplog_registry:merge_frontier(Id, #{O => 3}),
+    ok = bondy_oplog_origin_bans:retire(O, decommissioned),
+    ?assertEqual([O], bondy_oplog_registry:reap_frontier(Id, [O])),
+    ?assert(bondy_oplog_registry:claims(Id, #{O => 3})),
+    ?assertNot(bondy_oplog_registry:claims(Id, #{O => 3, <<"live">> => 1})),
     ok = bondy_oplog:stop_instance(Id).
 
 %% Solitude licenses nothing for the frontier: a one-node cluster that

@@ -67,12 +67,13 @@ partisan_gen_server:call(
 | Request                                  | Reply                                                                  |
 |---|---|
 | `get_root`                               | `{ok, hash() \| undefined, fingerprint()}`                             |
-| `get_frontier`                           | `{ok, #{origin() => seq()}, fingerprint()}`                            |
+| `get_frontier`                           | `{ok, #{origin() => seq()}, fingerprint(), #{origin() => seq()}}` \| `{error, {refold_owed, Id}}` |
 | `get_origins`                            | `{ok, [origin()]}`                                                     |
 | `get_retired`                            | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                       | `{ok, #{hash() => page()}}`                                            |
-| `get_catalogue_snapshot_init`            | `{ok, no_snapshot}` \| `{ok, {init, {watermark(), cursor()}}}`         |
+| `get_catalogue_snapshot_init`            | `{ok, no_snapshot}` \| `{ok, {init, {watermark(), cursor()}}}` \| `{error, {refold_owed, Id}}` |
 | `{get_catalogue_snapshot_next, Cursor}`  | `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {done, []}}` \| `{error, cursor_expired}` |
+| `{release_catalogue_snapshot, Cursor}`   | `{ok, ok}`                                                             |
 
 Errors propagate as `{error, Reason}` (e.g. `{instance_not_running, Id}`).
 ## Read semantics
@@ -105,6 +106,8 @@ installed-consistency barrier, since the answered vector is the initiator's
 evidence base for the gap check and must therefore count only what the tree
 can already ship. On drain timeout the reply is an error and the initiator
 degrades to `#{}`, skipping both adoption and the gap check for that round.
+The last element is the durable frontier
+(`bondy_oplog_instance:durable_frontier/1`), which peers record.
 
 `get_origins` and `get_retired` are node-level: this node's view of the
 replicated grow-only retirement set. A peer unions the answer in, which is the
@@ -213,32 +216,29 @@ dispatch(InstanceId, get_frontier) when is_binary(InstanceId) ->
             %% instead counts events applied mid-call that the round's root
             %% cannot yet carry — an off-by-one gap on nearly every round
             %% under sustained writes.
-            Frontier = bondy_oplog_instance:frontier(InstanceId),
-            case bondy_oplog_instance:await_apply(InstanceId) of
-                ok ->
-                    {ok, Frontier,
-                        bondy_oplog:topology_fingerprint(
-                            bondy_oplog:db_of(InstanceId)
-                        )};
-                {error, timeout} ->
-                    {error, {frontier_unavailable, InstanceId}}
+            maybe
+                {ok, Durable} ?=
+                    bondy_oplog_instance:durable_frontier(InstanceId),
+                Frontier = bondy_oplog_instance:frontier(InstanceId),
+                ok ?= frontier_barrier(InstanceId),
+                {ok, Frontier,
+                    bondy_oplog:topology_fingerprint(
+                        bondy_oplog:db_of(InstanceId)
+                    ),
+                    Durable}
             end
     end;
-dispatch(InstanceId, {confirm_root, Peer, Root}) when
-    is_binary(InstanceId), is_binary(Root)
+dispatch(InstanceId, {confirm_frontier, Peer, Frontier}) when
+    is_binary(InstanceId), is_map(Frontier)
 ->
-    %% The peer completed a pull against the root we advertised, so it now
-    %% holds every page reachable from it. Checkpoint that root against the
-    %% peer: both replicas now hold the SAME root for each other, which is
-    %% Canteen's common sub-graph and what makes the stability frontier
-    %% symmetric. Without it each side records only what it unilaterally
-    %% observed, at its own times, and compaction diverges.
+    %% The peer completed a pull from us and reports its durable frontier, so
+    %% each side records the other's (`bondy_oplog_sync_session`).
     case bondy_oplog_instance:whereis(InstanceId) of
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
             ok = bondy_oplog_peer_state:record_sync_complete(
-                Peer, InstanceId, Root
+                Peer, InstanceId, Frontier
             ),
             {ok, ok}
     end;
@@ -290,7 +290,9 @@ dispatch(InstanceId, get_catalogue_snapshot_init) when
                         {ok, no_snapshot} ->
                             {ok, no_snapshot};
                         {ok, {Watermark, Cursor}} ->
-                            {ok, {init, {Watermark, Cursor}}}
+                            {ok, {init, {Watermark, Cursor}}};
+                        {error, _} = Error ->
+                            Error
                     end
             end
     end;
@@ -307,11 +309,23 @@ dispatch(InstanceId, {get_catalogue_snapshot_next, Cursor}) when
                 {ok, {done, _} = Done} -> {ok, Done};
                 {error, _} = E -> E
             end
-    end.
+    end;
+dispatch(InstanceId, {release_catalogue_snapshot, Cursor}) when
+    is_binary(InstanceId), is_binary(Cursor)
+->
+    ok = bondy_oplog_catalogue_snapshot:release(InstanceId, Cursor),
+    {ok, ok}.
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+frontier_barrier(InstanceId) ->
+    case bondy_oplog_instance:await_apply(InstanceId) of
+        ok -> ok;
+        {error, timeout} -> {error, {frontier_unavailable, InstanceId}}
+    end.
 
 %% @private
 do_get_pages(InstanceId, Hashes) ->

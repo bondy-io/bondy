@@ -1,0 +1,90 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage{isabelle,isabellesym}
+\usepackage[a4paper,portrait,margin=1in]{geometry}
+
+% further packages required for unusual symbols (see also
+% isabellesym.sty), use only when needed
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+  %for \<leadsto>, \<box>, \<diamond>, \<sqsupset>, \<mho>, \<Join>,
+  %\<lhd>, \<lesssim>, \<greatersim>, \<lessapprox>, \<greaterapprox>,
+  %\<triangleq>, \<yen>, \<lozenge>
+
+%\usepackage{eurosym}
+  %for \<euro>
+
+%\usepackage[only,bigsqcap]{stmaryrd}
+  %for \<Sqinter>
+
+%\usepackage{eufrak}
+  %for \<AA> ... \<ZZ>, \<aa> ... \<zz> (also included in amssymb)
+
+%\usepackage{textcomp}
+  %for \<onequarter>, \<onehalf>, \<threequarters>, \<degree>, \<cent>,
+  %\<currency>
+
+% this should be the last package used
+\usepackage{pdfsetup}
+
+% urls in roman style, theory text in math-similar italics
+\urlstyle{rm}
+\isabellestyle{it}
+
+% for uniform font size
+%\renewcommand{\isastyle}{\isastyleminor}
+
+
+\begin{document}
+
+\title{A framework for establishing Strong Eventual Consistency for Conflict-free Replicated Data types}
+\author{Victor B.~F.~Gomes, Martin Kleppmann, Dominic P.~Mulligan,\\Alastair R. Beresford}
+\maketitle
+
+\begin{abstract}
+In this work, we focus on the correctness of Conflict-free Replicated Data Types (CRDTs), a class of algorithm that provides strong eventual consistency guarantees for replicated data.
+We develop a modular and reusable framework for verifying the correctness of CRDT algorithms.
+We avoid correctness issues that have dogged previous mechanised proofs in this area by including a network model in our formalisation, and proving that our theorems hold in all possible network behaviours.
+Our axiomatic network model is a standard abstraction that accurately reflects the behaviour of real-world computer networks.
+Moreover, we identify an abstract convergence theorem, a property of order relations, which provides a formal definition of strong eventual consistency.
+We then obtain the first machine-checked correctness theorems for three concrete CRDTs: the Replicated Growable Array, the Observed-Remove Set, and an Increment-Decrement Counter.
+\end{abstract}
+
+\tableofcontents
+
+% sane default for proof documents
+\parindent 0pt\parskip 0.5ex
+
+\section {Introduction}
+
+\emph{Strong eventual consistency} (SEC) is a model that strikes a compromise between strong and eventual consistency~\cite{Shapiro:2011un}.
+Informally, it guarantees that whenever two nodes have received the same set of messages---possibly in a different order---their view of the shared state is identical, and any conflicting concurrent updates must be merged automatically.
+Large-scale deployments of SEC algorithms include datacentre-based applications using the Riak distributed database \cite{Brown:2014hs}, and collaborative editing applications such as Google Docs \cite{DayRichter:2010tt}.
+Unlike strong consistency models, it is possible to implement SEC in decentralised settings without any central server or leader, and it allows local execution at each node to proceed without waiting for communication with other nodes.
+However, algorithms for achieving decentralised SEC are currently poorly understood: several such algorithms, published in peer-reviewed venues, were subsequently shown to violate their supposed guarantees \cite{Imine:2003ks,Imine:2006kn,Oster:2005vi}.
+Informal reasoning has repeatedly produced plausible-looking but incorrect algorithms, and there have even been examples of mechanised formal proofs of SEC algorithm correctness later being shown to be flawed.
+These mechanised proofs failed because, in formalising the algorithm, they made false assumptions about the execution environment.
+
+In this work we use the Isabelle/HOL proof assistant~\cite{DBLP:conf/tphol/WenzelPN08} to create a framework for reliably reasoning about the correctness of a particular class of decentralised replication algorithms.
+We do this by formalising not only the replication algorithms, but also the network in which they execute, allowing us to prove that the algorithm's assumptions hold in all possible network behaviours.
+We model the network using the axioms of \emph{asynchronous unreliable causal broadcast}, a well-understood abstraction that is commonly implemented by network protocols, and which can run on almost any computer network, including large-scale networks that delay, reorder, or drop messages, and in which nodes may fail.
+
+We then use this framework to produce machine-checked proofs of correctness for three Conflict-Free Replicated Data Types (CRDTs), a class of replication algorithms that ensure strong eventual consistency \cite{Shapiro:2011wy,Shapiro:2011un}.
+To our knowledge, this is the first machine-checked verification of SEC algorithms that explicitly models the network and reasons about all possible network behaviours.
+The framework is modular and reusable, making it easy to formulate proofs for new algorithms.
+We provide the first mechanised proofs of the Replicated Growable Array, the operation-based Observed-Remove Set, and the operation-based counter CRDT.
+
+% generated text of all theories
+\input{session}
+
+% optional bibliography
+\bibliographystyle{abbrv}
+\bibliography{root}
+
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:

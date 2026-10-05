@@ -29,7 +29,7 @@ case names the range it ran under on failure.
 %% The description `bondy_oplog_gc_scheduler:maybe_log_stall/3` logs,
 %% shortened, with its em dash.
 -define(STALL,
-    "Reclamation stalled " ?EM_DASH " a stalled member never ages out"
+    "GC stalled " ?EM_DASH " a stalled member never ages out"
 ).
 
 non_latin1_charlist_renders_as_text_test() ->

@@ -271,6 +271,7 @@ table's lifecycle tied to a supervisor child.
 -export([fast_path/1]).
 -export([ae_targets/1]).
 -export([frontier/1]).
+-export([claims/2]).
 -export([pending/1]).
 -export([frontier_and_pending/1]).
 -export([fused/1]).
@@ -297,6 +298,7 @@ table's lifecycle tied to a supervisor child.
 -export([merge_frontier/2]).
 -export([merge_applied/2]).
 -export([reap_frontier/2]).
+-export([reset_frontier/1]).
 -export([down/0]).
 -export([origins/0]).
 
@@ -640,6 +642,22 @@ frontier(InstanceId) ->
     end.
 
 ?DOC("""
+Whether the instance's applied frontier claims every entry of `VV` but a
+retired origin's, which `merge_frontier/2` never raises.
+""").
+-spec claims(instance_id(), #{binary() => non_neg_integer()}) -> boolean().
+
+claims(InstanceId, VV) when is_map(VV) ->
+    Frontier = frontier(InstanceId),
+    maps:fold(
+        fun(Origin, Seq, Acc) ->
+            Acc andalso Seq =< maps:get(Origin, Frontier, 0)
+        end,
+        true,
+        drop_retired(VV)
+    ).
+
+?DOC("""
 Returns the instance's PENDING applied seqs: `#{Origin => interval set}` of
 seqs this instance has folded that sit ABOVE the origin's prefix bound, because
 an earlier seq is still missing.
@@ -858,9 +876,9 @@ path that rebuilds a frontier goes through it. Two consequences follow:
   every reaped entry, on every restart, with nothing to catch it.
 
 The "only operation" half is a property of the call graph, not of this
-module: it holds while `merge_frontier/2` and `reap_frontier/2` are the only
-writers of `#entry.frontier`, which a grep confirms today and nothing
-enforces.
+module: it holds while `merge_frontier/2`, `merge_applied/2`,
+`reap_frontier/2` and `reset_frontier/1` are the only writers of
+`#entry.frontier`, which a grep confirms today and nothing enforces.
 
 The maxima must come from events this replica actually MATERIALISED: a
 per-origin maximum asserts an applied PREFIX, so a caller that passes a seq
@@ -879,7 +897,7 @@ its argument is one integer per origin.
 
 The remaining callers, and the predicate each carries:
 
-- `bondy_oplog_instance:restore_frontier/2` — this replica's own compaction
+- `bondy_oplog_instance:boot_frontier/2` — this replica's own compaction
   checkpoint, i.e. the same predicate, persisted.
 - `bondy_oplog_instance:finalize_catalogue_bootstrap/5` — a PEER's reported
   frontier, and the one caller that cannot derive its own predicate:
@@ -1059,8 +1077,8 @@ new_prefix(Prefix, _) ->
 ?DOC("""
 Removes `Origins` from `InstanceId`'s applied-frontier VV.
 
-The ONLY operation that moves the frontier down, and the only one that can
-break the join-semilattice discipline the convergence oracle rests on. It
+One of the two operations that move the frontier down, and the only one that
+can break the join-semilattice discipline the convergence oracle rests on. It
 is sound only for an origin EVERY member has retired —
 `bondy_oplog_origin_retirement` owns that check, and nothing else may call
 this. Reaping an entry a member still expects a deficit signal about takes
@@ -1105,6 +1123,28 @@ reap_frontier(InstanceId, Origins) when is_binary(InstanceId) ->
         {ok, Present} -> Present;
         no_change -> [];
         not_found -> []
+    end.
+
+?DOC("""
+Empties `InstanceId`'s applied frontier, both components, so that a full
+re-fold rebuilds it from what materialises. Called when a catalogue install may
+have replaced cells the frontier claims (`bondy_oplog_instance:rederive_projection/1`,
+and a boot that finds the instance's re-fold mark): the claims it drops are
+exactly the ones no cell may reflect any more
+(`proofs/tla/LiveRebootstrapRefold_MergeFrontier_3R_Safety.cfg`).
+
+Unlike `reap_frontier/2` it cannot break the oracle: an empty frontier claims
+nothing, so a peer reads this replica as behind, never as ahead, and the
+retired-origin ceiling holds because every later claim passes through
+`merge_frontier/2` or `merge_applied/2`. A no-op when the instance has no
+registry row.
+""").
+-spec reset_frontier(instance_id()) -> ok.
+
+reset_frontier(InstanceId) when is_binary(InstanceId) ->
+    case cas_frontier(InstanceId, fun(_) -> {{#{}, #{}}, ok} end) of
+        {ok, ok} -> ok;
+        not_found -> ok
     end.
 
 %% @private

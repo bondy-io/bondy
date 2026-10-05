@@ -1042,23 +1042,24 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin) ->
     Count.
 
 %% @private
-%% As `apply_cell_pairs_mux/4`, with per-origin prefix-closure enforcement: when
-%% `hold => true`, a remote origin's events beyond its first contiguity gap are
-%% HELD — excluded from the fold and therefore from the applied-frontier claim,
-%% which only ever names folded pairs. Returns `{CellsApplied, HeldCount}`; a
+%% As `apply_cell_pairs_mux/4`, delivering causally: when `hold => true`, a
+%% remote origin's events beyond its first contiguity gap, and every event whose
+%% context observed one, are HELD (`partition_contiguous/4`) — excluded from the
+%% fold and therefore from the applied-frontier claim, which only ever names
+%% folded pairs. Returns `{CellsApplied, HeldCount}`; a
 %% caller passing `hold => true` MUST NOT advance its replay cursor past this
 %% diff when `HeldCount > 0`, the unadvanced cursor being what re-presents the
-%% held events on the next replay (idempotent re-fold) until the gap fills or a
-%% catalogue rebootstrap re-anchors the cursor. Callers with no re-presentation
-%% path — the compaction catch-up, whose input is about to be truncated out of
-%% the MST, and `rederive_projection`, a one-shot full fold — MUST keep using
-%% `apply_cell_pairs_mux/4`: for them a hold is a silent drop.
+%% held events on the next replay until the gap fills or a
+%% catalogue rebootstrap re-anchors the cursor. `rederive_projection`, a
+%% one-shot full fold with no re-presentation path, MUST keep using
+%% `apply_cell_pairs_mux/4`: for it a hold is a silent drop. Either way,
+%% pairs the applied frontier already claims are skipped (`drop_claimed/2`).
 %%
 %% Local-origin events are never held: they are delivered in seq order
 %% by the local WAL drain, and holding a replica's own echoes could only
 %% park them behind a burned seq of its own counter.
 apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
-    {Foldable, Held} =
+    {Presented, Held} =
         case maps:get(hold, Opts, false) of
             true ->
                 partition_contiguous(
@@ -1067,6 +1068,7 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
             false ->
                 {drop_retired(Id, Pairs), 0}
         end,
+    Foldable = drop_claimed(Id, Presented),
     %% Detect on what will actually FOLD, after any hold: `prefix_hole`
     %% means a contiguity gap MATERIALISED into the projection, while a
     %% gap that was presented but held is `events_held`. With holding
@@ -1105,6 +1107,33 @@ fill_pairs(Pairs) ->
         end,
         Pairs
     ).
+
+%% @private
+%% Drops the pairs the applied frontier already claims, prefix or pending, so
+%% an event folds into a cell at most once. A re-fold is not idempotent once
+%% the cell has been reclaimed: stabilization discards an empty cell and its
+%% context, so a re-presented add whose remove was already folded would come
+%% back (`installed_enable_stays_disabled` in
+%% `bondy_oplog_bootstrap_rederive_test`; `proofs/tla/JoinInstall.tla`, the
+%% `ClaimSkip` configurations). It relies on every claim naming an event the
+%% projection holds (`ClaimSound` in `proofs/tla/LiveRebootstrapRefold.tla`).
+drop_claimed(Id, Pairs) ->
+    {VV, Pending} = bondy_oplog_registry:frontier_and_pending(Id),
+    [Pair || Pair <- Pairs, not is_claimed(pair_cell_key(Pair), VV, Pending)].
+
+%% @private
+is_claimed(undefined, _VV, _Pending) ->
+    false;
+is_claimed(Key, VV, Pending) ->
+    bondy_oplog_event:covered(Key, VV) orelse
+        bondy_connect_interval_set:is_element(
+            bondy_oplog_event:key_seq(Key),
+            maps:get(
+                bondy_oplog_event:key_origin(Key),
+                Pending,
+                bondy_connect_interval_set:new()
+            )
+        ).
 
 %% @private
 %% Drops pairs authored by a RETIRED origin before anything folds them.
@@ -1156,22 +1185,31 @@ drop_retired(Id, Pairs) ->
 
 %% @private
 %% Splits a replay batch into the pairs the fold may materialise and the
-%% count it must hold. Per remote origin, foldable seqs are everything at
-%% or below the applied frontier (idempotent re-folds) plus the
-%% contiguous run rising from it; the rest of that origin's seqs — and
-%% every pair carrying them — are held. The run is drawn from the ROUTABLE
-%% seqs only, so a bucket this shard has no table for stops it exactly as a
-%% missing seq does — both mean the cell cannot fold. Pairs with no
-%% per-origin seq claim (see `origin_seqs/2`) and local-origin pairs always
-%% fold; a `seq_fill` pair is seq-bearing like any other, so it both
-%% completes runs and can itself be held behind an unfilled earlier gap.
+%% count it must hold, so that the fold delivers causally: an event folds only
+%% when everything its stamped context observed is applied or folds before it
+%% in this batch, which key order then sequences
+%% (`proofs/isabelle/Aw_Kernel.thy`, `causal_hold_delivers_causally`).
+%%
+%% The batch folds in key order. Per remote origin it may fold up to a top: at
+%% first the end of the contiguous run rising from the applied frontier, drawn
+%% from the ROUTABLE seqs only, so a bucket this shard has no table for stops
+%% it exactly as a missing seq does. An event whose context names an origin
+%% beyond that origin's top lowers its own origin's top to below itself
+%% (`causal_tops/4`); the seqs above an origin's final top are held, with every
+%% pair carrying them.
+%% A retired origin never folds again, so it bounds nothing. Seqs at or below
+%% the applied frontier, pairs with no per-origin seq claim (see
+%% `origin_seqs/2`) and local-origin pairs are never held; a
+%% `seq_fill` pair is seq-bearing like any other, so it both completes runs
+%% and can itself be held behind an unfilled earlier gap.
 %%
 %% READS THE PREFIX ONLY, deliberately. Nothing pending ever continues the
 %% prefix, so the first missing seq is always `Prefix + 1` and every seq a
 %% pending-aware test would additionally fold sits above it. A hold is not a
 %% drop, so the two tests agree on the outcome and differ only in how many
 %% replays it takes.
-partition_contiguous(Id, Pairs, LocalOrigin, Source) ->
+partition_contiguous(Id, Pairs0, LocalOrigin, Source) ->
+    Pairs = lists:keysort(1, Pairs0),
     VV = bondy_oplog_registry:frontier(Id),
     OriginSeqs = maps:remove(
         LocalOrigin, origin_seqs(Pairs, fun pair_cell_key/1)
@@ -1179,40 +1217,32 @@ partition_contiguous(Id, Pairs, LocalOrigin, Source) ->
     Unroutable = maps:remove(
         LocalOrigin, origin_seqs(unroutable(Pairs, Source), fun pair_cell_key/1)
     ),
-    HeldSeqs = maps:filtermap(
+    RunTops = maps:map(
         fun(Origin, Seqs) ->
             Cur = maps:get(Origin, VV, 0),
-            News = lists:usort([S || S <- Seqs, S > Cur]),
             Blocked = maps:get(Origin, Unroutable, []),
             Run = contiguous_run(
-                Cur, [S || S <- News, not lists:member(S, Blocked)]
+                Cur,
+                lists:usort([
+                    S
+                 || S <- Seqs, S > Cur, not lists:member(S, Blocked)
+                ])
             ),
-            case News -- Run of
-                [] -> false;
-                Rest -> {true, Rest}
-            end
+            lists:last([Cur | Run])
         end,
         OriginSeqs
     ),
-    case map_size(HeldSeqs) of
-        0 ->
-            {Pairs, 0};
-        _ ->
-            {Foldable, Held} = lists:partition(
-                fun(Pair) ->
-                    case pair_cell_key(Pair) of
-                        undefined ->
-                            true;
-                        Key ->
-                            Origin = bondy_oplog_event:key_origin(Key),
-                            Seq = bondy_oplog_event:key_seq(Key),
-                            not lists:member(
-                                Seq, maps:get(Origin, HeldSeqs, [])
-                            )
-                    end
-                end,
-                Pairs
-            ),
+    Tops = causal_tops(
+        unapplied_contexts(Pairs, VV, LocalOrigin),
+        RunTops,
+        VV,
+        bondy_oplog_origin_bans:retired_set()
+    ),
+    case lists:partition(fun(Pair) -> not above_top(Pair, Tops) end, Pairs) of
+        {Foldable, []} ->
+            {Foldable, 0};
+        {Foldable, Held} ->
+            HeldSeqs = origin_seqs(Held, fun pair_cell_key/1),
             telemetry:execute(
                 [bondy_oplog, applier, events_held],
                 #{count => length(Held)},
@@ -1220,17 +1250,66 @@ partition_contiguous(Id, Pairs, LocalOrigin, Source) ->
             ),
             ?LOG_INFO(#{
                 description =>
-                    "Prefix-closure hold: this replay batch carries "
-                    "remote-origin events beyond a per-origin contiguity "
-                    "gap; they are excluded from the fold and the "
-                    "applied-frontier merge, and the caller keeps its "
-                    "replay cursor so they re-present until the gap "
-                    "fills or a rebootstrap repairs it.",
+                    "Causal hold: this replay batch carries remote-origin "
+                    "events beyond a per-origin contiguity gap, or events "
+                    "whose context observed one; they are excluded from the "
+                    "fold and the applied-frontier merge, and the caller "
+                    "keeps its replay cursor so they re-present until the "
+                    "gap fills or a rebootstrap repairs it.",
                 instance_id => Id,
                 held => HeldSeqs
             }),
             {Foldable, length(Held)}
     end.
+
+%% @private
+above_top(Pair, Tops) ->
+    case pair_cell_key(Pair) of
+        undefined ->
+            false;
+        Key ->
+            bondy_oplog_event:key_seq(Key) >
+                maps:get(bondy_oplog_event:key_origin(Key), Tops, infinity)
+    end.
+
+%% @private
+%% `{Origin, Seq, Context}` for each remote pair above the applied frontier
+%% whose event carries a stamped context (a version vector; `undefined` for a
+%% context-free CRDT).
+unapplied_contexts(Pairs, VV, LocalOrigin) ->
+    [
+        {Origin, Seq, Ctx}
+     || {_MstKey, {{cell_apply, _B, _K, _F}, Ctx, _Prev, _Sig}} = Pair <- Pairs,
+        is_list(Ctx),
+        Key <- [pair_cell_key(Pair)],
+        Origin <- [bondy_oplog_event:key_origin(Key)],
+        Origin =/= LocalOrigin,
+        Seq <- [bondy_oplog_event:key_seq(Key)],
+        Seq > maps:get(Origin, VV, 0)
+    ].
+
+%% @private
+%% Lowers each origin's top to below the first of its events, in key order,
+%% whose context names a seq above another origin's top. An origin outside
+%% `Tops` is bounded by the applied frontier. One pass suffices: whatever an
+%% event observed sorts before it (the HLC respects happens-before, H3 of
+%% `proofs/isabelle/Oplog_Model.thy`), so every top it is checked against is
+%% already final.
+causal_tops(Candidates, Tops0, VV, Retired) ->
+    lists:foldl(
+        fun({Origin, Seq, Ctx}, Tops) ->
+            Top = fun(P) -> maps:get(P, Tops, maps:get(P, VV, 0)) end,
+            Observed = fun({P, N}) ->
+                not is_map_key(P, Retired) andalso N > Top(P)
+            end,
+            case Seq =< Top(Origin) andalso lists:any(Observed, Ctx) of
+                true -> Tops#{Origin => Seq - 1};
+                false -> Tops
+            end
+        end,
+        Tops0,
+        Candidates
+    ).
 
 %% @private
 %% The pairs whose bucket does not resolve to a cell-apply context, so the

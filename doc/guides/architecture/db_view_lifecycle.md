@@ -14,7 +14,7 @@ flowchart LR
     CMP --> GAPRISK["A lagging peer's<br/>needed pages now<br/>exist nowhere"]
     GAPRISK --> HOLD["Prefix hold +<br/>honest frontier"]
     HOLD --> GAP["Frontier-gap verdicts"]
-    GAP -->|repeated| RB["Catalogue rebootstrap:<br/>install cells + adopt frontier"]
+    GAP -->|repeated| RB["Catalogue rebootstrap:<br/>install cells + re-fold + adopt frontier"]
     RB --> CONV["Converged again"]
 ```
 
@@ -26,7 +26,7 @@ flowchart LR
 | Compaction | Truncates MST history at or below the certified point and advances the watermark. History is redundant below the frontier by definition — every replica already folded it — so compaction reclaims index and page space without touching values. |
 | Reclamation | The per-cell half: each table's CRDT answers, through `stabilize/2`, what remains of a cell once nothing older can arrive — discard a tombstone, reduce ordering metadata, or keep. The license's exact boundary (clock-governed reductions only; context-governed ones need more than this frontier certifies) is stated and mechanically checked — see [deletion and reclamation](../database/deletion_and_reclamation.md) and [rationale](db_rationale.md). |
 | Who confirms | On a durable database every cluster member, reachable or not, until a membership act retires it: a down or partitioned member holds compaction and reclamation back, and the writes each side of a partition accepted alone survive it. The in-memory `registry` database, whose history must not grow while a member is down, compacts on the peers heard from within `db.compaction.peer_timeout`. The deliberate consequence there: a long-silent node's needed registry history can be compacted away everywhere. |
-| Repair (rebootstrap) | The recovery path for any truncation that outruns a peer: the registry's recency filter and retention, an unservable-root rebuild, or the merge dropping an event below the watermark. The returning node's holds keep its frontier honest; the persistent deficit produces gap verdicts; repeated verdicts schedule a catalogue rebootstrap, which installs the peers' *materialised cells* — values survive compaction even though events do not — and adopts their frontier. The node's own events survive throughout in its local log. |
+| Repair (rebootstrap) | The recovery path for any truncation that outruns a peer: the registry's recency filter and retention, an unservable-root rebuild, or the merge dropping an event below the watermark. The returning node's holds keep its frontier honest; the persistent deficit produces gap verdicts; repeated verdicts schedule a catalogue rebootstrap, which installs the peers' *materialised cells* — values survive compaction even though events do not — re-folds the node's own logged events over them, and only then adopts their frontier. The node's own events survive throughout in its local log, and a crash mid-repair re-folds them at restart. |
 | Bootstrap | The same install path, used at first join: a fresh instance takes a catalogue snapshot rather than paging through history it never had. |
 
 ## An episode, end to end
@@ -40,9 +40,10 @@ pulled, and keep writing. The node returns:
    bursts) — no state ever skips operations.
 2. Its frontier, refusing to count held events, stays behind; every round
    ends in a gap verdict.
-3. The second verdict schedules rebootstrap per affected shard; cells and
-   frontier install; held events at or below the adopted frontier become
-   ordinary re-folds.
+3. The second verdict schedules rebootstrap per affected shard; cells
+   install, the node's own events re-fold over them, and the frontier is
+   adopted; held events at or below the adopted frontier become ordinary
+   re-folds.
 4. Frontiers equalise; metrics go quiet. Elapsed, in the validated record:
    about three minutes from restart, under full load.
 

@@ -263,12 +263,8 @@ handle_cast(tick, State) ->
 handle_cast({tick_for, InstanceId}, State) ->
     {noreply, fire_async(InstanceId, State)};
 handle_cast({stalled, InstanceId, Reason}, State) ->
-    %% A trigger reported "no stability, reclaimed nothing" for this
-    %% instance. Log it — rate-limited per instance, because a genuinely
-    %% stalled member re-reports on every tick — naming the members holding
-    %% stability down: this is the difference between "GC is working" and
-    %% "GC has been stalled for a week on a decommissioned node nobody
-    %% retired".
+    %% Rate-limited per instance, because a member holding GC re-reports on
+    %% every tick.
     {noreply, maybe_log_stall(InstanceId, Reason, State)};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -396,9 +392,8 @@ fire_async(InstanceId, #state{in_flight = InFlight} = State) ->
 %% Runs the trigger and REPORTS its outcome — a permanently failing or
 %% permanently stalled instance must produce a scheduler-level signal, not
 %% vanish into a discarded return value. Every run emits
-%% `[bondy_oplog, scheduler, gc, trigger_outcome]`; a reclamation-style
-%% "no stability" outcome is additionally cast back to the scheduler for
-%% the rate-limited stall log.
+%% `[bondy_oplog, scheduler, gc, trigger_outcome]`; every `{error, _}` is
+%% additionally cast back to the scheduler for the rate-limited stall log.
 run_trigger(Name, InstanceId, Fun) when is_function(Fun, 1) ->
     Outcome =
         try Fun(InstanceId) of
@@ -428,7 +423,7 @@ run_trigger(Name, InstanceId, Fun) when is_function(Fun, 1) ->
     case Outcome of
         {error, Stall} ->
             %% EVERY stall reason is reported — no_frontier included: a
-            %% down-but-not-retired member whose confirmed root has gone
+            %% down-but-not-retired member whose recorded frontier has gone
             %% stale stalls as no_frontier, and that must not be silent.
             gen_server:cast(Name, {stalled, InstanceId, Stall});
         _ ->
@@ -469,9 +464,9 @@ maybe_log_stall(InstanceId, Reason, State) ->
                 end,
             ?LOG_WARNING(#{
                 description =>
-                    "Reclamation stalled: no causal stability for this "
-                    "instance, nothing reclaimed. See member_status for "
-                    "the member(s) holding stability down (highest "
+                    "GC stalled: the trigger returned an error for this "
+                    "instance. For reason unconfirmed or no_frontier, a "
+                    "member is holding it: see member_status (highest "
                     "last_sync_age_ms, or never_synced). Bring them back "
                     "online, or retire them with a deliberate cluster "
                     "membership removal — a stalled member never ages "
@@ -497,7 +492,7 @@ maybe_log_stall(InstanceId, Reason, State) ->
 %% Per-member sync recency for the stall log: the operator's call to
 %% action requires NAMING the member holding stability down, which the
 %% stall reason alone does not always do (a down member with a stale
-%% confirmed root stalls as `no_frontier`, naming nobody). `never_synced`
+%% recorded frontier stalls as `no_frontier`, naming nobody). `never_synced`
 %% means the member has no peer-state entry for this instance at all
 %% (e.g. it has been down since this node booted). Runs only on the
 %% rate-limited log path; total.

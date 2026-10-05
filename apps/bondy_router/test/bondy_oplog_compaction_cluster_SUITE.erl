@@ -1151,8 +1151,8 @@ do_stale_sync_and_compact_main(Peer) ->
 do_stale_sync_and_truncate_main(Peer) ->
     sync_then_main(Peer, fun(I) ->
         bondy_oplog_instance:compact(I, [
-            S
-         || #{peer := P} = S <-
+            F
+         || #{peer := P, frontier := F} <-
                 bondy_oplog_peer_state:get_instance_peer_states(I, 0),
             P =:= Peer
         ])

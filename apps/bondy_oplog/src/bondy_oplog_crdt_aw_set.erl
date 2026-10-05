@@ -103,6 +103,7 @@ not the dot-store itself, so the substrate stores a value column.
 -export([order_independent/0]).
 -export([batchable/0]).
 -export([context_of/1]).
+-export([dotted_context/0]).
 -export([reap_origins/2]).
 -export([encode_state/1]).
 -export([decode_state/1]).
@@ -249,6 +250,12 @@ stamps into the next write's `meta`.
 
 context_of({_Entries, CC, _Hlc}) ->
     CC.
+
+-doc "The context grows by exactly each applied operation's context and dot.".
+-spec dotted_context() -> true.
+
+dotted_context() ->
+    true.
 
 -doc """
 Reap the causal-context entries of permanently-retired origins (the

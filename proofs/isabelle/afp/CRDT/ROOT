@@ -1,0 +1,14 @@
+chapter AFP
+
+session CRDT = HOL +
+  options [timeout = 600]
+  sessions
+    "HOL-Library"
+  theories
+    Network
+    RGA
+    Counter
+    ORSet
+  document_files
+    "root.tex"
+    "root.bib"

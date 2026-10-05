@@ -3,23 +3,16 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PR-G op-replay gate: a LIVE replica re-bootstrapping from a peer must
-%% NOT lose a per-Origin-accumulating CRDT's contributions.
+%% A LIVE replica re-bootstrapping from a peer must lose none of its own
+%% events and claim none it does not hold.
 %%
-%% The catalogue snapshot install is `replace` (skip-if-older by HLC).
-%% That is correct for a register (the higher-HLC value wins) but WRONG for
-%% a counter: replacing a counter cell with the peer's higher-HLC state
-%% drops the contributions of any Origin that state does not carry. What
-%% restores them is the post-bootstrap full re-derive (`op-replay`), which
-%% re-folds the complete local+peer event set.
-%%
-%% This pins the convergence: two live replicas each increment the same
-%% counter cell under a distinct Origin, then one re-bootstraps from the
-%% other. The peer's cell HLC is forced higher so the replace genuinely
-%% INSTALLS (clobbers) the local cell (verified: installed=1, not skipped),
-%% and the result must still be the SUM. The post-bootstrap op-replay (a
-%% full re-fold of the merged MST) is what guarantees this in general,
-%% independent of how a cell's events are laid out across MST pages.
+%% The catalogue install replaces every cell the peer ships, which drops the
+%% contributions of any origin the peer's state does not carry. The rederive
+%% that follows re-folds the local MST over the installed cells before the
+%% peer's frontier is adopted, and a durable re-fold mark carries that duty
+%% across a crash. The order, the mark and the serve guard are checked in
+%% `proofs/tla/LiveRebootstrapRefold.tla`; these tests replay its
+%% counterexamples on the real code.
 
 -module(bondy_oplog_bootstrap_rederive_test).
 
@@ -51,10 +44,10 @@ rederive_test_() ->
             {timeout, 30, fun claim_a_later_round_then_rederive_add/0}},
         {"aw_set, claim B: the installed context covers the removed dot",
             {timeout, 30, fun claim_b_install_covers_removed_dot/0}},
-        {"aw_set, claim B: the installed context misses an unseen local dot",
-            {timeout, 30, fun claim_b_install_misses_unseen_dot/0}},
         {"aw_set, a held add folds after a later add that saw it",
             {timeout, 30, fun held_add_folds_after_a_later_add_that_saw_it/0}},
+        {"aw_set, fused: a rederive holds a dependent of a held add",
+            {timeout, 30, fun fused_rederive_holds_a_dependent/0}},
         {"aw_set, a held add folds after its remove",
             {timeout, 30, fun held_add_folds_after_its_remove/0}},
         {"aw_set, a member silent past the peer timeout holds compaction",
@@ -63,8 +56,43 @@ rederive_test_() ->
             {timeout, 30, fun partitioned_pairs_keep_their_writes/0}},
         {"aw_set, a node cut off alone keeps its unsynced write",
             {timeout, 30, fun cut_off_node_keeps_its_unsynced_write/0}},
-        {"aw_set, an event a peer drops at its watermark leaves a gap",
-            {timeout, 30, fun watermark_door_leaves_a_gap/0}}
+        {"aw_set, a folded add that re-enters the log stays removed",
+            {timeout, 30, fun folded_add_reentering_stays_removed/0}},
+        {"aw_set, fused: the door keeps an event a member lacks",
+            {timeout, 30, fun fused_door_keeps_what_a_member_lacks/0}},
+        {"aw_set, applier: the door keeps an event a member lacks",
+            {timeout, 30, fun applier_door_keeps_what_a_member_lacks/0}},
+        {"aw_set, applier: a pair that both compacted stops re-shipping",
+            {timeout, 30, fun compacted_pair_stops_reshipping/0}},
+        {"aw_set, a local cell with the higher HLC still takes the peer's",
+            {timeout, 30, fun newer_local_cell_takes_the_peers/0}},
+        {"aw_set, durable: a crash after the install keeps the local add",
+            {timeout, 60, fun crash_after_install_keeps_local_add/0}},
+        {"aw_set, durable: a crash before finalize keeps no stale claim",
+            {timeout, 60, fun crash_before_finalize_keeps_no_stale_claim/0}},
+        {"aw_set, durable: a write after a lost fold keeps the folded add",
+            {timeout, 60, fun write_after_lost_fold_keeps_the_add/0}},
+        {"aw_set, durable: nothing is served before the boot replay",
+            {timeout, 60, fun nothing_served_before_the_boot_replay/0}},
+        {"aw_set, a stream that fails after the install folds the add back",
+            {timeout, 30, fun failed_stream_folds_the_add_back/0}},
+        {"aw_set, a failed install write adopts no frontier",
+            {timeout, 30, fun failed_install_write_adopts_nothing/0}},
+        {"ew_flag, an installed enable stays disabled across a sweep",
+            {timeout, 30, fun installed_enable_stays_disabled/0}},
+        {"aw_set, a source that is installing refuses to serve",
+            {timeout, 30, fun installing_source_refuses_to_serve/0}},
+        {"aw_set, a replica serving a snapshot does not install one",
+            {timeout, 30, fun serving_replica_does_not_install/0}},
+        {"aw_set, an expired cursor does not hold the install",
+            {timeout, 30, fun expired_cursor_does_not_hold_the_install/0}},
+        {"aw_set, an expired cursor is not renewed after the mark",
+            {timeout, 30, fun expired_cursor_is_not_renewed_after_the_mark/0}},
+        {"aw_set, a cursor open before the serve check holds the install",
+            {timeout, 30,
+                fun cursor_open_before_the_serve_check_holds_the_install/0}},
+        {"aw_set, an install holds until its claims cover the source",
+            {timeout, 30, fun install_holds_until_claims_cover_source/0}}
     ]}.
 
 setup() ->
@@ -82,21 +110,15 @@ cleanup(_) ->
     ok.
 
 %% `CrdtMod = undefined` exercises the legacy fold kernel; the native
-%% `bondy_oplog_crdt_pn_counter` twin exercises the flipped op-based kernel
-%% (the default after PR-G). The rederive mechanism is kernel-agnostic, so
-%% both must converge identically.
+%% `bondy_oplog_crdt_pn_counter` twin exercises the op-based kernel. The
+%% rederive mechanism is kernel-agnostic, so both must converge identically.
 converges_after_clobber(CrdtMod) ->
     {Peer, _} = setup_counter_instance(CrdtMod),
     {Local, LocalEntry} = setup_counter_instance(CrdtMod),
 
     %% Each live replica increments the SAME counter cell under its own
-    %% Origin. Local writes once; Peer writes TWICE (the second is an HLC-
-    %% bumping `+0` no-op), so Peer's cell HLC is deterministically higher
-    %% than Local's and wins the skip-if-older `replace` — genuinely
-    %% INSTALLING (clobbering) Local's +5 in the projection (installed=1,
-    %% not skipped). The post-bootstrap op-replay (full re-fold of the
-    %% merged MST) is what guarantees convergence to the SUM in general,
-    %% independent of how a cell's events are laid out across MST pages.
+    %% Origin, so the install replaces Local's +5 with Peer's cell and only
+    %% the rederive brings it back.
     ok = inc(Local, 5),
     ok = inc(Peer, 3),
     ok = inc(Peer, 0),
@@ -196,28 +218,36 @@ claim_b_install_covers_removed_dot() ->
     teardown(Peer),
     teardown(Local).
 
-claim_b_install_misses_unseen_dot() ->
-    {Peer, Local, LocalEntry} = local_add_unseen_by_peer(),
-    LocalDot = local_dot(Local),
-    {error, _} = failing_bootstrap(Local, Peer),
-    ?assertEqual([<<"b">>, <<"c">>], aw_set_value(LocalEntry)),
-    ?assertNot(installed_context_covers(LocalEntry, LocalDot)),
-    teardown(Peer),
-    teardown(Local).
-
 %% Local cannot route Origin's first event, so the contiguity hold parks
-%% Origin's add of `a` while Writer's later event, whose context covers that
-%% add, folds. The add then folds second, once the table is routable.
+%% Origin's add of `a`, and Writer's add of `b`, whose context covers that add,
+%% is held with it: nothing folds before what it observed. Once the table is
+%% routable both fold, in key order.
 held_add_folds_after_a_later_add_that_saw_it() ->
     {Local, LocalEntry, ADot} = held_add_after(add, <<"b">>),
-    ?assertEqual([<<"b">>], aw_set_value(LocalEntry)),
-    ?assert(installed_context_covers(LocalEntry, ADot)),
+    ?assertEqual([], aw_set_value(LocalEntry)),
+    ?assertNot(installed_context_covers(LocalEntry, ADot)),
     ok = register_other_table(Local),
     ?assertEqual([<<"a">>, <<"b">>], aw_set_value(LocalEntry)).
 
-held_add_folds_after_its_remove() ->
-    {Local, LocalEntry, _ADot} = held_add_after(rmv, <<"a">>),
+%% On fused instances a rederive while the gap is open folds through the same
+%% causal hold, so `b` stays held and `a` is not marked seen ahead of its fold.
+fused_rederive_holds_a_dependent() ->
+    {Local, LocalEntry, ADot} = held_add_after(add, <<"b">>, #{
+        fused => true, wal_backend => mem, durability => ephemeral, seed => true
+    }),
     ?assertEqual([], aw_set_value(LocalEntry)),
+    ok = rederive(Local),
+    ?assertEqual([], aw_set_value(LocalEntry)),
+    ?assertNot(installed_context_covers(LocalEntry, ADot)),
+    ok = register_other_table(Local),
+    ok = rederive(Local),
+    ?assertEqual([<<"a">>, <<"b">>], aw_set_value(LocalEntry)).
+
+%% Writer's remove of `a` observed Origin's held add, so it is held with it.
+held_add_folds_after_its_remove() ->
+    {Local, LocalEntry, ADot} = held_add_after(rmv, <<"a">>),
+    ?assertEqual([], aw_set_value(LocalEntry)),
+    ?assertNot(installed_context_covers(LocalEntry, ADot)),
     ok = register_other_table(Local),
     ?assertEqual([], aw_set_value(LocalEntry)).
 
@@ -323,15 +353,40 @@ cut_off_node_keeps_its_unsynced_write() ->
     teardown(Lone),
     teardown(Peer).
 
+%% Peer folds Other's add of `a`, removes it, and truncates the add on Other's
+%% confirmation. The add comes back on Peer's next pull and, with no member to
+%% confirm it, the door keeps it, so the applier's replay is handed an event it
+%% has already folded. Folding it again would restore `a`.
+folded_add_reentering_stays_removed() ->
+    {Peer, PeerEntry} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Other, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    ok = apply_op(Other, {add, <<"a">>}),
+    ok = converge(Peer, Other),
+    ok = apply_ctx_op(Peer, {rmv, <<"a">>}),
+    ?assertEqual([], aw_set_value(PeerEntry)),
+    [Witness] = [
+        F
+     || #{peer := P, frontier := F} <-
+            bondy_oplog_peer_state:get_instance_peer_states(Peer, 0),
+        P =:= Other
+    ],
+    ?assertMatch(
+        {ok, {compacted, _, 1}}, bondy_oplog_instance:compact(Peer, [Witness])
+    ),
+    ok = pull(Peer, Other),
+    ?assertEqual(2, bondy_oplog:size(Peer)),
+    ?assertEqual([], aw_set_value(PeerEntry)),
+    teardown(Peer),
+    teardown(Other).
+
 %% Replay of `ConfirmedCompaction_RootVV3_Door_NoGap.cfg` on fused instances,
-%% every member reachable. Middle compacts its own `b` once Left and Right
-%% hold it, then pulls Left's earlier `a`: `a` sorts below Middle's watermark,
-%% so the merge applies it and drops it from Middle's tree. Right, which has
-%% not seen `a`, must not be told it is behind a peer that cannot ship it.
-watermark_door_leaves_a_gap() ->
+%% every member reachable. Middle compacts its own `b` once Left and Right hold
+%% it, then pulls Left's earlier `a`, which sorts below Middle's watermark.
+%% Right has not confirmed `a`, so Middle keeps it and ships it to Right.
+fused_door_keeps_what_a_member_lacks() ->
     {Left, _} = setup_fused_instance(),
     {Middle, _} = setup_fused_instance(),
-    {Right, _} = setup_fused_instance(),
+    {Right, RightEntry} = setup_fused_instance(),
     ok = apply_op(Left, {add, <<"a">>}),
     ok = apply_op(Middle, {add, <<"b">>}),
     ok = pull(Left, Middle),
@@ -342,17 +397,489 @@ watermark_door_leaves_a_gap() ->
     ),
     ok = pull(Middle, Left),
     LeftOrigin = bondy_oplog_registry:origin(Left),
-    ?assertEqual(0, bondy_oplog:size(Middle)),
     ?assertEqual(
         1, maps:get(LeftOrigin, bondy_oplog_instance:frontier(Middle))
     ),
-    ?assertEqual(
-        0, maps:get(LeftOrigin, bondy_oplog_instance:frontier(Right), 0)
-    ),
-    ?assertMatch({ok, _}, bondy_oplog_sync_session:run(Right, Middle, #{})),
+    ?assert(bondy_oplog:size(Middle) > 0),
+    ok = pull(Right, Middle),
+    ?assertEqual([<<"a">>, <<"b">>], aw_set_value(RightEntry)),
     teardown(Left),
     teardown(Middle),
     teardown(Right).
+
+%% The same on applier-backed instances, the main database's shape, where the
+%% door holds `a` until the applier folds it and the compaction cycle is the
+%% next site that may truncate it. Once Right confirms `a`, Middle drops it.
+applier_door_keeps_what_a_member_lacks() ->
+    {Left, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Middle, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Right, RightEntry} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    Cluster = [Left, Middle, Right],
+    bondy_oplog_test_helpers:with_cluster(Cluster, fun() ->
+        ok = apply_op(Left, {add, <<"a">>}),
+        ok = apply_op(Middle, {add, <<"b">>}),
+        ok = pull(Left, Middle),
+        ok = pull(Right, Middle),
+        ?assertMatch(
+            {ok, {compacted, _, _}},
+            bondy_oplog_test_helpers:compact_among(Middle, Cluster)
+        ),
+        ok = pull(Middle, Left),
+        _ = bondy_oplog_test_helpers:compact_among(Middle, Cluster),
+        ?assertEqual(2, bondy_oplog:size(Middle)),
+        ok = pull(Right, Middle),
+        ?assertEqual([<<"a">>, <<"b">>], aw_set_value(RightEntry)),
+        ok = pull(Middle, Right),
+        ?assertMatch(
+            {ok, {compacted, _, _}},
+            bondy_oplog_test_helpers:compact_among(Middle, Cluster)
+        ),
+        ?assertEqual(0, bondy_oplog:size(Middle))
+    end),
+    teardown(Left),
+    teardown(Middle),
+    teardown(Right).
+
+%% `ConfirmedCompaction_RootVV2_Door_Confirmed_Live.cfg`: once both members have
+%% confirmed `e`, a pull that brings it back below the watermark drops it, so
+%% the two trees empty instead of re-shipping `e` to each other.
+compacted_pair_stops_reshipping() ->
+    {A, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {B, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    Cluster = [A, B],
+    bondy_oplog_test_helpers:with_cluster(Cluster, fun() ->
+        ok = apply_op(A, {add, <<"e">>}),
+        ok = converge(A, B),
+        ?assertMatch(
+            {ok, {compacted, _, _}},
+            bondy_oplog_test_helpers:compact_among(A, Cluster)
+        ),
+        ok = pull(A, B),
+        ?assertEqual(0, bondy_oplog:size(A)),
+        ?assertMatch(
+            {ok, {compacted, _, _}},
+            bondy_oplog_test_helpers:compact_among(B, Cluster)
+        ),
+        ok = pull(B, A),
+        ok = pull(A, B),
+        ?assertEqual({0, 0}, {bondy_oplog:size(A), bondy_oplog:size(B)})
+    end),
+    teardown(A),
+    teardown(B).
+
+%% Local adds `a` after Peer's `b` and never pulls it, so Local's cell has the
+%% higher HLC. The re-bootstrap's trailing round fails, so `b` reaches Local
+%% only through the install, and Local adopts Peer's frontier, which claims it.
+newer_local_cell_takes_the_peers() ->
+    {Peer, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Local, LocalEntry} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    ok = apply_op(Peer, {add, <<"b">>}),
+    ok = apply_op(Local, {add, <<"a">>}),
+    {error, _} = failing_bootstrap(Local, Peer),
+    ok = drain(Local),
+    ?assertEqual([<<"a">>, <<"b">>], aw_set_value(LocalEntry)),
+    teardown(Peer),
+    teardown(Local).
+
+%% As `keeps_local_add_when_the_trailing_round_fails/0`, on a durable Local whose
+%% checkpoint already claims its add, and which crashes once the install has
+%% replaced its cell. The restart must fold the add back, and the instance
+%% must serve again once a re-bootstrap has settled.
+crash_after_install_keeps_local_add() ->
+    with_dir(fun(Dir) ->
+        {Peer, Local, LocalEntry} = local_add_unseen_by_peer(durable_opts(Dir)),
+        ok = bondy_oplog_instance:persist_frontier(Local),
+        {error, _} = bootstrap_with(Local, Peer, fun
+            (Src, {get_catalogue_snapshot_next, _}, Pass) when Src =:= Peer ->
+                crash_when_done(Local, Pass());
+            (_, _, Pass) ->
+                Pass()
+        end),
+        ok = drain(Local),
+        ?assertEqual([<<"a">>, <<"b">>, <<"c">>], aw_set_value(LocalEntry)),
+        ok = rebootstraps(Local, Peer),
+        teardown(Peer),
+        teardown(Local)
+    end).
+
+%% Local holds Early's `b` only through an install, and its checkpoint claims
+%% it. A second re-bootstrap installs Late's cell, which lacks `b`, and Local
+%% crashes before finalizing it. After the restart, Local's frontier must not
+%% claim `b` unless its cell has it.
+crash_before_finalize_keeps_no_stale_claim() ->
+    with_dir(fun(Dir) ->
+        {Early, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+        {Late, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+        {Local, LocalEntry} = setup_instance(
+            aw_set, bondy_oplog_crdt_aw_set, durable_opts(Dir)
+        ),
+        ok = apply_op(Early, {add, <<"b">>}),
+        {error, _} = failing_bootstrap(Local, Early),
+        EarlyOrigin = bondy_oplog_registry:origin(Early),
+        ?assertEqual(1, maps:get(EarlyOrigin, frontier(Local), 0)),
+        ok = apply_op(Late, {add, <<"c">>}),
+        ok = meck:new(bondy_oplog_instance, [passthrough, no_link]),
+        try
+            ok = meck:expect(
+                bondy_oplog_instance,
+                finalize_catalogue_bootstrap,
+                fun(_, _, _, _, _) ->
+                    crash(Local),
+                    {error, crashed}
+                end
+            ),
+            {error, _} = bondy_oplog_sync_session:bootstrap_catalogue(
+                Local, Late, #{}
+            )
+        after
+            meck:unload(bondy_oplog_instance)
+        end,
+        ok = drain(Local),
+        ?assert(
+            maps:get(EarlyOrigin, frontier(Local), 0) =:= 0 orelse
+                lists:member(<<"b">>, aw_set_value(LocalEntry))
+        ),
+        teardown(Early),
+        teardown(Late),
+        teardown(Local)
+    end).
+
+%% An OS crash loses the projection write of Local's add while its MST and
+%% committed WAL offset keep the event, and its claim falls back to the empty
+%% checkpoint. Local then takes a write before its boot replay has run, whose
+%% dot covers the add's; the add must still be folded
+%% (`proofs/tla/JoinInstall_Join_ClaimSkip_Crash_DurableStability_3E.cfg`).
+write_after_lost_fold_keeps_the_add() ->
+    with_dir(fun(Dir) ->
+        {Local, Entry} = setup_instance(
+            aw_set,
+            bondy_oplog_crdt_aw_set,
+            (durable_opts(Dir))#{
+                applier => #{drain_gated => true, commit_every => 1}
+            }
+        ),
+        ok = bondy_oplog_test_helpers:open_gate(Local),
+        ok = apply_op(Local, {add, <<"a">>}),
+        ok = lose_cell(Local, Entry),
+        crash(Local),
+        _ = bondy_oplog:append(Local, {cell_apply, ?B, ?K, {add, <<"b">>}}),
+        ok = bondy_oplog_test_helpers:open_gate(Local),
+        ok = drain(Local),
+        ?assertEqual([<<"a">>, <<"b">>], aw_set_value(Entry)),
+        teardown(Local)
+    end).
+
+%% A crash loses Local's claim on its add but keeps the cell that reflects
+%% it. Until the boot replay re-folds the add, a peer installing that cell
+%% would adopt a frontier without the add and lose it to a later sweep
+%% (`proofs/tla/JoinInstall_Session_Join_ClaimSkip_Crash_HlcStability_NoReplayed_RefoldFirst_3E.cfg`).
+%% Neither a new session, nor one opened before the crash, nor the frontier
+%% request is answered until the replay has run. With the claim kept, nothing
+%% is owed and the restarted instance serves with its drain still gated.
+nothing_served_before_the_boot_replay() ->
+    {error, _} = serves_after_crash(fun bondy_oplog_registry:reset_frontier/1),
+    ok = serves_after_crash(fun(_) -> ok end).
+
+serves_after_crash(LoseClaim) ->
+    with_dir(fun(Dir) ->
+        {Local, _Entry} = setup_instance(
+            aw_set,
+            bondy_oplog_crdt_aw_set,
+            (durable_opts(Dir))#{applier => #{drain_gated => true}}
+        ),
+        ok = bondy_oplog_test_helpers:open_gate(Local),
+        ok = apply_op(Local, {add, <<"a">>}),
+        {ok, {init, {_W, Cursor}}} =
+            request(Local, get_catalogue_snapshot_init),
+        ok = LoseClaim(Local),
+        crash(Local),
+        Served = bondy_oplog_instance:serving(Local),
+        case Served of
+            ok ->
+                ?assertMatch(
+                    {ok, _}, bondy_oplog_instance:durable_frontier(Local)
+                );
+            {error, {refold_owed, Local}} = Refused ->
+                ?assertEqual(
+                    Refused, bondy_oplog_instance:durable_frontier(Local)
+                ),
+                ?assertEqual(
+                    Refused, request(Local, get_catalogue_snapshot_init)
+                ),
+                ?assertEqual(
+                    {error, cursor_expired},
+                    request(Local, {get_catalogue_snapshot_next, Cursor})
+                ),
+                ok = bondy_oplog_test_helpers:open_gate(Local),
+                ?assertEqual(ok, bondy_oplog_instance:serving(Local))
+        end,
+        teardown(Local),
+        Served
+    end).
+
+%% What an OS crash leaves when it loses the cell's unsynced write: neither
+%% the cell, its cached copy, nor the claim on its events.
+lose_cell(Id, Entry) ->
+    ok = bondy_oplog_registry:reset_frontier(Id),
+    ok = bondy_oplog_cell_apply:invalidate_cache(
+        bondy_oplog_core_registry:entry_cache_adapter(Entry),
+        bondy_oplog_core_registry:entry_cache_handle(Entry),
+        ?B,
+        ?K
+    ),
+    Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
+    Adapter:delete(
+        bondy_oplog_core_registry:entry_projection_handle(Entry), ?B, ?K
+    ).
+
+%% The stream fails once the install has replaced Local's cell, as a source
+%% that started its own re-bootstrap would make it. The failed session must
+%% fold Local's add back, and Local must serve again once a re-bootstrap has
+%% settled.
+failed_stream_folds_the_add_back() ->
+    {Peer, Local, LocalEntry} = local_add_unseen_by_peer(),
+    {error, cursor_expired} = bootstrap_with(Local, Peer, fun
+        (Src, {get_catalogue_snapshot_next, _}, Pass) when Src =:= Peer ->
+            case Pass() of
+                {ok, {done, _}} -> {error, cursor_expired};
+                Other -> Other
+            end;
+        (_, _, Pass) ->
+            Pass()
+    end),
+    ok = drain(Local),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], aw_set_value(LocalEntry)),
+    ok = rebootstraps(Local, Peer),
+    teardown(Peer),
+    teardown(Local).
+
+%% Local's projection refuses the install's first write, and the trailing
+%% round would fail too. The session must end on the write error with Local's
+%% frontier not claiming Peer's `c`, which its cell lacks, and the re-bootstrap
+%% that follows must deliver it.
+failed_install_write_adopts_nothing() ->
+    {Peer, Local, LocalEntry} = local_add_unseen_by_peer(),
+    PeerOrigin = bondy_oplog_registry:origin(Peer),
+    Writer = bondy_oplog_registry:applier_pid(Local),
+    Writes = atomics:new(1, []),
+    ok = meck:new(bondy_oplog_projection_ets, [passthrough, no_link]),
+    Result =
+        try
+            ok = meck:expect(bondy_oplog_projection_ets, put_batch, fun(H, E) ->
+                case
+                    self() =:= Writer andalso
+                        atomics:add_get(Writes, 1, 1) =:= 1
+                of
+                    true -> {error, injected};
+                    false -> meck:passthrough([H, E])
+                end
+            end),
+            failing_bootstrap(Local, Peer)
+        after
+            meck:unload(bondy_oplog_projection_ets)
+        end,
+    ok = drain(Local),
+    ?assertEqual([<<"a">>, <<"b">>], aw_set_value(LocalEntry)),
+    ?assertEqual(1, maps:get(PeerOrigin, frontier(Local), 0)),
+    ?assertEqual({error, {projection_write_failed, injected}}, Result),
+    ok = rebootstraps(Local, Peer),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], aw_set_value(LocalEntry)),
+    teardown(Peer),
+    teardown(Local).
+
+%% Local installs Peer's enabled flag while its MST lacks the enable, since the
+%% trailing round fails. Local disables it, and a delivery from Other moves its
+%% replay cursor past the disable. Peer pulls the disable, and Local's sweep
+%% deletes the empty cell: membership is solo here, so the stability point is
+%% a fresh tick, where a cluster would take Peer's receipt of the disable. When
+%% the enable then arrives, Local's flag must stay disabled, as Peer's is
+%% (`proofs/tla/JoinInstall_Replace_Shipped.cfg`).
+installed_enable_stays_disabled() ->
+    {Peer, PeerEntry} = setup_instance(ew_flag, bondy_oplog_crdt_ew_flag),
+    {Local, LocalEntry} = setup_instance(ew_flag, bondy_oplog_crdt_ew_flag),
+    {Other, _} = setup_instance(ew_flag, bondy_oplog_crdt_ew_flag),
+    ok = apply_op(Peer, enable),
+    {error, _} = failing_bootstrap(Local, Peer),
+    ok = drain(Local),
+    ?assert(ew_flag_value(LocalEntry)),
+    ok = apply_ctx_op(Local, disable),
+    _ = bondy_oplog:append(Other, {cell_apply, ?B, <<"elsewhere">>, enable}),
+    ok = drain(Other),
+    ok = pull(Local, Other),
+    ok = pull(Peer, Local),
+    ?assertNot(ew_flag_value(PeerEntry)),
+    ?assertMatch(
+        {ok, #{discarded := 1}},
+        bondy_oplog_instance:reclaim_stable_cells(Local)
+    ),
+    ok = pull(Local, Peer),
+    ok = converge(Local, Peer),
+    ?assertNot(ew_flag_value(PeerEntry)),
+    ?assertNot(ew_flag_value(LocalEntry)),
+    teardown(Other),
+    teardown(Peer),
+    teardown(Local).
+
+%% Middle re-bootstraps from Source. From its first batch request, before any
+%% cell is installed, another replica can neither open a snapshot on it nor
+%% read its frontier (`proofs/tla/JoinInstall.tla`, guard "early"). Once the
+%% re-bootstrap has finished and Middle claims Source's frontier, Middle serves
+%% again.
+installing_source_refuses_to_serve() ->
+    {Source, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Middle, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    ok = apply_op(Source, {add, <<"s">>}),
+    ok = apply_op(Middle, {add, <<"m">>}),
+    Self = self(),
+    {ok, _} = bootstrap_with(Middle, Source, fun
+        (Src, {get_catalogue_snapshot_next, _}, Pass) when Src =:= Source ->
+            Self !
+                {served, [
+                    request(Middle, get_catalogue_snapshot_init),
+                    request(Middle, get_frontier)
+                ]},
+            Pass();
+        (_, _, Pass) ->
+            Pass()
+    end),
+    Served =
+        receive
+            {served, S} -> S
+        after 0 -> error(not_installing)
+        end,
+    ?assertMatch([{error, _}, {error, _}], Served),
+    _ = bondy_oplog:compact(Middle),
+    ?assertMatch({ok, {init, _}}, request(Middle, get_catalogue_snapshot_init)),
+    teardown(Source),
+    teardown(Middle).
+
+%% Middle serves a snapshot it opened to another replica, so it does not start
+%% installing one of its own: the open session would read a cell the install
+%% has replaced (`proofs/tla/JoinInstall.tla`, guard "busy"), and releases the
+%% cursor it opened on Source, which would otherwise hold Source's own install
+%% (action `Refuse`). Once that session has finished, Middle re-bootstraps.
+serving_replica_does_not_install() ->
+    {Source, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Middle, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    ok = apply_op(Source, {add, <<"s">>}),
+    ok = apply_op(Middle, {add, <<"m">>}),
+    {ok, {init, {_, Opened}}} = request(Middle, get_catalogue_snapshot_init),
+    ?assertEqual(
+        {error, {serving_snapshot, Middle}},
+        bondy_oplog_sync_session:bootstrap_catalogue(Middle, Source, #{})
+    ),
+    ?assertEqual(ok, bondy_oplog_instance:serving(Middle)),
+    ?assertNot(bondy_oplog_catalogue_cursor:any_open(Source)),
+    ?assertEqual(
+        {ok, ok}, request(Source, {release_catalogue_snapshot, Opened})
+    ),
+    ?assert(bondy_oplog_catalogue_cursor:any_open(Middle)),
+    ok = read_to_end(Middle, Opened),
+    {ok, _} = bondy_oplog_sync_session:bootstrap_catalogue(Middle, Source, #{}),
+    teardown(Source),
+    teardown(Middle).
+
+%% A session that abandoned its cursor on Middle holds Middle's install only
+%% until the cursor expires (`catalogue_cursor_ttl_ms`, here 0).
+expired_cursor_does_not_hold_the_install() ->
+    {Source, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Middle, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    ok = apply_op(Source, {add, <<"s">>}),
+    ok = apply_op(Middle, {add, <<"m">>}),
+    ok = application:set_env(bondy_oplog, catalogue_cursor_ttl_ms, 0),
+    try
+        {ok, {init, _}} = request(Middle, get_catalogue_snapshot_init)
+    after
+        ok = application:unset_env(bondy_oplog, catalogue_cursor_ttl_ms)
+    end,
+    {ok, _} = bondy_oplog_sync_session:bootstrap_catalogue(Middle, Source, #{}),
+    teardown(Source),
+    teardown(Middle).
+
+%% A batch request that looked its cursor up just before it expired renews it
+%% when it advances. Middle's mark, written once the cursor has expired, must
+%% delete it first, so the request ends instead of serving a replica that is
+%% installing.
+expired_cursor_is_not_renewed_after_the_mark() ->
+    {Middle, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    ok = apply_op(Middle, {add, <<"m">>}),
+    ok = application:set_env(bondy_oplog, catalogue_cursor_ttl_ms, 0),
+    try
+        {ok, {init, {_, Cursor}}} = request(
+            Middle, get_catalogue_snapshot_init
+        ),
+        ok = bondy_oplog_instance:begin_install(Middle),
+        ?assertEqual(
+            not_found, bondy_oplog_catalogue_cursor:advance(Cursor, <<"m">>)
+        )
+    after
+        ok = application:unset_env(bondy_oplog, catalogue_cursor_ttl_ms)
+    end,
+    teardown(Middle).
+
+%% Middle is suspended while a snapshot opens on it, so the open mints its
+%% cursor and waits on the serve check, and an install queued behind that check
+%% must see the cursor and refuse; the open is then served.
+cursor_open_before_the_serve_check_holds_the_install() ->
+    {Middle, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    ok = apply_op(Middle, {add, <<"m">>}),
+    Pid = bondy_oplog_instance:whereis(Middle),
+    Self = self(),
+    ok = sys:suspend(Pid),
+    try
+        _ = spawn_link(fun() ->
+            Self ! {opened, request(Middle, get_catalogue_snapshot_init)}
+        end),
+        ok = await(fun() -> bondy_oplog_catalogue_cursor:any_open(Middle) end),
+        _ = spawn_link(fun() ->
+            Self ! {began, bondy_oplog_instance:begin_install(Middle)}
+        end),
+        ok = await(fun() ->
+            element(2, erlang:process_info(Pid, message_queue_len)) >= 2
+        end)
+    after
+        ok = sys:resume(Pid)
+    end,
+    receive
+        {opened, Opened} -> ?assertMatch({ok, {init, _}}, Opened)
+    end,
+    receive
+        {began, Began} ->
+            ?assertEqual({error, {serving_snapshot, Middle}}, Began)
+    end,
+    ?assertEqual(ok, bondy_oplog_instance:serving(Middle)),
+    teardown(Middle).
+
+%% Source adds `x` after Local has read its frontier and before the stream
+%% ships its cell, so Local installs `x` with a frontier that does not claim
+%% it, and the trailing round that would pull it fails. Local must refuse to
+%% serve, a compaction tick notwithstanding, until it claims Source's frontier
+%% as read at finalize (`proofs/tla/JoinInstall_Session_Join_NoTarget.cfg`), and
+%% serve once a pull and a compaction tick have made it claim that frontier.
+install_holds_until_claims_cover_source() ->
+    {Source, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Local, LocalEntry} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    ok = apply_op(Source, {add, <<"s">>}),
+    {error, _} = bootstrap_with(Local, Source, fun
+        (Src, {get_catalogue_snapshot_next, _}, Pass) when Src =:= Source ->
+            ok = apply_op(Source, {add, <<"x">>}),
+            Pass();
+        (_, get_root, _Pass) ->
+            {error, {partisan_call_failed, timeout}};
+        (_, _, Pass) ->
+            Pass()
+    end),
+    ok = drain(Local),
+    ?assertEqual([<<"s">>, <<"x">>], aw_set_value(LocalEntry)),
+    _ = bondy_oplog:compact(Local),
+    ?assertEqual(
+        {error, {refold_owed, Local}}, bondy_oplog_instance:serving(Local)
+    ),
+    ok = pull(Local, Source),
+    _ = bondy_oplog:compact(Local),
+    ?assertEqual(ok, bondy_oplog_instance:serving(Local)),
+    teardown(Source),
+    teardown(Local).
 
 %% =============================================================================
 %% Helpers
@@ -393,9 +920,12 @@ converge(A, B) ->
 %% `{Tag, E}` under its context; Local, which cannot route the other table,
 %% pulls from Writer. Returns the dot of Origin's add.
 held_add_after(Tag, E) ->
-    {Origin, _} = setup_two_table_instance(),
-    {Writer, WriterEntry} = setup_two_table_instance(),
-    {Local, LocalEntry} = setup_two_table_instance(),
+    held_add_after(Tag, E, #{}).
+
+held_add_after(Tag, E, InstanceOpts) ->
+    {Origin, _} = setup_two_table_instance(InstanceOpts),
+    {Writer, WriterEntry} = setup_two_table_instance(InstanceOpts),
+    {Local, LocalEntry} = setup_two_table_instance(InstanceOpts),
     _ = bondy_oplog:append(
         Origin, {cell_apply, ?OTHER, <<"k">>, {set, 1, <<"v">>}}
     ),
@@ -405,9 +935,7 @@ held_add_after(Tag, E) ->
     ok = drain(Writer),
     ?assertEqual([<<"a">>], aw_set_value(WriterEntry)),
     ok = apply_ctx_op(Writer, {Tag, E}),
-    ok = bondy_oplog_applier:unregister_table(
-        bondy_oplog_registry:applier_pid(Local), ?OTHER
-    ),
+    ok = bondy_oplog_instance:unregister_table(Local, ?OTHER),
     _ = bondy_oplog_sync_session:run(Local, Writer, #{}),
     ok = drain(Local),
     {AOrigin, ASeq} = ADot,
@@ -415,7 +943,7 @@ held_add_after(Tag, E) ->
     {Local, LocalEntry, ADot}.
 
 %% An aw_set table at bucket `?B` sharing its instance with an lww table.
-setup_two_table_instance() ->
+setup_two_table_instance(InstanceOpts) ->
     Id = mk_id(),
     NS = ns_of(Id),
     OtherNS = binary_to_atom(<<"other_", Id/binary>>, utf8),
@@ -425,14 +953,14 @@ setup_two_table_instance() ->
     ok = register_table_entry(OtherNS, Id, ?OTHER, #{
         fold_module => lww_register
     }),
-    {ok, _} = bondy_oplog:start_instance(Id, #{
+    {ok, _} = bondy_oplog:start_instance(Id, InstanceOpts#{
         origin => bondy_oplog_origin:new(),
         applier => #{
             cell_apply_target => {NS, primary, 0}, cell_apply_bucket => ?B
         }
     }),
-    ok = bondy_oplog_applier:register_table(
-        bondy_oplog_registry:applier_pid(Id), ?OTHER, {OtherNS, primary, 0}, #{}
+    ok = bondy_oplog_instance:register_table(
+        Id, ?OTHER, {OtherNS, primary, 0}, #{}
     ),
     {ok, Entry} = bondy_oplog_core_registry:lookup(NS, primary, 0),
     {Id, Entry}.
@@ -453,8 +981,8 @@ register_table_entry(NS, Id, Bucket, Kernel) ->
 
 register_other_table(Id) ->
     OtherNS = binary_to_atom(<<"other_", Id/binary>>, utf8),
-    ok = bondy_oplog_applier:register_table(
-        bondy_oplog_registry:applier_pid(Id), ?OTHER, {OtherNS, primary, 0}, #{}
+    ok = bondy_oplog_instance:register_table(
+        Id, ?OTHER, {OtherNS, primary, 0}, #{}
     ),
     drain(Id).
 
@@ -472,14 +1000,21 @@ peer_removes_local_add() ->
 
 %% A re-bootstrap whose trailing round fails as a Partisan call timeout would.
 failing_bootstrap(Local, Peer) ->
+    bootstrap_with(Local, Peer, fun
+        (_, get_root, _Pass) -> {error, {partisan_call_failed, timeout}};
+        (_, _, Pass) -> Pass()
+    end).
+
+%% A re-bootstrap of `Local` from `Peer` in which every transport request is
+%% answered by `Hook(Peer, Request, Pass)`, where `Pass()` serves it as usual.
+bootstrap_with(Local, Peer, Hook) ->
     ok = meck:new(bondy_oplog_transport_inline, [passthrough]),
     try
         ok = meck:expect(
             bondy_oplog_transport_inline,
             request,
-            fun
-                (_, _, get_root, _) -> {error, {partisan_call_failed, timeout}};
-                (P, I, R, O) -> meck:passthrough([P, I, R, O])
+            fun(P, I, R, O) ->
+                Hook(P, R, fun() -> meck:passthrough([P, I, R, O]) end)
             end
         ),
         bondy_oplog_sync_session:bootstrap_catalogue(Local, Peer, #{})
@@ -487,13 +1022,95 @@ failing_bootstrap(Local, Peer) ->
         meck:unload(bondy_oplog_transport_inline)
     end.
 
+%% `Id` holds the re-fold mark with no session left to clear it, so it refuses
+%% to serve until the re-bootstrap the scheduler dispatches has settled.
+rebootstraps(Id, Peer) ->
+    ?assert(bondy_oplog_instance:owes_install(Id)),
+    ?assertEqual(
+        {error, {refold_owed, Id}}, request(Id, get_catalogue_snapshot_init)
+    ),
+    {ok, _} = bondy_oplog_sync_session:bootstrap_catalogue(Id, Peer, #{}),
+    ok = drain(Id),
+    _ = bondy_oplog:compact(Id),
+    ?assertMatch({ok, {init, _}}, request(Id, get_catalogue_snapshot_init)),
+    ok.
+
+%% `Request` answered by `Id` as a replica's sync session would see it.
+request(Id, Request) ->
+    bondy_oplog_transport_inline:request(Id, Id, Request, #{}).
+
+%% Reads the snapshot `Cursor` opened on `Id` until the stream ends.
+read_to_end(Id, Cursor) ->
+    case request(Id, {get_catalogue_snapshot_next, Cursor}) of
+        {ok, {done, _}} -> ok;
+        {ok, {batch, {Next, _}}} -> read_to_end(Id, Next)
+    end.
+
+await(Pred) ->
+    await(Pred, 500).
+
+await(Pred, 0) ->
+    error({timeout, Pred});
+await(Pred, N) ->
+    case Pred() of
+        true ->
+            ok;
+        false ->
+            timer:sleep(10),
+            await(Pred, N - 1)
+    end.
+
+%% The end of the snapshot stream kills `Id`, as a node crash would between
+%% the install and anything that follows it.
+crash_when_done(Id, {ok, {done, _}}) ->
+    crash(Id),
+    {error, crashed};
+crash_when_done(_Id, Reply) ->
+    Reply.
+
+crash(Id) ->
+    Inst = bondy_oplog_instance:whereis(Id),
+    Wal = bondy_oplog_registry:wal_pid(Id),
+    true = exit(Inst, kill),
+    ok = bondy_oplog_test_helpers:await_subtree_restart(Id, Inst, Wal, 10_000).
+
+frontier(Id) ->
+    bondy_oplog_instance:frontier(Id).
+
+%% A pack-store instance in `Dir`: its frontier checkpoint survives a crash,
+%% and its ETS projection is owned by the test, so its cells do too.
+durable_opts(Dir) ->
+    #{
+        backend => bondy_mst_pack_store,
+        storage_path => unicode:characters_to_binary(Dir),
+        seed => true
+    }.
+
+with_dir(Fun) ->
+    Dir = filename:join(["/tmp", os:getpid(), binary_to_list(mk_id())]),
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    try
+        Fun(Dir)
+    after
+        _ = file:del_dir_r(Dir)
+    end.
+
 %% Local writes once, so its origin's entry in the cell's context is the
 %% dot of that write.
 local_dot(Local) ->
     Origin = bondy_oplog_registry:origin(Local),
-    Applier = bondy_oplog_registry:applier_pid(Local),
-    {ok, CC} = bondy_oplog_applier:cell_context(Applier, ?B, ?K),
+    {ok, CC} = cell_context(Local),
     {Origin, _} = lists:keyfind(Origin, 1, CC).
+
+cell_context(Id) ->
+    case bondy_oplog_registry:applier_pid(Id) of
+        undefined ->
+            bondy_oplog_instance:cell_context(
+                bondy_oplog_registry:instance_pid(Id), ?B, ?K
+            );
+        Applier ->
+            bondy_oplog_applier:cell_context(Applier, ?B, ?K)
+    end.
 
 installed_context_covers(Entry, Dot) ->
     bondy_oplog_crdt_aw_core:dot_observed(
@@ -503,8 +1120,13 @@ installed_context_covers(Entry, Dot) ->
 %% Local adds `a` and pulls Peer's `b`; Peer never pulls from Local, and its
 %% later `c` gives its cell the higher HLC, so an install replaces Local's.
 local_add_unseen_by_peer() ->
+    local_add_unseen_by_peer(#{}).
+
+local_add_unseen_by_peer(LocalOpts) ->
     {Peer, _} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
-    {Local, LocalEntry} = setup_instance(aw_set, bondy_oplog_crdt_aw_set),
+    {Local, LocalEntry} = setup_instance(
+        aw_set, bondy_oplog_crdt_aw_set, LocalOpts
+    ),
     ok = apply_op(Local, {add, <<"a">>}),
     ok = apply_op(Peer, {add, <<"b">>}),
     {ok, _} = bondy_oplog_sync_session:run(Local, Peer, #{}),
@@ -548,13 +1170,14 @@ setup_instance(FoldModule, CrdtMod, InstanceOpts) ->
             _ -> Base#{crdt_module => CrdtMod}
         end,
     ok = bondy_oplog_core_registry:register(NS, primary, 0, RegConfig),
+    Applier = maps:get(applier, InstanceOpts, #{}),
     {ok, _} = bondy_oplog:start_instance(Id, InstanceOpts#{
         %% Distinct per-replica origin: a counter accumulates per Origin, so
         %% two replicas sharing an Origin would collide on `{Origin, Seq}`
         %% and dedup each other's increments (the #11 hazard). The default
         %% in-process origin is shared, so pin a fresh one per instance.
         origin => bondy_oplog_origin:new(),
-        applier => #{cell_apply_target => {NS, primary, 0}}
+        applier => Applier#{cell_apply_target => {NS, primary, 0}}
     }),
     {ok, Entry} = bondy_oplog_core_registry:lookup(NS, primary, 0),
     {Id, Entry}.
@@ -575,44 +1198,48 @@ apply_op(Id, Op) ->
 
 %% As `bondy_db` writes a tier_2 op: stamped with the cell's current context.
 apply_ctx_op(Id, Op) ->
-    Applier = bondy_oplog_registry:applier_pid(Id),
-    {ok, Ctx} = bondy_oplog_applier:cell_context(Applier, ?B, ?K),
+    {ok, Ctx} = cell_context(Id),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, ?K, Op}, Ctx),
     ok = drain(Id),
     ok.
 
 rederive(Id) ->
-    bondy_oplog_applier:rederive_projection_sync(
-        bondy_oplog_registry:applier_pid(Id)
-    ).
+    case bondy_oplog_registry:fused(Id) of
+        true ->
+            bondy_oplog_instance:rederive_projection(Id);
+        false ->
+            bondy_oplog_applier:rederive_projection_sync(
+                bondy_oplog_registry:applier_pid(Id)
+            )
+    end.
 
 aw_set_value(Entry) ->
     bondy_oplog_crdt_aw_set:to_value(aw_set_state(Entry)).
 
 aw_set_state(Entry) ->
-    Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
-    Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
-    case Adapter:get(Handle, ?B, ?K) of
-        not_found ->
-            bondy_oplog_crdt_aw_set:init();
-        {ok, Frame} ->
-            {_Hlc, StateBytes, _ValueBytes} =
-                bondy_oplog_cell_frame:decode_full(Frame),
-            bondy_oplog_crdt_aw_set:decode_state(StateBytes)
-    end.
+    cell_state(bondy_oplog_crdt_aw_set, Entry).
+
+ew_flag_value(Entry) ->
+    bondy_oplog_crdt_ew_flag:to_value(
+        cell_state(bondy_oplog_crdt_ew_flag, Entry)
+    ).
 
 counter_value(Entry) ->
+    bondy_oplog_crdt_pn_counter:to_value(
+        cell_state(bondy_oplog_crdt_pn_counter, Entry)
+    ).
+
+%% An absent cell reads as the CRDT's initial state, as the kernel folds it.
+cell_state(Mod, Entry) ->
     Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
     case Adapter:get(Handle, ?B, ?K) of
         not_found ->
-            0;
+            Mod:init();
         {ok, Frame} ->
             {_Hlc, StateBytes, _ValueBytes} =
                 bondy_oplog_cell_frame:decode_full(Frame),
-            bondy_oplog_crdt_pn_counter:to_value(
-                bondy_oplog_crdt_pn_counter:decode_state(StateBytes)
-            )
+            Mod:decode_state(StateBytes)
     end.
 
 teardown(Id) ->

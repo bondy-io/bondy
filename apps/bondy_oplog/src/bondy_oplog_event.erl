@@ -55,6 +55,7 @@ that import the header may pattern-match on the records directly.
 -export([key_seq/1]).
 -export([compare_keys/2]).
 -export([is_key/1]).
+-export([covered/2]).
 -export([new/3]).
 -export([new/5]).
 -export([key/1]).
@@ -110,6 +111,19 @@ compare_keys(_, _) -> gt.
 -spec is_key(term()) -> boolean().
 is_key(#bondy_oplog_event_key{}) -> true;
 is_key(_) -> false.
+
+?DOC("""
+Whether the version vector `VV` covers `Key`: an event key whose seq is at or
+below `VV`'s entry for its origin. A missing entry is seq 0; a non-event key
+and an `undefined` vector cover nothing.
+""").
+-spec covered(term(), #{binary() => non_neg_integer()} | undefined) ->
+    boolean().
+
+covered(#bondy_oplog_event_key{origin = Origin, seq = Seq}, #{} = VV) ->
+    Seq =< maps:get(Origin, VV, 0);
+covered(_Key, _VV) ->
+    false.
 
 ?DOC("""
 Constructs an event.

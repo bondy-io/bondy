@@ -1414,8 +1414,8 @@
         },
         {
           "refId": "B",
-          "expr": "sum by (event) (rate(bondy_oplog_gc_scheduler_events_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "gc {{event}}",
+          "expr": "sum by (scheduler, event) (rate(bondy_oplog_gc_scheduler_events_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "{{scheduler}} {{event}}",
           "datasource": {
             "type": "prometheus",
             "uid": "bondy-prometheus"

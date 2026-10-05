@@ -130,10 +130,10 @@ compact_to_empty_then_clean_restart(Dir) ->
         ?assertEqual(N, bondy_oplog:size(InstId)),
 
         %% Compact to empty: the peer confirms our own root.
-        Root = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         ?assertEqual(0, bondy_oplog:size(InstId)),
         %% The premise of the trace: nothing own-origin is left in the MST
@@ -245,7 +245,9 @@ mint_after_the_instance_is_killed(Dir) ->
         OldWal = bondy_oplog_registry:wal_pid(InstId),
         true = is_pid(OldInst) andalso is_pid(OldWal),
         true = exit(OldInst, kill),
-        ok = await_subtree_restart(InstId, OldInst, OldWal, 5000),
+        ok = bondy_oplog_test_helpers:await_subtree_restart(
+            InstId, OldInst, OldWal, 5000
+        ),
         ?assertEqual([], checkpoint_files_lenient(Dir, InstId)),
         ?assertEqual(
             #{}, maps:with([Origin], bondy_oplog_registry:frontier(InstId))
@@ -294,10 +296,10 @@ checkpoint_records_the_minted_seq(Dir) ->
 
         %% Compact to empty so neither the live MST nor the WAL below the
         %% watermark holds an own-origin event.
-        Root = bondy_oplog_instance:root_hash(InstId),
+        Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
-            bondy_oplog_instance:compact(InstId, [Root])
+            bondy_oplog_instance:compact(InstId, [Witness])
         ),
         ?assertEqual(0, bondy_oplog:size(InstId)),
 
@@ -462,7 +464,9 @@ append_after_the_overlay_died_is_refused(Dir) ->
             {error, {datasync_failed, eio}},
             try_append(InstId, <<"r">>)
         ),
-        ok = await_subtree_restart(InstId, Inst, Wal, 10_000)
+        ok = bondy_oplog_test_helpers:await_subtree_restart(
+            InstId, Inst, Wal, 10_000
+        )
     after
         ok = bondy_oplog:stop_instance(InstId),
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
@@ -527,31 +531,6 @@ checkpoint_files_lenient(Dir, InstId) ->
      || F <- filelib:wildcard(filename:join(Dir, "**/checkpoint.etf")),
         string:find(F, binary_to_list(InstId)) =/= nomatch
     ].
-
-%% Polls until the one_for_all restart has produced a new instance AND a
-%% new WAL pid, both alive.
-await_subtree_restart(InstId, OldInst, OldWal, TimeoutMs) ->
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    await_subtree_restart_loop(InstId, OldInst, OldWal, Deadline).
-
-await_subtree_restart_loop(InstId, OldInst, OldWal, Deadline) ->
-    Inst = bondy_oplog_instance:whereis(InstId),
-    Wal = bondy_oplog_registry:wal_pid(InstId),
-    Fresh =
-        is_pid(Inst) andalso Inst =/= OldInst andalso
-            is_process_alive(Inst) andalso
-            is_pid(Wal) andalso Wal =/= OldWal andalso
-            is_process_alive(Wal),
-    case Fresh of
-        true ->
-            ok;
-        false ->
-            case erlang:monotonic_time(millisecond) > Deadline of
-                true -> error({subtree_restart_timeout, Inst, Wal});
-                false -> timer:sleep(20)
-            end,
-            await_subtree_restart_loop(InstId, OldInst, OldWal, Deadline)
-    end.
 
 %% `bondy_oplog:append/2` answers `{error, wal_unavailable}` (or `noproc`
 %% while the instance is mid-restart) until `wal_opened/3` has landed;

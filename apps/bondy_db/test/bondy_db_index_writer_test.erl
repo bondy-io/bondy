@@ -258,8 +258,8 @@ aw_map_status_change_retracts({Db, _Sup, _Dir}) ->
     ok = bondy_db:close_table(T).
 
 %% =============================================================================
-%% Replay path (apply_cell_pairs dispatch): clearing the ETS index and
-%% replaying the primary MST rebuilds identical entries.
+%% Rebuild: clearing the index and rebuilding it from the primary
+%% projection yields identical entries.
 %% =============================================================================
 
 replay_rebuilds_cleared_index({Db, _Sup, _Dir}) ->
@@ -277,11 +277,7 @@ replay_rebuilds_cleared_index({Db, _Sup, _Dir}) ->
         {ok, []}, bondy_db:index_get(T, R, by_value, <<"active">>, #{})
     ),
 
-    %% Replay every primary shard's MST: `last_replayed_root` is still
-    %% `undefined` (no peer sync happened), so this is a full re-fold
-    %% through `apply_cell_pairs`, which re-dispatches every index op.
-    replay_all(T),
-    ok = flush_index(T, by_value),
+    ok = bondy_db:rebuild_index(T, by_value),
     ?assertEqual(
         Before, bondy_db:index_get(T, R, by_value, <<"active">>, #{})
     ),
@@ -358,18 +354,6 @@ clear_index(Table, IndexName) ->
             ok = Adapter:clear(Handle, Scope)
         end,
         lists:seq(0, N - 1)
-    ).
-
-%% Force a full cell-replay on every primary shard's applier.
-replay_all(Table) ->
-    Ids = maps:values(maps:get(instance_ids, Table)),
-    lists:foreach(
-        fun(InstanceId) ->
-            ApplierPid = bondy_oplog_registry:applier_pid(InstanceId),
-            true = is_pid(ApplierPid),
-            ok = bondy_oplog_applier:replay_cell_events_sync(ApplierPid)
-        end,
-        Ids
     ).
 
 make_tempdir() ->

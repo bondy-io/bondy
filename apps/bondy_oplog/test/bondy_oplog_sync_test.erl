@@ -110,11 +110,10 @@ sync_records_peer_state() ->
     {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
     {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 5)],
-    {ok, FinalRoot} = bondy_oplog:sync(A, B),
+    {ok, _} = bondy_oplog:sync(A, B),
     bondy_oplog_peer_state:sync(),
-    ?assertEqual(
-        {ok, FinalRoot},
-        bondy_oplog_peer_state:get_peer_root_hash(B, A)
+    ?assertMatch(
+        [#{peer := B}], bondy_oplog_peer_state:get_instance_peer_states(A)
     ),
     %% Cross-check: get_known_peers(A) lists B (with default
     %% peer_timeout_ms of 30s, the entry is fresh).

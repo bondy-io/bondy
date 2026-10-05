@@ -152,8 +152,8 @@ events satisfy I1 by construction), or peer-merged by `integrate_peer_root`
 (whose handler completion is the remote delivery point).
 
 **I2 (containment stability).** The reclamation frontier `StableHlc`
-(`bondy_oplog_instance:stability_point/1`) certifies, by per-key containment
-proofs against every confirmed peer root, that every replica holds every event
+(`bondy_oplog_instance:stability_point/1`) certifies, against every member's
+durable frontier, this replica's included, that every replica holds every event
 with HLC =< `StableHlc`.
 
 **Theorem (causal stability without causal broadcast).** Given I1 and I2, any
@@ -301,6 +301,10 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     %% watermark from `commit_now/1` regresses convergence (Jepsen
     %% OR-set: 27/226 lost adds).
     last_replayed_root = undefined :: undefined | bondy_mst:hash(),
+    %% A tree event may not have reached a fold yet, and only a diff from
+    %% `last_replayed_root` presents it: the boot anchor found one unclaimed,
+    %% or the last replay held one. A replay that holds nothing clears it.
+    owed = false :: boolean(),
     %% The prepare fence's shared remote-delivery generation ref
     %% (`bondy_oplog_registry:remote_gen/1`), resolved lazily on first
     %% use (`undefined` until the instance's `init/1` has published it —
@@ -587,19 +591,14 @@ notify_drain_resume(ApplierPid) when is_pid(ApplierPid) ->
 -spec replay_cell_events(pid()) -> ok.
 
 -doc """
-Re-fold the entire MST through the cell_apply path. Intended to be
-called by the instance after a `merge_pages` / `integrate_peer_root`
-cycle — without this, peer-received events sit in the local MST but
-never reach the per-cell projection, and `bondy_db:read/3` returns
-only events authored on the local node.
+Folds the MST events the projection lacks through the cell_apply path: the
+diff since the last replayed root, or the whole tree when there is none. The
+instance calls it after a `merge_pages` / `integrate_peer_root` cycle, so that
+peer-received events reach the per-cell projection.
 
-Idempotent for the CRDT folds that ship with the library (LWW
-register, OR-set, map_of_fields, ttl_presence): replaying an
-absorbed event either no-ops (same dot already in OR-set live or
-tombstones; same `{set, V, H}` already applied) or yields the same
-terminal state (later-HLC LWW). `strict_register` rejects duplicates
-with `{error, ...}` from `apply_event/3` but `apply_one_cell` already
-catches and logs.
+Delivery is causal (`bondy_oplog_cell_apply:apply_cell_pairs_mux/5`), and an
+event the applied frontier already claims is skipped, so repeating a replay
+folds nothing twice.
 """.
 replay_cell_events(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:cast(ApplierPid, replay_cell_events).
@@ -629,17 +628,21 @@ last_replayed_root(ApplierPid) when is_pid(ApplierPid) ->
 -spec advance_replayed_root(pid(), bondy_mst:hash() | undefined) -> ok.
 
 -doc """
-Advances `last_replayed_root` to `NewRoot` WITHOUT applying any pairs.
+Moves `last_replayed_root` to `NewRoot` WITHOUT applying any pairs.
 
 Called by the instance's compaction commit right after it truncates the
-MST: the projection is current up to the truncation point (the instance
-truncates nothing the applied VV does not witness), so the post-truncate
-root is a fully-replayed root. Re-anchoring the cursor on it keeps the
-next replay diff INCREMENTAL — the pre-truncate root's pages are freed by the
-truncate, so without this the next `diff_to_list/2` raises and falls back
-to a full `to_list/1` of the whole tree on every compaction cycle (an
-O(N)-per-cycle synchronous fold that starves the applier under sustained
-writes). Idempotent.
+MST. Re-anchoring keeps the next replay diff INCREMENTAL: the pre-truncate
+root's pages are freed by the truncate, so without it every compaction cycle
+would cost a full `to_list/1` fold.
+
+`NewRoot` is a replayed root only when every event under it reached a fold:
+the instance casts each delivery's replay before this, so the replays have
+run, and only a hold, or a boot anchor that found an unclaimed event, can
+leave one unfolded (`owed`). Then the cursor becomes `undefined` instead, and
+the next replay folds the whole tree
+(`proofs/tla/ReplayReanchor.tla`; `bondy_oplog_catalogue_compaction_test:
+held_event_folds_after_compaction/0` and
+`owed_refold_survives_compaction_before_gate/0`).
 """.
 advance_replayed_root(ApplierPid, NewRoot) when is_pid(ApplierPid) ->
     %% MUST be a cast, NOT a call. The instance issues this from inside its
@@ -655,17 +658,16 @@ advance_replayed_root(ApplierPid, NewRoot) when is_pid(ApplierPid) ->
     %% so fire-and-forget is correct.
     gen_server:cast(ApplierPid, {advance_replayed_root, NewRoot}).
 
--spec rederive_projection_sync(pid()) -> ok.
+-spec rederive_projection_sync(pid()) -> ok | {error, term()}.
 
 -doc """
-Re-derive the whole projection from the current MST by resetting the
-replay watermark and re-folding every cell's event group
-(`interpret_cog`). Unlike `replay_cell_events_sync/1` (a diff fold from
-the last replayed root), this re-applies the COMPLETE local+peer event
-set, so a cell whose materialised state was overwritten out-of-band — a
-`replace`-mode catalogue install that clobbered a per-Origin-accumulating
-CRDT (counter, grow-set) on a live re-bootstrap — is restored to the
-converged value. Idempotent.
+The applier side of `bondy_oplog_instance:rederive_projection/1`: empties the
+applied frontier, resets the replay cursor and folds the whole MST through the
+holding fold, which reports the full replay (`bondy_oplog_instance:refolded/1`).
+Unlike `replay_cell_events_sync/1` (a diff
+fold from the last replayed root), this presents the COMPLETE local+peer event
+set. The reset and the fold run in this process, as the WAL drain does, so no
+apply claims between them.
 """.
 rederive_projection_sync(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, rederive_projection, infinity).
@@ -931,19 +933,12 @@ write observed into the event `meta` before WAL append. Returns
 cell_context(ApplierPid, Bucket, Key) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, {cell_context, Bucket, Key}, infinity).
 
--type install_mode() :: replace.
-
--spec install_catalogue_batch(
-    pid(),
-    [bondy_oplog_transport:cell()]
-    | {install_mode(), [bondy_oplog_transport:cell()]}
-) ->
+-spec install_catalogue_batch(pid(), [bondy_oplog_transport:cell()]) ->
     {ok, #{
         installed := non_neg_integer(),
         skipped := non_neg_integer(),
         unclaimable := [binary()],
-        merged := non_neg_integer(),
-        replaced_no_merge := non_neg_integer()
+        max_hlc := non_neg_integer()
     }}
     | {error, term()}.
 
@@ -952,38 +947,31 @@ Installs a batch of catalogue-snapshot cells into the applier's
 projection shard. Each cell is `{Bucket, Key, Frame}` where `Frame` is
 a V2 cell frame as produced by the peer's projection adapter.
 
-Only **`replace`** mode exists (CvRDT `merge_states` is not supported):
-for each cell, if the existing local HLC is `>=` the incoming HLC the cell
-is skipped (per-cell HLC guard against bootstrap-vs-live interleave);
-otherwise the frame is written through unchanged. A snapshot bootstrap is
-only run by a fresh (`pre_bootstrap`) replica with an empty local
-projection, so skip-if-older is a no-op; a live replica converges via
-op-based anti-entropy instead (`bondy_oplog_sync_session`), which is
-lossless.
+Every cell whose bucket routes here REPLACES the local cell, whatever its
+HLC: a re-bootstrap starts from the peer's state, and the local events the
+peer lacks are folded back by the rederive that follows the install
+(`bondy_oplog_sync_session:bootstrap_catalogue/3`). Keeping a local cell
+instead would let the adopted peer frontier claim events that cell never
+folded (`proofs/tla/LiveRebootstrapRefold_SkipIfOlder_TrailFail.cfg`).
 
 Invalidates the read cache and advances the per-shard high-water HLC
-atomic after each successful write.
+atomic after each successful write. A write that fails ends the batch with
+`{error, {projection_write_failed, Reason}}`, so the frontier is not adopted;
+the cells already written stay replaced and the session's failed-stream path
+re-folds over them. Counting the cell installed instead lets the frontier claim
+what it lacks (`LiveRebootstrapRefold_Proposed_WriteFailCounted.cfg` in
+`proofs/tla/`; `bondy_oplog_bootstrap_rederive_test`,
+`failed_install_write_adopts_nothing`).
 
-Returns `{ok, #{installed := N, skipped := M, unclaimable := Buckets,
-merged := 0, replaced_no_merge := 0}}` (the `merged`/`replaced_no_merge`
-keys are retained for return-shape stability and are always `0`).
-
-`skipped` counts three unrelated causes and so cannot decide anything.
-`unclaimable` names the buckets of the cells that did NOT land and whose
-absence no local value covers — an unregistered bucket, or a frame that
-would not decode. It excludes the HLC-older skip, where a newer local
-write is already present. The caller adopts the peer's applied frontier
-only when it is empty (`bondy_oplog_sync_session:do_bootstrap_snapshot/6`):
-a cell carries no origin and no seq, so "did everything the peer shipped
-land" is the only question this install can answer about the frontier.
+`skipped` counts the cells that did not land; `unclaimable` names their
+buckets, an unregistered bucket or a frame that would not decode. The caller
+adopts the peer's applied frontier only when it is empty: a cell carries no
+origin and no seq, so "did everything the peer shipped land" is the only
+question this install can answer about the frontier. `max_hlc` is the highest
+cell HLC the batch decoded.
 """.
 install_catalogue_batch(ApplierPid, Cells) when
     is_pid(ApplierPid), is_list(Cells)
-->
-    install_catalogue_batch(ApplierPid, {replace, Cells});
-install_catalogue_batch(ApplierPid, {replace, Cells}) when
-    is_pid(ApplierPid),
-    is_list(Cells)
 ->
     gen_server:call(
         ApplierPid, {install_catalogue_batch, Cells}, infinity
@@ -995,14 +983,13 @@ has no separate applier process and runs the install in its own
 gen_server, passing its `#fused_drain{}` `cell_apply_source` as `Source`).
 Applier-state-free by construction: everything the install needs rides in
 `Source`'s per-table ctxs. Same semantics as the applier's own
-`{install_catalogue_batch, _}` handler — replace-mode, bucket-demuxed,
-per-cell HLC-guarded via the projection adapter's `head/3` fast path.
+`{install_catalogue_batch, _}` handler (`install_catalogue_batch/2`).
 """.
 -spec install_catalogue_cells(
     InstanceId :: instance_id(),
     Source :: term(),
     Cells :: [bondy_oplog_transport:cell()]
-) -> {ok, map()}.
+) -> {ok, map()} | {error, term()}.
 
 install_catalogue_cells(InstanceId, Source, Cells) when is_list(Cells) ->
     do_install_catalogue_batch(InstanceId, Source, Cells).
@@ -1120,31 +1107,13 @@ do_init_2(
                         bondy_oplog_registry:max_install_in_flight(InstanceId),
                     Lifecycle =
                         bondy_oplog_registry:lifecycle(InstanceId),
+                    {ReplayRoot, ReplayOwed} =
+                        bondy_oplog_instance:replay_anchor(InstP),
                     State = #state{
                         instance_id = InstanceId,
                         instance_pid = InstP,
-                        %% Anchor the replay cursor. The instance decides: the
-                        %% current root when the restored frontier already
-                        %% claims every cell event in the live MST (the healthy
-                        %% case — boot skips the fold, as it always did), and
-                        %% `undefined` when it does not, which re-folds the live
-                        %% MST so the frontier follows what materialises.
-                        %%
-                        %% This used to be `bondy_mst:root(MST)` unconditionally,
-                        %% on the premise that "the projection already reflects
-                        %% this root". That holds only for a LOCAL event whose
-                        %% bucket resolved: a peer-received event installs into
-                        %% the MST FIRST and is folded afterwards by a
-                        %% best-effort cast (`deliver_remote/1`), which a crash
-                        %% can lose — and nothing would ever re-present it, since
-                        %% the WAL drain resumes past the durable root. See
-                        %% `bondy_oplog_instance:replay_anchor/1`.
-                        %%
-                        %% The call runs on the instance because the fold reads
-                        %% pack-store fds, which are process-bound — the same
-                        %% reason `do_replay_cell_events_r/1` delegates.
-                        last_replayed_root =
-                            bondy_oplog_instance:replay_anchor(InstP),
+                        last_replayed_root = ReplayRoot,
+                        owed = ReplayOwed,
                         wal_pid = WalP,
                         wal_dir = WalDir,
                         iter = Iter,
@@ -1194,15 +1163,7 @@ do_init_2(
                     %% it waits.
                     case DrainGate of
                         open ->
-                            self() ! drain,
-                            %% Cold-replay catch-up: a durable MST can hold
-                            %% peer-authored events from a previous run whose
-                            %% `replay_cell_events` never ran (process died
-                            %% between `integrate_peer_root/2` and the cast).
-                            %% The WAL drain only handles events past
-                            %% `resume_position/2`, so without this the
-                            %% projection stays stale until the next sync tick.
-                            gen_server:cast(self(), replay_cell_events);
+                            start_folding();
                         gated ->
                             ok
                     end,
@@ -1213,6 +1174,20 @@ do_init_2(
         {error, _} = Err ->
             {stop, Err}
     end.
+
+%% @private
+%% Queues the boot replay, then the WAL drain. The replay folds the MST events
+%% the frontier does not claim: peer events whose replay never ran, and own
+%% events whose projection write a crash lost, which the drain over a durable
+%% MST does not re-read: it resumes at the committed consumer offset. It runs
+%% first because a drained write's dot would cover such an own event and the
+%% kernel would then skip it (`write_after_lost_fold_keeps_the_add` in
+%% `bondy_oplog_bootstrap_rederive_test`;
+%% `proofs/tla/JoinInstall_Join_ClaimSkip_Crash_DurableStability_3E.cfg`).
+start_folding() ->
+    ok = gen_server:cast(self(), replay_cell_events),
+    self() ! drain,
+    ok.
 
 %% @private
 %% Resolve `cell_apply_target` into a `cell_apply_ctx`
@@ -1539,15 +1514,16 @@ handle_call(replay_cell_events, _From, State) ->
     {reply, ok, do_replay_cell_events(State)};
 handle_call(last_replayed_root, _From, State) ->
     {reply, State#state.last_replayed_root, State};
-handle_call(rederive_projection, _From, State) ->
-    %% Full projection re-derive: reset the replay watermark so the diff
-    %% fold re-applies EVERY event (not just those past the last replayed
-    %% root), re-folding each cell's complete group. Restores a cell that a
-    %% `replace`-mode catalogue install clobbered on a live re-bootstrap.
-    %% The single-applier scope makes the reset + fold atomic w.r.t. other
-    %% reads.
-    {reply, ok,
-        do_replay_cell_events(State#state{last_replayed_root = undefined})};
+handle_call(
+    rederive_projection,
+    _From,
+    #state{instance_id = Id} = State0
+) ->
+    ok = bondy_oplog_registry:reset_frontier(Id),
+    {Result, State} = do_replay_cell_events_r(
+        State0#state{last_replayed_root = undefined}
+    ),
+    {reply, Result, State};
 handle_call(rebuild_indexes, _From, State) ->
     %% Full secondary-index rebuild: re-derive every live term from each
     %% cell's current projection value with the back-pressure cap bypassed,
@@ -1647,11 +1623,13 @@ resolve_cell_ctx(Source, Bucket, Founding) ->
         Ctx -> Ctx
     end.
 
-handle_cast({advance_replayed_root, NewRoot}, State) ->
-    %% Re-anchor the replay cursor on the post-truncate root without
-    %% applying anything. Cast (not call) to avoid an instance↔applier
-    %% deadlock — see `advance_replayed_root/2`.
+handle_cast(
+    {advance_replayed_root, NewRoot},
+    #state{owed = false} = State
+) ->
     {noreply, State#state{last_replayed_root = NewRoot}};
+handle_cast({advance_replayed_root, _NewRoot}, State) ->
+    {noreply, State#state{last_replayed_root = undefined}};
 handle_cast({refresh_validator, Reason}, State) ->
     {noreply, do_refresh_validator(Reason, State)};
 handle_cast(replay_cell_events, State) ->
@@ -1680,8 +1658,7 @@ handle_cast(
     ok = bondy_oplog_registry:set_tables_registered(
         State#state.instance_id, true
     ),
-    self() ! drain,
-    ok = gen_server:cast(self(), replay_cell_events),
+    ok = start_folding(),
     {noreply, State#state{drain_gate = open}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -2441,6 +2418,17 @@ resolve_remote_gen_ref(State) ->
 %% distinction: it must only advance its recorded generation on `ok`,
 %% or a failed replay would silently unfence subsequent context reads.
 do_replay_cell_events_r(
+    #state{instance_pid = InstP, last_replayed_root = LastRoot} = State0
+) ->
+    case replay_diff(State0) of
+        {ok, State} when LastRoot =:= undefined ->
+            {bondy_oplog_instance:refolded(InstP), State};
+        Result ->
+            Result
+    end.
+
+%% @private
+replay_diff(
     #state{
         cell_apply_source = Source,
         instance_id = Id,
@@ -2489,13 +2477,16 @@ do_replay_cell_events_r(
                     incremental => LastRoot =/= undefined
                 }
             ),
-            %% Prefix-closure hold: a diff with held events must keep the
-            %% replay cursor — re-diffing from the old root re-presents
-            %% them (idempotent re-fold) until the gap fills or a
-            %% rebootstrap re-anchors the cursor.
+            %% Prefix-closure hold: a diff with held events keeps the cursor
+            %% and sets `owed`, so a later diff, or a full fold once
+            %% compaction drops the cursor, presents them again.
             case Held of
-                0 -> {ok, State#state{last_replayed_root = CurrentRoot}};
-                _ -> {ok, State}
+                0 ->
+                    {ok, State#state{
+                        last_replayed_root = CurrentRoot, owed = false
+                    }};
+                _ ->
+                    {ok, State#state{owed = true}}
             end
     catch
         exit:Reason ->
@@ -2531,14 +2522,7 @@ diff_pairs(MST, LastRoot, Id) ->
 
 %% @private
 %% Installs a catalogue-snapshot batch of `[{Bucket, Key, Frame}]`
-%% triples into the projection.
-%%
-%% The install is `replace`-only (CvRDT `merge_states` is not supported).
-%% Skip-if-older guards a stale bootstrap write from clobbering a newer
-%% locally-applied event. A fresh (`pre_bootstrap`) replica's projection is
-%% empty so skip-if-older never skips; a live re-bootstrap may install a
-%% higher-HLC peer cell over a local one, which the post-bootstrap op-replay
-%% restores (`bondy_oplog_sync_session`).
+%% triples into the projection; see `install_catalogue_batch/2`.
 do_install_catalogue_batch(Id, Source, Cells) ->
     %% A peer snapshot bundles cells from EVERY table on the shard, each
     %% tagged with its entity-type `Bucket`. Demultiplex by bucket (the same
@@ -2550,64 +2534,44 @@ do_install_catalogue_batch(Id, Source, Cells) ->
     Groups = bondy_oplog_mux:group_by(
         Cells, fun({Bucket, _Key, _Frame}) -> {ok, Bucket} end
     ),
-    Counts = lists:foldl(
-        fun({Bucket, BucketCells}, Acc) ->
-            case bondy_oplog_mux:resolve(Source, Bucket) of
-                undefined ->
-                    %% No table registered for this bucket on the instance
-                    %% (a snapshot cell for a table not open here): skip it
-                    %% rather than misroute it to the founding projection.
-                    bump_n(
-                        skipped,
-                        length(BucketCells),
-                        unclaimable(Bucket, Acc)
-                    );
-                Ctx ->
-                    install_catalogue_group(
-                        Id, Ctx, Bucket, BucketCells, Acc
-                    )
-            end
-        end,
+    install_groups(
+        Id,
+        Source,
+        Groups,
         #{
             installed => 0,
             skipped => 0,
             unclaimable => [],
-            merged => 0,
-            replaced_no_merge => 0,
             max_hlc => 0
-        },
-        Groups
-    ),
-    {ok, Counts}.
+        }
+    ).
+
+%% @private
+install_groups(_Id, _Source, [], Acc) ->
+    {ok, Acc};
+install_groups(Id, Source, [{Bucket, Cells} | Rest], Acc0) ->
+    case bondy_oplog_mux:resolve(Source, Bucket) of
+        undefined ->
+            %% No table registered for this bucket on the instance
+            %% (a snapshot cell for a table not open here): skip it
+            %% rather than misroute it to the founding projection.
+            Acc = bump_n(skipped, length(Cells), unclaimable(Bucket, Acc0)),
+            install_groups(Id, Source, Rest, Acc);
+        Ctx ->
+            maybe
+                {ok, Acc} ?=
+                    install_catalogue_group(Id, Ctx, Bucket, Cells, Acc0),
+                install_groups(Id, Source, Rest, Acc)
+            end
+    end.
 
 %% @private
 %% Install one bucket's cells through its table's ctx, accumulating into the
 %% shared counts, then clear that ctx's old-state cache and notify reactors.
+%% Both run after a failed write too: the cells before it were replaced.
 install_catalogue_group(Id, Ctx, Bucket, Cells, Acc0) ->
-    #{
-        adapter := Adapter,
-        handle := Handle,
-        cache_adapter := CacheAdapter,
-        cache_handle := CacheHandle,
-        high_water_ref := HighWaterRef
-    } = Ctx,
-    Acc1 = lists:foldl(
-        fun(Cell, Acc) ->
-            install_one_cell(
-                Id,
-                Adapter,
-                Handle,
-                CacheAdapter,
-                CacheHandle,
-                HighWaterRef,
-                Cell,
-                Acc
-            )
-        end,
-        Acc0,
-        Cells
-    ),
-    %% The install path (`install_cell_unchecked/9`) writes the
+    {Acc1, Status} = install_cells(Id, Ctx, Cells, Acc0),
+    %% The install path (`install_cell/5`) writes the
     %% projection WITHOUT write-through (it installs a frame directly,
     %% with no fold result to cache). A catalogue bootstrap can run on a
     %% LIVE instance (a live re-bootstrap), so any installed key may
@@ -2621,7 +2585,7 @@ install_catalogue_group(Id, Ctx, Bucket, Cells, Acc0) ->
         maps:get(oldstate_cache, Ctx, undefined)
     ),
     %% Honour the table's `publish => true` declaration on THIS write path
-    %% too. `install_cell_unchecked/9` writes frames directly and emits no
+    %% too. `install_cell/5` writes frames directly and emits no
     %% per-cell merge event, so without this a table whose reactor DERIVES
     %% state from the projection (rather than merely invalidating on change)
     %% is never told its projection exists. One event per bucket per batch,
@@ -2631,10 +2595,22 @@ install_catalogue_group(Id, Ctx, Bucket, Cells, Acc0) ->
     %% differ like `bondy_aae_reactor:react_user/3` would read as "every
     %% user's credentials just changed".
     %%
-    %% Only when this batch actually installed something: a batch that
-    %% skipped every cell on the HLC guard changed nothing to rebuild from.
+    %% Only when this batch actually installed something: a batch whose cells
+    %% all failed to decode changed nothing to rebuild from.
     ok = maybe_publish_bootstrap(Ctx, Bucket, Acc0, Acc1),
-    Acc1.
+    case Status of
+        ok -> {ok, Acc1};
+        {error, _} = Error -> Error
+    end.
+
+%% @private
+install_cells(_Id, _Ctx, [], Acc) ->
+    {Acc, ok};
+install_cells(Id, Ctx, [Cell | Rest], Acc0) ->
+    case install_one_cell(Id, Ctx, Cell, Acc0) of
+        {ok, Acc} -> install_cells(Id, Ctx, Rest, Acc);
+        {error, _} = Error -> {Acc0, Error}
+    end.
 
 %% @private
 %% Fires the bootstrap notification when `Acc1` installed more cells than
@@ -2655,9 +2631,9 @@ without an applier, a projection or a dispatcher — the same reason
 `bondy_aae_reactor:apply_reaction/4` is exposed.
 
 `skip` when the table did not opt in (`publish => true` unset, so no
-`publish_ns`), or when this group installed nothing: a batch that skipped
-every cell on the per-cell HLC guard replaced no projection and leaves
-subscribers nothing to rebuild from.
+`publish_ns`), or when this group installed nothing: a batch none of whose
+cells decoded replaced no projection and leaves subscribers nothing to
+rebuild from.
 """.
 -spec bootstrap_publish_decision(
     Ctx :: map(), Acc0 :: map(), Acc1 :: map()
@@ -2677,45 +2653,27 @@ bootstrap_publish_decision(Ctx, Acc0, Acc1) ->
     end.
 
 %% @private
-install_one_cell(
-    Id,
-    Adapter,
-    Handle,
-    CacheAdapter,
-    CacheHandle,
-    HighWaterRef,
-    {Bucket, Key, Frame},
-    Acc
-) ->
+install_one_cell(Id, Ctx, {Bucket, Key, Frame}, Acc) ->
+    case decode_cell_hlc(Id, Bucket, Key, Frame) of
+        {ok, Hlc} ->
+            maybe
+                ok ?= install_cell(Ctx, Bucket, Key, Frame, Hlc),
+                %% The instance absorbs the batch maximum into its clock at
+                %% finalize, or it could mint below a stability point computed
+                %% from these cells (BONDY_DB_RECLAMATION_PROOF.md §7.1).
+                {ok,
+                    bump(installed, Acc#{
+                        max_hlc => max(maps:get(max_hlc, Acc, 0), Hlc)
+                    })}
+            end;
+        error ->
+            {ok, bump(skipped, unclaimable(Bucket, Acc))}
+    end.
+
+%% @private
+decode_cell_hlc(Id, Bucket, Key, Frame) ->
     try bondy_oplog_cell_frame:decode_full(Frame) of
-        {IncomingHlc, _IncomingStateBytes, _IncomingValueBytes} ->
-            Existing = read_existing_for_install(
-                Adapter, Handle, Bucket, Key
-            ),
-            %% Track the maximum decoded cell HLC across the batch. The
-            %% sync session folds it across batches and the instance absorbs
-            %% it into the local clock at finalize
-            %% (`finalize_catalogue_bootstrap/5`); without that absorb a
-            %% bootstrapped replica's clock sits BELOW the cells it just
-            %% installed and it can mint events under a stability point
-            %% computed from them (BONDY_DB_RECLAMATION_PROOF.md §7.1).
-            Acc1 = Acc#{
-                max_hlc => max(maps:get(max_hlc, Acc, 0), IncomingHlc)
-            },
-            handle_cell(
-                Id,
-                Adapter,
-                Handle,
-                CacheAdapter,
-                CacheHandle,
-                HighWaterRef,
-                Bucket,
-                Key,
-                Frame,
-                IncomingHlc,
-                Existing,
-                Acc1
-            )
+        {Hlc, _StateBytes, _ValueBytes} -> {ok, Hlc}
     catch
         C:R:St ->
             ?LOG_WARNING(#{
@@ -2729,120 +2687,7 @@ install_one_cell(
                 reason => R,
                 stacktrace => St
             }),
-            bump(skipped, unclaimable(Bucket, Acc))
-    end.
-
-%% @private
-%% Returns one of:
-%%   not_found
-%% | {ok, ExistingHlc, ExistingStateBytes | undefined}
-%%
-%% Only the HLC is needed for the skip-if-older check, so we use the
-%% adapter's optional `head/3` callback when available and avoid pulling
-%% the full V2 frame off the journal.
-read_existing_for_install(Adapter, Handle, Bucket, Key) ->
-    case adapter_head_hlc(Adapter, Handle, Bucket, Key) of
-        not_found ->
-            not_found;
-        {ok, ExistingHlc} ->
-            {ok, ExistingHlc, undefined}
-    end.
-
-%% @private
-%% HLC-only read against the projection adapter. Uses the optional
-%% `head/3` callback when the adapter exports it; otherwise falls
-%% back to `get/3 + decode_full/1`.
-adapter_head_hlc(Adapter, Handle, Bucket, Key) ->
-    case erlang:function_exported(Adapter, head, 3) of
-        true ->
-            case Adapter:head(Handle, Bucket, Key) of
-                not_found ->
-                    not_found;
-                {ok, HeadBytes} ->
-                    {Hlc, _ValueBytes} =
-                        bondy_oplog_cell_frame:decode_head(HeadBytes),
-                    {ok, Hlc}
-            end;
-        false ->
-            case Adapter:get(Handle, Bucket, Key) of
-                not_found ->
-                    not_found;
-                {ok, Frame} ->
-                    {Hlc, _StateBytes, _ValueBytes} =
-                        bondy_oplog_cell_frame:decode_full(Frame),
-                    {ok, Hlc}
-            end
-    end.
-
-%% @private
-handle_cell(
-    _Id,
-    Adapter,
-    Handle,
-    CacheAdapter,
-    CacheHandle,
-    HighWaterRef,
-    Bucket,
-    Key,
-    Frame,
-    IncomingHlc,
-    not_found,
-    Acc
-) ->
-    %% No local cell — install verbatim.
-    install_cell_unchecked(
-        Adapter,
-        Handle,
-        CacheAdapter,
-        CacheHandle,
-        HighWaterRef,
-        Bucket,
-        Key,
-        Frame,
-        IncomingHlc
-    ),
-    bump(installed, Acc);
-handle_cell(
-    Id,
-    Adapter,
-    Handle,
-    CacheAdapter,
-    CacheHandle,
-    HighWaterRef,
-    Bucket,
-    Key,
-    Frame,
-    IncomingHlc,
-    {ok, ExistingHlc, _ExistingStateBytes},
-    Acc
-) ->
-    case IncomingHlc > ExistingHlc of
-        true ->
-            install_cell_unchecked(
-                Adapter,
-                Handle,
-                CacheAdapter,
-                CacheHandle,
-                HighWaterRef,
-                Bucket,
-                Key,
-                Frame,
-                IncomingHlc
-            ),
-            bump(installed, Acc);
-        false ->
-            telemetry:execute(
-                [bondy_oplog, applier, catalogue_bootstrap, cell_skipped],
-                #{count => 1},
-                #{
-                    instance_id => Id,
-                    bucket => Bucket,
-                    cell_key => Key,
-                    incoming_hlc => IncomingHlc,
-                    existing_hlc => ExistingHlc
-                }
-            ),
-            bump(skipped, Acc)
+            error
     end.
 
 %% @private
@@ -2863,17 +2708,14 @@ bump_n(Key, N, Acc) ->
     maps:update_with(Key, fun(X) -> X + N end, Acc).
 
 %% @private
-install_cell_unchecked(
-    Adapter,
-    Handle,
-    CacheAdapter,
-    CacheHandle,
-    HighWaterRef,
-    Bucket,
-    Key,
-    Frame,
-    Hlc
-) ->
+install_cell(Ctx, Bucket, Key, Frame, Hlc) ->
+    #{
+        adapter := Adapter,
+        handle := Handle,
+        cache_adapter := CacheAdapter,
+        cache_handle := CacheHandle,
+        high_water_ref := HighWaterRef
+    } = Ctx,
     case Adapter:put_batch(Handle, [{Bucket, Key, Frame}]) of
         ok ->
             bondy_oplog_cell_apply:invalidate_cache(
@@ -2889,7 +2731,7 @@ install_cell_unchecked(
                 cell_key => Key,
                 reason => Reason
             }),
-            ok
+            {error, {projection_write_failed, Reason}}
     end.
 
 %% @private

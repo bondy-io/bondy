@@ -13,7 +13,7 @@
 %%
 %% Verifies:
 %%   - Fresh local replica with a leveled adapter bootstraps every cell
-%%     from a leveled-backed peer in `replace` mode.
+%%     from a leveled-backed peer.
 %%   - Post-bootstrap high-water on local matches the peer's
 %%     session-start watermark.
 %%   - Local frames are byte-identical to the peer frames (proof that

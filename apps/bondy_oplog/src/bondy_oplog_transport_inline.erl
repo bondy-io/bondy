@@ -60,13 +60,8 @@ do_request(PeerInstance, get_root) ->
     _ = bondy_oplog_instance:await_apply(PeerInstance),
     {ok, bondy_oplog_instance:root_hash(PeerInstance)};
 do_request(PeerInstance, get_frontier) ->
-    %% The responder's installed-consistency order: snapshot the applied
-    %% vector FIRST, then drain, then answer the SNAPSHOT. In-VM transport,
-    %% so there is no fingerprint leg — the Partisan path carries that.
-    Frontier = bondy_oplog_instance:frontier(PeerInstance),
-    _ = bondy_oplog_instance:await_apply(PeerInstance),
-    {ok, Frontier};
-do_request(PeerInstance, {confirm_root, _, _} = Request) ->
+    bondy_oplog_responder:dispatch(PeerInstance, get_frontier);
+do_request(PeerInstance, {confirm_frontier, _, _} = Request) ->
     bondy_oplog_responder:dispatch(PeerInstance, Request);
 do_request(PeerInstance, get_origins) ->
     %% Node-level origin advertisement for retirement reap-by-complement;
@@ -96,8 +91,12 @@ do_request(PeerInstance, get_catalogue_snapshot_init) ->
         {ok, no_snapshot} ->
             {ok, no_snapshot};
         {ok, {Watermark, Cursor}} ->
-            {ok, {init, {Watermark, Cursor}}}
+            {ok, {init, {Watermark, Cursor}}};
+        {error, _} = Error ->
+            Error
     end;
+do_request(PeerInstance, {release_catalogue_snapshot, _} = Request) ->
+    bondy_oplog_responder:dispatch(PeerInstance, Request);
 do_request(PeerInstance, {get_catalogue_snapshot_next, Cursor}) ->
     case bondy_oplog_catalogue_snapshot:next(PeerInstance, Cursor) of
         {ok, {batch, _} = Batch} ->

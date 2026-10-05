@@ -192,14 +192,13 @@ confirmed_frontier_is_hand_computed() ->
     _K2 = bondy_oplog:append(Id, {cell_apply, ?B, <<"kA">>, clear}),
     K3 = bondy_oplog:append(Id, {cell_apply, ?B, <<"kB">>, {set, <<"w">>}}),
     ok = bondy_oplog_instance:await_apply(Id),
-    %% The peer's confirmed root: everything up to and including e3.
-    R3 = bondy_oplog_instance:root_hash(Id),
-    ?assert(is_binary(R3)),
-    %% e4 lands AFTER the confirmed root — outside the frontier.
+    %% The peer's durable frontier: everything up to and including e3.
+    Witness = bondy_oplog_registry:frontier(Id),
+    %% e4 lands AFTER the peer's frontier — outside the stability frontier.
     _K4 = bondy_oplog:append(Id, {cell_apply, ?B, <<"kC">>, {set, <<"x">>}}),
     ok = bondy_oplog_instance:await_apply(Id),
 
-    ok = bondy_oplog_peer_state:record_sync_complete(Ghost, Id, R3),
+    ok = bondy_oplog_peer_state:record_sync_complete(Ghost, Id, Witness),
     ok = bondy_oplog_peer_state:sync(),
 
     ok = meck:new(partisan_peer_service, [passthrough]),
@@ -208,7 +207,7 @@ confirmed_frontier_is_hand_computed() ->
             {ok, [partisan:node(), Ghost]}
         end),
 
-        %% Hand-computed: the largest local key covered by R3 is e3, so the
+        %% Hand-computed: the largest local key `Witness` covers is e3, so the
         %% stability point IS e3's HLC — asserted against the captured event
         %% key, not against the chain's own output.
         {ok, SP} = bondy_oplog_instance:stability_point(Id),

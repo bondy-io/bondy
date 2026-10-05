@@ -205,7 +205,11 @@ liveness gap this classification deliberately leaves open.
 Emitted per trigger run by every scheduler instance. Measurement: `count`.
 Metadata: `scheduler` (e.g. `bondy_oplog_reclaim_scheduler`), `instance_id`,
 `outcome`. A permanently failing instance is visible here even if nothing
-else surfaces it.
+else surfaces it. `unconfirmed` and `membership_unavailable` from the
+compaction scheduler (`bondy_oplog_gc_scheduler`) mean compaction of a durable
+database is waiting on members. The Prometheus counter
+`bondy_oplog_gc_scheduler_events_total` carries `scheduler` and `event` (here
+`trigger_<outcome>`).
 
 ### `[bondy_oplog, retirement, completed]` and `[bondy_oplog, retirement, skipped]`
 
@@ -250,9 +254,17 @@ rate would storm.
 
 ### The stall log
 
-Alongside the telemetry, a scheduler-driven reclamation stall produces a
-warning log naming the instance and the missing members, rate-limited to one
-line per instance per 60 seconds. The log states the operational fact that
+Alongside the telemetry, a scheduler-driven stall produces a warning log
+naming the scheduler, the instance and the missing members, rate-limited to
+one line per scheduler and instance per 60 seconds. Both schedulers report
+every error their trigger returns. For the reclamation scheduler that includes
+stability not advancing. For the compaction scheduler it includes compaction
+of a durable database waiting on a member this node has no confirmed row for
+(`unconfirmed`), or on an unreadable membership. A member that confirmed and
+then went down does not produce a compaction warning: its stale row only stops
+the frontier advancing, which looks the same as a peer that has not synced
+yet. The reclamation scheduler reports it as `no_frontier`, naming it in
+`member_status`. For a member, the log states the operational fact that
 matters: a member in this state never ages out, and must be retired by a
 deliberate membership act.
 

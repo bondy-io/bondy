@@ -239,7 +239,7 @@ Register(r, b) ==
 (***************************************************************************)
 (* A RESTART. The DURABLE state survives it -- the projection (`applied`),  *)
 (* the MST (`tree`) and the applied-frontier checkpoint (`claim`, restored  *)
-(* by `bondy_oplog_instance:restore_frontier/2` inside `init/1`, before any *)
+(* by `bondy_oplog_instance:boot_frontier/2` inside `init/1`, before any    *)
 (* table has registered). The ROUTING DIRECTORY does not: `reg` drops back  *)
 (* to the founding bucket and refills table by table as the catalogue       *)
 (* reopens them (`bondy_db` opens each table, then calls `start_draining`). *)

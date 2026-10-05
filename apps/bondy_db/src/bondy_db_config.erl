@@ -127,7 +127,7 @@ MST-history retention policy for `DbName`'s per-shard op-log instances
 both knobs are `0` — the DEFAULT: peer-confirmed compaction is the
 primary history bound for ephemeral instances exactly as for durable
 ones, and it never truncates an event a live peer still needs, which is
-what keeps a live re-bootstrap's `replace`-mode install + rederive a
+what keeps a live re-bootstrap's install + rederive a
 complete remedy. Retention is an explicit opt-in OVERLOAD BACKSTOP
 (`registry`-only, fused-only): it truncates by local age/size when the
 confirmed frontier yields nothing, at the cost of that soundness

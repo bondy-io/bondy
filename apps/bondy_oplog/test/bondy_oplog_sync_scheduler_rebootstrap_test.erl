@@ -60,7 +60,9 @@ cleanup(_) ->
 rebootstrap_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {timeout, 30, fun unavailable_flags_and_rebootstraps/0},
+        {timeout, 30, fun unavailable_without_deficit_ends_benign/0},
         {timeout, 30, fun other_failures_do_not_flag/0},
+        {timeout, 30, fun owed_install_rebootstraps/0},
         {timeout, 30, fun gap_two_strikes_rebootstraps_fused/0},
         {timeout, 30, fun unservable_behind_three_strikes_rebootstraps/0},
         {timeout, 30, fun unservable_without_deficit_never_escalates/0}
@@ -84,6 +86,28 @@ unavailable_flags_and_rebootstraps() ->
         bondy_oplog_sync_scheduler:trigger(),
         Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
         ?assertMatch(#{peer := ?PEER}, Meta)
+    end),
+    bondy_oplog:stop_instance(Inst).
+
+%% The same unpullable pages and unmoved root, from a peer whose applied
+%% frontier is not ahead: the pages cover only events this replica already
+%% applied, so the round ends normally and nothing is flagged.
+unavailable_without_deficit_ends_benign() ->
+    set_mode(unavailable_no_deficit),
+    Inst = mk_inst(),
+    with_telemetry(fun() ->
+        bondy_oplog_sync_scheduler:trigger(),
+        ?assertMatch(
+            #{reason := normal},
+            await([bondy_oplog, sync_scheduler, live, ended], Inst)
+        ),
+        receive
+            {telemetry, [bondy_oplog, sync_scheduler, rebootstrap_scheduled], _,
+                #{instance_id := Inst}} ->
+                error(unexpected_rebootstrap_flag)
+        after 500 ->
+            ok
+        end
     end),
     bondy_oplog:stop_instance(Inst).
 
@@ -203,6 +227,22 @@ other_failures_do_not_flag() ->
     end),
     bondy_oplog:stop_instance(Inst).
 
+%% An instance that holds the re-fold mark with no session to clear it, as a
+%% session that ended before finalizing leaves it, is dispatched a
+%% catalogue re-bootstrap with no flag set, the same failing transport as
+%% `other_failures_do_not_flag/0` notwithstanding.
+owed_install_rebootstraps() ->
+    set_mode(error),
+    Inst = mk_inst(),
+    ok = bondy_oplog_instance:begin_install(Inst),
+    ?assert(bondy_oplog_instance:owes_install(Inst)),
+    with_telemetry(fun() ->
+        bondy_oplog_sync_scheduler:trigger(),
+        #{instance_id := Inst} =
+            await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst)
+    end),
+    bondy_oplog:stop_instance(Inst).
+
 %% =============================================================================
 %% Transport — the "peer" the sessions talk to
 %% =============================================================================
@@ -217,12 +257,14 @@ request(_Peer, _Instance, get_frontier, _Opts) ->
     %% the unservable escalation: `unservable_no_deficit` answers an
     %% empty VV so `maybe_unservable_behind/3` finds nothing to recover.
     case mode() of
-        unservable_no_deficit -> {ok, #{}};
-        _ -> {ok, #{<<"rb_test_peer_origin">> => 1}}
+        M when M == unservable_no_deficit orelse M == unavailable_no_deficit ->
+            {ok, #{}};
+        _ ->
+            {ok, #{<<"rb_test_peer_origin">> => 1}}
     end;
 request(_Peer, _Instance, get_root, _Opts) ->
     case mode() of
-        unavailable ->
+        M when M == unavailable orelse M == unavailable_no_deficit ->
             [{root, Root}] = ets:lookup(?MODE_TAB, root),
             {ok, Root};
         gap ->

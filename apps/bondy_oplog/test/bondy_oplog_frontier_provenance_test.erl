@@ -2,7 +2,8 @@
 %% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
-%% The provenance stamp on a persisted applied frontier.
+%% The provenance stamp on a persisted applied frontier, and the durable
+%% frontier a replica reports to its peers.
 %%
 %% Releases up to and including `1.0.0-rc.lime` merged a fold of the live MST's
 %% `cell_apply` keys into the frontier at every boot. That fold counts RECEIPT,
@@ -141,8 +142,87 @@ an_own_only_frontier_is_silent(Dir) ->
     end.
 
 %% =============================================================================
+%% The durable frontier
+%% =============================================================================
+
+durable_frontier_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(Dir) ->
+        [
+            {timeout, 60, fun() ->
+                the_durable_frontier_is_the_checkpoint(Dir)
+            end},
+            {timeout, 60, fun() ->
+                the_stability_point_waits_for_the_own_checkpoint(Dir)
+            end}
+        ]
+    end}.
+
+%% A peer is answered the frontier the last checkpoint holds, never one the
+%% instance has applied but not yet persisted: each write below advances the
+%% applied frontier ahead of the durable one, and only a checkpoint — on demand,
+%% at a compaction commit, or restored at boot — catches it up.
+the_durable_frontier_is_the_checkpoint(Dir) ->
+    {Id, NS, Origin, Shard} = fresh(Dir),
+    try
+        _ = append_batch(Id, 3),
+        _ = bondy_oplog_instance:await_apply(Id),
+        {Applied3, #{}} = answered(Id),
+        ?assertNotEqual(#{}, Applied3),
+
+        ok = bondy_oplog_instance:persist_frontier(Id),
+        ?assertEqual({Applied3, Applied3}, answered(Id)),
+
+        _ = append_batch(Id, 2),
+        _ = bondy_oplog_instance:await_apply(Id),
+        {Applied5, Applied3} = answered(Id),
+        ?assertNotEqual(Applied3, Applied5),
+
+        ok = compact_to_empty(Id),
+        ?assertEqual({Applied5, Applied5}, answered(Id)),
+
+        ok = bondy_oplog:stop_instance(Id),
+        {ok, _} = open_instance(Id, NS, Dir, Origin),
+        ?assertEqual({Applied5, Applied5}, answered(Id))
+    after
+        cleanup_instance(Id, NS, Shard)
+    end.
+
+%% The stability point counts this replica's own durable frontier among the
+%% witnesses, not only its peers': a peer that durably holds every event does
+%% not make one stable here before this replica's checkpoint claims it.
+the_stability_point_waits_for_the_own_checkpoint(Dir) ->
+    {Id, NS, _Origin, Shard} = fresh(Dir),
+    Ghost = 'peer@durable',
+    ok = meck:new(partisan_peer_service, [passthrough]),
+    try
+        ok = meck:expect(partisan_peer_service, members, fun() ->
+            {ok, [partisan:node(), Ghost]}
+        end),
+        _ = append_batch(Id, 3),
+        _ = bondy_oplog_instance:await_apply(Id),
+        ok = bondy_oplog_peer_state:record_sync_complete(
+            Ghost, Id, frontier(Id)
+        ),
+        ok = bondy_oplog_peer_state:sync(),
+        ?assertEqual(
+            {error, no_frontier}, bondy_oplog_instance:stability_point(Id)
+        ),
+
+        ok = bondy_oplog_instance:persist_frontier(Id),
+        ?assertMatch({ok, _}, bondy_oplog_instance:stability_point(Id))
+    after
+        meck:unload(partisan_peer_service),
+        cleanup_instance(Id, NS, Shard)
+    end.
+
+%% =============================================================================
 %% Helpers
 %% =============================================================================
+
+answered(Id) ->
+    {ok, Applied, _Fp, Durable} =
+        bondy_oplog_responder:dispatch(Id, get_frontier),
+    {Applied, Durable}.
 
 classify(Ckpt) ->
     bondy_oplog_instance:checkpoint_provenance(Ckpt).
@@ -244,8 +324,8 @@ append_batch(Id, N) ->
     ].
 
 compact_to_empty(Id) ->
-    Root = bondy_oplog_instance:root_hash(Id),
-    {ok, {compacted, _, _}} = bondy_oplog_instance:compact(Id, [Root]),
+    Witness = bondy_oplog_registry:frontier(Id),
+    {ok, {compacted, _, _}} = bondy_oplog_instance:compact(Id, [Witness]),
     0 = bondy_oplog:size(Id),
     ok.
 
