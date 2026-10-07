@@ -6,14 +6,17 @@
 -module(bondy_cluster_api).
 -moduledoc """
 `bondy_wamp_api` implementation exposing cluster operations as WAMP
-procedures: `bondy.cluster.{members,connections,info,leave}`.
+procedures: `bondy.cluster.{members,connections,info,leave}`. On a standalone
+node (`bondy_cluster:enabled/0` is `false`) `leave` answers
+`bondy.error.cluster_disabled` and changes nothing
+(`bondy_cluster_standalone_SUITE`).
 
 ## Membership is the reclamation authority
 
 Removing a node from the Partisan membership is not only a routing change. It
 is what releases the rest of the cluster from waiting on that node:
 `bondy_oplog_instance:reclamation_members/0` is
-`partisan_peer_service:members/0` minus this node, and
+`bondy_cluster:members/0` minus this node, and
 `bondy_oplog_origin_retirement` subscribes to membership and reaps, by
 complement, every origin no live member claims. So a departed node that stays
 in the membership stalls reclamation, and removing it is what unstalls it.
@@ -50,12 +53,10 @@ guess. Run the dry run first and read the counts.
 ## Master realm only
 
 Every procedure here goes through `bondy_wamp_api_utils:admin_call_args/3`.
-`members` and `info` did not until 2026-09-02: `bondy.*` is dispatched
-statically, so those two URIs resolved in ANY realm and only the absence of an
-RBAC grant stood between a tenant session and them. `connections` — node names
-and channels — was gated while `info`, which answers `node_spec()` and so
-carries listen ADDRESSES and PORTS, was not; that asymmetry was an oversight
-rather than a design, since `info` discloses strictly more.
+`bondy.*` is dispatched statically, so without that gate a URI resolves in ANY
+realm and only the absence of an RBAC grant stands between a tenant session and
+it. `info` needs it most: it answers `node_spec()`, which carries the node's
+listen addresses and ports.
 
 The set is pinned by `bondy_cluster_api_SUITE:procedures/0`, which DECLARES
 each procedure's authority and is checked against the URIs `handle_call/3`
@@ -119,7 +120,7 @@ handle_call(?BONDY_CLUSTER_LEAVE, #call{} = M, Ctxt) ->
     {reply, leave(M, Name)};
 handle_call(?BONDY_CLUSTER_CONNECTIONS, #call{} = M, Ctxt) ->
     [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
-    {ok, Conns} = partisan_peer_service:connections(),
+    Conns = bondy_cluster:connections(),
     Result = #{
         ~"node" => nodestring(partisan:node()),
         ~"connections" => [connection(C) || C <- Conns]
@@ -128,7 +129,9 @@ handle_call(?BONDY_CLUSTER_CONNECTIONS, #call{} = M, Ctxt) ->
     {reply, R};
 handle_call(?BONDY_CLUSTER_MEMBERS, #call{} = M, Ctxt) ->
     [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
-    R = bondy_wamp_message:result(M#call.request_id, #{}, [members()]),
+    R = bondy_wamp_message:result(M#call.request_id, #{}, [
+        bondy_cluster:members()
+    ]),
     {reply, R};
 handle_call(?BONDY_CLUSTER_INFO, #call{} = M, Ctxt) ->
     [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
@@ -167,12 +170,21 @@ local_readiness() ->
 
 %% @private
 leave(#call{} = M, Name) when is_binary(Name) ->
-    case member_spec(Name) of
+    case bondy_cluster:enabled() of
+        true -> leave_member(M, Name);
+        false -> bondy_wamp_api_utils:error(cluster_disabled, M)
+    end;
+leave(#call{} = M, _) ->
+    bondy_wamp_api_utils:error({invalid_value, ~"node"}, M).
+
+%% @private
+leave_member(#call{} = M, Name) ->
+    case member(Name) of
         error ->
             bondy_wamp_api_utils:error(
                 {not_a_member, Name}, M
             );
-        {ok, Spec} ->
+        {ok, Node} ->
             Remaining = remaining_members(Name),
             %% The survey is the only wait on this path, so the caller's
             %% `_deadline` bounds it and nothing else. Shortening it cannot
@@ -182,15 +194,13 @@ leave(#call{} = M, Name) when is_binary(Name) ->
                 bondy_wamp_api_utils:deadline(M#call.options), ?SURVEY_TIMEOUT
             ),
             Survey = survey(Remaining, Budget),
-            do_leave(M, Name, Spec, Survey)
-    end;
-leave(#call{} = M, _) ->
-    bondy_wamp_api_utils:error({invalid_value, ~"node"}, M).
+            do_leave(M, Name, Node, Survey)
+    end.
 
 %% @private
 %% The dry run reports the survey and stops; the real call refuses on an
 %% unsafe survey and otherwise performs the Partisan removal.
-do_leave(#call{} = M, Name, Spec, Survey) ->
+do_leave(#call{} = M, Name, Node, Survey) ->
     case bondy_wamp_api_utils:dry_run(M) of
         true ->
             bondy_wamp_api_utils:dry_run_result(
@@ -199,7 +209,7 @@ do_leave(#call{} = M, Name, Spec, Survey) ->
         false ->
             case Survey of
                 #{safe := true} ->
-                    ok = partisan_peer_service:leave(Spec),
+                    ok = bondy_cluster:leave(Node),
                     ?LOG_NOTICE(#{
                         description => "Node removed from the cluster",
                         node => Name,
@@ -216,32 +226,12 @@ do_leave(#call{} = M, Name, Spec, Survey) ->
     end.
 
 %% @private
-%% The member names, read LOCK-FREE.
-%%
-%% `partisan_peer_service:members/0` answers the same names — the manager
-%% replies with `[Node || #{name := Node} <- State#state.members]` — but as a
-%% `gen_server:call(..., infinity)`: an unbounded wait on the very process a
-%% cluster fault would block, and the one procedure in this module that could
-%% not honour a caller's `_deadline` AT ALL, because there was no timeout to
-%% shorten. `partisan_membership` mirrors that same list into ETS on every
-%% membership change (`partisan_membership:set/1`, called from the manager
-%% wherever `State#state.members` moves), so this is the same answer without
-%% the wait — the same reading `bondy_alarm_api` gives for its fan-out target.
-%%
-%% It is an ordset, so the reply is now SORTED where the manager's list came
-%% back in whatever order the membership strategy left it. That is a change to
-%% what the wire carries, and a stable order is the better of the two.
-members() ->
-    partisan_membership:node_names().
-
-%% @private
 %% Every member that will remain once `Name` is gone. The leaving node is
 %% excluded because it is not one of the replicas whose advertisement the
 %% reaper will consult afterwards, and this node is excluded because it is
 %% answering.
 remaining_members(Name) ->
-    Members = partisan_membership:node_names(),
-    Members -- [partisan:node(), binary_to_atom(Name, utf8)].
+    bondy_cluster:members() -- [partisan:node(), binary_to_atom(Name, utf8)].
 
 -doc """
 Asks every remaining member whether it is ready and how many oplog instances
@@ -289,7 +279,7 @@ survey(Peers, 0) ->
 survey(Peers, Budget) ->
     Replies =
         try
-            {R, _BadNodes} = partisan_rpc:multicall(
+            {R, _BadNodes} = bondy_cluster:multicall(
                 Peers, ?MODULE, local_readiness, [], Budget
             ),
             R
@@ -351,21 +341,12 @@ unsafe_reason(#{not_ready := [_ | _] = NotReady}) ->
     {members_not_ready, [nodestring(N) || N <- NotReady]}.
 
 %% @private
-%% The `node_spec()` Partisan needs to remove another node.
-%%
-%% `partisan_membership:members/0` is the lock-free ETS mirror of the manager's
-%% own member list — the same list `members_for_orchestration/0` answers with,
-%% and for the same reason `members/0` above no longer goes through the
-%% manager: that call is `gen_server:call(..., infinity)`, so a wedged peer
-%% service made `bondy.cluster.leave` wait forever BEFORE it reached the survey
-%% the caller's `_deadline` bounds.
-member_spec(Name) ->
+member(Name) ->
     try binary_to_existing_atom(Name, utf8) of
         Node ->
-            Specs = partisan_membership:members(),
-            case [S || #{name := N} = S <- Specs, N == Node] of
-                [Spec | _] -> {ok, Spec};
-                [] -> error
+            case lists:member(Node, bondy_cluster:members()) of
+                true -> {ok, Node};
+                false -> error
             end
     catch
         %% An atom nobody has ever created cannot be a member, and creating
@@ -374,26 +355,18 @@ member_spec(Name) ->
     end.
 
 %% @private
-connection(C) ->
+connection(#{node := Node, channel := Channel, listen_addr := Addr}) ->
     #{
-        ~"node" => nodestring(partisan_peer_connections:node(C)),
-        ~"channel" => atom_to_binary(
-            partisan_peer_connections:channel(C), utf8
-        ),
-        ~"listen_addr" => listen_addr(C)
+        ~"node" => nodestring(Node),
+        ~"channel" => atom_to_binary(Channel, utf8),
+        ~"listen_addr" => listen_addr(Addr)
     }.
 
 %% @private
-listen_addr(C) ->
-    try partisan_peer_connections:listen_addr(C) of
-        #{ip := IP, port := Port} ->
-            #{
-                ~"ip" => list_to_binary(inet:ntoa(IP)),
-                ~"port" => Port
-            }
-    catch
-        _:_ -> null
-    end.
+listen_addr(#{ip := IP, port := Port}) ->
+    #{~"ip" => list_to_binary(inet:ntoa(IP)), ~"port" => Port};
+listen_addr(undefined) ->
+    null.
 
 %% @private
 nodestring(Node) when is_atom(Node) ->

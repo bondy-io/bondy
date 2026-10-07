@@ -263,11 +263,19 @@ nested_get(_, _) ->
     undefined.
 
 %% @private
+%% An id outside `key_id()` raises: the envelope's 16-bit field would truncate
+%% it, and the key would be sealed under an id no node looks up.
 current_key_id() ->
     case master_key_config() of
-        MK when is_map(MK) -> maps:get(id, MK, ?DEFAULT_KEY_ID);
+        MK when is_map(MK) -> valid_key_id(maps:get(id, MK, ?DEFAULT_KEY_ID));
         _ -> ?DEFAULT_KEY_ID
     end.
+
+%% @private
+valid_key_id(Id) when is_integer(Id), Id >= 0, Id =< 16#FFFF ->
+    Id;
+valid_key_id(Id) ->
+    error({invalid_master_key_id, Id}).
 
 %% @private
 %% Resolves + caches the master key for `KeyId`. Raises on any failure so the

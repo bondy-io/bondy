@@ -739,7 +739,7 @@ forward(#cancel{} = M, _Addressed, #{from := Caller} = Opts) ->
     %% CANCEL arrived on is not the callee. Mode semantics: `kill` keeps the
     %% promise (the callee's ERROR settles the call), `killnowait` and `skip`
     %% take it so any late response is discarded; `skip` sends no INTERRUPT.
-    %% The INTERRUPT is only sent to a callee that announced call_canceling.
+    %% A callee that did not announce call_canceling is treated as `skip`.
 
     RealmUri = ?GET_REALM_URI(Opts),
 
@@ -765,11 +765,8 @@ forward(#cancel{} = M, _Addressed, #{from := Caller} = Opts) ->
             ok;
         {ok, Promise} ->
             Callee = bondy_rpc_promise:callee(Promise),
-            Interruptible = session_feature(
-                bondy_ref:session_id(Callee), callee, call_canceling
-            ),
 
-            case Interruptible of
+            case interruptible(Callee) of
                 true ->
                     InvocationId =
                         bondy_rpc_promise:invocation_id(Promise),
@@ -780,6 +777,17 @@ forward(#cancel{} = M, _Addressed, #{from := Caller} = Opts) ->
                         Callee, #{from => Caller}
                     ),
                     bondy_router_peer:send(RealmUri, To, Interrupt, SendOpts);
+                false when Mode == kill ->
+                    %% `skip`: the caller's node is waiting for this node to
+                    %% settle the call, so the ERROR goes back the way a
+                    %% callee's ERROR does.
+                    _ = bondy_rpc_promise:take(bondy_rpc_promise:key(Promise)),
+                    Via = bondy_rpc_promise:via(Promise),
+                    {To, SendOpts} = bondy_router_peer:prepare_send(
+                        Caller, #{from => Callee, via => Via}
+                    ),
+                    Error = cancelled_error(CallId),
+                    bondy_router_peer:send(RealmUri, To, Error, SendOpts);
                 false ->
                     ok
             end;
@@ -1260,12 +1268,20 @@ handle_cancel_local(#cancel{} = M, Ctxt0, kill) ->
         InvocationId = bondy_rpc_promise:invocation_id(Promise),
         Callee = bondy_rpc_promise:callee(Promise),
 
-        Via = bondy_rpc_promise:via(Promise),
-        SendOpts0 = #{from => Caller, via => Via},
-        {To, SendOpts} = bondy_router_peer:prepare_send(Callee, SendOpts0),
-
-        R = bondy_wamp_message:interrupt(InvocationId, Opts),
-        ok = bondy_router_peer:send(RealmUri, To, R, SendOpts),
+        case interruptible(Callee) of
+            true ->
+                Via = bondy_rpc_promise:via(Promise),
+                SendOpts0 = #{from => Caller, via => Via},
+                {To, SendOpts} = bondy_router_peer:prepare_send(
+                    Callee, SendOpts0
+                ),
+                R = bondy_wamp_message:interrupt(InvocationId, Opts),
+                ok = bondy_router_peer:send(RealmUri, To, R, SendOpts);
+            false ->
+                _ = bondy_rpc_promise:take(bondy_rpc_promise:key(Promise)),
+                Error = cancelled_error(CallId),
+                ok = bondy_router_peer:send(RealmUri, Caller, Error, #{})
+        end,
 
         {ok, Ctxt1}
     end,
@@ -1297,12 +1313,18 @@ handle_cancel_local(#cancel{} = M, Ctxt0, killnowait) ->
         ok = bondy_router_peer:send(RealmUri, Caller, Error, #{}),
 
         %% But Callee might be remote
-        Interrupt = bondy_wamp_message:interrupt(InvocationId, Opts),
-        Via = bondy_rpc_promise:via(Promise),
-        SendOpts0 = #{from => Caller, via => Via},
-        {To, SendOpts} = bondy_router_peer:prepare_send(Callee, SendOpts0),
-
-        ok = bondy_router_peer:send(RealmUri, To, Interrupt, SendOpts),
+        case interruptible(Callee) of
+            true ->
+                Interrupt = bondy_wamp_message:interrupt(InvocationId, Opts),
+                Via = bondy_rpc_promise:via(Promise),
+                SendOpts0 = #{from => Caller, via => Via},
+                {To, SendOpts} = bondy_router_peer:prepare_send(
+                    Callee, SendOpts0
+                ),
+                ok = bondy_router_peer:send(RealmUri, To, Interrupt, SendOpts);
+            false ->
+                ok
+        end,
 
         {ok, Ctxt1}
     end,
@@ -1588,6 +1610,13 @@ gate_receive_progress(M, _) ->
 %% looked up locally, so this must only be used for refs targeting a
 %% session on this node. Any failure (no session id, session gone) reads
 %% as the feature being unsupported.
+%% Only a callee that announced `call_canceling` may be sent an INTERRUPT; for
+%% any other, `kill` and `killnowait` act as `skip` (WAMP Advanced Profile,
+%% Call Canceling).
+interruptible(Callee) ->
+    session_feature(bondy_ref:session_id(Callee), callee, call_canceling).
+
+%% @private
 session_feature(SessionId, Role, Feature) when is_binary(SessionId) ->
     try bondy_session:roles(SessionId) of
         Roles when is_map(Roles) ->
@@ -2162,8 +2191,6 @@ handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri) ->
             %% bondy_rpc_load_balancer opts validation error. It is carried as
             %% a cause so the caller gets both the general condition and the
             %% specific option that was wrong.
-            ErrorOpts = maps:with(?WAMP_PPT_ATTRS, Msg#call.options),
-
             Error = bondy_wamp_error:to_wamp(
                 bondy_connect_error:wrap(
                     bondy_connect_error:new(invalid_argument, #{
@@ -2178,7 +2205,7 @@ handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri) ->
                 ),
                 ?CALL,
                 CallId,
-                ErrorOpts
+                #{}
             ),
             ok = reply_error(Error, Ctxt)
     end.
@@ -2669,6 +2696,10 @@ try_rib_groups(
             case bondy_rpc_load_balancer:select(LocalsG, LBOpts) of
                 {ok, _} = OK ->
                     OK;
+                {error, Invalid} when is_map(Invalid) ->
+                    %% The CALL's options are wrong, which no other group
+                    %% fixes; the caller gets `invalid_argument`.
+                    {error, Invalid};
                 {error, _} ->
                     try_rib_groups(Rest, RealmUri, ProcUri, Opts)
             end;
@@ -3108,8 +3139,7 @@ interrupt_local_callee(Promise, RefSessionId) ->
     CalleeSessionId = bondy_ref:session_id(Callee),
 
     Interruptible =
-        CalleeSessionId =/= RefSessionId andalso
-            session_feature(CalleeSessionId, callee, call_canceling),
+        CalleeSessionId =/= RefSessionId andalso interruptible(Callee),
 
     case Interruptible of
         true ->

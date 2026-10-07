@@ -112,9 +112,7 @@
     %% progressive features are in `bondy_session:?STRICT_OPTIN_FEATURES', so a
     %% client that OMITS one is given `false' instead of inheriting the `true'
     %% here -- the router offers them, but only a client that asks receives
-    %% them. A remote callee is gated on its own node
-    %% (`bondy_dealer:maybe_gate_progressive_callee/2'), which is what makes a
-    %% mixed cluster safe rather than any global switch.
+    %% them. A remote callee is gated on its own node.
     progressive_call_results => true,
     progressive_calls => true,
     call_timeout => true,

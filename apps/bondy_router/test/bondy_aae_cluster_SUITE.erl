@@ -654,14 +654,11 @@ concurrent_token_issues_cross_node_both_survive(Config) ->
 
 %% Stale-peer rejoin on the DURABLE path.
 %%
-%% A peer silent past `peer_timeout_ms` stops pinning the stability frontier,
-%% so durable truncation on the survivor proceeds WITHOUT its confirmation —
-%% deliberately, or one dead node would pin every shard forever. What this
-%% case checks is that rejoining is still lossless in BOTH directions:
+%% A peer that is down is still a member, so the survivor's compaction keeps
+%% everything the peer has not confirmed. What this case checks is that
+%% rejoining is lossless in BOTH directions:
 %%
-%%   - the survivor truncated history the returning node never saw, so that
-%%     range cannot arrive by page-sync and must come via catalogue install
-%%     + rederive;
+%%   - the survivor's writes made while the peer was down reach it;
 %%   - the returning node's OWN writes, made while isolated, live only in its
 %%     own MST and must flow back to the survivor.
 %%
@@ -684,15 +681,6 @@ stale_peer_rejoin_durable_converges(Config) ->
     try
         _ = [push_module(N, ?MODULE) || N <- [R1, R2]],
 
-        %% Shrink the recency window so "silent past peer_timeout_ms" is
-        %% seconds rather than the 30s default.
-        _ = [
-            erpc:call(N, application, set_env, [
-                bondy_oplog, peer_timeout_ms, 2000
-            ])
-         || N <- [R1, R2]
-        ],
-
         Shared = <<"rejoin_shared">>,
         SharedV = #{username => Shared, marker => <<"before_split">>},
         ok = apply_on(R1, ?USERS_TABLE, ?REALM, Shared, SharedV),
@@ -714,12 +702,11 @@ stale_peer_rejoin_durable_converges(Config) ->
         %% gone. The crash path is the other restart case in this suite.
         ok = bondy_ct:stop_node(S2, graceful),
 
-        %% R1 keeps writing while R2 is gone, then outlives the recency window
-        %% and compacts — truncating durable history R2 never saw.
+        %% R1 keeps writing while R2 is gone, then compacts, which keeps what
+        %% R2 has not confirmed.
         Only1 = <<"rejoin_written_while_down">>,
         Only1V = #{username => Only1, marker => <<"survivor_only">>},
         ok = apply_on(R1, ?USERS_TABLE, ?REALM, Only1, Only1V),
-        timer:sleep(3000),
         _ = erpc:call(R1, ?MODULE, do_compact_all, []),
 
         %% R2 returns on its own data directory and rejoins.
@@ -734,12 +721,8 @@ stale_peer_rejoin_durable_converges(Config) ->
             {_, R2b, _} = S2b,
             ok = push_module(R2b, ?MODULE),
             ok = bondy_ct:rejoin(S2b, [S1, S2b], 60000),
-            _ = erpc:call(R2b, application, set_env, [
-                bondy_oplog, peer_timeout_ms, 2000
-            ]),
 
-            %% Direction 1: the returning node catches up on everything,
-            %% including the range the survivor truncated.
+            %% Direction 1: the returning node catches up on everything.
             ok = wait_converge(R2b, ?USERS_TABLE, ?REALM, Shared, SharedV),
             ok = wait_converge(R2b, ?USERS_TABLE, ?REALM, Only1, Only1V),
 
@@ -918,12 +901,6 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
         %% failing runs were exactly those whose main-DB instances held live
         %% events after boot). So the PREMISE is waited for: the reader's
         %% main-DB instances hold no live event.
-        _ = [
-            erpc:call(N, application, set_env, [
-                bondy_oplog, peer_timeout_ms, 2000
-            ])
-         || N <- [W, R0]
-        ],
         ok = wait_until(
             fun() ->
                 _ =

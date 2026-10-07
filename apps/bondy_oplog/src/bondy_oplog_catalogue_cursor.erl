@@ -391,7 +391,7 @@ discard_instance(InstanceId) when is_binary(InstanceId) ->
 ?DOC("""
 Whether a cursor on `InstanceId` has not yet expired, so a session may still
 read it. An expired row still in the table is not counted, though `advance/2`
-would renew it; `bondy_oplog_instance:begin_install/1` deletes such rows with
+would renew it; `bondy_oplog_instance:begin_install/3` deletes such rows with
 `discard_instance/1`.
 """).
 -spec any_open(instance_id()) -> boolean().

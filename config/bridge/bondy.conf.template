@@ -665,6 +665,13 @@ cluster.tls.server.verify = verify_none
 # cluster.tls.client.verify = verify_none
 
 ##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+cluster.enabled = off
+
+##
 ## Default: off
 ##
 ## Acceptable values:

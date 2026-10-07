@@ -35,8 +35,8 @@ silently discarded. The reactor cannot tell a genuinely newer remote edit from
 a concurrent one (lww carries no causal context), so it over-approximates:
 every remote replacement of a differing value emits a
 `[bondy, aae, merge_conflict]` telemetry event and a warning log naming realm
-and table. Operators who never edit the same grant on two nodes concurrently
-will never see it fire.
+and table. It therefore also fires for an ordinary update made on one node,
+on every other node that already held the previous value.
 
 The split mirrors the authn-vs-authz distinction in the local write path: an
 **authentication-level** change (a user or realm *delete*) tears the affected

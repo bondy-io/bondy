@@ -23,10 +23,7 @@
         %% Project
         bondy_metrics,
         bondy_connect_lib,
-        %% Cluster transport — the node-level responder is a
-        %% partisan_gen_server and bondy_oplog_transport_partisan routes sync
-        %% over Partisan (deployments run connect_disterl => false).
-        partisan,
+        bondy_cluster,
         %% Umbrella
         bondy_mst,
         bondy_log

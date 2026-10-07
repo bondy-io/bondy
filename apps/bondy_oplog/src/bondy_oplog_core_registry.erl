@@ -555,7 +555,7 @@ Read the per-shard high-water HLC mark
 
 Returns `{ok, Hlc}` when at least one `cell_apply` event has been
 materialised into the shard's projection since the shard's last
-registration (or `finalize_catalogue_bootstrap/3` call), `{ok,
+registration (or `finalize_catalogue_bootstrap/4` call), `{ok,
 no_watermark}` otherwise, and `not_found` when no shard is
 registered under the given key.
 
@@ -636,8 +636,9 @@ last_ae_at(NS, Index, Shard) ->
 Whether the shard has ever been freshened (AE bumped past the
 "infinitely stale" sentinel). Used by a restarting secondary writer to
 tell a crash-restart of a previously-populated shard (rebuild to recover
-the lost buffer) from a first-ever start (the startup backfill handles
-it). `false` for an unknown or never-bumped shard.
+the lost buffer) from a first-ever start, which has no trust marker and
+is rebuilt when its table opens. `false` for an unknown or never-bumped
+shard.
 """.
 -spec ever_freshened(atom(), atom(), non_neg_integer()) -> boolean().
 

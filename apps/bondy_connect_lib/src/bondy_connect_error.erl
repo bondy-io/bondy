@@ -596,6 +596,7 @@ types() ->
         node_down,
         cluster_not_formed,
         partition_detected,
+        cluster_disabled,
         %% Mail
         mail_not_configured,
         no_such_relay,
@@ -1760,6 +1761,19 @@ entry(partition_detected) ->
         ~"K003",
         transient,
         ~"A network partition has been detected."
+    );
+entry(cluster_disabled) ->
+    entry(
+        ~"bondy.error.cluster_disabled",
+        ~"K004",
+        permanent,
+        ~"Clustering is disabled on this node.",
+        <<
+            "This node runs standalone ('cluster.enabled = off'), so it has no "
+            "cluster to change. Neither retrying nor changing the request "
+            "helps; an operator enables clustering in bondy.conf and restarts "
+            "the node."
+        >>
     );
 %% -----------------------------------------------------------------------------
 %% Mail

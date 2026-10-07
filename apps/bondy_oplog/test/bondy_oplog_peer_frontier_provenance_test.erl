@@ -161,7 +161,7 @@ two_instances() ->
     {A, B}.
 
 recorded_for(Instance) ->
-    case bondy_oplog_peer_state:get_instance_peer_states(Instance) of
+    case bondy_oplog_peer_state:get_instance_peer_states(Instance, 0) of
         [] -> undefined;
         [#{frontier := F} | _] -> F
     end.

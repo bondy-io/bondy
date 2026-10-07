@@ -18,8 +18,8 @@
 %% truncated history recovers via catalogue bootstrap (the
 %% `peer_pages_unavailable`/`frontier_gap` → rebootstrap path).
 %%
-%% These tests pin: retention truncates on size and age breaches; no
-%% retention ⇒ the old defer-forever behavior (no hidden solo carve-out);
+%% These tests pin, on a held cycle (clustering enabled, no witness):
+%% retention truncates on size and age breaches; no retention ⇒ defer;
 %% retention requires `fused`; retention without a projection never fires;
 %% the truncate-vs-drain race loses no data (the fused MST never holds
 %% unapplied events); the peer-confirmed and mux paths are unchanged.
@@ -48,7 +48,8 @@ cleanup(_) ->
 
 compaction_fused_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
-        {timeout, 30, fun solo_fused_without_retention_defers/0},
+        {timeout, 30, fun held_fused_without_retention_defers/0},
+        {timeout, 30, fun fused_compaction_waits_for_every_member/0},
         {timeout, 30, fun retention_size_breach_truncates/0},
         {timeout, 30, fun retention_age_breach_truncates/0},
         {timeout, 30, fun retention_below_thresholds_defers/0},
@@ -77,7 +78,11 @@ compaction_fused_test_() ->
         {timeout, 30,
             fun live_bootstrap_with_churn_between_batches_converges/0},
         {timeout, 30, fun unservable_own_root_self_heals_when_peers_dominate/0},
+        {timeout, 30,
+            fun unservable_own_root_self_heals_when_right_edge_lost/0},
         {timeout, 30, fun unservable_own_root_holds_until_peers_dominate/0},
+        {timeout, 30,
+            fun unservable_own_root_rebuild_holds_unapplied_applier/0},
         {timeout, 30, fun truncation_reclaims_store_pages/0}
     ]}.
 
@@ -85,12 +90,9 @@ compaction_fused_test_() ->
 %% Tests
 %% =============================================================================
 
-%% Without a retention policy, a peerless fused instance defers forever —
-%% the pre-retention behavior, now again the ONLY no-policy behavior (the
-%% interim solo-membership carve-out was subsumed by retention and
-%% removed). Retention is the mechanism, explicitly configured; nothing
-%% truncates behind the operator's back.
-solo_fused_without_retention_defers() ->
+%% Without a retention policy, a held cycle on a fused instance defers: no
+%% witness confirms anything.
+held_fused_without_retention_defers() ->
     Id = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
     K = <<"vehicle_0">>,
     _ = bondy_oplog:append(Id, {cell_apply, ?B, K, {inc, 1}}),
@@ -99,9 +101,35 @@ solo_fused_without_retention_defers() ->
     SizeBefore = bondy_oplog:size(Id),
     ?assert(SizeBefore >= 1),
 
-    ?assertEqual({ok, no_change}, bondy_oplog_instance:compact(Id, [])),
+    ?assertEqual({ok, no_change}, held_compact(Id)),
     ?assertEqual(SizeBefore, bondy_oplog:size(Id)),
 
+    teardown(Id).
+
+%% One member synced just now and claims everything; the other never
+%% confirmed. Truncating on the recent member alone would leave the silent one
+%% behind this replica's truncation record for good, so nothing is cut.
+fused_compaction_waits_for_every_member() ->
+    Id = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(Id),
+    SizeBefore = bondy_oplog:size(Id),
+    ok = bondy_oplog_peer_state:record_sync_complete(
+        {peer, live},
+        Id,
+        bondy_oplog_registry:frontier(Id),
+        os:system_time(millisecond)
+    ),
+    bondy_oplog_test_helpers:with_cluster(
+        [{peer, live}, {peer, silent}],
+        fun() ->
+            ?assertEqual(
+                {error, {unconfirmed, [{peer, silent}]}},
+                bondy_oplog:compact(Id)
+            )
+        end
+    ),
+    ?assertEqual(SizeBefore, bondy_oplog:size(Id)),
     teardown(Id).
 
 %% `max_events` breach: the whole applied tree truncates — with NO peer
@@ -123,7 +151,7 @@ retention_size_breach_truncates() ->
     ?assert(bondy_oplog:size(Id) > 3),
 
     ?assertMatch(
-        {ok, {compacted, _, _}}, bondy_oplog_instance:compact(Id, [])
+        {ok, {compacted, _, _}}, held_compact(Id)
     ),
     ?assertEqual(0, bondy_oplog:size(Id)),
     ?assertNotEqual(undefined, bondy_oplog:current_watermark(Id)),
@@ -145,7 +173,7 @@ retention_age_breach_truncates() ->
     %% Let the events age past the 50ms window.
     timer:sleep(120),
     ?assertMatch(
-        {ok, {compacted, _, _}}, bondy_oplog_instance:compact(Id, [])
+        {ok, {compacted, _, _}}, held_compact(Id)
     ),
     ?assertEqual(0, bondy_oplog:size(Id)),
 
@@ -162,7 +190,7 @@ retention_below_thresholds_defers() ->
     SizeBefore = bondy_oplog:size(Id),
     ?assert(SizeBefore >= 1),
 
-    ?assertEqual({ok, no_change}, bondy_oplog_instance:compact(Id, [])),
+    ?assertEqual({ok, no_change}, held_compact(Id)),
     ?assertEqual(SizeBefore, bondy_oplog:size(Id)),
 
     teardown(Id).
@@ -200,7 +228,7 @@ retention_truncate_vs_drain_race() ->
      || K <- Keys
     ],
     %% No await: compact races the fused drain.
-    _ = bondy_oplog_instance:compact(Id, []),
+    _ = held_compact(Id),
     ok = bondy_oplog_instance:await_apply(Id),
 
     %% No cell lost: every key materialized in the projection.
@@ -215,7 +243,7 @@ retention_truncate_vs_drain_race() ->
     %% survive it, and a follow-up cycle truncates them only while the
     %% size still BREACHES max_events — exactly 1 event left is at the
     %% bound, not over it, and correctly defers.
-    _ = bondy_oplog_instance:compact(Id, []),
+    _ = held_compact(Id),
     ?assert(bondy_oplog:size(Id) =< 1),
 
     teardown(Id).
@@ -232,13 +260,13 @@ retention_compaction_is_idempotent() ->
     ok = bondy_oplog_instance:await_apply(Id),
 
     ?assertMatch(
-        {ok, {compacted, _, _}}, bondy_oplog_instance:compact(Id, [])
+        {ok, {compacted, _, _}}, held_compact(Id)
     ),
     ?assertEqual(0, bondy_oplog:size(Id)),
     Watermark1 = bondy_oplog:current_watermark(Id),
     ?assertNotEqual(undefined, Watermark1),
 
-    ?assertEqual({ok, no_change}, bondy_oplog_instance:compact(Id, [])),
+    ?assertEqual({ok, no_change}, held_compact(Id)),
     ?assertEqual(Watermark1, bondy_oplog:current_watermark(Id)),
     ?assertEqual(0, bondy_oplog:size(Id)),
 
@@ -377,7 +405,7 @@ fused_catalogue_bootstrap_roundtrip() ->
     ?assertEqual(0, bondy_oplog:size(SrcId)),
 
     %% Producer: the fused instance serves a full multi-bucket snapshot.
-    {ok, {_Watermark, Cursor}} = bondy_oplog_catalogue_snapshot:init(SrcId),
+    {ok, {_Watermark, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(SrcId),
     Cells = pull_snapshot(SrcId, Cursor, []),
     Buckets = lists:usort([B || {B, _K, _F} <- Cells]),
     ?assertEqual([?BUCKET_REG, ?BUCKET_SUB], Buckets),
@@ -406,9 +434,11 @@ fused_catalogue_bootstrap_roundtrip() ->
         TgtId, ?BUCKET_REG, {TgtNsReg, primary, 0}, #{}
     ),
 
-    {ok, Counts} = bondy_oplog_instance:install_catalogue_batch(
-        TgtId, Cells
-    ),
+    %% The rederive adopts the source's applied-frontier VV — without it a
+    %% snapshot-seeded replica converges by data but never by the oracle.
+    SrcFrontier = bondy_oplog_registry:frontier(SrcId),
+    ?assertNotEqual(#{}, SrcFrontier),
+    {ok, Counts} = bondy_oplog_test_helpers:install(TgtId, Cells, SrcFrontier),
     ?assertEqual(2, maps:get(installed, Counts)),
     ?assertNotEqual(
         undefined,
@@ -424,13 +454,7 @@ fused_catalogue_bootstrap_roundtrip() ->
         bondy_oplog_core:read(TgtNsSub, primary, ?BUCKET_SUB, <<"kb">>)
     ),
 
-    %% Finalize adopts the source's applied-frontier VV — without it a
-    %% snapshot-seeded replica converges by data but never by the oracle.
-    SrcFrontier = bondy_oplog_registry:frontier(SrcId),
-    ?assertNotEqual(#{}, SrcFrontier),
-    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
-        TgtId, 0, SrcFrontier, true
-    ),
+    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(TgtId, 0, 0, true),
     TgtFrontier = bondy_oplog_registry:frontier(TgtId),
     _ = [
         ?assertEqual(Max, maps:get(Origin, TgtFrontier, missing))
@@ -570,23 +594,17 @@ watermark_door_holds_unapplied_peer_event_applier() ->
     teardown(A),
     teardown(B).
 
-%% THE COMPACTION CAP, below-watermark trim path (the trace
-%% `proofs/tla/ConfirmedCompaction_RootVV2_AsyncSweep_NoCap.cfg` refutes
-%% with `NoDrop`): the door holds A's never-applied event below B's
-%% watermark, and a compaction tick lands BEFORE the applier's replay
-%% has folded it. Without the cap `finalize_catalogue_compaction/3`
-%% truncated at or below the watermark unguarded (the async catch-up of
-%% the time folded only `(watermark, frontier]`, i.e. nothing here) and
-%% the op was gone from both the tree and the projection. The tick must be a
+%% A NEVER-APPLIED EVENT BELOW THE WATERMARK STAYS UNTIL APPLIED: the door
+%% holds A's never-applied event below B's watermark, and a compaction tick
+%% lands BEFORE the applier's replay has folded it. The tick must be a
 %% `no_change`; the event must reach the projection once the applier
-%% runs; the next tick then truncates it.
+%% runs; the next tick then truncates it. B's own durable frontier, a
+%% witness, does not cover the event, so the test passes with the compaction
+%% cap disabled too.
 %%
 %% The applier is `sys:suspend`ed so the replay cannot race the tick;
 %% the pages are pulled by hand because the sync session's settle
-%% barrier would block on the suspended applier. Exercises the cap's
-%% `undefined` (nothing may go) branch; the partial branch (a held key
-%% with applied tree keys below it) is the door's own held branch and is
-%% not constructed here.
+%% barrier would block on the suspended applier.
 compaction_holds_doored_event_until_applied_watermark_path() ->
     A = start_applier_instance(),
     B = start_applier_instance(),
@@ -636,7 +654,7 @@ compaction_holds_doored_event_until_applied_watermark_path() ->
 
 %% As above on the peer-confirmed FRONTIER path: B also holds an applied
 %% own event ABOVE its watermark, so the confirmed frontier advances past
-%% the watermark and the tick reaches `finalize_catalogue_compaction/3`
+%% the watermark and the tick reaches `finalize_catalogue_compaction/4`
 %% with a frontier above the held key. The cap must still hold the whole
 %% tree: the held key is
 %% the tree's smallest, so nothing may go, including the applied own
@@ -738,10 +756,9 @@ compaction_truncates_held_event_of_retired_origin() ->
     end.
 
 %% THE FRONTIER WITNESS SURVIVES THE PEER'S COMPACTION
-%% (`proofs/tla/ConfirmedCompaction_Root2.cfg`, `RoundConfirmsApplied`
-%% refuted in 6 steps under a root-only rule). A compacts e1 once B confirms
-%% it; A then mints e2. A's tree has lost e1, but the durable frontier B
-%% records for A still covers it, so B compacts.
+%% (`proofs/tla/ConfirmedCompaction_2R_Async_Live.cfg`: every tree empties).
+%% A compacts e1 once B confirms it; A then mints e2. A's tree has lost e1,
+%% but the durable frontier B records for A still covers it, so B compacts.
 %% Drives the production entry (`bondy_oplog_compaction:compact/1`), the
 %% one that reads `bondy_oplog_peer_state`, with A and B as the members.
 peer_compaction_does_not_stall_ours() ->
@@ -771,7 +788,7 @@ peer_compaction_does_not_stall_ours() ->
     [VVA] = [
         F
      || #{peer := P, frontier := F} <-
-            bondy_oplog_peer_state:get_instance_peer_states(B),
+            bondy_oplog_peer_state:get_instance_peer_states(B, 0),
         P =:= A
     ],
     ?assertEqual(2, maps:get(AOrigin, VVA)),
@@ -783,8 +800,8 @@ peer_compaction_does_not_stall_ours() ->
     teardown(B).
 
 %% A ROW WITH NO FRONTIER HOLDS COMPACTION
-%% (`proofs/tla/ConfirmedCompaction_Root3.cfg`, `NoLoss` refuted in 5 steps
-%% under "constrains nothing"). B holds e1 from A and has completed a round
+%% (`proofs/tla/ConfirmedCompaction_3R.cfg` holds `NoLoss` with every row
+%% recording nothing at the start). B holds e1 from A and has completed a round
 %% against C, whose tree was empty: C's row has no frontier. C is live and
 %% has never received e1, so B must not truncate it. Once C pulls B (and
 %% reports its frontier back), B compacts.
@@ -803,7 +820,7 @@ rootless_live_peer_holds_compaction() ->
         [
             S
          || #{peer := P} = S <-
-                bondy_oplog_peer_state:get_instance_peer_states(B),
+                bondy_oplog_peer_state:get_instance_peer_states(B, 0),
             P =:= C
         ]
     ),
@@ -1040,14 +1057,12 @@ frontier_gap_detected_after_peer_truncation() ->
 
     %% Remedy: catalogue bootstrap B <- A (data + frontier), after which
     %% the same round passes clean.
-    {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(A),
+    {ok, {_W, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(A),
     Cells = pull_snapshot(A, Cursor, []),
-    {ok, _Counts} = bondy_oplog_instance:install_catalogue_batch(
-        B, Cells
+    {ok, _Counts} = bondy_oplog_test_helpers:install(
+        B, Cells, bondy_oplog_registry:frontier(A)
     ),
-    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
-        B, 0, bondy_oplog_registry:frontier(A), true
-    ),
+    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(B, 0, 0, true),
     ?assertMatch(
         {ok, _},
         bondy_oplog_sync_session:run(B, A, #{record_in_peer_state => false})
@@ -1089,34 +1104,33 @@ rederive_restores_cell_clobbered_by_live_bootstrap() ->
     %% Live re-bootstrap B <- A: the install replaces B's cell with A's
     %% copy, so B's own inc is gone from the projection while B's frontier
     %% still covers it.
-    {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(A),
+    {ok, {_W, Cursor, Buckets}} = bondy_oplog_catalogue_snapshot:init(A),
     Cells = pull_snapshot(A, Cursor, []),
-    {ok, #{installed := 1}} = bondy_oplog_instance:install_catalogue_batch(
-        B, Cells
-    ),
+    {ok, Token} = bondy_oplog_instance:begin_install(B, Buckets, #{}),
+    ok = bondy_oplog_instance:install_catalogue_batch(B, Token, Cells),
     ?assertMatch({1, _}, bondy_oplog_core:read(BNs, primary, K)),
 
     %% The remedy: rederive re-applies B's retained MST events over the
     %% installed cell; B's inc integrates (it is absent from A's copy),
     %% converging to both contributions.
-    ok = bondy_oplog_instance:rederive_projection(B),
+    {ok, #{installed := 1}} = bondy_oplog_instance:rederive_projection(
+        B, Token
+    ),
     ?assertMatch({2, _}, bondy_oplog_core:read(BNs, primary, K)),
 
     %% Idempotent: a second full re-apply must not double-count — the
     %% kernel rejects ops the cell already holds.
-    ok = bondy_oplog_instance:rederive_projection(B),
+    {ok, #{installed := 0}} = bondy_oplog_test_helpers:install(B, []),
     ?assertMatch({2, _}, bondy_oplog_core:read(BNs, primary, K)),
 
     teardown(A),
     teardown(B).
 
-%% The CHURN variant of the clobber/rederive lock: local ops keep landing
-%% BETWEEN install batches of a live re-bootstrap (the install runs in the
-%% instance gen_server, so batches are atomic, but the gaps between them
-%% are live). A churn op folded after batch 1 and clobbered by batch 2
-%% must still survive the full bootstrap sequence (install, rederive,
-%% finalize), converging to peer + pre-bootstrap + mid-install
-%% contributions.
+%% The CHURN variant of the clobber/rederive lock: a local op lands BETWEEN
+%% install batches of a live re-bootstrap and folds onto B's own cell, since
+%% the batches are only staged. The rederive installs A's cell and re-folds
+%% both of B's incs, and the full bootstrap sequence (install, rederive,
+%% finalize) converges to peer + pre-bootstrap + mid-install contributions.
 live_bootstrap_with_churn_between_batches_converges() ->
     A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
     B = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
@@ -1132,7 +1146,7 @@ live_bootstrap_with_churn_between_batches_converges() ->
     _ = bondy_oplog:append(A, {cell_apply, ?B, <<"k_other">>, {inc, 1}}),
     ok = bondy_oplog_instance:await_apply(A),
 
-    {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(A),
+    {ok, {_W, Cursor, Buckets}} = bondy_oplog_catalogue_snapshot:init(A),
     Cells = pull_snapshot(A, Cursor, []),
     ?assertEqual(2, length(Cells)),
     {KCells, OtherCells} = lists:partition(
@@ -1140,27 +1154,22 @@ live_bootstrap_with_churn_between_batches_converges() ->
     ),
 
     %% Batch 1 (without K), then the mid-install churn op on K, then
-    %% batch 2 — whose copy of K clobbers BOTH of B's incs.
-    {ok, _} = bondy_oplog_instance:install_catalogue_batch(
-        B, OtherCells
+    %% batch 2, whose copy of K the rederive installs.
+    {ok, Token} = bondy_oplog_instance:begin_install(
+        B, Buckets, bondy_oplog_registry:frontier(A)
     ),
+    ok = bondy_oplog_instance:install_catalogue_batch(B, Token, OtherCells),
     _ = bondy_oplog:append(B, {cell_apply, ?B, K, {inc, 1}}),
     ok = bondy_oplog_instance:await_apply(B),
-    {ok, _} = bondy_oplog_instance:install_catalogue_batch(
-        B, KCells
-    ),
-    %% Batch 2 replaced both of B's incs with A's copy, although the churn
-    %% inc gave B's cell the higher HLC.
-    ?assertMatch({1, _}, bondy_oplog_core:read(BNs, primary, K)),
+    ok = bondy_oplog_instance:install_catalogue_batch(B, Token, KCells),
+    ?assertMatch({2, _}, bondy_oplog_core:read(BNs, primary, K)),
 
     %% The production sequence as `bondy_oplog_sync_session` runs it: the
-    %% rederive (restores whatever the install replaced), finalize
-    %% (frontier adoption), then a full AE round against the peer.
-    ok = bondy_oplog_instance:rederive_projection(B),
+    %% rederive (frontier adoption, then restores whatever the install
+    %% replaced), finalize, then a full AE round against the peer.
+    {ok, _} = bondy_oplog_instance:rederive_projection(B, Token),
     ?assertMatch({3, _}, bondy_oplog_core:read(BNs, primary, K)),
-    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
-        B, 0, bondy_oplog_registry:frontier(A), true
-    ),
+    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(B, 0, 0, true),
     ?assertMatch(
         {ok, _},
         bondy_oplog_sync_session:run(B, A, #{record_in_peer_state => false})
@@ -1169,130 +1178,257 @@ live_bootstrap_with_churn_between_batches_converges() ->
     ?assertMatch({1, _}, bondy_oplog_core:read(BNs, primary, <<"k_other">>)),
 
     %% Idempotent under a second full re-apply.
-    ok = bondy_oplog_instance:rederive_projection(B),
+    {ok, _} = bondy_oplog_test_helpers:install(B, []),
     ?assertMatch({3, _}, bondy_oplog_core:read(BNs, primary, K)),
 
     teardown(A),
     teardown(B).
 
-%% THE s16 SELF-HEAL LOCK (broken-node half). A fused instance whose own
-%% root loses pages can never serve a complete page round again, so
-%% nothing on the shard ever earns a truncation license — an AE blackout
-%% plus an unbounded MST. Once the unservable streak passes the
-%% threshold AND every recency-live peer's recorded frontier dominates
-%% ours, the compaction tick must REBUILD: drop the tree, advance the
-%% watermark, keep the projection and the applied frontier.
+%% A fused instance whose own root has lost pages can never serve a complete
+%% page round again and its walk confirms nothing. Once every member's recorded
+%% frontier covers ours, a compaction cycle rebuilds: it drops the tree,
+%% advances the watermark, and keeps the projection and the applied frontier.
 unservable_own_root_self_heals_when_peers_dominate() ->
-    ok = application:set_env(bondy_oplog, unservable_self_heal_after_ms, 50),
-    Id = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
-    Ns = ns_of(Id),
-    try
-        _ = [
-            bondy_oplog:append(
-                Id,
-                {cell_apply, ?B, <<"sh_", (integer_to_binary(N))/binary>>,
-                    {inc, 1}}
-            )
-         || N <- lists:seq(1, 300)
-        ],
-        ok = bondy_oplog_instance:await_apply(Id),
-        SizeBefore = bondy_oplog:size(Id),
-        ?assert(SizeBefore > 100),
-
-        %% Fault: delete a page the current root references — the
-        %% dangling-own-root state observed live on Fly s16.
-        ok = drop_root_referenced_page(Id),
-        %% The advertise guard sees it on the next `aae_root` ask (this
-        %% is also what starts the unservable streak clock).
-        ?assertEqual(undefined, bondy_oplog_instance:aae_root(Id)),
-
-        %% A recency-live peer whose recorded frontier EQUALS ours
-        %% dominates it — our surplus is fully covered elsewhere.
-        ok = bondy_oplog_peer_state:record_sync_complete(
-            {peer, sh_dominating},
-            Id,
-            bondy_oplog_registry:frontier(Id),
-            os:system_time(millisecond)
+    with_unservable_instance(first, fun(Id) ->
+        %% The one other member's recorded frontier EQUALS ours, so it
+        %% dominates: our surplus is fully covered elsewhere.
+        ok = record_row(
+            {peer, sh_dominating}, Id, bondy_oplog_registry:frontier(Id)
         ),
-        timer:sleep(80),
-
-        ?assertMatch({ok, _}, bondy_oplog_instance:compact(Id, [])),
+        bondy_oplog_test_helpers:with_cluster([{peer, sh_dominating}], fun() ->
+            ?assert(compact_rebuilt(Id))
+        end),
         %% Rebuilt: tree empty, projection intact, frontier kept, and
         %% the advertise guard is happy again (empty = servable).
+        Ns = ns_of(Id),
         ?assertEqual(0, bondy_oplog:size(Id)),
         ?assertNotEqual(
-            undefined, bondy_oplog_core:read(Ns, primary, <<"sh_1">>)
+            undefined, bondy_oplog_core:read(Ns, primary, <<"us_1">>)
         ),
         ?assert(map_size(bondy_oplog_registry:frontier(Id)) > 0),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(Id)),
 
         %% And the shard is alive again: new writes install and compact.
-        _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"sh_new">>, {inc, 1}}),
+        _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"us_new">>, {inc, 1}}),
         ok = bondy_oplog_instance:await_apply(Id),
         ?assertNotEqual(
-            undefined, bondy_oplog_core:read(Ns, primary, <<"sh_new">>)
+            undefined, bondy_oplog_core:read(Ns, primary, <<"us_new">>)
         )
+    end).
+
+%% The rebuild drops the whole tree even when the lost page is the right edge,
+%% where `bondy_mst:last/1` finds no key.
+unservable_own_root_self_heals_when_right_edge_lost() ->
+    with_unservable_instance(right_edge, fun(Id) ->
+        ?assertEqual(undefined, bondy_oplog_instance:aae_root(Id)),
+        ok = record_row(
+            {peer, re_dominating}, Id, bondy_oplog_registry:frontier(Id)
+        ),
+        bondy_oplog_test_helpers:with_cluster([{peer, re_dominating}], fun() ->
+            ?assert(compact_rebuilt(Id))
+        end),
+        ?assertEqual(undefined, bondy_oplog_instance:root_hash(Id)),
+        _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"us_new">>, {inc, 1}}),
+        ok = bondy_oplog_instance:await_apply(Id),
+        ?assert(is_binary(bondy_oplog_instance:aae_root(Id)))
+    end).
+
+%% The cover check, on a single origin with the lost page below the root's
+%% first key: the member's recorded frontier covers up to that key only. A walk
+%% that skipped the lost page would find every readable key up to it confirmed
+%% and truncate there; nothing may be truncated, because no walk can tell
+%% whether the member holds the keys it cannot read
+%% (`proofs/tla/ConfirmedCompaction_3R_Lost.cfg` holds `NoStrand`;
+%% `_3R_Lost_SkipWalk.cfg`, whose walk skips the page, violates it). Once the
+%% member covers ours, the next cycle rebuilds.
+unservable_own_root_holds_until_peers_dominate() ->
+    with_unservable_instance(first, fun(Id) ->
+        SizeBefore = bondy_oplog:size(Id),
+        Ours = bondy_oplog_registry:frontier(Id),
+        ?assertEqual(1, map_size(Ours)),
+        {_, RootPage} = root_page(Id),
+        {FirstKey, _, _} = hd(bondy_mst_page:list(RootPage)),
+        Seq = bondy_oplog_event:key_seq(FirstKey),
+        ok = record_row(
+            {peer, hb_behind}, Id, maps:map(fun(_, _) -> Seq end, Ours)
+        ),
+        bondy_oplog_test_helpers:with_cluster([{peer, hb_behind}], fun() ->
+            ?assertNot(compact_rebuilt(Id)),
+            ?assertEqual(SizeBefore, bondy_oplog:size(Id)),
+            ok = record_row({peer, hb_behind}, Id, Ours),
+            ?assert(compact_rebuilt(Id)),
+            ?assertEqual(0, bondy_oplog:size(Id))
+        end)
+    end).
+
+%% An applier-backed instance rebuilds too, capped below the first event its
+%% applier has not folded. One page is lost below that event, so the walk meets
+%% it and the cycle rebuilds. Another is lost above it, so the capped
+%% truncation keeps it, the tree stays unservable and no rebuild is reported.
+%% Once the applier has folded what it can read and the member covers it, the
+%% next cycle drops the page above too and reports the rebuild. The events on
+%% that page come back from the peer
+%% (`proofs/tla/ConfirmedCompaction_2R_Async_Lost.cfg` holds `NoDrop`;
+%% `_2R_Async_Lost_Live.cfg` holds `Convergence`).
+unservable_own_root_rebuild_holds_unapplied_applier() ->
+    A = start_applier_instance(),
+    B = start_applier_instance(),
+    try
+        ok = append_events(B, 1, 300),
+        wait_past_ms(os:system_time(millisecond)),
+        H = bondy_oplog:append(A, {cell_apply, ?B, <<"held">>, {inc, 1}}),
+        ok = append_events(A, 1, 100),
+        ApplierPid = bondy_oplog_registry:applier_pid(B),
+        ok = sys:suspend(ApplierPid),
+        ok = pull_root(B, A),
+        {Tab, _} = root_page(B),
+        Subtrees = subtrees(Tab, bondy_oplog_instance:root_hash(B)),
+        [Below | _] = [R || {R, _, Hi} <- Subtrees, Hi =/= top, Hi =< H],
+        [Above | _] = [R || {R, Lo, _} <- Subtrees, Lo =/= bottom, Lo >= H],
+        true = ets:delete(Tab, Below),
+        true = ets:delete(Tab, Above),
+        ok = record_row(
+            {peer, rb_applier}, B, bondy_oplog_registry:frontier(B)
+        ),
+        bondy_oplog_test_helpers:with_cluster([{peer, rb_applier}], fun() ->
+            SizeBefore = bondy_oplog:size(B),
+            ?assertNot(compact_rebuilt(B)),
+            ?assert(bondy_oplog:size(B) < SizeBefore),
+            ?assertEqual(undefined, bondy_oplog_instance:aae_root(B)),
+            ok = sys:resume(ApplierPid),
+            ok = bondy_oplog_applier:barrier(ApplierPid),
+            ok = record_row(
+                {peer, rb_applier}, B, bondy_oplog_registry:frontier(B)
+            ),
+            ?assert(compact_rebuilt(B)),
+            ?assert(is_binary(bondy_oplog_instance:aae_root(B))),
+            ok = pull_root(B, A),
+            ok = bondy_oplog_applier:barrier(ApplierPid),
+            AOrigin = bondy_oplog_instance:origin(A),
+            ?assertEqual(
+                maps:get(AOrigin, bondy_oplog_registry:frontier(A)),
+                maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)
+            )
+        end)
     after
-        application:unset_env(bondy_oplog, unservable_self_heal_after_ms),
-        teardown(Id)
+        teardown(A),
+        teardown(B)
     end.
 
-%% The domination gate: with a live peer whose recorded frontier does
-%% NOT cover ours (or is unknown), the rebuild must hold — the surplus
-%% must drain to the peers first (their unservable-behind catalogue
-%% bootstraps), only then may the tree be dropped.
-unservable_own_root_holds_until_peers_dominate() ->
-    ok = application:set_env(bondy_oplog, unservable_self_heal_after_ms, 50),
+%% Every subtree under the page `Hash` of the page table `Tab`, as
+%% `{Ref, Lo, Hi}`: its keys all sort strictly between `Lo` and `Hi`, where
+%% `bottom` and `top` are unbounded.
+subtrees(Tab, Hash) ->
+    subtrees(Tab, Hash, bottom, top).
+
+subtrees(Tab, Hash, Lo, Hi) ->
+    [{Hash, Page, _}] = ets:lookup(Tab, Hash),
+    Entries = bondy_mst_page:list(Page),
+    Keys = [K || {K, _, _} <- Entries],
+    Refs = [bondy_mst_page:low(Page) | [R || {_, _, R} <- Entries]],
+    lists:append([
+        [{R, L, U} | subtrees(Tab, R, L, U)]
+     || {R, L, U} <- lists:zip3(Refs, [Lo | Keys], Keys ++ [Hi]),
+        is_binary(R)
+    ]).
+
+%% Runs `Fun(Id)` on a fused instance holding at least 300 applied events
+%% whose own root has lost the page `Pick` selects
+%% (`drop_root_referenced_page/2`). The fixture does not ask for the root, so
+%% compaction has to find the lost page itself.
+with_unservable_instance(Pick, Fun) ->
     Id = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
     try
-        _ = [
-            bondy_oplog:append(
-                Id,
-                {cell_apply, ?B, <<"hb_", (integer_to_binary(N))/binary>>,
-                    {inc, 1}}
-            )
-         || N <- lists:seq(1, 300)
-        ],
-        ok = bondy_oplog_instance:await_apply(Id),
-        SizeBefore = bondy_oplog:size(Id),
-        ?assert(SizeBefore > 100),
-        ok = drop_root_referenced_page(Id),
-        ?assertEqual(undefined, bondy_oplog_instance:aae_root(Id)),
-
-        %% A live peer with a BEHIND frontier (empty VV): not dominated.
-        ok = bondy_oplog_peer_state:record_sync_complete(
-            {peer, hb_behind},
-            Id,
-            #{<<"someone">> => 1},
-            os:system_time(millisecond)
-        ),
-        timer:sleep(80),
-        ?assertMatch({ok, _}, bondy_oplog_instance:compact(Id, [])),
-        %% Held: the unservable tree is still there.
-        ?assertEqual(SizeBefore, bondy_oplog:size(Id)),
-
-        %% The peer catches up (its recorded frontier now covers ours —
-        %% e.g. after its catalogue bootstrap from our projection) → the
-        %% next tick rebuilds.
-        ok = bondy_oplog_peer_state:record_sync_complete(
-            {peer, hb_behind},
-            Id,
-            bondy_oplog_registry:frontier(Id),
-            os:system_time(millisecond)
-        ),
-        timer:sleep(20),
-        ?assertMatch({ok, _}, bondy_oplog_instance:compact(Id, [])),
-        ?assertEqual(0, bondy_oplog:size(Id))
+        ok = append_events(Id, 1, 300),
+        ok = await_right_edge(Id, Pick, 301),
+        ?assert(bondy_oplog:size(Id) > 100),
+        ok = drop_root_referenced_page(Id, Pick),
+        Fun(Id)
     after
-        application:unset_env(bondy_oplog, unservable_self_heal_after_ms),
         teardown(Id)
     end.
+
+append_events(Id, From, To) ->
+    _ = [
+        bondy_oplog:append(
+            Id,
+            {cell_apply, ?B, <<"us_", (integer_to_binary(N))/binary>>, {inc, 1}}
+        )
+     || N <- lists:seq(From, To)
+    ],
+    bondy_oplog_instance:await_apply(Id).
+
+%% The tree's shape follows the hashes of its keys, so the root's last entry
+%% may have no right child: append until it has one.
+await_right_edge(_Id, first, _N) ->
+    ok;
+await_right_edge(Id, right_edge, N) when N < 400 ->
+    {_, RootPage} = root_page(Id),
+    case lists:last(bondy_mst_page:list(RootPage)) of
+        {_, _, R} when is_binary(R) ->
+            ok;
+        _ ->
+            ok = append_events(Id, N, N),
+            await_right_edge(Id, right_edge, N + 1)
+    end.
+
+%% Runs one compaction cycle on the witnesses the recorded rows give and
+%% returns whether it rebuilt the tree: an ordinary truncation may empty an
+%% unservable tree too, so its size does not tell the two apart.
+compact_rebuilt(Id) ->
+    Self = self(),
+    HandlerId = {?MODULE, rebuilt, Id},
+    ok = telemetry:attach(
+        HandlerId,
+        [bondy_oplog, instance, mst_rebuilt],
+        fun
+            (_, _, #{instance_id := I}, _) when I =:= Id ->
+                Self ! {rebuilt, I};
+            (_, _, _, _) ->
+                ok
+        end,
+        undefined
+    ),
+    try
+        ?assertMatch({ok, _}, bondy_oplog_compaction:compact(Id)),
+        receive
+            {rebuilt, Id} -> true
+        after 0 -> false
+        end
+    after
+        telemetry:detach(HandlerId)
+    end.
+
+%% `record_sync_complete/4` is a cast; the call after it makes the row visible
+%% before the next compaction reads it.
+record_row(Peer, Id, Frontier) ->
+    ok = bondy_oplog_peer_state:record_sync_complete(
+        Peer, Id, Frontier, os:system_time(millisecond)
+    ),
+    _ = sys:get_state(bondy_oplog_peer_state),
+    ok.
 
 %% Deletes one page referenced by the instance's CURRENT MST root,
 %% straight out of the (public) ETS page store — the fault observed
-%% live on Fly s16 (2 pages absent from an own root). The page table is
-%% the instance-owned ETS table holding the store's `<<"$root">>` row.
-drop_root_referenced_page(Id) ->
+%% live on Fly s16 (2 pages absent from an own root). `first` picks the root's
+%% first reference, `right_edge` the right child of its last entry, which holds
+%% the tree's largest keys.
+drop_root_referenced_page(Id, Pick) ->
+    {Tab, RootPage} = root_page(Id),
+    Ref =
+        case Pick of
+            first ->
+                hd(bondy_mst_page:refs(RootPage));
+            right_edge ->
+                {_, _, R} = lists:last(bondy_mst_page:list(RootPage)),
+                R
+        end,
+    true = ets:delete(Tab, Ref),
+    ok.
+
+%% The instance's page table, the instance-owned ETS table holding the store's
+%% `<<"$root">>` row, and its current root page.
+root_page(Id) ->
     Pid = bondy_oplog_instance:whereis(Id),
     [Tab] = [
         T
@@ -1307,9 +1443,7 @@ drop_root_referenced_page(Id) ->
     ],
     [{<<"$root">>, RootHash}] = ets:lookup(Tab, <<"$root">>),
     [{RootHash, RootPage, _}] = ets:lookup(Tab, RootHash),
-    [Ref | _] = bondy_mst_page:refs(RootPage),
-    true = ets:delete(Tab, Ref),
-    ok.
+    {Tab, RootPage}.
 
 %% Truncation must PHYSICALLY reclaim the dropped history's pages, not
 %% just unlink them: `bondy_mst:truncate/2` frees only the spine pages it
@@ -1317,7 +1451,7 @@ drop_root_referenced_page(Id) ->
 %% store, and nothing else ever ran the store's GC — so shards whose
 %% event count read 0 still pinned their whole history as orphaned ETS
 %% pages (the residual RAM plateau after the scheduler-starvation fix;
-%% ~5 GB/node at fleet scale). Pins `truncate_below_or_equal/3`'s
+%% ~5 GB/node at fleet scale). Pins `truncate_below_or_equal/4`'s
 %% mark-and-sweep on the ephemeral backend, asserted at the ETS level —
 %% the blind spot every event-count assertion missed.
 truncation_reclaims_store_pages() ->
@@ -1538,6 +1672,14 @@ restart_bans() ->
         bondy_oplog_sup, bondy_oplog_origin_bans
     ),
     ok.
+
+%% A cycle with no witness on a node with clustering enabled: the held cycle
+%% `bondy_oplog_compaction:compact/1` runs, the one retention applies to.
+held_compact(Id) ->
+    bondy_oplog_test_helpers:with_members(
+        fun() -> [partisan:node()] end,
+        fun() -> bondy_oplog_instance:compact(Id, []) end
+    ).
 
 mk_id() ->
     iolist_to_binary([

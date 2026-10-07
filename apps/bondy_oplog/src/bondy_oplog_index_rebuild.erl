@@ -48,10 +48,10 @@ For one index `(NS, IndexName)`:
 
 ## Triggers
 
-- **Startup backfill** — `bondy_db:open_table` calls `rebuild_sync/2` once
-  per index after provisioning, so a table opened over a durable primary
-  with pre-existing data (or after a peer bootstrap) materialises its
-  indexes before the table is returned.
+- **Untrusted at open** — `bondy_db:open_table` calls `rebuild_sync/2` for
+  an index one of whose shards has no trust marker (never built, or a drop
+  removed it) or no clean-shutdown flag (not closed cleanly last lifetime).
+  An index whose every shard has both is trusted and only freshened.
 - **Saturation** — the primary applier drops a batch that would overflow a
   secondary writer's backlog, marks the shard, and `request/2`s a rebuild.
 - **Writer crash** — on restart a writer that had previously been
@@ -117,7 +117,8 @@ request(NS, IndexName) when is_atom(NS), is_atom(IndexName) ->
 -doc """
 Synchronously rebuild `(NS, IndexName)` and return once the index has been
 re-materialised from the primary and its target shards freshened. The
-barrier used by the startup backfill, the operator API, and tests.
+barrier used by `bondy_db:open_table` for an untrusted index, the operator
+API, and tests.
 """.
 -spec rebuild_sync(atom(), atom()) -> ok | {error, term()}.
 

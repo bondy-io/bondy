@@ -129,13 +129,13 @@ Default: `on`
 
 The value for the `Strict-Transport-Security` header. This header tells browsers to only access the server over HTTPS, preventing protocol downgrade attacks.
 
-Set to an empty string to disable.
+Set to `off` to suppress this one header; the other security headers are still sent.
 
 ```
 listeners.public_http.security_headers.hsts = max-age=31536000; includeSubDomains
 ```
 
-Default: `max-age=31536000; includeSubDomains` for HTTPS listeners, empty (disabled) for HTTP listeners.
+Default: `max-age=31536000; includeSubDomains` on a listener with `transport = tls`; not sent on a plaintext listener.
 
 > **Note:** HSTS is only meaningful on HTTPS listeners. Setting it on an HTTP listener has no practical effect since the header is ignored by browsers when received over a plain HTTP connection.
 
@@ -148,7 +148,7 @@ Common values:
 - `DENY` -- the page cannot be displayed in a frame at all
 - `SAMEORIGIN` -- the page can only be displayed in a frame on the same origin
 
-Set to an empty string to disable.
+Set to `off` to suppress this one header; the other security headers are still sent.
 
 ```
 listeners.public_http.security_headers.frame_options = SAMEORIGIN
@@ -160,7 +160,7 @@ Default: `SAMEORIGIN`
 
 The value for the `X-Content-Type-Options` header. Setting this to `nosniff` prevents browsers from MIME-sniffing the response content type, which can prevent certain XSS attacks.
 
-Set to an empty string to disable.
+Set to `off` to suppress this one header; the other security headers are still sent.
 
 ```
 listeners.public_http.security_headers.content_type_options = nosniff
@@ -172,13 +172,13 @@ Default: `nosniff`
 
 The value for the `Content-Security-Policy` header. CSP provides a defence-in-depth mechanism against XSS and data injection attacks by declaring which content sources the browser should trust.
 
-Set to an empty string to disable (default).
+Set to `off` to suppress this one header; the other security headers are still sent. Not sent unless set.
 
 ```
 listeners.public_http.security_headers.content_security_policy = default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'
 ```
 
-Default: empty (disabled)
+Default: not sent
 
 > **Note:** CSP policies are highly application-specific. Audit your application's actual asset sources (CDNs, fonts, third-party scripts, API endpoints) before enabling this in production to avoid breaking functionality.
 
@@ -189,8 +189,11 @@ Default: empty (disabled)
 Controls the `Server` response header. This can be used to suppress infrastructure information disclosure.
 
 - `bondy` -- emits `bondy/<version>` (default)
-- An empty string -- suppresses the header entirely
 - Any other value -- emits that value verbatim
+
+`bondy.conf` has no spelling for an empty value: `key =` with nothing after it is
+a syntax error (`bondy_listener_schema_SUITE:an_empty_security_header_value_is_a_syntax_error`).
+The header can therefore be replaced through `bondy.conf` but not suppressed.
 
 ```
 listeners.public_http.server_header = bondy
@@ -219,8 +222,8 @@ listeners.public_http.security_headers.frame_options = DENY
 listeners.public_http.security_headers.content_type_options = nosniff
 listeners.public_http.security_headers.content_security_policy = default-src 'self'; frame-ancestors 'none'
 
-## Suppress server version
-listeners.public_http.server_header =
+## Replace the server version
+listeners.public_http.server_header = api
 ```
 
 ## Generating a default configuration file

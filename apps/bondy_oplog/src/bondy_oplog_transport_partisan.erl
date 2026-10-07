@@ -15,7 +15,7 @@
 Partisan transport for the sync protocol.
 
 `peer_id` is interpreted as a **Partisan node name** (the values returned
-by `partisan_peer_service:members/0` / `bondy_oplog_peer_source_partisan`),
+by `bondy_cluster:members/0` / `bondy_oplog_peer_source_partisan`),
 never an `erlang:node()`/`nodes()` value. Sync requests are delivered to
 the peer's `bondy_oplog_responder` (a `partisan_gen_server`) via
 `partisan_gen_server:call/3`; the responder dispatches to the local
@@ -50,7 +50,7 @@ Partisan's default channel.
     instance_id(),
     bondy_oplog_transport:request(),
     map()
-) -> {ok, term()} | {error, term()}.
+) -> bondy_oplog_transport:response() | {error, term()}.
 
 request(Peer, InstanceId, Request, Opts) when
     is_atom(Peer), is_binary(InstanceId)
@@ -60,10 +60,7 @@ request(Peer, InstanceId, Request, Opts) when
     Msg = {sync_protocol, InstanceId, Request},
     CallOpts = call_opts(Timeout, Opts),
     try partisan_gen_server:call(Target, Msg, CallOpts) of
-        {ok, _} = OK -> OK;
-        {ok, _, _} = OK -> OK;
-        {error, _} = E -> E;
-        Other -> {error, {unexpected_response, Other}}
+        Reply -> bondy_oplog_transport:response(Reply)
     catch
         exit:Reason ->
             {error, {partisan_call_failed, Reason}}

@@ -84,7 +84,7 @@ revoke_all_user_reaches_the_sso_bucket(_Config) ->
     ok = bondy_ticket:revoke_all(?M1, ?USER),
 
     ?assertEqual(
-        {error, not_found},
+        {error, revoked},
         bondy_ticket:lookup(?SSO, ?USER, Scope),
         "Revoking an SSO user's tickets must reach the SSO realm's bucket"
     ).
@@ -104,7 +104,7 @@ revoke_all_realm_spares_sibling_realms(_Config) ->
     ok = bondy_ticket:revoke_all(?M1),
 
     ?assertEqual(
-        {error, not_found},
+        {error, revoked},
         bondy_ticket:lookup(?SSO, ?USER, M1Scope),
         "The deleted realm's tickets must go"
     ),

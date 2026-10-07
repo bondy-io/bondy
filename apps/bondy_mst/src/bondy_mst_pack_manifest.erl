@@ -58,9 +58,8 @@ has its error contract.
   value exists in `sealed_packs`. After GC retires pack 42, the
   manifest reflects `sealed_packs := old_list \\ [42]` AND
   `deleted_through := max(old_deleted_through, 42)`.
-- `current_root` — the MST root the writer last `set_root`'d to;
-  mirrored to the `root` file for fast boot. Manifest is
-  authoritative on conflict.
+- `current_root` — the MST root the writer last `set_root`'d to.
+  The pack store persists the root only here.
 - `incoming_pack` — `present` when `incoming.pack` exists with
   content; `absent` otherwise. The page store consults this on
   open to decide whether to scan + truncate the incoming pack.

@@ -40,7 +40,6 @@ per-process Bondy and Logger metadata.
 -export_type([send_opts/0]).
 -export_type([metadata/0]).
 
--export([aae_exchanges/0]).
 -export([ack/2]).
 -export([add_via/2]).
 -export([call/5]).
@@ -103,9 +102,6 @@ is_owner(Key) ->
 %% @private
 cluster_nodes() ->
     [partisan:node() | partisan:nodes()].
-
-aae_exchanges() ->
-    partisan_plumtree_broadcast:exchanges().
 
 -spec request(Pid :: pid(), RealmUri :: uri(), M :: bondy_wamp_message:t()) ->
     tuple().

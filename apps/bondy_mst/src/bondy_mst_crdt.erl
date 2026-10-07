@@ -10,10 +10,10 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-This module implements the logic for an efficient, *state-based* Conflict-Free
-Replicated Data Type (CRDT) designed for open, potentially untrusted networks.
-It is designed for distributed systems where efficient merging and verification
-of large datasets are required.
+This module replicates one Merkle Search Tree between nodes, over networks
+that may be open or untrusted. A node learns a peer's root by gossip, fetches
+the pages it lacks, and merges the peer's tree into its own with the tree's
+`merger` function.
 
 Anti-entropy merges are performed in the background and without blocking
 local operations. The underlying tree is not changed until all the remote
@@ -30,18 +30,13 @@ garbage collection, gossip and the `on_merge` hook. It interprets the
 `bondy_mst_exchange:event()` values returned by the exchange (see
 `apply_events/2`).
 
-# CRDT Types
-By selecting the type of values stored we can obtain various CRDTs:
-
-1. If value is a boolean indicating if an item is present or not, we obtain
-a grow-only set.
-2. If value is a last-writer-wins register with a version number then we obtain a
-key-value store with last-writer-wins reconciliation.
-3. If value is another existing CRDT type, then we obtain a map CRDT with
-efficient detection of differing items.
+# Values
+The tree's `merger` decides what a merge does when both trees hold a key. A
+boolean presence flag gives a grow-only set. A versioned value whose merger
+keeps the higher version gives a last-writer-wins key-value store.
 
 # Supported Consistency models
-This CRDT support two modes of operation: eventual consistency and causal
+This module supports two modes of operation: eventual consistency and causal
 consistency. The default is causal consistency.
 
 ### Causal Consistency
@@ -56,11 +51,11 @@ system will always see action A before it sees action B.
 In `causal` consistency mode, a full state sync is performed at every gossip
 event with the sender's replica.
 
-This CRDT achieves casual consistency without any conditions on the network
+This module is meant to give causal consistency without any conditions on the network
 topology as is required by causal broadcast.
 
 ### Eventual Consistency
-If causal consistency is not required, the CRDT can operate in `eventual`
+If causal consistency is not required, the module can operate in `eventual`
 consistency mode, by gossiping individual single operations and applying them as
 soon as they are received, while executing periodic syncs to ensure
 termination.
@@ -69,14 +64,14 @@ termination.
 
 This module implements the state and logic for anti-entropy synchronization
 exchanges.
-The idea is for the user to choose the right processinfrastructure e.g. using
+The idea is for the user to choose the right process infrastructure e.g. using
 this module as helper for a `gen_server`, `gen_statem` or alternatives e.g.
 Partisan equivalents or standard processes.
 
 ## Synchronization Messages
 
-Synchronisation messages should be handled by calling `handle/2`. However, it’s
-important to note that most messages cannot be handled concurrently. In general,
+Synchronisation messages should be handled by calling `handle/2`. Most
+messages cannot be handled concurrently. In general,
 an MST supports a single writer, so write operations must be serialised by an
 Erlang process. However, some write operations that occur during a sync can be
 handled concurrently depending on the backend store used.
@@ -309,7 +304,7 @@ Called when a merge exchange has finished.
 %% =============================================================================
 
 ?DOC("""
-Cretes a new MST-based CRDT.
+Creates a replicated MST.
 
 # Options
 * `store => bondy_mst_store:t()` - the backend store for this grove

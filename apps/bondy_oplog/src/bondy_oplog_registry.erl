@@ -150,6 +150,10 @@ table's lifecycle tied to a supervisor child.
     %% bucket costs one interval for that origin however many later seqs fold
     %% behind it.
     pending = #{} :: #{binary() => bondy_connect_interval_set:t()},
+    %% The truncation record: per origin, a bound on every event this
+    %% instance's truncations removed while its frontier claimed it. See
+    %% `raise_truncated/2`.
+    truncated = #{} :: #{binary() => non_neg_integer()},
     %% Demand-based applier->instance flow control; the contract is at the
     %% applier's own `#state.install_in_flight`. Published once at instance
     %% init. `undefined` between the entry's creation and the instance's
@@ -191,7 +195,7 @@ table's lifecycle tied to a supervisor child.
     %% snapshot SERVED before then silently omits the unregistered buckets
     %% while `get_frontier` still answers in full, so the initiator installs
     %% the one and adopts the other. This is the serving half only — the
-    %% installing half is `bondy_oplog_sync_session:adopt_frontier/3`, and
+    %% installing half is `bondy_oplog_applier:commit_stage/4`, and
     %% neither subsumes the other (`MuxBucketSkip_Minus_ServeGate`,
     %% `_Minus_AdoptIfComplete`). Written by the applier at its `init/1`
     %% (from `drain_gated`), and set `true` by
@@ -298,7 +302,10 @@ table's lifecycle tied to a supervisor child.
 -export([merge_frontier/2]).
 -export([merge_applied/2]).
 -export([reap_frontier/2]).
--export([reset_frontier/1]).
+-export([replace_frontier/2]).
+-export([truncated/1]).
+-export([raise_truncated/2]).
+-export([uncovered_truncation/2]).
 -export([down/0]).
 -export([origins/0]).
 
@@ -877,7 +884,7 @@ path that rebuilds a frontier goes through it. Two consequences follow:
 
 The "only operation" half is a property of the call graph, not of this
 module: it holds while `merge_frontier/2`, `merge_applied/2`,
-`reap_frontier/2` and `reset_frontier/1` are the only writers of
+`reap_frontier/2` and `replace_frontier/2` are the only writers of
 `#entry.frontier`, which a grep confirms today and nothing enforces.
 
 The maxima must come from events this replica actually MATERIALISED: a
@@ -895,22 +902,16 @@ materialised to `merge_applied/2`, which keeps the contiguous prefix and holds
 anything above a gap in `pending` — a set this function cannot express, since
 its argument is one integer per origin.
 
-The remaining callers, and the predicate each carries:
+The remaining caller, and the predicate it carries:
 
 - `bondy_oplog_instance:boot_frontier/2` — this replica's own compaction
   checkpoint, i.e. the same predicate, persisted.
-- `bondy_oplog_instance:finalize_catalogue_bootstrap/5` — a PEER's reported
-  frontier, and the one caller that cannot derive its own predicate:
-  catalogue-snapshot cells carry only `{HLC, Value}` and no `{Origin, Seq}`.
-  So the decision is made one level up, in
-  `bondy_oplog_sync_session:adopt_frontier/3`, on the only question the
-  install can answer — did every cell the peer shipped land here. It passes
-  the peer's vector when the answer is yes and `#{}` when it is not.
-  Adopting regardless is a proved over-claim
-  (`Bucket_Skip_Soundness.unconditional_adoption_unsound`,
-  `proofs/tla/MuxBucketSkip_Minus_AdoptIfComplete.cfg`).
 
-The log's own max `cell_apply` seq is NOT a fourth source. The MST records
+A PEER's reported frontier does not come through here: a catalogue install
+replaces the frontier with it (`replace_frontier/2`), under the predicate
+`bondy_oplog_applier:commit_stage/4` carries.
+
+The log's own max `cell_apply` seq is NOT another source. The MST records
 receipt, not materialisation, so merging it over-claims every cell that was
 received and skipped, and because `watermark_door/2` and
 `capped_truncation_point/2` judge "never applied" against this same frontier,
@@ -941,7 +942,7 @@ merge_filtered(_InstanceId, Partial) when Partial =:= #{} ->
     ok;
 merge_filtered(InstanceId, Partial) ->
     Merge = fun({Cur, CurP}) ->
-        Raised = maps:merge_with(fun(_O, A, B) -> max(A, B) end, Cur, Partial),
+        Raised = max_merge(Cur, Partial),
         %% Raising a prefix can cover seqs already held as pending — a
         %% checkpoint restore that lands above a hole, say — so re-absorb
         %% rather than leave the two components describing the same seq
@@ -1126,26 +1127,85 @@ reap_frontier(InstanceId, Origins) when is_binary(InstanceId) ->
     end.
 
 ?DOC("""
-Empties `InstanceId`'s applied frontier, both components, so that a full
-re-fold rebuilds it from what materialises. Called when a catalogue install may
-have replaced cells the frontier claims (`bondy_oplog_instance:rederive_projection/1`,
-and a boot that finds the instance's re-fold mark): the claims it drops are
-exactly the ones no cell may reflect any more
+Replaces `InstanceId`'s applied frontier with `Frontier`, nothing pending, so
+that a re-fold claims on top of it only what materialises. Called when a
+catalogue install replaced cells: by `bondy_oplog_applier:commit_stage/4`, with
+the peer's frontier or `#{}`, and with `#{}` by a boot that finds the
+instance's re-fold mark. A merge instead keeps claiming
+events an earlier install carried and this one dropped
 (`proofs/tla/LiveRebootstrapRefold_MergeFrontier_3R_Safety.cfg`).
 
-Unlike `reap_frontier/2` it cannot break the oracle: an empty frontier claims
-nothing, so a peer reads this replica as behind, never as ahead, and the
-retired-origin ceiling holds because every later claim passes through
-`merge_frontier/2` or `merge_applied/2`. A no-op when the instance has no
-registry row.
-""").
--spec reset_frontier(instance_id()) -> ok.
+The frontier never drops below the truncation record (`truncated/1`): a
+truncated event is no longer in the tree, so no re-fold claims it again, and a
+frontier that stopped claiming it would lose it. With `#{}`, the frontier becomes the record. Without this
+floor, a crash under the re-fold mark loses a truncated event
+(`proofs/tla/JoinInstall_Truncation_CompactDurable_Crash_NoFloor.cfg` violates
+`CompactedClaimed`; `_CompactDurable_Crash.cfg` holds it).
 
-reset_frontier(InstanceId) when is_binary(InstanceId) ->
-    case cas_frontier(InstanceId, fun(_) -> {{#{}, #{}}, ok} end) of
+The retired-origin ceiling applies as in `merge_frontier/2`: a retired origin's
+entry is dropped. A no-op when the instance has no registry row.
+""").
+-spec replace_frontier(instance_id(), #{binary() => non_neg_integer()}) -> ok.
+
+replace_frontier(InstanceId, Frontier) when
+    is_binary(InstanceId), is_map(Frontier)
+->
+    Replaced = drop_retired(max_merge(Frontier, truncated(InstanceId))),
+    case cas_frontier(InstanceId, fun(_) -> {{Replaced, #{}}, ok} end) of
         {ok, ok} -> ok;
         not_found -> ok
     end.
+
+?DOC("""
+Returns the instance's truncation record: per origin, a bound on every event
+its truncations removed while its applied frontier claimed it. `#{}` when the
+instance has truncated nothing, or has no registry row.
+""").
+-spec truncated(instance_id()) -> #{binary() => non_neg_integer()}.
+
+truncated(InstanceId) ->
+    case field(InstanceId, #entry.truncated) of
+        Map when is_map(Map) -> Map;
+        _ -> #{}
+    end.
+
+?DOC("""
+Raises the truncation record to the pointwise maximum of itself and `VV`.
+
+`bondy_oplog_instance` raises it before every truncation, and restores it from
+its checkpoint at boot. It is the only writer, which a grep confirms today and
+nothing enforces, so a plain read-modify-write is safe. The record lives in the
+row, as the frontier does, so a restart that keeps the row keeps both.
+""").
+-spec raise_truncated(instance_id(), #{binary() => non_neg_integer()}) -> ok.
+
+raise_truncated(InstanceId, VV) when is_binary(InstanceId), is_map(VV) ->
+    Current = truncated(InstanceId),
+    case max_merge(Current, VV) of
+        Current ->
+            ok;
+        Raised ->
+            _ = update_element_safe(InstanceId, [{#entry.truncated, Raised}]),
+            ok
+    end.
+
+?DOC("""
+The entries of the instance's truncation record (`truncated/1`) that `VV` does
+not cover, retired origins dropped as in `claims/2`: `#{}` when `VV` covers
+the record.
+""").
+-spec uncovered_truncation(instance_id(), #{binary() => non_neg_integer()}) ->
+    #{binary() => non_neg_integer()}.
+
+uncovered_truncation(InstanceId, VV) when is_map(VV) ->
+    maps:filter(
+        fun(Origin, Seq) -> Seq > maps:get(Origin, VV, 0) end,
+        drop_retired(truncated(InstanceId))
+    ).
+
+%% @private
+max_merge(A, B) ->
+    maps:merge_with(fun(_O, X, Y) -> max(X, Y) end, A, B).
 
 %% @private
 %% Zero cost until an operator retires something: one `persistent_term`

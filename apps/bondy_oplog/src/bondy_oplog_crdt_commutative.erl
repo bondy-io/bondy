@@ -64,10 +64,9 @@ A module implements **exactly one** per-operation step:
   join via `bondy_dvvset`. Both forms are optional callbacks; the helper
   routes to whichever the module exports.
 
-Non-commutative CRDTs (an observed-remove map, a bounded counter) do
-**not** use this module: they must re-interpret the cell's live group on
-write, so they implement `bondy_oplog_crdt:interpret_cog/2` directly and
-declare `order_independent() -> false`.
+A non-commutative CRDT does **not** use this module: one operation onto the
+materialised state is not its fold. It declares `order_independent() -> false`,
+and the eager kernel refuses it (`bondy_oplog_cell_kernel:apply/6`).
 
 ## Operation extraction
 

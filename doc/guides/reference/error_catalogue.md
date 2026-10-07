@@ -49,8 +49,22 @@ as `bondy.error.internal_error` with a `trace_id` and nothing else. The same
 operator can join the two without the peer ever seeing it.
 
 Every value in the payload is JSON-encodable by construction. A term with no
-JSON representation is rendered as text, and both nesting depth and total size
-are bounded.
+JSON representation is rendered as text. Within `details`, nesting is bounded
+at 8 levels — anything deeper is rendered as text — and each string is
+truncated to about 4096 bytes, ending in `...`
+(`bondy_connect_error:sanitise/1`). The total size of the payload is not
+bounded, and `message` and `description` are never truncated.
+
+## Correlating requests and errors
+
+Every API Gateway request is assigned an id when it arrives, available to an
+API specification as `{{request.id}}`; an upstream error is logged against it,
+and a specification can render it to the client as `{{action.error.id}}`. The
+`trace_id` of an internal error is the same kind of value. Both are W3C Trace
+Context `trace-id`s — 32 lowercase hex characters — generated from a UUIDv7
+(`bondy_telemetry:trace_id/0`, `bondy_connect_error`), so they sort by creation
+time. Quote either when reporting a failure: the server's log entry for it
+carries the same value.
 
 ## Retry semantics
 
@@ -72,8 +86,10 @@ unable to decide whether the operation is permitted, and is transient.
 ## The catalogue
 
 `HTTP` is the status an API Gateway response uses. An API specification can
-override it per host or version through its `status_codes` map. A `†` marks a
-type that shares another's URI.
+override it per host or version through its `status_codes` map. An error URI
+with no HTTP mapping answers `500` unless the specification maps it
+(`bondy_http_utils:http_status/1`). A `†` marks a type that shares another's
+URI.
 
 ### Authentication
 
@@ -222,6 +238,7 @@ so.
 | `node_down` | `bondy.error.node_down` | `node_down` | transient | 503 | K001 |
 | `cluster_not_formed` | `bondy.error.cluster_not_formed` | `cluster_not_formed` | transient | 503 | K002 |
 | `partition_detected` | `bondy.error.partition_detected` | `partition_detected` | transient | 503 | K003 |
+| `cluster_disabled` | `bondy.error.cluster_disabled` | `cluster_disabled` | permanent | 501 | K004 |
 
 ### System
 

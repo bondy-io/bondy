@@ -95,18 +95,14 @@ the_wire_option_reaches_a_timeout_test() ->
 %% Declared rather than discovered: the whole point is to notice a call that
 %% was not here before, and a scanner that inferred "blocking" from the shape
 %% of a call would have to be right about every future one. Several of these
-%% have no caller in the tree today and are listed BECAUSE of that: the two
-%% `partisan_peer_service` reads were removed from `bondy_cluster_api` on
-%% 2026-09-01 for being `gen_server:call(..., infinity)`, and re-introducing
-%% one must fail here rather than quietly restore an unbounded wait.
+%% have no caller in the tree and are listed BECAUSE of that: introducing one
+%% must fail here rather than quietly add a wait the budget does not bound.
 blocking_callees() ->
     [
-        {partisan_rpc, call, 4},
-        {partisan_rpc, call, 5},
-        {partisan_rpc, multicall, 4},
-        {partisan_rpc, multicall, 5},
-        {partisan_peer_service, members, 0},
-        {partisan_peer_service, members_for_orchestration, 0},
+        {bondy_cluster, call, 5},
+        {bondy_cluster, multicall, 5},
+        {bondy_cluster, leave, 0},
+        {bondy_cluster, leave, 1},
         {erpc, call, 4},
         {erpc, call, 5},
         {erpc, multicall, 4},
@@ -122,8 +118,8 @@ blocking_callees() ->
     ].
 
 %% Every function in a `bondy_wamp_api` implementation that calls one of the
-%% above, and what bounds each. All three take their timeout from
-%% `bondy_wamp_api_utils:budget/2`, so the caller's `_deadline` can only
+%% above, and what bounds each. All but the cluster leave take their timeout
+%% from `bondy_wamp_api_utils:budget/2`, so the caller's `_deadline` can only
 %% shorten them.
 %%
 %% Adding a row is a DECISION, not bookkeeping: a new waiting site that is not
@@ -137,7 +133,9 @@ waiting_sites() ->
         %% The `bondy.alarm.list` / `.get` fan-out.
         {bondy_alarm_api, peer_answers, 2},
         %% The `bondy.cluster.leave` safety survey. Fail-closed when spent.
-        {bondy_cluster_api, survey, 2}
+        {bondy_cluster_api, survey, 2},
+        %% The removal itself. UNBOUNDED: Partisan's leave takes no timeout.
+        {bondy_cluster_api, do_leave, 4}
     ].
 
 %% Both directions. A NEW waiting site fails because it is not declared; a

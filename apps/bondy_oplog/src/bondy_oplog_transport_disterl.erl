@@ -23,7 +23,7 @@ disterl link; the responder dispatches to the local instance.
 
 - The Erlang runtime must be running in distributed mode (`erl
   -name`/`-sname`) on both nodes.
-- Both nodes have the `bondy_mst` application running, so the
+- Both nodes have the `bondy_oplog` application running, so the
   responder is registered and listening.
 - The cookies and network reachability are operator concerns.
 
@@ -35,13 +35,9 @@ disterl link; the responder dispatches to the local instance.
 
 ## Choosing this vs Partisan
 
-A `partisan` consumer simply implements
-`bondy_oplog_transport` itself with `partisan_gen_server:call`
-in place of `gen_server:call`, addressing
-`{bondy_oplog_responder, Peer}` over the partisan layer.
-The library does not ship a partisan transport (it would otherwise
-have to take partisan as a hard dependency); the disterl transport
-is shipped because disterl is part of OTP.
+`bondy_oplog_transport_partisan` makes the same request with
+`partisan_gen_server:call/3`, and is the transport Bondy wires when
+clustering is enabled (`bondy_router_app`). This one needs only OTP.
 """).
 
 -export([request/4]).
@@ -52,7 +48,7 @@ is shipped because disterl is part of OTP.
     instance_id(),
     bondy_oplog_transport:request(),
     map()
-) -> {ok, term()} | {error, term()}.
+) -> bondy_oplog_transport:response() | {error, term()}.
 
 request(PeerNode, InstanceId, Request, Opts) when
     is_atom(PeerNode), is_binary(InstanceId)
@@ -61,10 +57,7 @@ request(PeerNode, InstanceId, Request, Opts) when
     Target = {bondy_oplog_responder, PeerNode},
     Msg = {sync_protocol, InstanceId, Request},
     try gen_server:call(Target, Msg, Timeout) of
-        {ok, _} = OK -> OK;
-        {ok, _, _} = OK -> OK;
-        {error, _} = E -> E;
-        Other -> {error, {unexpected_response, Other}}
+        Reply -> bondy_oplog_transport:response(Reply)
     catch
         exit:Reason ->
             {error, {gen_server_call_failed, Reason}}

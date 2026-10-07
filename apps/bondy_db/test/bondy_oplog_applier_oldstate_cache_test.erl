@@ -152,11 +152,11 @@ counter_coherent_across_batches() ->
 %% 3b. Coherence vs the catalogue-install write path (Architecture QA fix)
 %% =============================================================================
 
-%% A catalogue install writes the projection directly via `install_cell/9`,
-%% WITHOUT going through the write-through path. If the cache is not
-%% cleared, a subsequent live event folds against the pre-install
-%% OldState — a convergence break. This is the falsifying regression for
-%% the `do_install_catalogue_batch/3` cache clear.
+%% A catalogue install writes the projection directly, WITHOUT going through
+%% the write-through path. If the cache is not cleared, a subsequent live
+%% event folds against the pre-install OldState — a convergence break. This
+%% is the falsifying regression for the install's cache clear in
+%% `bondy_oplog_applier`.
 merge_install_does_not_serve_stale_oldstate() ->
     B = <<"b">>,
     K = <<"k">>,
@@ -171,7 +171,9 @@ merge_install_does_not_serve_stale_oldstate() ->
         %% directly, not via write-through. The cache still holds the
         %% HLC-10 frame unless the install clears it.
         Cell = encoded_lww_cell(B, K, 50, <<"v_installed">>),
-        {ok, _} = bondy_oplog_instance:install_catalogue_batch(Id, [Cell]),
+        {ok, Token} = bondy_oplog_instance:begin_install(Id, [], #{}),
+        ok = bondy_oplog_instance:install_catalogue_batch(Id, Token, [Cell]),
+        {ok, _} = bondy_oplog_instance:rederive_projection(Id, Token),
         ?assertEqual(<<"v_installed">>, read_cell_value(Proj, B, K)),
 
         %% A live LWW set at HLC 30 must LOSE to the installed HLC-50

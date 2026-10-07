@@ -15,8 +15,8 @@ Peer-side responder for the catalogue-snapshot bootstrap protocol.
 
 Two entry points:
 
-- `init/1,2` — opens a session. Returns `{ok, {Watermark, Cursor}}` on
-  success, or `{ok, no_snapshot}` when neither an applier nor a fused
+- `init/1` — opens a session. Returns `{ok, {Watermark, Cursor, Buckets}}` on
+  success, `Buckets` naming every bucket the session scans, or `{ok, no_snapshot}` when neither an applier nor a fused
   instance process is registered for it, or its projection shard is not
   registered in `bondy_oplog_core_registry`.
 - `next/2` — pulls the next chunk of `(Bucket, Key, Frame)` triples
@@ -29,12 +29,14 @@ gen_server round-trip in the hot path so multiple bootstrap sessions
 on the same peer run fully in parallel. Only the initial `init/1` call
 hits the applier (to discover `cell_apply_target`).
 
-## Single-shard, single-bucket assumption
+## Scan order
 
-This v1 services single-shard catalogues that store all cells in one
-bucket. The default bucket is `<<>>` (matching the convention in
-existing test instances). Multi-shard / multi-bucket catalogue
-bootstrap is a follow-up.
+A session walks the tables of one projection shard, one bucket each, a
+table at a time; a single-table instance walks the default bucket `<<>>`.
+Within a bucket it ships keys in ascending order, and a cell too large for
+one batch goes out in parts before any later key, which the initiator's
+install relies on to delete the cells the stream skipped
+(`bondy_oplog_applier:commit_stage/4`).
 
 ## Snapshot consistency
 
@@ -52,7 +54,7 @@ refused while the instance holds the re-fold mark of a snapshot install of its
 own, or has yet to replay the events its frontier does not
 claim (`bondy_oplog_instance:serving/1`); the instance does not start
 installing while a session is open on it
-(`bondy_oplog_instance:begin_install/1`), and the sessions open on it expire
+(`bondy_oplog_instance:begin_install/3`), and the sessions open on it expire
 when it restarts owing that replay
 (`bondy_oplog_catalogue_cursor:discard_instance/1`).
 """).
@@ -108,7 +110,7 @@ when it restarts owing that replay
 %% =============================================================================
 
 -spec init(instance_id()) ->
-    {ok, {non_neg_integer(), bondy_oplog_catalogue_cursor:cursor()}}
+    {ok, {non_neg_integer(), bondy_oplog_catalogue_cursor:cursor(), [binary()]}}
     | {ok, no_snapshot}
     | {error, term()}.
 
@@ -120,12 +122,15 @@ projection handle); the session streams them all in one cursor, advancing
 from one table to the next as each table's keyspace is exhausted
 (`bondy_oplog_catalogue_cursor:next_target/1`). A single-table instance (no
 per-table bucket on its registry entry) falls back to the legacy
-single-bucket walk over the default bucket (`<<>>`).
+single-bucket walk over the default bucket (`<<>>`). The reply names the
+buckets the session scans, a bucket with no cell included, so the initiator
+can tell an empty table from one this instance does not have
+(`bondy_oplog_applier:commit_stage/4`).
 
 `{error, {refold_owed, InstanceId}}`, discarding the cursor, while the
 instance may not serve a snapshot (`bondy_oplog_instance:serving/1`). The
 cursor is minted before that check, so an install that starts after the check
-finds it open (`bondy_oplog_instance:begin_install/1`), and one that starts
+finds it open (`bondy_oplog_instance:begin_install/3`), and one that starts
 before it makes the check refuse (`bondy_oplog_bootstrap_rederive_test`,
 `cursor_open_before_the_serve_check_holds_the_install`).
 """).
@@ -134,7 +139,7 @@ init(InstanceId) ->
     case {bondy_oplog_instance:serving(InstanceId), Opened} of
         {ok, _} ->
             Opened;
-        {Refused, {ok, {_, Cursor}}} ->
+        {Refused, {ok, {_, Cursor, _}}} ->
             ok = bondy_oplog_catalogue_cursor:discard(Cursor),
             Refused;
         {Refused, _} ->
@@ -185,7 +190,7 @@ next(InstanceId, Cursor) when
 
 ?DOC("""
 Ends a session whose initiator will not read it, so its cursor stops holding
-the instance's own install (`bondy_oplog_instance:begin_install/1`). A cursor
+the instance's own install (`bondy_oplog_instance:begin_install/3`). A cursor
 on another instance, or one already gone, is left alone.
 """).
 -spec release(instance_id(), bondy_oplog_catalogue_cursor:cursor()) -> ok.
@@ -278,6 +283,7 @@ build_targets(InstanceId, FoundingNS) ->
 %% current scan position; the rest ride on the cursor for `next_target/1`.
 init_with_targets(InstanceId, FoundingNS, Index, Shard, Targets) ->
     [{NS1, Bucket1} | Rest] = Targets,
+    Buckets = lists:usort([B || {_, B} <- Targets]),
     case bondy_oplog_core_registry:high_water_hlc(FoundingNS, Index, Shard) of
         not_found ->
             {ok, no_snapshot};
@@ -285,12 +291,12 @@ init_with_targets(InstanceId, FoundingNS, Index, Shard, Targets) ->
             Cursor = bondy_oplog_catalogue_cursor:mint(
                 InstanceId, NS1, Index, Shard, Bucket1, 0, Rest
             ),
-            {ok, {0, Cursor}};
+            {ok, {0, Cursor, Buckets}};
         {ok, Watermark} when is_integer(Watermark) ->
             Cursor = bondy_oplog_catalogue_cursor:mint(
                 InstanceId, NS1, Index, Shard, Bucket1, Watermark, Rest
             ),
-            {ok, {Watermark, Cursor}}
+            {ok, {Watermark, Cursor, Buckets}}
     end.
 
 %% =============================================================================

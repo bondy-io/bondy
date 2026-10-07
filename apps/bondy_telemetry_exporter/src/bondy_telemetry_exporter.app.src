@@ -25,6 +25,7 @@
         telemetry,
         prometheus,
         bondy_metrics,
+        bondy_cluster,
         opentelemetry_api,
         %% inets and ssl BEFORE opentelemetry: the SDK's batch processor
         %% initializes the OTLP exporter module (an httpc profile) at ITS

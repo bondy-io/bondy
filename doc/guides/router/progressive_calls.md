@@ -56,27 +56,14 @@ re-routed.
 
 ## Enabling the feature
 
-The dealer feature is **disabled by default** and is enabled per node:
+Progressive Calls is a capability of the build, not a setting: Bondy
+advertises `progressive_calls` as a dealer feature in every `WELCOME`, and
+there is no `bondy.conf` key to turn it off. See
+[WAMP features](wamp_features.md).
 
-```
-wamp.dealer.progressive_calls = on
-```
-
-> #### Mixed-version clusters {: .warning}
-> Only enable the flag once **every** node in the cluster runs a Bondy
-> version that supports it. The flag is read at call time on the node the
-> caller is connected to, so it can be flipped without a restart.
-
-While the flag is on, every `CALL` on that node pays a small bounded promise
-lookup (to tell a first chunk from a subsequent one). The lookup is a prefixed
-`ordered_set` probe, not a scan, so the cost is a low constant per call — but it
-is paid by *all* calls on the node, not only progressive ones, which is one more
-reason to leave the flag off where the feature is not used.
-
-Toggling the flag **off while a stream is open** is safe but coarse: the node
-stops recognising further chunks as continuations, so the caller's in-flight
-stream fails rather than completing. Flip the flag during a quiet window, not
-mid-stream.
+A session obtains the feature only when its `HELLO` announces it. The feature
+is strict opt-in: a client role that omits `progressive_calls` is given
+`false`, rather than inheriting the router's advertised value.
 
 ## Semantics and guarantees
 
@@ -118,7 +105,10 @@ mid-stream.
 - **Caller departure.** If the caller's session ends mid-stream, the dealer
   sends the callee an `INTERRUPT` (mode `killnowait`) so it stops waiting on
   input that will never arrive — for local callees directly, and for callees
-  on other nodes by relaying the cancellation to their node.
+  on other nodes by relaying the cancellation to their node
+  (`bondy_connect_cluster_rpc_SUITE:progressive_input_remote_caller_death_interrupts_callee`).
+  On caller departure the `INTERRUPT` goes only to a callee that announced
+  `call_canceling`.
 
 ## Using it from bondy_connect_sdk (Erlang client)
 

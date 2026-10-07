@@ -1,323 +1,304 @@
-# The three packages
+# The storage packages
 
 > Audience: anyone who wants the mental model before reading any code.
 > Time to read: ~10 min.
 
-Bondy's storage is three cooperating packages behind a small facade.
-Each has a distinct job and a narrow interface:
+Bondy's storage is a small stack of packages behind one facade. Each has a
+distinct job and a narrow interface:
 
 - **`bondy_oplog`** is the **write side**. It appends events durably,
-  ships them to peers, and recovers them after a crash.
-- **`bondy_mst`** is the **replication structure** — a Merkle Search
-  Tree (state-based CRDT) that lets two peers compare what they have
-  without sending the whole world.
-- **`bondy_db`** is the **read side**. It returns the most recent
-  value for a key, fast, with bounded staleness if you ask for it.
+  replicates them to peers, and recovers them after a crash. Its WAL is a
+  writer from **`bondy_log`**, the segmented log core.
+- **`bondy_mst`** is the **replication structure**: a Merkle Search Tree that
+  lets two peers find the events one of them lacks without sending
+  everything they hold.
+- **`bondy_db`** is the **facade**. Applications open tables, write and read
+  through it. Its reads use the read primitives in `bondy_oplog_core`, which
+  is part of the `bondy_oplog` application.
 
-Everything else (the applier, the projection, the cache, the CRDT
-catalogue) is glue between those three.
+The applier, the projection, the cache and the CRDT catalogue connect these
+packages.
 
-The three are **layered**, with dependencies running one way:
-`bondy_db` → `bondy_oplog` → `bondy_mst` (plus each layer's own leaf
-dependencies — Leveled under `bondy_db`, the cluster transport under
-`bondy_oplog`). Nothing lower ever calls up, so the graph is acyclic
-and each package is a standalone OTP application usable on its own. A
-layer configures the one below it through that layer's public API:
-`bondy_db:open/2` passes per-instance options down to
-`bondy_oplog:start_instance/2`, which in turn selects the `bondy_mst`
-store backend. Layer-wide tuning that is not per-instance rides each
-layer's own application environment — never one layer writing
-another's.
+The packages are **layered**, and their dependencies run one way:
+`bondy_db` → `bondy_oplog` → `bondy_log` → `bondy_mst`. Each layer also has its
+own leaf dependencies: leveled under `bondy_db`, and `bondy_cluster` and
+Partisan under `bondy_oplog`. `scripts/check_layering.escript` checks the
+static call graph of `bondy_db`, `bondy_oplog` and `bondy_mst` and fails on
+any call from a lower layer to a higher one. The higher layer wires itself
+into the lower one by dependency injection: `bondy_db` passes its leveled
+projection adapter as an option, so `bondy_oplog` calls it with no static
+edge. A layer configures the one below through that layer's public API:
+`bondy_db:open/2` passes per-instance options to
+`bondy_oplog:start_instance/2`, and those options select the `bondy_mst`
+store backend. One environment key crosses a layer: at start, `bondy_db` sets
+`bondy_oplog`'s `latency_probe` to `{bondy_db, probe_write}`.
 
 ## The 30-second picture
 
 ```mermaid
 flowchart LR
     App(["Application"])
+    DB["bondy_db<br/>tables • read • write barrier"]
     OPLOG["bondy_oplog<br/>write • replicate • recover"]
     MST["bondy_mst<br/>Merkle Search Tree<br/>anti-entropy"]
-    DB["bondy_db<br/>read • cache • freshness"]
 
-    App -- "append(InstanceId, Op)" --> OPLOG
+    App -- "apply(Table, Realm, Key, Op)" --> DB
     App -- "read(Table, Realm, Key)" --> DB
+    DB -- "append" --> OPLOG
+    DB -- "bondy_oplog_core:read" --> OPLOG
 
     OPLOG -. "events become<br/>MST pages" .-> MST
-    MST  -. "events get<br/>materialised" .-> DB
 
     classDef pkg fill:#0b3,stroke:#053,color:#fff;
     class OPLOG,MST,DB pkg;
 ```
 
-Three things to note before we go any further:
+Three things to note before going further:
 
-1. **Applications never read from the oplog.** Reads go to `bondy_db`.
-   The oplog is replication / durability machinery beneath that.
-2. **The MST is not a key/value store.** It is the *structure* peers
-   use to agree on a set of events. The materialised key/value
-   answers live in the projection (LSM-backed), behind `bondy_db`.
-3. **There is no leader.** All three packages are local-first;
-   convergence is achieved by exchanging MST pages over a sync
-   transport.
+1. **Applications read through `bondy_db`.** A read goes to the cache and
+   the projection, not to the log of events.
+2. **The MST is not a key/value store.** It is the structure that peers use
+   to agree on a set of events. The materialised key/value cells live in the
+   projection (leveled on disk, or ETS for an ephemeral table).
+3. **There is no leader.** A node writes locally and converges by pulling
+   the MST pages it lacks from its peers.
 
 ## Layered storage
 
-Each shard, per namespace, owns instances of five layers stacked like
-this:
+Each oplog instance owns one shard and stacks these layers:
 
 ```mermaid
 flowchart TB
-    O["OVERLAY · in-RAM ETS<br/>events between WAL ack and projection commit"]
-    P["PROJECTION · Leveled LSM per shard (or ETS, ephemeral)<br/>materialised cells: HLC + folded value"]
-    SNAP["COMPACTION CHECKPOINT · single file<br/>CRDT state at the compaction watermark"]
-    MST["MST PAGE STORE · packfile + .idx<br/>content-addressed pages, replication substrate"]
-    WAL["WAL · append-only segments<br/>source of truth"]
+    O["OVERLAY · ETS<br/>events between WAL append and MST install"]
+    P["PROJECTION · leveled (durable) or ETS (ephemeral)<br/>materialised cells: HLC + CRDT state"]
+    SNAP["COMPACTION CHECKPOINT · file (durable) or ETS<br/>CRDT state at the compaction watermark"]
+    MST["MST PAGE STORE · packs + .idx (durable) or ETS<br/>content-addressed pages, replication substrate"]
+    WAL["WAL · append-only segments (or in-memory, fused only)<br/>events in append order"]
 
-    O   --> P
-    P   --> SNAP
-    SNAP --> MST
-    MST --> WAL
+    O ~~~ P ~~~ SNAP ~~~ MST ~~~ WAL
 ```
 
-The arrows mean *"rebuilds from"*. If you delete every other layer, the
-WAL alone can reconstruct the whole stack — that is why the WAL is the
-"must survive" layer and everything above it is a performance choice.
+The WAL is not an unbounded history. Compaction folds the events that every
+peer holds into the checkpoint and truncates them from the MST. Once the
+checkpoint is durable, the instance advances the WAL's snapshot watermark,
+and the WAL deletes the segments below it
+(`bondy_oplog_compaction_durable_test:compaction_advances_wal_watermark_and_sweeps`).
+[Chapter 06](06_compaction_and_bootstrap.md) covers the cycle.
 
 ## Following a write end-to-end
 
-Imagine a client calls `bondy_oplog:append(InstanceId, Op)` (or, through
-the facade, `bondy_db:apply(Table, Realm, Key, Op)`). Here is what
-happens in the happy path:
+A client calls `bondy_db:apply(Table, Realm, Key, Op)`. The facade picks the
+shard and calls `bondy_oplog:append_applied/4` on that shard's instance. This
+is the happy path:
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Caller
-    participant INST as bondy_oplog_instance
-    participant WAL as bondy_oplog_wal
-    participant OV as overlay (ETS)
-    participant SYNC as sync_scheduler<br/>+ sync_session
+    participant WAL as WAL (bondy_log_wal)
+    participant OV as instance overlay (ETS)
     participant APP as bondy_oplog_applier
+    participant PROJ as projection
+    participant INST as bondy_oplog_instance
     participant MST as bondy_mst (pages)
-    participant PROJ as projection (Leveled)
 
-    C->>INST: append(Event)
-    INST->>WAL: append(frame)
-    WAL-->>INST: {Hlc, Segment, Offset}
-    INST->>OV: insert(event)
-    INST-->>C: ok (caller unblocks)
-    Note over OV,SYNC: Replication is pull-only anti-entropy<br/>(a peer's next sync pulls the newest pages).<br/>There is no sending-side eager-push today.
-
-    par async install
-        APP->>WAL: drain batch
-        APP->>MST: install pages
-        APP->>PROJ: write {Hlc, FoldedValue}
-        APP->>OV: evict applied events
-    and async sync to peers
-        SYNC->>MST: compare roots with peer
-        MST-->>SYNC: missing pages
-        SYNC->>SYNC: ship them
-    end
+    C->>OV: stage event (with barrier alias)
+    C->>WAL: append(frame)
+    WAL-->>C: ok
+    APP->>WAL: drain batch
+    APP->>PROJ: write cell frames
+    APP->>INST: install_local_batch (cast)
+    INST->>MST: put pages
+    INST->>OV: evict rows
+    INST-->>C: barrier reply
+    Note over C: apply/4 returns
 ```
 
-A few things the diagram is hiding to keep it readable:
+Notes on what the diagram leaves out:
 
-- The WAL only writes one frame; what the caller sees as one event
-  becomes one `term_to_binary([Event], _)` payload on disk.
-- The overlay (step 4) is what makes the event visible to **reads**
-  before the projection catches up. It is the read-your-writes
-  primitive.
-- The sync session uses **MST root comparison** to find which *pages*
-  a peer is missing, not a full event exchange — that is the whole
-  point of `bondy_mst` (see chapter 02, in the bondy_mst library
-  docs). Whether two nodes hold the *same data* is a separate
-  question, answered by a per-instance **applied frontier** rather than
-  the root: compaction empties the MST, so an empty-MST peer's root no
-  longer witnesses its contents
+- When the instance publishes a fast path, the caller's own process signs
+  the event, stages the overlay row and then appends to the WAL. The row is
+  staged first because the applier can read the frame as soon as it is
+  durable. Without a fast path the append goes through the instance
+  gen_server.
+- The WAL writes one frame per append. Through the oplog adapter, one event
+  becomes one `term_to_binary([Event], _)` body.
+- The applier writes the projection *before* it casts the install to the
+  instance. The instance evicts the overlay row after the MST install and
+  then replies to the waiting caller. `apply/4` therefore returns after the
+  projection holds the write.
+- Replication is pull-only. The responder of a peer serves only read
+  requests (roots, frontiers, pages, catalogue snapshots), and a sync session
+  pulls the pages its own MST lacks. Whether two nodes hold the *same data* is
+  a separate question, answered by the per-instance **applied frontier**,
+  because compaction empties the MST and an empty MST's root says nothing
+  about its contents
   (see [chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)).
-- **Ephemeral tables have a fused variant** of this picture: the
-  applier collapses into the instance (one process runs
-  drain→verify→apply→install inline) and the WAL can be an
-  in-memory queue (`wal_backend => mem`) — no disk I/O on the write
-  path at all, with durability provided by the cluster via
-  anti-entropy. See [chapter 01](01_bondy_oplog.md).
+- **An ephemeral table can be fused.** The applier collapses into the
+  instance, which runs drain, verify, apply and install itself. A fused
+  instance can also use the in-memory WAL (`wal_backend => mem`), so the
+  write path does no disk I/O. Peers hold the data through anti-entropy.
+  See [chapter 01](01_bondy_oplog.md).
 
 ## Following a read end-to-end
 
-Now `bondy_db:read(Table, Realm, Key)` (the facade; `bondy_oplog_core:read(NS,
-Index, Bucket, Key)` underneath):
+`bondy_db:read(Table, Realm, Key)` computes the shard and calls
+`bondy_oplog_core:read(NS, primary, Bucket, Key, #{shard => Shard})`:
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant App as Application
-    participant DB as bondy_db / bondy_oplog_core
-    participant CACHE as cache_adapter (ETS)
-    participant OV as overlay (ETS)
-    participant PROJ as projection (Leveled)
-    participant CRDT as crdt_module
+    participant CORE as bondy_oplog_core
+    participant CACHE as cache (ETS)
+    participant PROJ as projection
+    participant K as cell kernel / CRDT
 
-    App->>DB: read(Table, Realm, Key)
-    DB->>CACHE: get(Key)
+    App->>CORE: read(NS, primary, Bucket, Key)
+    CORE->>CACHE: get(Bucket, Key)
     alt cache hit
-        CACHE-->>DB: {Value, Hlc}
-        DB-->>App: {Value, Hlc}
+        CACHE-->>CORE: {Value, Hlc}
     else cache miss
-        DB->>PROJ: get(Key)
-        PROJ-->>DB: {ProjState, ProjHlc}
-        DB->>OV: events_after(Key, ProjHlc)
-        OV-->>DB: [Event, ...]
-        DB->>CRDT: interpret_cog([Event, ...], ProjState)
-        CRDT-->>DB: {Value, Hlc}
-        DB->>CACHE: put(Key, {Value, Hlc})
-        DB-->>App: {Value, Hlc}
+        CORE->>CACHE: ticket()
+        CORE->>PROJ: head(Bucket, Key)
+        PROJ-->>CORE: {Hlc, ValueBytes}
+        CORE->>K: decode value
+        CORE->>CACHE: fill(Bucket, Key, {Value, Hlc}, Ticket)
     end
+    CORE-->>App: {Value, Hlc}
 ```
 
-Three storage tiers on the hot path: cache, overlay, projection. The
-**CRDT module** is the per-table operation interpreter
-([chapter 05](05_crdt_model.md)) — that's what gives the read its
-CRDT semantics: the overlay's pending events are interpreted as a
-group on top of the projection state, never folded one state at a
-time.
+A read touches two storage tiers: the cache and the projection. The
+**CRDT module** of the table ([chapter 05](05_crdt_model.md)) decides what a
+cell's state means. `bondy_oplog_core` can also merge a per-shard read overlay
+of pending events into a read. `bondy_db` registers every shard with
+`overlay = disabled`, so Bondy reads never take that path.
+[Chapter 03](03_bondy_db.md#read-your-writes-and-the-write-barrier) explains
+why.
 
-## How the three packages talk to each other
-
-Zooming in on the wires:
+## How the packages talk to each other
 
 ```mermaid
 flowchart TB
+    subgraph BONDY_DB["bondy_db"]
+        FACADE["bondy_db (facade)"]
+        TOPO["bondy_db_topology_*"]
+        LPROJ["bondy_db_projection_leveled"]
+    end
     subgraph BONDY_OPLOG["bondy_oplog"]
-        OPLOG_INST["oplog_instance"]
-        WAL["wal"]
+        INST["bondy_oplog_instance"]
+        WALF["bondy_oplog_wal"]
+        APP["bondy_oplog_applier"]
         SYNC["sync_scheduler<br/>sync_session"]
-        APP["applier"]
+        CORE["bondy_oplog_core"]
+        REG["bondy_oplog_core_registry"]
+        CACHE["bondy_oplog_cache_ets"]
+    end
+    subgraph BONDY_LOG["bondy_log"]
+        LWAL["bondy_log_wal"]
     end
     subgraph BONDY_MST["bondy_mst"]
-        TREE["MST in-memory"]
-        PSTORE["pack_store · packfile"]
-        STORES{{"ets_store · map_store · pack_store"}}
-    end
-    subgraph BONDY_DB["read side"]
-        FACADE["bondy_db (facade)"]
-        CORE["oplog_core"]
-        REG["oplog_core_registry"]
-        OVERLAY["oplog_db_overlay"]
-        CACHE["cache_adapter"]
-        PROJ["projection_adapter<br/>leveled / ets"]
+        TREE["MST"]
+        STORES{{"pack_store · ets_store · map_store"}}
     end
 
-    OPLOG_INST -->|"append + install"| WAL
-    OPLOG_INST -->|"install pages"| TREE
-    TREE -->|"put / get pages"| STORES
-    STORES --- PSTORE
-    APP -->|"drain"| WAL
-    APP -->|"cell_apply"| PROJ
-    APP -->|"evict"| OVERLAY
-    SYNC -->|"exchange roots"| TREE
-
-    FACADE --> CORE
+    FACADE --> TOPO
+    FACADE -->|"append"| INST
+    FACADE -->|"read / range"| CORE
     CORE --> REG
     CORE --> CACHE
-    CORE --> OVERLAY
-    CORE --> PROJ
-
-    OPLOG_INST -->|"merge into"| OVERLAY
+    CORE -->|"head / get"| LPROJ
+    INST --> WALF
+    WALF --> LWAL
+    APP -->|"drain"| WALF
+    APP -->|"cell apply"| LPROJ
+    APP -->|"invalidate"| CACHE
+    APP -->|"install cast"| INST
+    INST -->|"put pages"| TREE
+    TREE --> STORES
+    SYNC -->|"compare roots, pull pages"| INST
 ```
 
-Most of the arrows here are obvious from chapters
-[01](01_bondy_oplog.md) / 02 (in the bondy_mst library docs) /
-[03](03_bondy_db.md) / [04](04_applier.md); the ones worth
-flagging:
+The arrows worth flagging:
 
-- The **"read side" box groups modules by role, not by application.**
-  `bondy_db` is a thin facade; the read primitives it calls —
-  `bondy_oplog_core`, `bondy_oplog_core_registry`,
-  `bondy_oplog_db_overlay`, `bondy_oplog_cache_adapter`, and
-  `bondy_oplog_projection_adapter` — all live in the **`bondy_oplog`**
-  application. Look for them there, not under `bondy_db`.
-- The **applier is the only writer to the projection.** Reads share
-  the same projection handle through `bondy_oplog_core_registry`.
-- The **overlay is shared** between the writer (oplog_instance) and
-  the reader (`bondy_oplog_core`) — that's how reads see events before
-  the applier has folded them in.
-- The **pack_store** is one of several `bondy_mst_store`
-  implementations; tests use `ets_store` / `map_store`.
+- **`bondy_db` names the projection adapter, `bondy_oplog` calls it.** The
+  applier and `bondy_oplog_core` reach `bondy_db_projection_leveled` only
+  through the adapter module stored in the registry entry of the shard.
+- **The applier writes primary cells on a non-fused instance.** A fused
+  instance writes them itself. After each projection write the writer deletes
+  the cache entry for that cell. Readers share the same projection handle
+  through `bondy_oplog_core_registry`.
+- **The pack store** is one of three `bondy_mst_store` implementations.
+  A durable instance uses it. An instance opened with `backend => ets` uses
+  the ETS store.
 
 ## Why this shape?
 
-A handful of architectural commitments are worth naming up front, so
-the chapters that follow make sense:
+A handful of architectural commitments explain the chapters that follow:
 
-1. **WAL is the source of truth.** Every other layer (MST, snapshot,
-   projection, overlay, cache) is reconstructible from it.
-2. **Per-cell HLC.** Each projection cell carries its own
-   `last_modified_hlc`. Reads return `{Value, Hlc}`; causality is
-   *exposed*, not hidden.
-3. **Per-table CRDT, pure operation-based.** The substrate is
-   CRDT-agnostic: it ships *operations* (opaque terms) and causal
-   metadata; what "merge" means for `users` vs `registry` lives in
-   plain Erlang modules implementing the `bondy_oplog_crdt`
-   behaviour. Commutative types ride the scalar HLC (`tier_0`);
-   concurrency-detecting types (multi-value register, add-wins map)
-   carry a per-cell causal context (`tier_2`). (The earlier
-   state-based *fold* modules were retired; see
-   [chapter 05](05_crdt_model.md).)
-4. **Two-sided API.** `bondy_oplog` for writes, `bondy_db` for reads.
-   Applications never read from the oplog.
-5. **No consensus.** Convergence is by anti-entropy over the MST
-   (carried, in a Bondy deployment, over Partisan), plus a wall-clock
-   **freshness fence** for namespaces that need bounded staleness (e.g.
-   auth). The fence is fed by a per-round heartbeat: every completed sync
-   round stamps the shard as "in contact with its peers," so an idle
-   security shard can still prove its liveness.
-6. **The MST is bounded.** Once peers confirm they have an event,
-   it is physically removed from the MST and folded into a single
-   per-instance snapshot via `bondy_oplog_compaction`. A fully
-   converged cluster's live MST is empty; new replicas bootstrap
-   from a snapshot, not from the full history
+1. **Durable state is the WAL above the snapshot watermark, the MST, the
+   projection and the compaction checkpoint.** The WAL gives each write its
+   durability point. Compaction bounds the WAL and the MST together.
+2. **Per-cell HLC.** Each projection cell carries the HLC of its latest
+   applied event. Reads return `{Value, Hlc}`, so causality is exposed, not
+   hidden.
+3. **Per-table CRDT, pure operation-based.** The substrate is CRDT-agnostic:
+   it replicates *operations* (opaque terms) and causal metadata. What a write
+   means for a table is defined by a module that implements the
+   `bondy_oplog_crdt` behaviour. Types such as counters and LWW registers
+   declare `tier_0` and order by the HLC alone. Types that detect concurrency
+   (multi-value register, add-wins and remove-wins maps and sets, the flags)
+   declare `tier_2` and carry a per-cell causal context. See
+   [chapter 05](05_crdt_model.md).
+4. **One facade.** Applications write and read through `bondy_db`.
+5. **No consensus.** Convergence is by anti-entropy over the MST (carried
+   over Partisan in a Bondy deployment). A wall-clock **freshness fence**
+   serves namespaces that need bounded staleness, such as the security
+   tables. A completed sync round that reaches a peer stamps the shards of
+   the instance as in contact with its peers, so an idle security shard stays
+   fresh.
+6. **The MST is bounded.** Once the cluster confirms it holds an event,
+   compaction removes the event from the MST and folds it into the
+   compaction checkpoint of the instance. New replicas bootstrap from a
+   catalogue snapshot, not from the full history
    ([chapter 06](06_compaction_and_bootstrap.md)).
-7. **Convergence is verified by the applied frontier, not the MST root.**
-   Precisely because the MST empties (item 6), root equality cannot
-   answer "do two nodes hold the same data?" — two converged peers in
-   different compaction states show different roots, and two
-   both-compacted peers both show `undefined`. Each instance instead
-   maintains a compaction-invariant **applied frontier** — a per-origin
-   version vector of applied events — and peers compare frontiers to
-   judge agreement
+7. **Convergence is judged by the applied frontier, not the MST root.**
+   Because the MST empties, root equality cannot answer "do two nodes hold
+   the same data?". Two converged peers in different compaction states show
+   different roots, and two fully compacted peers both show `undefined`. Each
+   instance keeps an **applied frontier**, a per-origin version vector
+   `#{Origin => max Seq}` of applied events, and peers compare frontiers
    ([chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)).
-8. **Changes are observable.** A table can opt into change
-   notification: every write publishes a node-local event, and writes
-   that arrive from a *peer* through anti-entropy publish a distinct
-   *merge* event — the seam a node-local reactor uses to act on what
-   another node did ([chapter 03](03_bondy_db.md#change-notification)).
-9. **A node's day job is routing; storage work yields to it.** The
-   heavy background tasks are bounded so they cannot starve the node.
-   Anti-entropy runs under a node-wide concurrency cap, a fixed page
-   budget that bounds its memory regardless of dataset size, a
-   per-shard throttle that quiets converged shards, and (opt-in) a
-   load-reactive yield that defers reconciliation while the node is
-   busy — with the freshness-fence shards exempt so authentication
-   never starves ([chapter 06](06_compaction_and_bootstrap.md#keeping-anti-entropy-subordinate-to-routing)).
-   The durable MST seal runs off the apply path by default (chapter 02
-   in the bondy_mst library docs), and a per-instance heap monitor
-   reclaims transient apply garbage
+8. **Changes are observable.** A table opened with `publish => true` publishes
+   a node-local event for each applied write. A write that arrives from a
+   *peer* through anti-entropy publishes a distinct *merge* event, which a
+   node-local reactor uses to act on what another node did
+   ([chapter 03](03_bondy_db.md#change-notification)).
+9. **A node's main job is routing, and storage work yields to it.**
+   Anti-entropy runs under a node-wide concurrency cap and a fixed page
+   budget per round. A per-shard throttle quiets converged shards, and an
+   opt-in load-reactive yield defers reconciliation while the node is busy.
+   Instances that back the freshness fence are exempt from the cap, the
+   throttle and the yield
+   ([chapter 06](06_compaction_and_bootstrap.md#keeping-anti-entropy-subordinate-to-routing)).
+   The durable MST seals packs off the install path by default
+   (`pack_seal_mode`, default `async`; chapter 02 in the bondy_mst library
+   docs). A per-instance heap monitor reclaims transient garbage
    ([chapter 01](01_bondy_oplog.md#the-instance-heap-monitor)).
 
 ## Where next?
 
-Read the chapters in order. Each one stands on its own but the order
-is intentional — the write side teaches you what an event is, the
-MST chapter teaches you how peers find their disagreements, then the
-read side, then the glue.
+Read the chapters in order. The write side teaches what an event is. The MST
+chapter teaches how peers find their disagreements. Then come the read side
+and the applier that connects them.
 
-If you only have time for one more chapter: read
-02 — bondy_mst (in the bondy_mst library docs). It is the unique idea in the stack;
-the rest is good engineering around it.
+If you have time for one more chapter only, read 02 — bondy_mst (in the
+bondy_mst library docs). The MST is the idea the rest of the stack is built
+around.
 
 ## Pointers
 
-- These chapters are the architecture reference; module docs carry
-  the implementation-level contracts (wire formats, options,
-  invariants).
-- Modules to skim before reading further:
-  `bondy_oplog.erl`, `bondy_mst.erl`, `bondy_db.erl`.
+- These chapters are the architecture reference. The module docs carry the
+  implementation-level contracts (wire formats, options, invariants).
+- Modules to skim before reading further: `bondy_db.erl`, `bondy_oplog.erl`,
+  `bondy_oplog_core.erl`, `bondy_mst.erl`.

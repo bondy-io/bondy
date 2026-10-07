@@ -14,9 +14,13 @@
 -export([value_of/2]).
 -export([compact_among/2]).
 -export([with_cluster/2]).
+-export([with_members/2]).
 -export([await_subtree_restart/4]).
 -export([settle/1]).
 -export([open_gate/1]).
+-export([install/2]).
+-export([install/3]).
+-export([applier_install/2]).
 
 %% Build a V2 cell frame for the given fold state. Equivalent to what
 %% the applier writes through `bondy_oplog_cell_apply` —
@@ -69,8 +73,9 @@ compact_among(Id, Cluster) ->
 %% calling (the watermark door runs in it) or the one `compact_among/2` names.
 %% Over the inline transport a peer is addressed by its instance id, which is
 %% what its peer-state rows are keyed by. Any other caller sees every instance
-%% as a member, itself included, so it never confirms.
--spec with_cluster([binary()], fun(() -> T)) -> T.
+%% as a member, itself included, so it never confirms. A peer that is not an
+%% instance id, such as `{peer, Name}`, is never the caller.
+-spec with_cluster([term()], fun(() -> T)) -> T.
 
 with_cluster(Cluster, Fun) ->
     case get({?MODULE, cluster}) of
@@ -78,16 +83,32 @@ with_cluster(Cluster, Fun) ->
             Fun();
         undefined ->
             put({?MODULE, cluster}, Cluster),
-            ok = meck:new(partisan_peer_service, [passthrough]),
             try
-                ok = meck:expect(partisan_peer_service, members, fun() ->
-                    {ok, [partisan:node() | Cluster -- [caller(Cluster)]]}
-                end),
-                Fun()
+                with_members(
+                    fun() ->
+                        lists:usort([
+                            partisan:node() | Cluster -- [caller(Cluster)]
+                        ])
+                    end,
+                    Fun
+                )
             after
-                meck:unload(partisan_peer_service),
                 erase({?MODULE, cluster})
             end
+    end.
+
+%% Runs `Fun` on a node with clustering enabled whose membership is what
+%% `Members()` returns, read on every call and from any process.
+-spec with_members(fun(() -> [term()]), fun(() -> T)) -> T.
+
+with_members(Members, Fun) ->
+    ok = meck:new(bondy_cluster, [passthrough]),
+    try
+        ok = meck:expect(bondy_cluster, enabled, fun() -> true end),
+        ok = meck:expect(bondy_cluster, members, Members),
+        Fun()
+    after
+        meck:unload(bondy_cluster)
     end.
 
 caller(Cluster) ->
@@ -167,3 +188,25 @@ open_gate(Id) ->
     end,
     ok = settle(Id),
     settle(Id).
+
+%% A whole catalogue install on instance `Id` of a snapshot of the buckets
+%% `Cells` carry: begin, stage one batch, then re-derive, which adopts
+%% `PeerFrontier` and replies the install's counts.
+install(Id, Cells) ->
+    install(Id, Cells, #{}).
+
+install(Id, Cells, PeerFrontier) ->
+    {ok, Token} = bondy_oplog_instance:begin_install(
+        Id, buckets(Cells), PeerFrontier
+    ),
+    ok = bondy_oplog_instance:install_catalogue_batch(Id, Token, Cells),
+    bondy_oplog_instance:rederive_projection(Id, Token).
+
+%% As `install/2`, on a bare applier, without the instance's re-fold mark.
+applier_install(Applier, Cells) ->
+    {ok, Token} = bondy_oplog_applier:begin_stage(Applier, buckets(Cells), #{}),
+    ok = bondy_oplog_applier:install_catalogue_batch(Applier, Token, Cells),
+    bondy_oplog_applier:rederive_projection_sync(Applier, Token).
+
+buckets(Cells) ->
+    lists:usort([Bucket || {Bucket, _Key, _Frame} <- Cells]).

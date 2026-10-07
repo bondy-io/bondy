@@ -662,7 +662,7 @@ do_target_diag(InstIds) ->
 %%
 %% A catalogue bootstrap installs a projection snapshot and adopts the peer's
 %% applied frontier; the events behind the adopted maxima are not shipped
-%% (`bondy_oplog_instance:finalize_catalogue_bootstrap/5`). Such a replica is
+%% (`bondy_oplog_applier:commit_stage/4`). Such a replica is
 %% converged by the frontier oracle while holding a smaller EVENT tree than
 %% its peer — and therefore a different MST root, permanently. That is the
 %% one benign way this suite's root barrier can fail, so distinguishing it
@@ -709,12 +709,8 @@ do_install_bootstrap_counter() ->
                     %% during a frozen window means the freeze did not take.
                     [bondy_oplog, compaction, ok],
                     [bondy_oplog, compaction, retention],
-                    %% The unservable-root self-heal
-                    %% (`maybe_self_heal_unservable/1`) drops the tree and
-                    %% advances the watermark past it. It runs inside
-                    %% `do_compact_sync/2`, so it is a second way a
-                    %% compaction tick sets a watermark, distinguishable
-                    %% from an ordinary commit only by this event.
+                    %% A rebuild of an MST whose own root lost pages is a
+                    %% compaction commit; this event marks which ones were.
                     [bondy_oplog, instance, mst_rebuilt],
                     %% The reclaim scheduler is a SECOND gc_scheduler instance
                     %% (`bondy_oplog_reclaim_scheduler`) that `freeze_gc/1`
@@ -929,7 +925,7 @@ prefix(Other) -> Other.
 %% is still short of the peer's, is the interesting contradiction.
 do_peer_states(InstId) ->
     Now = os:system_time(millisecond),
-    try bondy_oplog_peer_state:get_instance_peer_states(InstId) of
+    try bondy_oplog_peer_state:get_instance_peer_states(InstId, 0) of
         States when is_list(States) ->
             [
                 {

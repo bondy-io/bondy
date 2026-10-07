@@ -32,7 +32,7 @@ a `max`-CAS loop; readers a single `get`.
   `atomics:atomics_ref()` is shared with read-only consumers
   (catalogue freshness reporting, bootstrap finalise). The CAS loop
   is therefore not optional even in the single-writer case, because
-  `finalize_catalogue_bootstrap/3` also advances from a separate
+  `finalize_catalogue_bootstrap/4` also advances from a separate
   process.
 
 ## Persistence

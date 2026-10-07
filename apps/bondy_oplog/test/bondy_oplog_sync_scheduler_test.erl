@@ -174,7 +174,7 @@ partisan_source_excludes_self() ->
     %% members → sample delegation without needing a real cluster.
     ?assertEqual(
         [partisan:node()],
-        element(2, partisan_peer_service:members())
+        bondy_cluster:members()
     ),
     ?assertEqual(
         [],

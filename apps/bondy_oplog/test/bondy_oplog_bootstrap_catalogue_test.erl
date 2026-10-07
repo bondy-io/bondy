@@ -37,7 +37,7 @@ bootstrap_catalogue_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         fun fresh_replica_bootstraps_from_peer/0,
         fun bootstrap_marks_local_live/0,
-        fun finalize_adopts_peer_frontier/0,
+        fun rederive_adopts_peer_frontier_over_a_complete_install/0,
         fun finalize_does_not_go_live_on_an_unpersisted_frontier/0,
         fun bootstrap_seeds_local_frontier/0,
         fun bootstrap_absorbs_installed_hlcs/0,
@@ -174,25 +174,21 @@ bootstrap_absorbs_installed_hlcs() ->
     teardown(Peer),
     teardown(Local).
 
-%% A catalogue bootstrap ships the peer's projection cells, which carry only
-%% HLC + value — NOT the per-origin `{Origin, Seq}` the applied-frontier VV is
-%% built from — so the frontier cannot be derived from the install and must be
-%% ADOPTED from the peer. `finalize_catalogue_bootstrap/4` adopts it; `/3`
-%% merges nothing.
-finalize_adopts_peer_frontier() ->
-    {Local, _, _, _} = setup_instance(),
-    ?assertEqual(#{}, bondy_oplog_instance:frontier(Local)),
-
+%% The rederive takes the peer's frontier as the applied frontier when every
+%% shipped cell landed, and adopts nothing when one did not: here a frame that
+%% does not decode (`bondy_oplog_applier:commit_stage/4`).
+rederive_adopts_peer_frontier_over_a_complete_install() ->
     PeerFrontier = #{<<"origin-a">> => 42, <<"origin-b">> => 7},
-    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
-        Local, 0, PeerFrontier, true
+    {Local, _, _, _} = setup_instance(),
+    {ok, #{unclaimable := []}} = bondy_oplog_test_helpers:install(
+        Local, [], PeerFrontier
     ),
-    %% The peer's applied frontier is adopted.
     ?assertEqual(PeerFrontier, bondy_oplog_instance:frontier(Local)),
 
-    %% Legacy `/3` leaves the frontier untouched (empty merge), unchanged.
     {Other, _, _, _} = setup_instance(),
-    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(Other, 0, true),
+    {ok, #{unclaimable := [?B]}} = bondy_oplog_test_helpers:install(
+        Other, [{?B, <<"k">>, <<"not a frame">>}], PeerFrontier
+    ),
     ?assertEqual(#{}, bondy_oplog_instance:frontier(Other)),
 
     teardown(Local),
@@ -208,9 +204,7 @@ finalize_does_not_go_live_on_an_unpersisted_frontier() ->
     ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Local)),
     Result = with_io_fault_lock(fun() ->
         ok = meck:expect(bondy_mst_io, fsync_dir, fun(_) -> {error, eio} end),
-        bondy_oplog_instance:finalize_catalogue_bootstrap(
-            Local, 0, #{<<"origin-a">> => 1}, 0, false
-        )
+        bondy_oplog_instance:finalize_catalogue_bootstrap(Local, 0, 0, false)
     end),
     ?assertMatch({error, {dir_fsync_failed, _, eio}}, Result),
     ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Local)),

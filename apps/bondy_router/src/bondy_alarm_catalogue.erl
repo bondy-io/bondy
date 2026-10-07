@@ -285,7 +285,7 @@ list() ->
                 <<"load_regulation.memory_monitor.limit">>
             ]
         },
-        %% `bondy_oplog_sync_session:adopt_frontier/3`. A peer shipped
+        %% Raised by `bondy_oplog_sync_session`. A peer shipped
         %% catalogue cells for a bucket this instance has no table for, so the
         %% install was partial and the peer's applied frontier was withheld
         %% rather than adopted. `class = node` because the deficient party is

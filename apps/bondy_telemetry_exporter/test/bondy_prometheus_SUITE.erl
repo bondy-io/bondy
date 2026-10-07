@@ -61,6 +61,12 @@ exposition_renders_all_family_groups(_) ->
     Duplicates = lists:usort(Series -- lists:usort(Series)),
     Duplicates == [] orelse ct:fail({duplicate_series, Duplicates}),
 
+    %% A family rendered by two collectors repeats its `# TYPE` line, which
+    %% makes the whole exposition invalid.
+    Types = [L || L <- binary:split(Output, <<"\n">>, [global]), is_type(L)],
+    DupTypes = lists:usort(Types -- lists:usort(Types)),
+    DupTypes == [] orelse ct:fail({duplicate_families, DupTypes}),
+
     %% One representative family per collector/source. Families whose
     %% sources return no rows on a solo test node (e.g. per-peer
     %% connections) are deliberately not asserted.
@@ -356,3 +362,6 @@ wait_for_http_requests_above(H0, Retries) ->
             timer:sleep(20),
             wait_for_http_requests_above(H0, Retries - 1)
     end.
+
+is_type(<<"# TYPE ", _/binary>>) -> true;
+is_type(_) -> false.

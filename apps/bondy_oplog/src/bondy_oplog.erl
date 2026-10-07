@@ -526,14 +526,18 @@ later with HLC `=< Watermark` are rejected by the receive-side filter
 instead of being re-installed. Without this, a peer that has not yet
 seen the truncate would keep re-shipping the events we just dropped.
 
-**No checkpoint is written.** Use this only when the operator has
-out-of-band evidence that the dropped events are safe to lose
-cluster-wide. For coordinated retention, use `compact/1` instead.
+The checkpoint's watermark does not move. Use this only when the operator has
+out-of-band evidence that the dropped events are safe to lose cluster-wide.
+For coordinated retention, use `compact/1` instead.
 
-Returns the number of MST rows removed.
+The removal is a truncation like any other: it raises the instance's
+truncation record (`bondy_oplog_registry:truncated/1`) to its applied frontier.
+
+Returns the number of MST rows removed, or `{error, {refold_owed, Id}}` while
+a catalogue install holds the instance's re-fold mark.
 """).
 -spec truncate_prefix(instance_id(), bondy_oplog_event:event_key()) ->
-    non_neg_integer().
+    non_neg_integer() | {error, {refold_owed, instance_id()}}.
 
 truncate_prefix(InstanceId, Watermark) ->
     %% Drain the local applier so truncation operates on the up-to-date

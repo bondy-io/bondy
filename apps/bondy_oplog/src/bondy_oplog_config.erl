@@ -74,7 +74,6 @@ here.
 -export([set_live_sync_max_ms/1]).
 
 %% PEERS / BOOTSTRAP
--export([peer_timeout_ms/0]).
 -export([bootstrap_peer_strategy/0]).
 -export([set_bootstrap_peer_strategy/1]).
 -export([max_inflight_bootstraps/0]).
@@ -229,23 +228,13 @@ gc_max_concurrency() ->
 
 -doc """
 `incoming.pack` byte threshold at which the durable pack-store MST seals it
-into a sealed pack (default `2_000_000`, 2 MiB).
-
-The seal rewrites the whole `incoming.pack` in one datasync'd pass, and that
-pass runs on the instance's apply pipeline — so its duration is a freeze of
-local writes' visibility (read-after-write freshness lag), not of the write
-calls themselves. The cost scales linearly with this threshold: the pack
-store's own default (16 MiB) produces ~600ms+ freezes, large enough to push
-freshness lag toward the auth fence `max_lag` (1s, `bondy_auth`) and cause
-spurious `temporarily_unavailable` refusals. 2 MiB keeps each freeze to ~tens
-of ms with no throughput or hot-read cost — reads serve from the projection +
-cache, never the MST, so the resulting larger sealed-pack count does not touch
-the read path (it only adds AAE/compaction/cold-boot work, which GC bounds).
+into a sealed pack (default 2 MiB, the `db.pack_auto_seal_bytes` default).
+See `db.pack_auto_seal_bytes` for the trade-off.
 """.
 -spec pack_auto_seal_bytes() -> pos_integer().
 
 pack_auto_seal_bytes() ->
-    application:get_env(?APP, pack_auto_seal_bytes, 2_000_000).
+    application:get_env(?APP, pack_auto_seal_bytes, 2_097_152).
 
 -doc """
 Seal driver for the durable pack-store MST instances (default `async`).
@@ -378,12 +367,6 @@ set_live_sync_max_ms(Ms) when is_integer(Ms), Ms >= 0 ->
 %% =============================================================================
 %% API — PEERS / BOOTSTRAP
 %% =============================================================================
-
--doc "Peer liveness timeout in milliseconds (default `30000`).".
--spec peer_timeout_ms() -> non_neg_integer().
-
-peer_timeout_ms() ->
-    application:get_env(?APP, peer_timeout_ms, 30_000).
 
 -doc "Bootstrap peer-selection strategy (default `first`).".
 -spec bootstrap_peer_strategy() -> atom().

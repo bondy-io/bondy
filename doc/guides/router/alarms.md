@@ -36,9 +36,28 @@ every `task` names a catalogued task, that every `observe_with` procedure
 exists and is *not* a task, and that every declared detail key is delivered at
 the raise site.
 
-That last check is narrower than it sounds: three of the nine entries declare
-detail keys and six declare none, so it proves an entry cannot lie about what
+That last check is narrower than it sounds: ten of the fourteen entries declare
+detail keys and four declare none, so it proves an entry cannot lie about what
 it declares — not that every alarm carries structured detail.
+
+### Entries
+
+| Id | Severity | Class | Raised when |
+| --- | --- | --- | --- |
+| `{http_connector_service_down, Name}` | major | integration | An HTTP connector service's pool is marked down, after `liveness.failure_threshold` consecutive failed liveness probes; cleared after `liveness.success_threshold` consecutive successful ones |
+| `{mail_relay_down, Name}` | major | integration | An outbound mail relay fails its health check |
+| `{bondy_mcp_name_collision, Realm, Name}` | major | realm | Two MCP manifest entries in a realm resolve to the same name |
+| `bondy_memory_high` | major | node | Node memory use is above the high watermark of its limit |
+| `{bondy_oplog_bucket_unroutable, InstanceId}` | major | node | A catalogue bootstrap received cells for a table this node does not declare; the instance does not adopt the peer's frontier and bootstraps again |
+| `{bondy_oplog_drain_stalled, InstanceId}` | major | node | A WAL drain processes frames without committing a new position for `db.drain.stall_alarm` |
+| `{bondy_oplog_frontier_hole, InstanceId}` | major | node | A shard has carried a gap in its applied frontier for `db.frontier.hole_alarm` |
+| `{bondy_oplog_frontier_receipt_derived, InstanceId}` | major | node | A shard restored an applied frontier derived from receipt |
+| `bondy_db_main_unavailable` | critical | node | The durable `main` database could not be opened |
+| `{bondy_oplog_instance_down, InstanceId}` | critical | node | A shard instance has stopped and is not running again yet; its tables are unavailable |
+| `bondy_oplog_retirement_not_persistent` | major | cluster | The origin retirement set cannot be read or written |
+| `bondy_oplog_sync_oversized_items` | major | cluster | Anti-entropy skips stored values larger than the inter-node frame cap |
+| `{retained_messages_count_limit, Realm}` | warning | realm | A realm's retained messages reach `wamp.message_retention.max_messages` |
+| `{retained_messages_memory_limit, Realm}` | warning | realm | A realm's retained messages reach `wamp.message_retention.max_memory` |
 
 ### Severity names the response
 
@@ -53,21 +72,30 @@ argue about it.
 
 Severity does not decide whether a node leaves the load balancer.
 `affects_ready` is its own per-alarm flag, because the two judgements differ:
-an unreachable upstream connector is `major` and must not drain the node, since
-the WAMP data plane is unaffected; a failed durable store is also `major` and
-must.
+an unreachable upstream connector must not drain the node, since the WAMP data
+plane is unaffected; a node whose durable store failed to open must leave the
+load balancer.
 
-Every current entry declares `affects_ready => false`. Of the nine conditions,
-only `bondy_db_main_unavailable` stops the node serving, and its readiness
-flag deliberately does not travel through the alarm — see
-`bondy_namespace_catalog:main_status/0`. A condition that must survive a crash
-of the handler reporting it is recorded outside the alarm state and only
-mirrored as an alarm.
+Every current entry declares `affects_ready => false`. Of the fourteen
+conditions, two take the node out of rotation, and neither does so through
+its alarm: `bondy_db_main_unavailable` and `{bondy_oplog_instance_down, _}`.
+Their readiness is read from `bondy_namespace_catalog:main_status/0` and
+`bondy_oplog_instance_keeper:not_running/0`, and each alarm only mirrors it. A
+condition that must survive a crash of the handler reporting it is recorded
+outside the alarm state.
 
-`m:bondy_router_app`'s `is_ready/0` is the single readiness oracle, and reads the
-published flag rather than calling the handler: `/ready` is polled per node per
-second, and a `gen_event:call` would serialise that poll behind whatever else
-the shared `alarm_handler` manager is doing.
+`m:bondy_router_app`'s `is_ready/0` is the single readiness oracle. It is true
+only when all of these hold:
+
+- boot has finished;
+- the `main` database opened;
+- every kept oplog shard instance is running
+  (`bondy_router_app_readiness_test`: `a_kept_instance_not_running_is_not_ready`);
+- no raised alarm declares `affects_ready`.
+
+It reads the published `affects_ready` flag rather than calling the handler:
+`/ready` is polled per node per second, and a `gen_event:call` would serialise
+that poll behind whatever else the shared `alarm_handler` manager is doing.
 
 ## The runbook join
 
@@ -85,11 +113,11 @@ the shared `alarm_handler` manager is doing.
   an entry in `m:bondy_task_catalogue`, which carries its `impact` and
   `blast_radius`.
 
-Six of the nine entries have no task, and that is the answer rather than a gap.
-Only the mail relay and the MCP name collision have a remediation in the WAMP
-API; nothing in `bondy.*` fixes a stalled drain, an unopenable durable store,
-an unwritable retirement set, an oversized sync item or a retention ceiling. An
-empty list stops the search rather than inviting improvisation.
+Twelve of the fourteen entries have no task, and that is the answer rather than
+a gap. Only the mail relay and the MCP name collision have a remediation in the
+WAMP API; nothing in `bondy.*` fixes the others, from a failing HTTP connector
+service to a stopped shard instance. An empty list stops the search rather
+than inviting improvisation.
 
 Every rendered alarm carries a `catalogue_id`, because an alarm's id is
 concrete (`{mail_relay_down, <<"smtp1">>}`) while an entry's is a pattern
@@ -152,10 +180,10 @@ the occurrence that raised the condition. It survives restatement exactly as
 `raised_at` does; a later occurrence's trace is discarded.
 
 Most alarms will not have one. Bondy has no ambient trace context — a trace
-rides in a message's options — and seven of the nine producers are background
-probes, appliers and sweepers with no request to inherit from. The field is
-absent there rather than filled with a freshly minted id that would correlate
-with nothing.
+rides in a message's options — and only the two retained-message ceilings are
+raised with one; the other twelve entries are raised with no request to
+inherit from. The field is absent there rather than filled with a freshly
+minted id that would correlate with nothing.
 
 `m:bondy_alarm_handler`'s `content/1` deliberately ignores `onset_trace_id`
 when deciding whether a restatement changed anything. Were it compared, a
@@ -171,7 +199,7 @@ transition.
 | `bondy.task.{catalogue,describe}` | What may be done, with impact and blast radius. See `m:bondy_task_api`. |
 | Prometheus | `bondy_alarms`, `bondy_alarm_active` (one series per alarm id, discriminator included) and `bondy_node_ready`. |
 | Logs | Every transition: `warning` for a raise or update, `notice` for a clear. |
-| `/ready` | 503 while any raised alarm declares `affects_ready`. |
+| `/ready` | 503 while `bondy_router_app:is_ready/0` is false. |
 | MCP | The read procedures and topics, through the shipped `bondy_sre_read` overlay. |
 
 ## What this subsystem does not do

@@ -26,7 +26,13 @@ revoke_all_test_() ->
         [
             {"revoke_all/2 clears one user's tickets, leaves the others",
                 fun revoke_all_user/0},
-            {"revoke_all/1 clears the whole realm", fun revoke_all_realm/0}
+            {"revoke_all/1 clears the whole realm", fun revoke_all_realm/0},
+            {"revoking a ticket this node never stored leaves a marker",
+                fun revoke_unseen_ticket/0},
+            {"a new ticket in a revoked scope verifies",
+                fun reissue_after_revoke/0},
+            {"an expired marker is pruned like an expired ticket",
+                fun expired_marker_is_pruned/0}
         ]
     end}.
 
@@ -87,6 +93,44 @@ revoke_all_realm() ->
     ok = bondy_ticket:revoke_all(?REALM),
     ?assertEqual([], live_authids(T)).
 
+%% A node revokes a ticket whose issue has not replicated to it yet. Clearing
+%% would write nothing, and the node would later accept the ticket under
+%% `allow_not_found`; the marker is what it rejects instead.
+revoke_unseen_ticket() ->
+    Claims = client_claims(<<"heidi">>, <<"app4">>, device(1)),
+    ?assertEqual(
+        {error, not_found}, lookup(<<"heidi">>, <<"app4">>, device(1))
+    ),
+    ok = bondy_ticket:revoke(Claims),
+    ?assertEqual({error, revoked}, lookup(<<"heidi">>, <<"app4">>, device(1))),
+
+    SsoScope = #{realm => all, client_id => all, device_id => all},
+    ok = bondy_ticket:revoke((client_claims(<<"ivan">>, all, all))#{
+        scope => SsoScope
+    }),
+    ?assertEqual(
+        {error, revoked}, bondy_ticket:lookup(?REALM, <<"ivan">>, SsoScope)
+    ).
+
+reissue_after_revoke() ->
+    Claims = client_claims(<<"judy">>, <<"app5">>, device(1)),
+    ok = bondy_ticket:store_ticket(?REALM, <<"judy">>, Claims),
+    ok = bondy_ticket:revoke(Claims),
+    ?assertEqual({error, revoked}, lookup(<<"judy">>, <<"app5">>, device(1))),
+
+    New = Claims#{expires_at => erlang:system_time(second) + 7200},
+    ok = bondy_ticket:store_ticket(?REALM, <<"judy">>, New),
+    ?assertEqual({ok, New}, lookup(<<"judy">>, <<"app5">>, device(1))).
+
+expired_marker_is_pruned() ->
+    T = table(),
+    ok = bondy_ticket:revoke(expired_claims(<<"karl">>, <<"app6">>, device(1))),
+    ?assertEqual(1, cell_size(T, <<"karl">>)),
+
+    ok = store(<<"karl">>, <<"app6">>, device(2), live),
+    ?assertEqual(1, cell_size(T, <<"karl">>)),
+    ?assertEqual({error, not_found}, lookup(<<"karl">>, <<"app6">>, device(1))).
+
 %% Drive the real `bondy_ticket:store_ticket/3` (which builds the per-device
 %% list via `update_tickets/3`) for one (user, client) across N devices. All N
 %% share one composed store key `{Authid, ClientId, <<>>}` (device handled by
@@ -141,7 +185,13 @@ client_tickets_list_in_one_cell() ->
     ),
 
     ok = bondy_ticket:revoke_all(?REALM, Authid),
-    ?assertEqual([], rows_for(T, Authid)).
+    [
+        ?assertEqual(
+            {error, revoked},
+            bondy_ticket:lookup(?REALM, Authid, scope(Client, device(I)))
+        )
+     || I <- lists:seq(1, N)
+    ].
 
 %% One live device and one already-expired device share a cell. Writing any
 %% device then reclaims the expired one — but never the entry being written.

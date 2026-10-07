@@ -151,6 +151,8 @@ Treat a key as dead only when it appears in the output of both.
 | `oplog.catalog` | Never had a consumer; setting it did nothing in any released version. |
 | `oplog.core.scan_max_concurrency` | Same — never wired to any code path. |
 | Any `store.*` key (RocksDB tuning) | RocksDB is gone. The new `leveled` backend has no equivalent `bondy.conf` tuning surface yet — if you relied on `store.*` for capacity planning, there is currently nothing to replace it with. |
+| `wamp.dealer.pattern_based_registration` | Pattern-based registration is always on. |
+| `wamp.broker.pattern_based_subscription` | Pattern-based subscription is always on. |
 
 If you have an `advanced.config` with a `{plum_db, [...]}` stanza (for
 `store.*` settings that had no `bondy.conf` mapping, or for anything else),
@@ -169,6 +171,22 @@ unchanged — this is purely the Erlang application identifier. If your
 silently inert rather than an error, so this one won't fail your boot — it
 will just stop taking effect, which is worse to debug.
 
+Module names changed too. If you call Bondy modules from a remote console or a
+script, use these names:
+
+| Module in 1.0.0-rc.65 | Module in this release |
+|---|---|
+| `bondy` | `bondy_router_peer` |
+| `bondy_app` | `bondy_router_app` |
+| `bondy_sup` | `bondy_router_sup` |
+| `bondy_utils` | `bondy_router_utils` |
+| `bondy_stdlib` | `bondy_connect_lib` |
+| `bondy_humanized`, `bondy_itc`, `bondy_retry`, `bondy_table_manager`, `bondy_uuidv7` | `bondy_connect_humanized`, `bondy_connect_itc`, `bondy_connect_retry`, `bondy_connect_table_manager`, `bondy_connect_uuidv7` |
+
+The `bondy_stdlib` application is `bondy_connect_lib`. The write-ahead log of
+the new storage engine is the `bondy_log` application, whose modules are named
+`bondy_log_*`.
+
 ### 6. Consider the new options (optional)
 
 None of these existed at 1.0.0-rc.65, in any form — they aren't renames, so
@@ -183,7 +201,7 @@ defaults are safe to run with unchanged.
 | `db.wal.max_segment_bytes` | WAL segment rotation threshold. |
 | `db.reclaim`, `db.reclaim.interval`, `db.reclaim.batch_cells` | Projection-cell reclamation (tombstone space reclaim). See the [reclamation configuration reference](reclamation_options.md). |
 | `db.origin_retirement`, `db.origin_retirement.interval` | Reaping bookkeeping for permanently departed cluster members. See the [reclamation configuration reference](reclamation_options.md). |
-| `db.gc_max_concurrency`, `db.compaction.peer_timeout` | Shared compaction/reclamation scheduler tuning. See the [reclamation configuration reference](reclamation_options.md). |
+| `db.gc_max_concurrency` | Shared compaction/reclamation scheduler tuning. See the [reclamation configuration reference](reclamation_options.md). |
 | `db.drain.stall_alarm` | Alarm threshold for a wedged WAL consumer. |
 | `db.frontier.hole_alarm` | Alarm threshold for a shard carrying a per-origin gap in its applied frontier. |
 | `cluster.max_message_size` | Partisan inter-node frame size cap. |
@@ -220,7 +238,8 @@ periodic health check of the upstream that raises an alarm
 (`{http_connector_service_down, ServiceName}`, visible via the existing
 active-alarms metric/dashboard panel) after `liveness.failure_threshold`
 consecutive failures and clears it on recovery. This is new, not a rename —
-the defaults are safe to run with unchanged.
+the defaults are safe to run with unchanged. See
+[HTTP connector: liveness probe](http_connector.md).
 
 ### 8. Declare your listeners
 
@@ -262,6 +281,39 @@ default certificate path and nothing does now, so a TLS listener that relied on
 that default is refused at boot — and because the inventory is resolved as a unit,
 that refusal stops every other listener too. A listener with `enabled = off` is
 not checked, so declaring one and provisioning its certificate later is fine.
+
+### 9. Rename the HTTP transport queue keys
+
+The `wamp.transport_queue.*` block configures the HTTP long-poll and SSE
+transports, and is renamed `wamp.http_transport.*`:
+
+| Old key (≤ 1.0.0-rc.65) | New key |
+|---|---|
+| `wamp.transport_queue.max_messages` | `wamp.http_transport.queue.max_messages` |
+| `wamp.transport_queue.max_bytes` | `wamp.http_transport.queue.max_bytes` |
+| `wamp.transport_queue.message_ttl` | `wamp.http_transport.queue.message_ttl` |
+| `wamp.transport_queue.eviction_interval` | `wamp.http_transport.queue.eviction_interval` |
+| `wamp.transport_queue.partitions` | `wamp.http_transport.queue.partitions` |
+| `wamp.transport_queue.transport_ttl` | `wamp.http_transport.idle_timeout` |
+
+Remove `wamp.transport_queue.overflow_strategy`: it has no replacement. When a
+queue is full, the oldest entry is evicted.
+
+`scripts/migrate_conf.escript migrate` applies these renames and drops
+`overflow_strategy`.
+
+### 10. Disable clustering on a single node
+
+A node that runs alone must set:
+
+```
+cluster.enabled = off
+```
+
+`cluster.enabled` defaults to `on`. A node left on `on` with no other member
+holds compaction and reclamation, and refuses authentication under the default
+`db.aae.fence.on_isolation`. See
+[Running a single node](clustering.md#running-a-single-node).
 
 ## Result
 

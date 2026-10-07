@@ -49,7 +49,7 @@ catalogue_snapshot_test_() ->
 
 fresh_shard_init_returns_no_watermark_cursor() ->
     {Id, _NS, _, _} = setup_instance(),
-    {ok, {W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
+    {ok, {W, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(Id),
     ?assertEqual(0, W),
     ?assert(is_binary(Cursor)),
     ?assertEqual(16, byte_size(Cursor)),
@@ -66,7 +66,7 @@ init_returns_watermark_after_cells() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"b">>, {set, 25, <<"vb">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"c">>, {set, 17, <<"vc">>}}),
     ok = bondy_oplog_test_projection:drain(Id),
-    {ok, {W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
+    {ok, {W, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(Id),
     ?assertEqual(25, W),
     ?assert(is_binary(Cursor)),
     teardown(Id).
@@ -79,7 +79,7 @@ next_returns_batch_then_done() ->
      || {I, K} <- lists:zip(lists:seq(1, length(Keys)), Keys)
     ],
     ok = bondy_oplog_test_projection:drain(Id),
-    {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
+    {ok, {_W, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(Id),
     {ok, {batch, {Cursor, Cells}}} =
         bondy_oplog_catalogue_snapshot:next(Id, Cursor),
     %% All 5 cells fit in the default batch of 64.
@@ -107,7 +107,7 @@ next_paginates_with_small_batch_size() ->
          || {I, K} <- lists:zip(lists:seq(1, length(Keys)), Keys)
         ],
         ok = bondy_oplog_test_projection:drain(Id),
-        {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
+        {ok, {_W, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(Id),
         AllCells = pull_all(Id, Cursor, []),
         ReturnedKeys = [K || {_B, K, _F} <- AllCells],
         ?assertEqual(lists:sort(Keys), lists:sort(ReturnedKeys)),
@@ -139,7 +139,7 @@ unknown_cursor_returns_expired() ->
 cursor_for_other_instance_returns_expired() ->
     {Id1, _, _, _} = setup_instance(),
     {Id2, _, _, _} = setup_instance(),
-    {ok, {_W1, Cursor1}} = bondy_oplog_catalogue_snapshot:init(Id1),
+    {ok, {_W1, Cursor1, _}} = bondy_oplog_catalogue_snapshot:init(Id1),
     %% Using Cursor1 against Id2 must report expired.
     ?assertEqual(
         {error, cursor_expired},

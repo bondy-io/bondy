@@ -2407,13 +2407,13 @@ do_create(#{uri := Uri} = Map0, Opts) ->
 %% @private
 %% Decide whether to mint key material eagerly at create time. See the REALM KEY
 %% MATERIAL section for the rationale. Eager for an authoritative create (not
-%% declarative) or a bootstrapping (solo) node; deferred to lazy generation for
-%% a clustered node applying declarative config. A keyset explicitly supplied in
+%% declarative) or with clustering disabled; deferred to lazy generation for a
+%% clustered node applying declarative config. A keyset explicitly supplied in
 %% the create map is always kept verbatim.
 maybe_gen_keys(Map, Opts) ->
     Declarative =
         is_map(Opts) andalso maps:get(declarative, Opts, false) =:= true,
-    case (not Declarative) orelse is_solo() of
+    case (not Declarative) orelse not bondy_cluster:enabled() of
         true ->
             Map#{
                 private_keys => ensure_keys(
@@ -2431,18 +2431,6 @@ maybe_gen_keys(Map, Opts) ->
 %% @private
 ensure_keys([], Gen) -> Gen();
 ensure_keys(Keys, _) -> Keys.
-
-%% @private
-%% True only for a deployment that never had a peer (a bootstrapping single
-%% node). `partisan_peer_service:members/0` lists the full known membership
-%% (including currently-unreachable peers), so a clustered node — even when
-%% partitioned — is not solo. On any error (e.g. queried before Partisan is
-%% ready) we answer `false` and defer to lazy generation, which is always safe.
-is_solo() ->
-    case partisan_peer_service:members() of
-        {ok, Members} when is_list(Members) -> length(Members) =< 1;
-        _ -> false
-    end.
 
 %% @private
 -spec do_lookup(uri()) -> {ok, t()} | {error, not_found}.
@@ -2566,9 +2554,10 @@ store(Uri, Realm) ->
 %%     eagerly. It has a single creator node, so the keys are written once and
 %%     propagate to peers via anti-entropy before any token is issued; this is
 %%     what makes cross-node JWT verification of the first token reliable.
-%%   * A BOOTSTRAPPING node (solo Partisan membership) also generates eagerly,
-%%     even for declarative config-declared realms: it is the authoritative
-%%     origin of those realms, so it mints their keys early for peers to inherit.
+%%   * A node with clustering disabled (`bondy_cluster:enabled/0`) also
+%%     generates eagerly, even for declarative config-declared realms: it is the
+%%     only replica, so its keys are the realm's keys, and a node that later
+%%     starts a cluster carries them to the nodes that join it.
 %%   * A node applying DECLARATIVE config while part of a cluster (a joiner, or a
 %%     node re-reading the config file at boot) DEFERS: it creates the realm
 %%     key-free and inherits the cluster's keys via anti-entropy, so joiners do
@@ -2578,10 +2567,9 @@ store(Uri, Realm) ->
 %% empty-keyset clauses in `private_keys/1`, `encryption_keys/1`,
 %% `get_random_kid/1`, `get_random_private_key/1`, `get_random_encryption_kid/1`),
 %% so a realm is never stuck without keys: a node that genuinely needs a key
-%% before anti-entropy delivers one mints its own (union-merged). There is no
-%% precise bootstrap-vs-join detection (boot-time membership is racy and Bondy
-%% joins via dynamic peer discovery); the solo check plus the declarative flag
-%% plus lazy fallback together keep the common case at exactly one keyset.
+%% before anti-entropy delivers one mints its own (union-merged). Membership is
+%% not consulted: it cannot tell a first node from a member that has just
+%% restarted (`bondy_oplog_instance:reclamation_members/0`).
 
 %% @private
 %% The open `bondy_realm_keys` table handle. Raises if the catalogue has not

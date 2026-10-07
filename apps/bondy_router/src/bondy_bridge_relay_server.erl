@@ -23,6 +23,7 @@ stateDiagram-v2
    idle --> active: rcv(data)
    idle --> [*]: error
    idle --> [*]: ping_timeout
+   active --> [*]: idle_timeout
    idle --> [*]: idle_timeout
 ```
 
@@ -64,7 +65,7 @@ stateDiagram-v2
     ping_retry :: optional(bondy_connect_retry:t()),
     ping_payload :: optional(binary()),
     ping_idle_timeout :: optional(non_neg_integer()),
-    idle_timeout :: pos_integer(),
+    idle_timeout :: timeout(),
     hibernate = idle :: never | idle | always,
     sessions = #{} :: #{id() => bondy_session:t()},
     sessions_by_realm = #{} :: #{uri() => bondy_session_id:t()},
@@ -158,7 +159,7 @@ init({Ref, Transport, Opts}) ->
     %% We setup the auth_timeout timer. This is the period we allow between
     %% opening a connection and authenticating at least one session. Having
     %% passed that time we will close the connection.
-    Actions = [auth_timeout(State)],
+    Actions = [auth_timeout(State), idle_timeout(State)],
     {ok, connecting, State, Actions}.
 
 terminate({shutdown, Info}, StateName, #state{socket = undefined} = State) ->
@@ -444,20 +445,7 @@ active(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, active, State).
 
 idle(enter, active, State) ->
-    %% We use an event timeout meaning any event received will cancel it
-    IdleTimeout = State#state.idle_timeout,
-    PingTimeout = State#state.idle_timeout,
-    Adjusted = IdleTimeout - PingTimeout,
-    Time =
-        case Adjusted > 0 of
-            true -> Adjusted;
-            false -> IdleTimeout
-        end,
-
-    Actions = [
-        {state_timeout, Time, idle_timeout}
-    ],
-    maybe_send_ping(State, Actions);
+    maybe_send_ping(State);
 idle({timeout, ping_idle_timeout}, ping_idle_timeout, State) ->
     maybe_send_ping(State);
 idle({timeout, ping_timeout}, ping_timeout, State0) ->
@@ -465,12 +453,6 @@ idle({timeout, ping_timeout}, ping_timeout, State0) ->
     State = ping_fail(State0),
     %% Try to send another one or stop if retry limit reached
     maybe_send_ping(State);
-idle(state_timeout, idle_timeout, _State) ->
-    Info = #{
-        description => "Shutting down connection due to inactivity.",
-        reason => idle_timeout
-    },
-    {stop, {shutdown, Info}};
 idle(internal, {pong, Bin}, #state{ping_payload = Bin} = State0) ->
     %% We got a response to our ping
     State = ping_succeed(State0),
@@ -486,8 +468,6 @@ idle(internal, Msg, State) ->
         {{timeout, ping_idle_timeout}, cancel},
         {next_event, internal, Msg}
     ],
-    %% idle_timeout is a state timeout so it will be cancelled as we are
-    %% transitioning to active
     {next_state, active, State, Actions};
 idle(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, idle, State).
@@ -550,6 +530,7 @@ handle_event(info, {Tag, Socket, Data}, _, #state{socket = Socket} = State) when
             %% should not reset timers here, we'll do that in the handling
             %% of next_event
             Actions = [
+                idle_timeout(State),
                 {next_event, internal, Msg}
             ],
             {keep_state, State, Actions}
@@ -563,6 +544,12 @@ handle_event(info, {Tag, Socket, Data}, _, #state{socket = Socket} = State) when
             },
             {stop, {shutdown, Info}}
     end;
+handle_event({timeout, idle_timeout}, idle_timeout, _, _) ->
+    Info = #{
+        description => "Shutting down connection due to inactivity.",
+        reason => idle_timeout
+    },
+    {stop, {shutdown, Info}};
 handle_event(info, {Tag, _Socket}, _, _) when ?CLOSED_TAG(Tag) ->
     ?LOG_INFO(#{
         description => "Connection closed by client."
@@ -1162,6 +1149,12 @@ ping_idle_timeout(State) ->
     %% setting it again.
     Time = State#state.ping_idle_timeout,
     {{timeout, ping_idle_timeout}, Time, ping_idle_timeout}.
+
+%% @private
+%% `idle_timeout` is how long the peer may stay silent: every frame it sends, a
+%% pong included, restarts the timer.
+idle_timeout(State) ->
+    {{timeout, idle_timeout}, State#state.idle_timeout, idle_timeout}.
 
 %% @private
 ping_timeout(Time) ->

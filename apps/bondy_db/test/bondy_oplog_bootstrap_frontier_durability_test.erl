@@ -3,7 +3,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %% Durability coverage for the frontier a catalogue bootstrap ADOPTS from its
-%% peer (`bondy_oplog_instance:finalize_catalogue_bootstrap/4`).
+%% peer (`bondy_oplog_applier:commit_stage/4`) and makes durable at finalize
+%% (`bondy_oplog_instance:finalize_catalogue_bootstrap/4`).
 %%
 %% A fresh replica installs the peer's projection snapshot, then adopts the
 %% peer's applied-frontier version vector — which includes the peer's
@@ -59,15 +60,16 @@ adopted_frontier_is_durable_at_bootstrap() ->
 
         PeerFrontier = #{?PHANTOM_ORIGIN => ?PHANTOM_SEQ},
 
-        %% Adopt the peer's frontier on every instance, exactly as the catalogue
-        %% bootstrap does at completion. `WasLive = true` keeps the lifecycle
+        %% Adopt the peer's frontier on every instance and finalize, exactly as
+        %% the catalogue bootstrap does. `WasLive = true` keeps the lifecycle
         %% untouched (no `mark_live` side effect).
         Instances = bondy_oplog:list_instances(),
         ?assert(Instances =/= []),
         lists:foreach(
             fun(I) ->
+                {ok, _} = bondy_oplog_test_helpers:install(I, [], PeerFrontier),
                 ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
-                    I, 0, PeerFrontier, true
+                    I, 0, 0, true
                 )
             end,
             Instances

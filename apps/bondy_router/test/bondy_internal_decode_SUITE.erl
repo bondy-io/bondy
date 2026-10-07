@@ -28,6 +28,7 @@ all() ->
         callback_args_survive_cluster_forward,
         callback_procedure_refuses_payload_passthru,
         router_error_to_payload_passthru_call,
+        invalid_call_option_error_carries_no_ppt,
         callback_subscriber_receives_payload,
         fun_subscriber_receives_payload,
         http_gateway_survives_encoded_event
@@ -121,6 +122,32 @@ router_error_to_payload_passthru_call(Config) ->
                 end
         end,
     ?assertEqual(?WAMP_NOT_AUTHORIZED, Error#error.error_uri).
+
+%% An ERROR the router raises describes no payload, so it carries none of the
+%% CALL's `ppt_*` options. Here the load balancer refuses the CALL's options:
+%% a `jump_consistent_hash` registration needs a routing key the CALL omits.
+invalid_call_option_error_carries_no_ppt(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Uri = <<"com.example.internal.decode.jch">>,
+    Ref = bondy_ref:new(internal, self(), bondy_session_id:new()),
+    {ok, _} = bondy_dealer:register(
+        Uri, #{invoke => <<"jump_consistent_hash">>}, RealmUri, Ref
+    ),
+    Call = bondy_wamp_message:call(
+        9, #{ppt_scheme => <<"x_custom">>}, Uri, [<<"opaque">>]
+    ),
+    Error =
+        case bondy_router:forward(Call, session_context(RealmUri)) of
+            {reply, #error{} = E, _} ->
+                E;
+            {ok, _} ->
+                receive
+                    {?BONDY_REQ, _, _, #error{request_id = 9} = E} -> E
+                after 5000 -> ct:fail(no_reply)
+                end
+        end,
+    ?assertEqual(?WAMP_INVALID_ARGUMENT, Error#error.error_uri),
+    ?assertNot(maps:is_key(ppt_scheme, Error#error.details)).
 
 %% A callback subscriber is applied with the published payload.
 callback_subscriber_receives_payload(Config) ->

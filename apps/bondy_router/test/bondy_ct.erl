@@ -129,6 +129,10 @@
         {delete_threshold, 1000},
         {tiered_slow_level, 0}
     ]},
+    %% The schema's `cluster.enabled` default; unset is standalone.
+    {bondy_cluster, [
+        {enabled, true}
+    ]},
     {partisan, [
         {exchange_tick_period, 60000},
         {tls_server_options, [
@@ -718,8 +722,8 @@
     stall_main_open/1,
     aae_reset_all_stale/0,
     aae_bump_isolated_all/0,
-    aae_mock_nonsolo_membership/0,
-    aae_unmock_nonsolo_membership/0
+    aae_mock_unreachable_peer/0,
+    aae_unmock_unreachable_peer/0
 ]).
 
 %% =============================================================================
@@ -860,9 +864,10 @@ start_cluster(Names, Config) when is_list(Names) ->
 
 -doc """
 As `start_cluster/2` but WITHOUT joining the nodes: each boots as an
-independent single-node router. This is the topology a bridge relay
-connects — two sovereign routers, no Partisan membership, no replicated
-registry — so a suite that clusters its nodes instead would never
+independent standalone router (`[bondy_cluster, enabled]` is `false` unless a
+node's ExtraEnv overrides it), so Partisan is not started. This is the
+topology a bridge relay connects — two sovereign routers, no cluster, no
+replicated registry — so a suite that clusters its nodes instead would never
 exercise the bridge path. Stop with `stop_cluster/1` (the peers are the
 same shape).
 """.
@@ -874,10 +879,13 @@ start_nodes(Names, Config) when is_list(Names) ->
     PrivDir = proplists:get_value(priv_dir, Config),
     PrivDir =/= undefined orelse error({missing_priv_dir, Config}),
     Cookie = atom_to_list(erlang:get_cookie()),
+    Standalone = {[bondy_cluster, enabled], false},
     Specs = [
         case N of
-            {Name, Extra} when is_atom(Name), is_list(Extra) -> {Name, Extra};
-            Name when is_atom(Name) -> {Name, []}
+            {Name, Extra} when is_atom(Name), is_list(Extra) ->
+                {Name, [Standalone | Extra]};
+            Name when is_atom(Name) ->
+                {Name, [Standalone]}
         end
      || N <- Names
     ],
@@ -1673,8 +1681,8 @@ aae_reset_all_stale() ->
 -doc """
 Drive the scheduler's no-peer freshness path for every running instance — the
 exact function the sync scheduler invokes at its no-peer seam. Whether it
-certifies freshness depends on `db.aae.fence.on_isolation` and whether the
-node looks solo (see `aae_mock_nonsolo_membership/0`).
+certifies freshness depends on `db.aae.fence.on_isolation` and on whether
+clustering is enabled (`bondy_cluster:enabled/0`).
 """.
 -spec aae_bump_isolated_all() -> ok.
 
@@ -1686,30 +1694,29 @@ aae_bump_isolated_all() ->
 
 -doc """
 Mock the Partisan membership so this single test node looks like one member of a
-two-node cluster whose peer is unreachable: NOT solo (so the `on_isolation`
-policy actually applies), and — since `partisan:nodes/0` really returns [] here
-— not a connected majority either. The ghost peer is a node atom, so any sync
+two-node cluster whose peer is unreachable, and — since `partisan:nodes/0` really
+returns [] here — not a connected majority either. The ghost peer is a node atom, so any sync
 the scheduler attempts against it over the in-VM transport is rejected outright
 (`{error, {invalid_peer_for_inline_transport, _}}`) and cannot falsely certify
-freshness. Pair with `aae_unmock_nonsolo_membership/0` in an `after` clause.
+freshness. Pair with `aae_unmock_unreachable_peer/0` in an `after` clause.
 """.
--spec aae_mock_nonsolo_membership() -> ok.
+-spec aae_mock_unreachable_peer() -> ok.
 
-aae_mock_nonsolo_membership() ->
-    ok = meck:new(partisan_peer_service, [passthrough, no_link]),
-    ok = meck:expect(partisan_peer_service, members, fun() ->
-        {ok, [node(), 'ghost@127.0.0.1']}
+aae_mock_unreachable_peer() ->
+    ok = meck:new(bondy_cluster, [passthrough, no_link]),
+    ok = meck:expect(bondy_cluster, members, fun() ->
+        lists:usort([node(), 'ghost@127.0.0.1'])
     end),
     ok.
 
 -doc """
-Undo `aae_mock_nonsolo_membership/0`.
+Undo `aae_mock_unreachable_peer/0`.
 """.
--spec aae_unmock_nonsolo_membership() -> ok.
+-spec aae_unmock_unreachable_peer() -> ok.
 
-aae_unmock_nonsolo_membership() ->
+aae_unmock_unreachable_peer() ->
     try
-        meck:unload(partisan_peer_service)
+        meck:unload(bondy_cluster)
     catch
         _:_ -> ok
     end,

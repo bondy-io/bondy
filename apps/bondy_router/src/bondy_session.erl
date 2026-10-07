@@ -30,9 +30,12 @@ data will be lost.
 %% Advanced-profile features a peer must announce EXPLICITLY to obtain — no
 %% inheritance from the router's advertised set (see merge_feature_flags/2). The
 %% progressive features are opt-in per call and cannot be silently degraded
-%% mid-stream, so a peer that never announced them must not be treated as
-%% supporting them.
--define(STRICT_OPTIN_FEATURES, [progressive_call_results, progressive_calls]).
+%% mid-stream, and the dealer sends INTERRUPT only to a callee that supports
+%% `call_canceling`, so a peer that never announced one of them must not be
+%% treated as supporting it.
+-define(STRICT_OPTIN_FEATURES, [
+    progressive_call_results, progressive_calls, call_canceling
+]).
 
 -record(session, {
     id :: bondy_session_id:t(),
@@ -378,15 +381,8 @@ close(#session{} = S, Reason) when
     %% Cleanup counters
     ok = bondy_message_id:purge_session(RealmUri, Id),
 
-    %% NOTE: no credential is revoked here. This used to dispatch on
-    %% `Reason == ?WAMP_CLOSE_LOGOUT`, which no caller has ever passed: a
-    %% client's GOODBYE reason is recorded by `bondy_wamp_protocol` and then
-    %% dropped, and `terminate/1` closes with `undefined`. The clause was
-    %% therefore dead, and a reader took it for a working logout. A WAMP
-    %% client still has no way to revoke its own ticket — `bondy.ticket.revoke`
-    %% is a TODO in `bondy_ticket_api` and only the OIDC *HTTP* logout
-    %% (`bondy_oidc_handler`) revokes. Removed rather than left in place; the
-    %% fix is a separate change.
+    %% Closing a session revokes no credential; a client revokes its ticket
+    %% with `bondy.ticket.revoke`.
 
     %% Notify internally. Metrics ride telemetry; the gen_event
     %% notification remains for the WAMP meta-event publisher.

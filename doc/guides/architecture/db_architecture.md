@@ -1,21 +1,21 @@
 # Storage Architecture (bondy_db)
 
 This is the architecture documentation for Bondy's storage stack — the
-`bondy_db` facade, the `bondy_oplog` replication substrate, and the
-`bondy_mst` Merkle Search Tree — organised by the SEI *Views and Beyond*
+`bondy_db` facade, the `bondy_oplog` replication substrate, the `bondy_log`
+append-only log, and the `bondy_mst` Merkle Search Tree — organised by the SEI *Views and Beyond*
 method. It zooms into what the [platform architecture](architecture.md)
 covers in two pages, for readers who work on or operate this subsystem
 directly.
 
 ## Context
 
-The storage stack serves one consumer — the router's named tables — and
-talks to three externals: the disk, the cluster mesh, and the operator's
-metrics endpoint.
+The storage stack serves the router's named tables; the MCP gateway and the
+telemetry exporter also read it. It talks to three externals: the disk, the
+cluster mesh, and the operator's metrics endpoint.
 
 ```mermaid
 flowchart LR
-    R[bondy_router<br/>tables: security, realms,<br/>gateway, RIB] --> DB[Storage stack<br/>bondy_db · bondy_oplog · bondy_mst]
+    R[bondy_router<br/>tables: security, realms,<br/>gateway, RIB] --> DB[Storage stack<br/>bondy_db · bondy_oplog ·<br/>bondy_log · bondy_mst]
     DB --> DISK[("Disk<br/>WAL · leveled · packs")]
     DB <-->|Partisan channels| PEERS[Peer nodes'<br/>storage stacks]
     DB --> MET[Metrics]
@@ -53,22 +53,29 @@ here.
 - **Database** — a fixed set of shards sharing a topology: `main`
   (durable) or `registry` (ephemeral).
 - **Shard instance** (or *instance*) — the unit of replication: one
-  write-ahead log, one MST, one projection, one applier. Its replicas are
-  the same-named instances on other nodes.
+  write-ahead log, one MST, one projection, and, on a `main` shard, one
+  applier. On a `registry` shard the instance process drains and folds
+  itself. Its replicas are the same-named instances on other nodes.
 - **Event** — one operation as stored: key `{HLC, Origin, Seq}` plus the
-  operation term. The *origin* is the instance's per-boot replica
-  identity; *seq* is that origin's contiguous counter.
+  operation term. The *origin* is the instance's replica identity: a
+  `main` shard persists it in its data directory, and a `registry` shard
+  gets a new one each time the VM starts. *Seq* is that origin's contiguous
+  counter.
 - **Projection** — the materialised current value per cell; what reads
   return.
 - **Fold** — applying an event to the projection through the table's CRDT
   module; the only place operation semantics execute.
 - **Applied frontier** — per instance, per origin: the highest folded seq,
-  advanced once the projection write is durable. It reads as a contiguous
-  prefix because of what feeds it: locally minted seqs are contiguous by
-  construction, and the replication fold holds a remote origin's events
-  behind a gap rather than folding past it.
+  advanced after the projection write returns. It reads as a contiguous
+  prefix because of what feeds it: locally minted seqs are contiguous, and
+  the replication fold holds a remote origin's events behind a gap rather
+  than folding past it.
+- **Durable frontier** — per instance: on a `main` shard, the applied
+  frontier as of its last checkpoint; on a `registry` shard, the live applied
+  frontier. The instance reports it to its peers. Compaction and
+  reclamation read every member's durable frontier.
 - **Watermark** — per instance: the compaction bound; history at or below
-  it may be truncated from the MST.
+  it has been or may be truncated from the MST.
 - **Catalogue** — the provisioning layer that turns table declarations
   into databases, topologies, and instances, and the source of the cell
   snapshots a rebootstrap installs.

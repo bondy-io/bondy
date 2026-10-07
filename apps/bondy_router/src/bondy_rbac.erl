@@ -422,7 +422,7 @@ get_context(RealmUri, Username) when
 
 -doc """
 Returns an authorization context for `Username` in `RealmUri`, resolved against
-`ExplicitGroups` in addition to the user's own memberships.
+`ExplicitGroups` instead of the user's own memberships.
 
 The context is a snapshot: the role's grants and everything reachable through
 the group graph are resolved now and answer every later `authorize/3` without a
@@ -431,8 +431,10 @@ grown stale.
 
 Explicit groups are how a claim-based session contributes roles Bondy does not
 store — an OIDC subject may have no local user record at all, and carries its
-group memberships from the identity provider. They are added to, never
-substituted for, the user's own memberships and the `all` group.
+group memberships from the identity provider. The context holds the user's
+direct grants, the grants of `ExplicitGroups` and the groups they belong to,
+and the `all` group's; the user's locally stored memberships contribute nothing
+(`bondy_rbac_SUITE:explicit_groups_exclude_local_memberships`).
 """.
 -spec get_context(
     RealmUri :: uri(),

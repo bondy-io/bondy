@@ -27,7 +27,8 @@ compaction_test_() ->
     %% 5s, racing the eunit watchdog into a `*timed out*` cancellation
     %% even though the substrate is functioning correctly.
     {setup, fun setup/0, fun cleanup/1, [
-        {timeout, 30, fun compact_with_no_peers_is_no_change/0},
+        {timeout, 30, fun no_other_member_compacts_on_own_frontier/0},
+        {timeout, 30, fun no_other_member_with_clustering_is_held/0},
         {timeout, 30, fun compact_after_sync_advances_watermark/0},
         {timeout, 30, fun compaction_truncates_mst/0},
         {timeout, 30, fun watermark_filter_drops_old_remote_events/0},
@@ -38,12 +39,30 @@ compaction_test_() ->
         {timeout, 30, fun held_compaction_reaches_the_scheduler/0}
     ]}.
 
-compact_with_no_peers_is_no_change() ->
+%% Clustering disabled: no other replica exists, so this replica's own durable
+%% frontier licenses the truncation.
+no_other_member_compacts_on_own_frontier() ->
     Id = mk_id(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     ok = append_cells(Id, 1, 5),
-    %% No peer state recorded ⇒ no stability frontier ⇒ no compaction.
-    ?assertEqual({ok, no_change}, bondy_oplog:compact(Id)),
+    {ok, {compacted, _, N}} = bondy_oplog:compact(Id),
+    ?assert(N > 0),
+    ?assertNotEqual(undefined, bondy_oplog:current_watermark(Id)),
+    ?assertEqual(5 - N, bondy_oplog:size(Id)),
+    ok = bondy_oplog:stop_instance(Id).
+
+%% Clustering enabled with no other member listed, which is also a member
+%% that has just restarted: nothing is truncated.
+no_other_member_with_clustering_is_held() ->
+    Id = mk_id(),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
+    ok = append_cells(Id, 1, 5),
+    bondy_oplog_test_helpers:with_members(
+        fun() -> [partisan:node()] end,
+        fun() ->
+            ?assertEqual({error, no_members}, bondy_oplog:compact(Id))
+        end
+    ),
     ?assertEqual(undefined, bondy_oplog:current_watermark(Id)),
     ?assertEqual(5, bondy_oplog:size(Id)),
     ok = bondy_oplog:stop_instance(Id).
@@ -132,20 +151,19 @@ unconfirmed_member_is_reported() ->
     ?assertEqual(undefined, bondy_oplog:current_watermark(A)),
     ?assertEqual(5, bondy_oplog:size(A)).
 
-%% An unreadable membership is not solo: nothing is truncated on its say-so.
+%% An unreadable membership truncates nothing.
 unreadable_membership_is_reported() ->
     {A, B} = mk_pair(),
     ok = append_cells(A, 1, 5),
     ok = converge(A, B),
-    ok = meck:new(partisan_peer_service, [passthrough]),
-    try
-        ok = meck:expect(partisan_peer_service, members, fun() ->
-            error(unavailable)
-        end),
-        ?assertEqual({error, membership_unavailable}, bondy_oplog:compact(A))
-    after
-        meck:unload(partisan_peer_service)
-    end,
+    bondy_oplog_test_helpers:with_members(
+        fun() -> error(unavailable) end,
+        fun() ->
+            ?assertEqual(
+                {error, membership_unavailable}, bondy_oplog:compact(A)
+            )
+        end
+    ),
     ?assertEqual(5, bondy_oplog:size(A)).
 
 %% Compaction waiting on a member with no confirmed row reaches a scheduler
@@ -163,19 +181,24 @@ held_compaction_reaches_the_scheduler() ->
         fun(_, _, Meta, _) -> Self ! {outcome, Meta} end,
         undefined
     ),
-    ok = meck:new(partisan_peer_service, [passthrough]),
-    ok = meck:expect(partisan_peer_service, members, fun() ->
-        {ok, [partisan:node(), Ghost]}
-    end),
-    {ok, Sched} = bondy_oplog_gc_scheduler:start_link(#{
-        name => compaction_sched_probe, enabled => true, interval_ms => 100
-    }),
     try
-        ?assertEqual(unconfirmed, await_outcome(Id, 2000))
+        bondy_oplog_test_helpers:with_members(
+            fun() -> lists:usort([partisan:node(), Ghost]) end,
+            fun() ->
+                {ok, Sched} = bondy_oplog_gc_scheduler:start_link(#{
+                    name => compaction_sched_probe,
+                    enabled => true,
+                    interval_ms => 100
+                }),
+                try
+                    ?assertEqual(unconfirmed, await_outcome(Id, 2000))
+                after
+                    gen_server:stop(Sched)
+                end
+            end
+        )
     after
-        gen_server:stop(Sched),
-        telemetry:detach(HandlerId),
-        meck:unload(partisan_peer_service)
+        telemetry:detach(HandlerId)
     end.
 
 %% Helpers

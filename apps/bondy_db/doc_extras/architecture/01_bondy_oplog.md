@@ -1,26 +1,29 @@
 # bondy_oplog: the write side
 
-> Audience: anyone who needs to know what happens between
-> `bondy_oplog:append/2` and "this event will survive a power cut".
-> Time to read: ~15 min.
+This chapter explains what happens between `bondy_oplog:append/2` and the
+point where an event survives a power cut, reaches every peer, and finally
+leaves the log. It is written for a reader who knows the overview in
+[chapter 00](00_overview.md) and wants the mental model of the write side
+before reading its code.
 
-In the previous chapter we said `bondy_oplog` is "the write side". Let's
-unpack that. The oplog has four jobs:
+The oplog has four jobs:
 
-1. **Frame events** into a known shape (`{HLC, Origin, Seq}` keys,
-   signature, payload).
-2. **Persist** them durably to a Write-Ahead Log per instance.
-3. **Replicate** them to peers without a leader — via the MST.
-4. **Recover** them from the WAL after a crash.
+1. **Frame** each event into a known shape: an `{HLC, Origin, Seq}` key, an
+   operation, optional metadata and a signature.
+2. **Persist** each event in the write-ahead log (WAL) of its instance.
+3. **Replicate** events to peers without a leader, through the MST.
+4. **Recover** events from the WAL after a crash.
 
-This chapter is a slow walk through each.
+A fifth job follows from the first four: the oplog truncates itself, so the
+log does not grow without bound.
 
-## The unit of work: an instance
+## The instance
 
-A `bondy_oplog_instance` is the smallest replicated unit. One instance
-holds one MST, one WAL, one applier (durable mode), one compaction
-checkpoint. Multiple instances can run side-by-side on the same node —
-they are isolated from each other.
+A `bondy_oplog_instance` is the smallest replicated unit. One instance owns
+one MST, one WAL, one overlay, one validator and one compaction checkpoint.
+A durable instance also has an applier, the process that materialises
+events into the projection ([chapter 04](04_applier.md)). Several instances
+run side by side on one node, and they share no state.
 
 ```mermaid
 flowchart LR
@@ -37,19 +40,21 @@ flowchart LR
     Peers(["Peers"]) -- "sync session" --> INSTANCE
 ```
 
-The instance is a gen_server, but the lock-free fast paths
-(`append_fast`, lock-free `get`) bypass it when the validator is
-stateless. The gen_server serialises:
+The instance is a gen_server, but two paths do not go through it. A read by
+instance id (`bondy_oplog_instance:get/2`) looks up the overlay and the MST
+handle in the registry. When the validator is stateless, `append_fast`
+builds, signs and appends the event in the caller's process. The gen_server
+serialises the rest:
 
-- stateful-validator appends (`append`, `append_many`);
-- peer event installs (`install_remote`);
-- MST page exchanges (`get_pages`, `merge_pages`, `missing_set`);
-- compaction operations (`compact`, `truncate_prefix`);
-- applier sync barriers (`drain_install_queue`,
-  `await_overlay_drained`) — in fused mode these are serviced by the
-  instance itself between drain slices (see below).
+- appends that need a stateful validator (`append`, `append_many`);
+- single peer-event installs (`install_remote`);
+- MST page exchange (`get_pages`, `merge_pages`, `missing_set`,
+  `integrate_peer_root`);
+- compaction (`compact`, `truncate_prefix`);
+- applier barriers (`drain_install_queue`, `await_overlay_drained`). In
+  fused mode the instance services these itself between drain slices.
 
-## An event has shape
+## Events and their keys
 
 Every event carries an **event key**:
 
@@ -57,21 +62,25 @@ Every event carries an **event key**:
 {HLC, Origin, Seq}
 ```
 
-- **HLC** is a Hybrid Logical Clock — monotonic across a node, and
-  bounded by wall-clock skew across the cluster.
-- **Origin** is the 16-byte identifier of the node that authored the
-  event. Two replicas can't collide because their origins differ.
-- **Seq** is a per-(HLC, Origin) tiebreaker for the rare case where
-  two events at the same node share an HLC tick.
+- **HLC** is a 64-bit Hybrid Logical Clock value. Each instance keeps its
+  own clock, and the clock never runs backwards. When a sync merges events
+  with a higher HLC, the instance advances its clock past them.
+- **Origin** is an opaque binary that identifies the replica that created
+  the event. The default origin is a random 128-bit value
+  (`bondy_oplog_origin:default/0`). Two replicas never share an origin
+  unless an operator configures the same `origin` for both.
+- **Seq** is a per-origin counter. It increases with every event of that
+  origin and is never reused. A failed append returns its sequence numbers,
+  so the sequence of an origin has no gaps.
 
-The event key is the **sort key** in the MST. That is why peers can
-agree on order without any consensus: order is in the data.
+The event key is the sort key of the MST. Keys sort by HLC first, then by
+origin, then by sequence. Peers agree on the order of events without
+consensus, because the order is part of the data.
 
-The event also carries an **operation** — an opaque term the
-substrate never interprets or serialises itself; meaning lives in the
-table's CRDT module ([chapter 05](05_crdt_model.md)) — plus optional
-`meta` (the tier_2 causal context travels here) and a signature from
-the validator.
+The event also carries an **operation**. The oplog never interprets it; its
+meaning lives in the CRDT module of the table
+([chapter 05](05_crdt_model.md)). The optional `meta` field carries the
+causal metadata of the tier, and the validator adds a signature.
 
 ## The append path
 
@@ -86,7 +95,7 @@ sequenceDiagram
 
     C->>I: append(Event)
     Note over C,I: For stateless validators<br/>the caller process does this directly<br/>via append_fast.
-    I->>V: build_key + sign_event
+    I->>V: bondy_oplog_event:key/3 + sign_event
     V-->>I: signed Event'
     I->>OV: stage_to_overlay(Event')
     I->>W: append_batch(frame)
@@ -97,8 +106,8 @@ sequenceDiagram
         W->>W: enqueue for next barrier
     end
     alt WAL succeeds
-        W-->>I: {Hlc, Segment, Offset}
-        I-->>C: {ok, Hlc}
+        W-->>I: {ok, [{Hlc, Position}]}
+        I-->>C: EventKey
     else WAL fails
         W-->>I: {error, _}
         I->>OV: unstage_overlay(Event')
@@ -106,20 +115,21 @@ sequenceDiagram
     end
 ```
 
-A couple of details to keep in mind:
+Two properties of this path matter to everything downstream:
 
-- **The overlay is staged *before* the WAL append.** The invariant
-  is "the applier can never observe a durable event without its
-  overlay row". A failed WAL append rolls the overlay back via the
-  instance's `unstage_overlay/2`.
-- **The caller unblocks before the applier runs.** The applier is
-  the process that materialises the event into the projection
-  ([chapter 04](04_applier.md)). The caller's `ok` means "durable + visible in the
-  overlay", not "materialised in the projection".
+- **The instance stages the overlay row before the WAL append.** The applier
+  reads an event from the WAL as soon as the WAL commits it. If the overlay
+  row came later, the applier could evict a row that does not exist yet, and
+  the late row would stay as an orphan. When the WAL refuses the batch,
+  `unstage_overlay/2` removes the rows again.
+- **The caller returns before the applier runs.** A returned key means that
+  the WAL accepted the frame and the overlay serves the event. Under
+  `per_write` the frame is also on disk. It does not mean that the event is
+  materialised in the projection.
 
 ## The WAL on disk
 
-One directory per instance, segments numbered with 9-digit IDs:
+The WAL keeps one directory per instance. Each segment has a 9-digit id:
 
 ```
 {wal_dir}/{instance_id}/
@@ -133,7 +143,8 @@ One directory per instance, segments numbered with 9-digit IDs:
     ...
 ```
 
-Each segment file looks like this:
+When `wal_dir` is not set, the supervisor derives the directory from
+`storage_path` through `bondy_oplog_path`. Each segment file looks like this:
 
 ```mermaid
 flowchart LR
@@ -147,28 +158,32 @@ flowchart LR
     H --> F0 --> F1 --> F2 --> FN --> T
 ```
 
-Per-frame:
+Each frame has this layout (`bondy_log_frame`):
 
 ```
 Magic | FrameLen | CRC32 | FrameVersion | Flags | Body (list of events, ETF)
 ```
 
-The frame is the unit of atomicity: a multi-event batch becomes **one
-frame**. If a crash leaves a partial frame at the tail of the head
-segment, recovery truncates back to the last valid CRC boundary.
+The frame is the unit of atomicity: a batch of events becomes one frame.
+When a crash leaves a partial frame at the tail of the head segment,
+recovery truncates the segment back to the last frame with a valid CRC.
 
-The companion `.qidx` is a sparse HLC index — used by operators and by
-peer sync to jump into a segment at a target HLC without scanning the
-whole thing.
+The `.qidx` file next to each segment is a sparse key index
+(`bondy_log_idx`). It maps the key range of a frame to its byte offset, so a
+reader can seek to a target key without a full scan. The index only
+accelerates seeks: when it is missing or stale, the reader scans the
+segment, and recovery rebuilds the file.
 
-## Two fsync modes
+### Two fsync modes
 
-The namespace declares its durability policy:
+The `fsync_mode` option of an instance selects its durability policy. The
+durable main database reads it from the `wal_fsync_mode` setting, whose
+default is `per_write`.
 
-| Mode | When `{ok, _}` is returned | Use it for |
+| Mode | When `append` returns | Trade-off |
 |---|---|---|
-| `per_write` | After fsync. Strictly durable. | Auth-critical (grants, tickets) |
-| `batched` | After enqueue. `await_durable/3` is the barrier. | High-churn (registry) |
+| `per_write` | After the fsync. | Every acknowledged event is on disk. Throughput is bounded by the fsync rate of the device. |
+| `batched` | After the write, before the fsync. `await_durable/3` waits for the fsync. | Higher throughput. An acknowledged event can be lost until the next fsync. |
 
 ```mermaid
 flowchart LR
@@ -181,73 +196,76 @@ flowchart LR
     end
 ```
 
-Both are written in pure Erlang and verified by PropEr crash tests.
+Both modes are pure Erlang. The PropEr properties in
+`bondy_oplog_wal_proper_test` cover torn writes, failed fsyncs in both
+modes and truncation safety.
 
-## Fused mode: the ephemeral fast path
+## Fused mode
 
-A table can opt its instances into **fused mode**
-(`oplog_instance_opts => #{fused => true}`, ephemeral durability).
-Fused mode collapses the applier into the instance gen_server: the
-instance drains its own WAL and runs the full pipeline inline —
+A table can put its instances in **fused mode**
+(`oplog_instance_opts => #{fused => true}`). Only an ephemeral table can do
+this. In fused mode the instance gen_server has no separate applier: it
+drains its own WAL and runs the whole pipeline inline:
 
 ```
 drain → verify → cell-apply → MST install → publish → overlay evict
 ```
 
-(`fused_apply_batch/2` in `bondy_oplog_instance.erl`, reusing the
-applier's state-free stages and emitting the applier's telemetry
-events, so dashboards see one uniform write path). The supervisor
-omits the applier and scrubber children entirely.
+`fused_apply_batch/2` in `bondy_oplog_instance.erl` reuses the stages of the
+applier that hold no state, and it emits the telemetry events of the
+applier. Dashboards therefore see one write path. The supervisor omits the
+applier child. It also omits the scrubber child when the WAL is in memory.
 
-The one rule that makes this safe under sustained load: **the drain
-yields**. After a bounded number of batches the instance re-queues the
-drain message and returns to its mailbox, so `handle_call`/`handle_cast`
-traffic — compaction triggers, `integrate_peer_root` (remote
-convergence!), write-ack barriers — is serviced between drain slices
-rather than starved behind an unbounded drain.
+**The fused drain yields.** After a bounded number of batches, the instance
+re-queues its drain message and returns to its mailbox. Compaction calls,
+`integrate_peer_root` and write barriers therefore run between drain
+slices. Without the yield, a sustained load would starve them behind an
+unbounded drain.
 
 ### The in-memory WAL
 
-A fused instance can additionally select `wal_backend => mem`: the
-disk WAL is replaced by `bondy_oplog_wal_mem`, an ETS `ordered_set`
-queue keyed by a dense monotonic sequence. There is **no fsync and no
-disk I/O on the ack path** — `head == durable` at all times, and the
-fused drain reads the queue via an `ets:next/2` cursor
-(`bondy_oplog_wal_mem_reader`). Consumed prefixes are garbage-collected
-as the drain commits; a count-based cap (`max_live_events`) provides
-the same `{error, wal_full}` backpressure shape as the disk WAL.
+A fused instance can also select `wal_backend => mem`. The disk WAL is then
+replaced by `bondy_oplog_wal_mem`, an ETS `ordered_set` keyed by a dense
+monotonic sequence. The acknowledgement path has no fsync and no disk I/O.
+Appends run in the caller's process (`append_local/2`): each caller reserves
+a sequence range from an atomic and inserts its rows directly. The fused
+drain reads the table through an `ets:next/2` cursor
+(`bondy_oplog_wal_mem_reader`) and stops at the first gap. The WAL deletes
+each prefix once the drain commits it. The `max_live_events` cap returns
+`{error, wal_full}`, the same backpressure shape as the disk WAL.
 
-The durability deal is explicit and **cluster-provided**: an ephemeral
-table's projection and MST are already memory-only — node death loses
-them regardless of WAL backend, and the data re-converges from peers
-via anti-entropy. Dropping the local fsync only widens the
-acked-but-not-yet-replicated loss window to include
-BEAM-crash-with-disk-survival; that window is covered by AE exactly
-like node death. Durable tables never enter this code path — the
-supervisor only honours `wal_backend => mem` for fused instances and
-falls back to disk (with a warning) otherwise.
+The rest of the instance sees the same gen_server protocol as
+`bondy_oplog_wal`: `append_batch`, `await_durable` and
+`set_committed_segment`.
 
-Producers are oblivious: the mem WAL speaks the same gen_server
-protocol (`append_batch`, `await_durable`, committed-position
-tracking) as `bondy_oplog_wal`.
+The cluster provides the durability of an in-memory WAL. The projection and
+MST of an ephemeral table already live in memory, so node death loses them
+whatever the WAL backend. Anti-entropy then restores the data from peers.
+Dropping the local fsync widens the loss window by one case: a BEAM crash
+on a node whose disk survives. Anti-entropy covers that case the same way.
+Durable tables never use the in-memory WAL: the supervisor honours
+`wal_backend => mem` only for fused instances, and otherwise it logs a
+warning and uses the disk WAL.
 
-## Replication: there is no leader
+## Replication by anti-entropy
 
-The novel bit of `bondy_oplog` is **how events get from one node to
-another**. Two pieces conspire:
+`bondy_oplog` replicates without a leader, and anti-entropy over the MST is
+its only replication path. A local append stages the overlay row and writes
+the local WAL. A peer learns about the event when one of its sync sessions
+compares MST roots with this node and pulls the pages it lacks.
 
-1. The **MST** is a content-addressed structure. Two peers compare
-   roots and, in one round-trip, find exactly which pages they differ
-   on. Chapter 02 (in the bondy_mst library docs) has the details.
-   (Root comparison finds the *differences* to pull; whether two
-   nodes hold the *same data* is judged separately, by the applied
-   frontier — see below.)
-2. A **single node-global `bondy_oplog_sync_scheduler`** ticks every
-   `sync_interval_ms` (default 500 ms). On each tick it iterates
-   the locally-running instances and, per instance, asks the
-   configured peer source for a small subset of peers, then spawns
-   one `bondy_oplog_sync_session` per peer via the dispatch
-   callback (default: `bondy_oplog_sync_session:start/3`).
+Two mechanisms make this work:
+
+1. The **MST** is a content-addressed tree. A sync session compares the
+   root of the peer with its own. When they differ, the session walks the
+   tree of the peer and requests only the pages that the local store lacks
+   (`missing_set`), a bounded batch per round. The MST chapter in the
+   bondy_mst library docs (`02_bondy_mst.md`) explains the structure.
+2. One node-wide **`bondy_oplog_sync_scheduler`** ticks every
+   `sync_interval_ms` (default 500 ms). On each tick it walks the running
+   instances. For each instance it asks the configured peer source for a
+   set of peers, and it starts one `bondy_oplog_sync_session` per peer
+   (`bondy_oplog_sync_session:start/3` by default).
 
 ```mermaid
 sequenceDiagram
@@ -266,96 +284,78 @@ sequenceDiagram
             PS-->>SCHED: [Peer1, Peer2, ...]
             par per peer
                 SCHED->>SESS: start(InstanceId, PeerN)
-                SESS->>PEER: get_root
-                PEER-->>SESS: PeerRoot
-                SESS->>SESS: missing_set + pull pages
-                SESS->>PEER: integrate
+                SESS->>PEER: get_frontier + get_root
+                PEER-->>SESS: frontiers + PeerRoot
+                SESS->>SESS: missing_set + pull pages + merge_pages
+                SESS->>SESS: integrate_peer_root (local instance)
+                SESS->>PEER: confirm_frontier
             end
         end
     end
 ```
 
-The session is short-lived and asynchronous. It does not block
-writes, and a failing session is just retried on the next tick.
+The session is short-lived and asynchronous. It does not block writes, and
+the next tick retries a failed session.
 
-A converged instance has nothing to pull, yet a naive scheduler would
-still spawn a session against every peer on every tick. The
-**live-sync throttle** (on by default) makes the cadence adaptive: an
-instance dispatches every tick while its MST root is moving, then
-backs the poll window off — doubling up to `live_sync_max_ms` (default
-5 s) — once the root goes quiescent, and snaps back to the base
-interval the moment a poll pulls something. Because `bondy_db` is
-pull-only, that capped window is also the steady-state convergence
-latency for an idle shard. One exception: an instance that backs the
-read-side freshness fence is **never** throttled, because its sync
-round is what re-stamps the fence heartbeat (below) — backing it off
-would trip the fence on inactivity.
+### How peer events enter an instance
 
-A successful round does one more thing: it **advances the shard's
-freshness signal**. Each `(NS, primary, Shard)` carries a wait-free
-`ae_atomics` timestamp that `bump_ae_on_sync/2` stamps with the current
-wall-clock time at the end of every completed round — including an
-*empty* round, where the peer had nothing new. That heartbeat is what
-lets a low-churn shard prove it is still in contact with its peers even
-when no event has changed; the read side reads it as the freshness fence
-([chapter 03](03_bondy_db.md)). Whether a round is allowed to certify
-freshness is governed by an **isolation policy** (`refuse` / `proceed` /
-`quorum`): a node that cannot reach a peer does not get to declare its
-own data fresh under the default `refuse`. The policy lives here, on the
-freshness-production side, so the read path stays a single atomic read.
+Peer events do not pass through the local WAL or the overlay. When every
+page reachable from the root of the peer is in the local store, the session
+calls `integrate_peer_root` on the local instance. The instance merges that
+tree into its own MST and then delivers the new events to the projection. A
+fused instance folds them inline. A durable instance asks its applier to
+fold them. `bondy_oplog:append_remote/2` installs a single peer event
+through the same delivery point, but no Bondy component calls it, so the
+sync cadence sets the floor on cross-node visibility.
 
-The transport is pluggable (`bondy_oplog_transport` behaviour). Three
-implementations ship: **`bondy_oplog_transport_partisan`** — the
-production transport, which carries sync traffic over the same Partisan
-overlay Bondy already uses for its cluster membership and messaging —
-`bondy_oplog_transport_disterl` (Distributed Erlang), and
-`bondy_oplog_transport_inline` (same-VM, used for tests). Bondy runs on
-Partisan, not Distributed Erlang, so a Bondy deployment uses the
-Partisan transport.
+### Which frontiers a round exchanges
 
-Root comparison tells a peer which pages to pull; it does not, on its
-own, establish that two nodes hold the same data — compaction empties
-the MST, so a converged instance's root is `undefined` and witnesses
-nothing. Convergence is judged instead by a per-instance **applied
-frontier**, a `#{Origin => max Seq}` version vector over applied events
-(compaction-invariant), which a peer fetches with a `get_frontier`
-request alongside `get_root`. The construction and its three-source
-recovery are covered in
-[chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle);
-on this side, the responder serves the request and the operator sync
-view is what compares the two frontiers.
+Root comparison tells a session which pages to pull. It does not show that
+two nodes hold the same data: compaction empties the MST, so the root of a
+converged instance is `undefined`. The **applied frontier** answers that
+question instead. It is a per-instance `#{Origin => max Seq}` version vector
+over the applied events, and compaction does not change it. The
+`get_frontier` request returns the applied frontier and the **durable
+frontier** of the peer. The session compares the applied frontiers. When the
+peer has no pages left to serve and its applied frontier is ahead, the
+scheduler flags a **catalogue re-bootstrap**. At the end of a complete
+round the session records the durable frontier of the peer in
+`bondy_oplog_peer_state`, and `confirm_frontier` hands the peer its own.
+Compaction reads those recorded durable frontiers as its witnesses. The
+construction and recovery of the applied frontier are in
+[chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle).
 
-## Replication is anti-entropy only
+### Cadence and freshness
 
-Today replication is **exclusively anti-entropy** over the MST via
-`bondy_oplog_sync_session`. A local append stages the overlay and
-appends to the local WAL; peers learn about the event when a sync
-tick walks the MST and pulls divergent pages.
+A converged instance has nothing to pull, so the **live-sync throttle** (on
+by default) backs off its poll window while its MST root stays quiescent, up
+to `live_sync_max_ms` (default 5 s). An instance that backs the read-side
+freshness fence is never throttled. The rules are in
+[chapter 06](06_compaction_and_bootstrap.md#the-live-sync-adaptive-throttle).
 
-```mermaid
-flowchart LR
-    LW[local writer] -->|stage overlay + append WAL| LOCAL["local overlay + WAL"]
-    LOCAL -->|applier installs pages| MST[local MST]
-    AE["sync_session<br/>(periodic, per peer)"] -->|missing_set diff| RM[remote MST]
-    RM -->|pages| AE
-    AE -->|integrate_peer_root| MST
-```
+A complete round also advances the freshness signal of each shard the
+instance backs. `bump_ae_on_sync/2` stamps the `ae_atomics` timestamp of
+each `(NS, primary, Shard)` with the current monotonic time, even when the
+round pulled nothing. That heartbeat lets a low-churn shard show that it is
+still in contact with its peers. An **isolation policy** (`refuse`,
+`proceed` or `quorum`; default `refuse`) decides whether a round may certify
+freshness. Under `refuse`, a node that reaches no peer does not certify its
+own data. The policy lives on the side that produces freshness, so the read
+path stays a single atomic read. [Chapter 03](03_bondy_db.md#the-freshness-fence)
+explains the fence that reads the signal.
 
-A few notes:
+### Transports
 
-- **Peer events do not flow through the remote WAL.** They arrive
-  via the responder / sync_session and are forwarded to the
-  remote instance, which stages them in the overlay; the
-  receiving applier installs them into the MST + projection.
-- **A future eager-push fast-path is intended.** An `enqueue_remote`
-  hook is in place as the receive-side seam; the `eager_pushed` overlay
-  tag it would carry is reserved for that future receiver and is not
-  written yet. No sending-side pusher exists today, so treat
-  sync-session cadence as the floor on cross-node visibility.
+The transport is a behaviour (`bondy_oplog_transport`) with three
+implementations:
+
+- `bondy_oplog_transport_partisan` carries sync traffic over the Partisan
+  overlay that Bondy uses for cluster membership and messaging. A Bondy
+  node uses this transport.
+- `bondy_oplog_transport_disterl` uses Distributed Erlang.
+- `bondy_oplog_transport_inline` calls the peer in the same VM, for tests.
 
 ## Recovery on boot
-
-What happens when a node restarts?
 
 ```mermaid
 flowchart TB
@@ -376,44 +376,43 @@ flowchart TB
     II --> AI
 ```
 
-- Recovery runs in the WAL writer's `init/1`, not the instance's
-  init.
-- The manifest is small and atomic; read in sub-ms.
-- The tail scan is bounded by `max_segment_bytes` (default 64 MiB);
-  the worst case is "scan one segment" — tens of ms.
-- After the tail is clean, the applier resumes from the backend's
-  **durability capability**, never from MST state: a **durable**
-  backend resumes at the WAL's own committed consumer offset
-  (`start_pos_from_consumer_offset/1`), a **volatile** (ets/map)
-  backend replays from `beginning` to rebuild its lost MST. (Resuming
-  from MST state was the old behaviour; a stale or absent root regressed
-  the cursor to `beginning` and re-read the whole WAL every drain — the
-  resume livelock fixed in [chapter 04](04_applier.md#crash-recovery).)
-  The consumer offset doubles as the durability fence for WAL retention.
-- Any events past the resume position get re-applied — CRDT
-  idempotency makes that safe ([chapter 05](05_crdt_model.md)).
-- **Identity survives restarts.** When `storage_path` is set and no
-  explicit `origin` is configured, the supervisor loads (or persists,
-  on first boot) the instance's origin from disk
-  (`bondy_oplog_origin:load_or_create/1`), so recovery never rejects
-  the node's own WAL segments as foreign. If the WAL would fall back
-  to the per-OS-pid tmp path (identity and segments abandoned on
-  restart), the supervisor logs a loud warning — configure
-  `storage_path`/`wal_dir`, or declare `durability => ephemeral` to
-  acknowledge it.
+- Recovery runs in the `init/1` of the WAL writer, not in the `init/1` of
+  the instance.
+- The manifest is small and the writer replaces it atomically.
+- The tail scan reads at most the head segment, whose size
+  `max_segment_bytes` bounds (default 64 MiB).
+- After the tail is clean, the applier chooses its resume position from the
+  **durability** of the MST backend, never from MST state. A durable
+  backend resumes at the committed consumer offset of the WAL
+  (`start_pos_from_consumer_offset/1`). A volatile backend (`ets` or
+  `map`) replays from `beginning` to rebuild its lost MST.
+  [Chapter 04](04_applier.md#crash-recovery) explains why MST state is not
+  a safe resume source.
+- The committed segment also bounds WAL retention: the retention sweep
+  deletes only the segments below it.
+- The applier re-applies any event past the resume position. CRDT
+  idempotency makes the replay safe ([chapter 05](05_crdt_model.md)).
+- **The origin survives restarts.** When `storage_path` is set and no
+  explicit `origin` is configured, the supervisor loads the origin of the
+  instance from disk, or persists a new one on first boot
+  (`bondy_oplog_origin:load_or_create/1`). Recovery therefore never rejects
+  the WAL segments of the node as foreign. When neither `wal_dir` nor
+  `storage_path` is set, the WAL falls back to a temporary path keyed by the
+  OS pid, which a restart abandons. The supervisor then logs a warning,
+  unless the instance declares `durability => ephemeral`.
 
 ## Backpressure
 
-The instance gates appends via overlay-size and WAL-availability
-checks. There is no soft "hint" — appends either succeed or return
-one of three error tuples (`bondy_oplog_instance.erl`):
+The instance admits or refuses each append. There is no soft hint: an
+append returns its key, one of three admission errors, or the failure of
+the WAL writer (`bondy_oplog_instance.erl`).
 
 ```mermaid
 flowchart LR
     A["append"]
-    OK["{ok, Hlc}"]
+    OK["EventKey"]
     BP1["{error, backpressure}<br/>overlay event/byte caps hit"]
-    BP2["{error, working_set_full}<br/>install queue saturated"]
+    BP2["{error, working_set_full}<br/>max_working_set cap hit"]
     BP3["{error, wal_unavailable}<br/>WAL writer down / recovering"]
     Caller(["Caller backs off"])
 
@@ -423,173 +422,186 @@ flowchart LR
     A --> BP3 --> Caller
 ```
 
-The overlay caps (`max_overlay_events`, `max_overlay_bytes`) are
-read on the hot path via atomics so the check is wait-free. Disks
-fill, partitions degrade, peers fall behind — backpressure is
-*signalled*, not "the system crashes".
+- `{error, backpressure}` means that the overlay has reached
+  `max_overlay_events` or `max_overlay_bytes`. The instance reads both
+  counters from atomics, so the check takes no lock.
+- `{error, working_set_full}` means that the events visible to readers, MST
+  plus overlay, have reached `max_working_set`.
+- `{error, wal_unavailable}` means that the WAL writer is down or
+  restarting.
+
+A full disk WAL returns `{error, wal_full}`. Full disks, degraded partitions
+and slow peers therefore show up as errors that the caller handles.
 
 ## The instance heap monitor
 
-A `bondy_oplog_instance` is a long-lived `gen_server`, and applying a
-high-volume event stream churns a lot of short-lived terms — the
-apply/drain folds, the AAE page merges, the CRDT interpretation. The
-BEAM's generational collector keeps that transient garbage around until
-the next *major* collection, so a busy instance's heap can climb well
-above its live working set and look like a leak. It is not — the process
-reclaims under memory pressure — but the lingering peak is real, and most
-visible during a **solo import** (no peers): the convergence-driven
-hibernate that would otherwise sweep the heap never fires, because there
-is no peer round to drive it, so the heap grows unchecked until the BEAM's
-own GC catches up. This was the cause of a multi-GB resident-size scare on
-a freshly-importing node that turned out to be instance-heap garbage, not
-anti-entropy buffers.
+An instance is a long-lived gen_server. Applying a high-volume event stream
+creates many short-lived terms: the apply and drain folds, the
+anti-entropy page merges and the CRDT interpretation. The generational
+collector of the BEAM keeps that garbage until the next major collection.
+The heap of a busy instance therefore climbs above its live working set,
+although the process reclaims the memory under pressure. The peak is most
+visible during a solo import, with no peers. The hibernate that
+anti-entropy drives never fires then, because no peer round runs.
 
-The heap monitor closes that gap directly. It lives in its own module,
-`bondy_oplog_heap_monitor` — passive state the instance drives from
-`handle_info(gc_tick, …)`. A periodic `gc_tick`
-(`instance_gc_interval_ms`, default `2000`; `0` disables) fullsweep-and-
-hibernates the instance once its heap has grown past
-`instance_gc_heap_delta_bytes` (default 16 MiB) over a post-GC baseline.
-The decision is the pure `bondy_oplog_heap_monitor:gc_decision/3`: grown
-past the delta → hibernate; shrank below the baseline → rebaseline to the
-lower live size; grew but under the delta → keep accumulating against the
-same baseline, so slow steady growth still trips eventually.
+`bondy_oplog_heap_monitor` caps that peak. It is passive state that the
+instance drives from `handle_info(gc_tick, …)`. Every
+`instance_gc_interval_ms` (default `2000`; `0` disables the monitor), the
+tick compares the heap with a post-GC baseline. The pure function
+`bondy_oplog_heap_monitor:gc_decision/3` decides:
 
-Two properties make it safe to run always-on:
+- When the heap has grown by at least `instance_gc_heap_delta_bytes`
+  (default 16 MiB), the instance does a full sweep and hibernates.
+- When the heap is below the baseline, the monitor lowers the baseline.
+- Otherwise the monitor keeps the baseline, so slow steady growth still
+  reaches the delta.
 
-- **It keys on *growth over the live baseline*, not absolute heap size.**
-  An instance holding a large live MST (an ephemeral backend keeps the
-  whole tree on-heap) is never GC-thrashed — the monitor fires roughly
-  once per delta of *accumulated garbage*, capping the transient peak at
-  ≈ `live + delta`, then settles at the new baseline.
-- **It is independent of anti-entropy and free on the hot path.** It runs
-  from its own timer, so it reclaims during a solo import where the
-  convergence-driven hibernate cannot; and the append/drain path never
-  touches it, so it adds nothing to write latency.
+Two properties let the monitor run always on:
+
+- **It keys on growth over the live baseline, not on absolute heap size.**
+  An ephemeral backend keeps the whole MST on the heap, and the monitor
+  never thrashes such an instance. It fires about once per delta of
+  garbage, so the peak stays near `live + delta`.
+- **It runs off the hot path.** It has its own timer, so it reclaims memory
+  during a solo import. The append and drain paths never call it, so it
+  adds nothing to write latency.
 
 ## The oplog truncates itself
 
-The defining property of `bondy_oplog` is that the event log does not
-grow without bound. Once peers confirm they have an event, the
-`bondy_oplog_gc_scheduler` (1 s default tick, firing the
-least-recently-fired instances first so its `gc_max_concurrency` cap
-round-robins across ALL instances rather than starving everything
-behind the fastest few) calls
-`bondy_oplog_compaction:compact/1` for each instance, which:
+The event log does not grow without bound. An event can leave the MST once
+every **member** of the cluster holds its effect durably. Each member's
+**durable frontier** records what it has checkpointed, and compaction reads
+those frontiers as **witnesses**. On the `ets` and `map` backends the
+witness of a member is its live applied frontier.
 
-1. computes a **stability frontier** from per-peer witnesses — the
-   recorded root hash and the recorded applied frontier of every cluster
-   member, or, on a fused instance, of the peers heard from within
-   `peer_timeout_ms` (default 30 s). Because the frontier is derived
-   from peer-synced state — which only ever reflects installed,
-   published events — it is always at or below the installed
-   watermark, so `compact/1` needs **no** overlay-drain barrier and
-   runs safely under sustained write load (fused included).
-2. **skips any re-fold** — the projection, maintained eagerly on
-   write, is the materialised state — and persists the watermark and
-   applied-frontier vector via the **compaction checkpoint**
-   (`bondy_oplog_compaction_checkpoint`; file-backed when
-   `storage_path` is set, ETS otherwise).
-3. atomically truncates the MST via `bondy_mst:truncate/2` — a
-   **structural prefix-truncate** that walks only the left spine,
-   rewrites O(log N) pages, and leaves a root byte-identical to the
-   equivalent per-key deletes — then (ETS backend) sweeps the
-   now-unreachable dropped subtrees' pages via `bondy_mst:gc/1`
-   (truncate only unlinks them), and advances the watermark.
+`bondy_oplog_gc_scheduler` ticks every second by default. It fires the
+least-recently-fired instances first, so its `gc_max_concurrency` cap
+rotates across all instances instead of starving those behind the first
+few. For each instance it calls `bondy_oplog_compaction:compact/1`, which
+runs one cycle in the instance gen_server:
+
+1. The instance writes a checkpoint when its applied frontier has moved.
+   Then `compute_frontier_for/2` computes the **stability frontier**: the
+   largest key such that every witness confirms every key up to it. Every
+   member counts, however long it has been silent
+   ([chapter 06](06_compaction_and_bootstrap.md#what-does-stable-mean-here)).
+2. `capped_truncation_point/2` caps the truncation point strictly below the
+   first key that the applied frontier does not cover. `compact/1` drains
+   nothing first, because of this cap.
+3. `bondy_mst:truncate/2` drops the prefix. It walks only the left spine and
+   rewrites O(log N) pages, and its root equals the root of the equivalent
+   per-key deletes
+   (`bondy_mst_truncate_test:truncate_matches_delete_and_fresh_test_/0`).
+   On the ETS backend, `bondy_mst:gc/2` then sweeps the dropped pages,
+   because truncation only unlinks them. No step re-folds events: the
+   projection, maintained on write, is the materialised state.
+4. The instance makes the truncated root durable and writes the
+   **compaction checkpoint** (`bondy_oplog_compaction_checkpoint`), which
+   holds the watermark and the applied frontier. The checkpoint is a file
+   when `storage_path` is set and an ETS table otherwise.
+5. Only then does the instance advance the WAL **watermark**.
+
+When the walk in `compute_frontier_for/2` meets a page that the store lacks,
+the result is `unservable` and the cycle confirms nothing from the walk
+(`proofs/tla/ConfirmedCompaction_3R_Lost.cfg` holds `NoStrand`;
+`ConfirmedCompaction_3R_Lost_SkipWalk.cfg`, whose walk skips the page,
+violates it). Only `rebuild_frontier/2` can then truncate, on an instance
+whose witnesses all cover its applied frontier
+(`ConfirmedCompaction_3R_Lost_Ungated.cfg` drops that condition and
+violates `NoStrand`;
+`bondy_oplog_compaction_fused_test:unservable_own_root_self_heals_when_right_edge_lost/0`).
 
 ```mermaid
 flowchart LR
-    PEERS["bondy_oplog_peer_state<br/>fresh roots + applied frontiers"]
+    PEERS["bondy_oplog_peer_state<br/>every member's durable frontier"]
     FRONT["compute_frontier_for"]
-    CKPT["compaction_checkpoint:put<br/>(watermark + applied frontier)"]
+    CAP["capped_truncation_point"]
     TRUNC["bondy_mst:truncate/2<br/>(structural O(log N) prefix drop)"]
-    GC["bondy_mst:gc/1<br/>(sweep unlinked pages · ETS backend)"]
-    WM[watermark advance]
+    GC["bondy_mst:gc/2<br/>(sweep unlinked pages · ETS backend)"]
+    CKPT["compaction_checkpoint:put<br/>(watermark + applied frontier)"]
+    WM[WAL watermark advance]
 
-    PEERS --> FRONT --> CKPT --> TRUNC
-    TRUNC --> GC --> WM
+    PEERS --> FRONT --> CAP --> TRUNC --> GC
+    GC --> CKPT --> WM
 ```
 
-At full quiescence the live MST is empty; new replicas bootstrap through
-the catalogue snapshot protocol (`bondy_oplog_sync_session`) instead of
-replaying history.
-[Chapter 06](06_compaction_and_bootstrap.md) walks through the full
+When the cluster is quiescent and every witness has caught up, the live MST
+is empty. A new replica then joins through the catalogue bootstrap
+(`bondy_oplog_sync_session:bootstrap_catalogue/3`) instead of replaying
+history. [Chapter 06](06_compaction_and_bootstrap.md) covers the whole
 lifecycle.
 
 ## Things to keep in mind
 
-- **One writer per WAL.** No locking, no contention.
-- **Events are signed.** The validator is the gateway for both local
-  appends and peer-received events ([chapter 04](04_applier.md)).
-- **WAL ≠ replication log.** The WAL is **per-node**; the MST is the
-  replication structure. Peers don't replay each other's WALs.
-- **The overlay is the read-your-writes primitive.** Without it,
-  every read would block on the applier.
-- **The MST is bounded.** Compaction physically deletes stable
-  events; the live MST is a *window*, not a log ([chapter 06](06_compaction_and_bootstrap.md)).
+- **The disk WAL has one writer process.** The in-memory WAL takes
+  concurrent inserts from callers, and its reader stops at the first gap.
+- **Events are signed.** The validator signs local appends, and the applier
+  verifies events before it materialises them ([chapter 04](04_applier.md)).
+- **The WAL is not the replication log.** Each instance has its own WAL,
+  and peers never replay each other's WALs. The MST is the replication
+  structure.
+- **The overlay gives read-your-writes.** Without it, a read would have to
+  wait for the applier.
+- **The live MST is a window, not a log.** Compaction deletes stable events
+  ([chapter 06](06_compaction_and_bootstrap.md)).
 
 ## Pointers
 
 Implementation:
 
-- `bondy_oplog.erl` — the facade.
-- `bondy_oplog_instance.erl` — the gen_server; lock-free fast
-  paths, stateful-validator slow paths, `integrate_peer_root`,
-  overlay staging; `fused_apply_batch/2` and the yielding fused
-  drain.
-- `bondy_oplog_heap_monitor.erl` — the periodic instance heap
-  monitor (`new/0`, `arm/1`, `handle_tick/1`, the pure
-  `gc_decision/3`); passive state driven by the instance from
-  `handle_info(gc_tick, …)`.
-- `bondy_oplog_wal.erl` — the oplog's WAL: opens a `bondy_log_wal`
-  writer (the `bondy_log` app's log core) with `bondy_oplog_log_adapter`
-  and delegates `append_batch/2`, `await_durable/3`,
-  `set_committed_segment/2` to it. (The consumer offset is persisted by
-  `bondy_log_state:write_consumer_offset/2`.)
-- `bondy_oplog_wal_mem.erl` + `bondy_oplog_wal_mem_reader.erl` —
-  the in-memory (ETS) WAL backend for fused ephemeral instances.
-- `bondy_oplog_origin.erl` — origin persistence under
-  `storage_path` (`load_or_create/1`).
-- `bondy_oplog_path.erl` — per-instance on-disk directory layout
-  (`flat` | `sharded`, selected by the `path_layout` option).
-- `bondy_oplog_compaction_checkpoint.erl` (+ `_ets` / `_file`) —
-  the compaction checkpoint behaviour and backends.
+- `bondy_oplog.erl`: the facade.
+- `bondy_oplog_instance.erl`: the gen_server; the lock-free paths, the
+  stateful-validator paths, `integrate_peer_root`, overlay staging,
+  `fused_apply_batch/2` and the yielding fused drain.
+- `bondy_oplog_heap_monitor.erl`: the instance heap monitor (`new/0`,
+  `arm/1`, `handle_tick/1` and the pure `gc_decision/3`).
+- `bondy_oplog_wal.erl`: the WAL of the oplog. It opens a `bondy_log_wal`
+  writer with `bondy_oplog_log_adapter` and delegates `append_batch/2`,
+  `await_durable/3` and `set_committed_segment/2` to it.
+  `bondy_log_state:write_consumer_offset/2` persists the consumer offset.
+- `bondy_oplog_wal_mem.erl` and `bondy_oplog_wal_mem_reader.erl`: the
+  in-memory WAL for fused ephemeral instances.
+- `bondy_oplog_origin.erl`: origin persistence under `storage_path`
+  (`load_or_create/1`).
+- `bondy_oplog_path.erl`: the per-instance directory layout (`flat` or
+  `sharded`, selected by the `path_layout` option).
+- `bondy_oplog_compaction_checkpoint.erl` (with `_ets` and `_file`): the
+  compaction checkpoint behaviour and its backends.
 - `bondy_log_wal.erl`, `bondy_log_recovery.erl`, `bondy_log_reader.erl`,
-  `bondy_log_segment.erl`, `_idx.erl`, `_manifest.erl`, `_state.erl`,
-  `_scrubber.erl` — the log core, in the `bondy_log` library app shared
-  with Bondy Streams: the writer (group-commit fsync, rotation,
-  retention, backpressure), boot-time tail scan + manifest
+  `bondy_log_segment.erl`, `_idx.erl`, `_manifest.erl`, `_state.erl` and
+  `_scrubber.erl`: the log core in the `bondy_log` library app, shared with
+  Bondy Streams. It holds the writer (group-commit fsync, rotation,
+  retention, backpressure), the boot-time tail scan and manifest
   reconciliation, the drain cursor and the on-disk layout. The frame
   envelope (`bondy_log_frame`), the body codec (`bondy_log_codec`), the
-  key-registry behaviour and the atomic-write idiom (`bondy_log_io`)
-  live there too; `bondy_oplog_wal.hrl` re-exports the constants under
-  the `BONDY_OPLOG_WAL_*` names. The core is oplog-free: what a record
-  *is* (`bondy_log_record`), what the segment header's identity fields
-  hold (`bondy_log_identity`) and where the writer pid is published
-  (`bondy_log_directory`) are three behaviours one adapter module
-  implements; `bondy_oplog_log_adapter.erl` is the oplog's.
-- `bondy_oplog_sync_scheduler.erl` — single global scheduler;
-  `run_tick/1`, `dispatch_for/2`.
-- `bondy_oplog_sync_session.erl` — `run/3`, `bootstrap_catalogue/3`,
+  key-registry behaviour and the atomic-write helpers (`bondy_log_io`)
+  live there too. `bondy_oplog_wal.hrl` re-exports the constants under the
+  `BONDY_OPLOG_WAL_*` names. The core does not depend on the oplog: three
+  behaviours define what a record is (`bondy_log_record`), what the
+  identity fields of the segment header hold (`bondy_log_identity`) and
+  where the writer pid is published (`bondy_log_directory`).
+  `bondy_oplog_log_adapter.erl` implements all three for the oplog.
+- `bondy_oplog_sync_scheduler.erl`: the node-wide scheduler (`run_tick/1`,
+  `dispatch_for/2`).
+- `bondy_oplog_sync_session.erl`: `run/3`, `bootstrap_catalogue/3` and
   `pull_until_complete`; `bump_ae_on_sync/2` and
-  `maybe_bump_ae_isolated/1` (the per-round freshness heartbeat) and
-  `should_certify_freshness/1` (the isolation policy).
-- `bondy_oplog_transport.erl` (+ `_partisan.erl` / `_disterl.erl` /
-  `_inline.erl`) — the transport behaviour and its three
-  implementations; Bondy uses the Partisan transport.
-- `bondy_oplog_registry.erl` holds the per-instance **applied frontier**
-  (the convergence oracle) and its idempotent max-merge;
-  `bondy_oplog_cell_apply.erl` advances it on the apply path and
-  `bondy_oplog_responder.erl` serves the `get_frontier` request
+  `maybe_bump_ae_isolated/1`, the per-round freshness heartbeat; and
+  `should_certify_freshness/1`, the isolation policy.
+- `bondy_oplog_transport.erl` (with `_partisan.erl`, `_disterl.erl` and
+  `_inline.erl`): the transport behaviour and its three implementations.
+- `bondy_oplog_registry.erl`: the per-instance applied frontier and its
+  max-merge (`merge_applied/2`). `bondy_oplog_cell_apply.erl` turns applied
+  events into a frontier claim, and `bondy_oplog_responder.erl` serves the
+  `get_frontier` request
   ([chapter 06](06_compaction_and_bootstrap.md#the-applied-frontier-the-convergence-oracle)).
-- `bondy_oplog_config.erl` — the layer's public configuration surface:
-  one accessor per tunable, each holding its default once and read live
-  from the application environment (not a cached snapshot, so a runtime
-  `set_env` takes effect on the next read). It covers the scheduler
-  cadence; the anti-entropy regulators (`aae_max_concurrency`,
-  `aae_max_pages_in_flight`, the live-sync throttle bounds, the
+- `bondy_oplog_config.erl`: the configuration surface of the layer. It has
+  one accessor per setting, holds each default once and reads the
+  application environment on every call, so a runtime `set_env` takes
+  effect on the next read. It covers the scheduler cadence; the
+  anti-entropy regulators (`aae_max_concurrency`,
+  `aae_max_pages_in_flight`, the live-sync throttle bounds and the
   `aae_load_adaptive` yield); the durable-seal mode and threshold
   (`pack_seal_mode`, `pack_auto_seal_bytes`); the instance heap monitor
   (`instance_gc_interval_ms`, `instance_gc_heap_delta_bytes`); the fence
-  isolation policy; and GC concurrency.
-- `bondy_oplog_validator.erl` (+ `_crypto.erl` / `_trust.erl`).
+  isolation policy; and the GC concurrency.
+- `bondy_oplog_validator.erl` (with `_crypto.erl` and `_trust.erl`).

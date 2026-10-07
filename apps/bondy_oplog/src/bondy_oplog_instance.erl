@@ -66,14 +66,6 @@
 %% costs only a few retained pages for this long.
 -define(PEER_ROOT_PIN_TTL_MS, 120_000).
 
-%% How long the instance's own aae-root must verify UNSERVABLE
-%% (continuously) before the compaction path self-heals by rebuilding
-%% the MST (`maybe_self_heal_unservable/1`). Far above any transient
-%% truncate/GC race window (those clear within a round) and long enough
-%% for the peer-side unservable-behind escalation to drain our surplus
-%% first — see the domination gate.
--define(SELF_HEAL_UNSERVABLE_AFTER_MS, 60_000).
-
 %% Minimum gap between durable (pack) page reclamations — see
 %% `maybe_collect_durable/1`. A collection rewrites every sealed pack, so this
 %% is deliberately coarse: the leak it drains is slow (durable namespaces are
@@ -183,6 +175,8 @@ behind that barrier.
     %% (`bondy_oplog_applier:advance_replayed_root/2`).
     last_replayed_root = undefined :: undefined | bondy_mst:hash(),
     owed = false :: boolean(),
+    %% The staged catalogue install (`install_catalogue_batch/3`).
+    install_stage :: bondy_oplog_applier:install_stage(),
     %% AE-freshness shard keys bumped on every fused commit and after a
     %% remote replay, so secondary-index reads on those shards observe the
     %% fused writer's progress. Mirrors the applier's `ae_targets` (the
@@ -223,20 +217,9 @@ behind that barrier.
     hlc :: bondy_connect_hlc:t(),
     seq :: atomics:atomics_ref(),
     mst :: bondy_mst:t(),
-    %% Per-root AAE-advertise servability cache: `{RootHash, Servable}`.
-    %% `aae_root/1` refuses to advertise a dangling root — one whose pages are not
-    %% all present, which would fail a pulling peer with
-    %% `peer_returned_empty_pages` — and advertises `undefined` instead so we heal
-    %% via our own pull. The `missing_set` walk is memoised per root hash so it
-    %% re-walks only when the root changes.
+    %% `{RootHash, Servable}` from the last `servable_root/1` walk, so the walk
+    %% runs again only when the root changes.
     aae_root_check :: undefined | {binary(), boolean()},
-    %% Monotonic ms of the FIRST unservable aae-root verdict of the
-    %% current unservable streak; reset the moment any root verifies
-    %% servable. Persist across root changes: a tree whose missing
-    %% pages sit in a shared subtree stays unservable through every new
-    %% root, and the self-heal threshold must measure the streak, not
-    %% the root. See `maybe_self_heal_unservable/1`.
-    unservable_since = undefined :: undefined | integer(),
     %% Monotonic ms of the last durable (pack) page reclamation. See
     %% `maybe_collect_durable/1`.
     last_durable_gc = undefined :: undefined | integer(),
@@ -388,7 +371,7 @@ behind that barrier.
     %% because a catalogue install replaced cells: `installing` from the start
     %% of the install until the session finalizes, `{target, VV}` from then
     %% until the frontier claims `VV`, `refold` after a boot that found the
-    %% mark, `none` otherwise. See `begin_install/1`.
+    %% mark, `none` otherwise. See `begin_install/3`.
     refold = none ::
         none | installing | {target, #{binary() => non_neg_integer()}} | refold,
     %% Whether the replay from the current replay anchor has presented every
@@ -531,17 +514,16 @@ behind that barrier.
 %% Bootstrap
 -export([mark_live/1]).
 -export([lifecycle_state/1]).
--export([begin_install/1]).
--export([install_catalogue_batch/2]).
--export([rederive_projection/1]).
+-export([begin_install/3]).
+-export([install_catalogue_batch/3]).
+-export([rederive_projection/2]).
+-export([abort_install/2]).
 -export([refolded/1]).
 -export([install_target/2]).
 -export([owes_install/1]).
 -export([serving/1]).
 -export([durable_frontier/1]).
--export([finalize_catalogue_bootstrap/3]).
 -export([finalize_catalogue_bootstrap/4]).
--export([finalize_catalogue_bootstrap/5]).
 -export([persist_frontier/1]).
 -export([wal_opened/3]).
 -export([replay_anchor/1]).
@@ -1382,11 +1364,10 @@ current root only when it is fully servable (every page reachable from it
 is present in the store). A dangling root — one whose pages are not all
 present — is NOT advertised; this returns `undefined` instead, so a
 pulling peer requests nothing from us (its `missing_set(undefined)` is
-empty) and cannot fail with `peer_returned_empty_pages`. The node then
-heals its own root via its periodic pull / WAL replay rather than
-poisoning a healthy peer with a root it cannot serve. The servability
-check is memoised per root hash, so it costs one `missing_set` walk only
-when the root changes.
+empty) and cannot fail with `peer_returned_empty_pages`. Compaction
+rebuilds such a tree once every member covers what this replica applied
+(`bondy_oplog_compaction:compact/1`). The servability check is memoised per
+root hash, so it costs one `missing_set` walk only when the root changes.
 """.
 -spec aae_root(instance_id() | pid()) -> binary() | undefined.
 
@@ -1491,7 +1472,7 @@ range(Target, From, To) ->
     ).
 
 -spec truncate_prefix(instance_id() | pid(), bondy_oplog_event:event_key()) ->
-    non_neg_integer().
+    non_neg_integer() | {error, {refold_owed, instance_id()}}.
 
 truncate_prefix(Target, Watermark) ->
     gen_server:call(target(Target), {truncate_prefix, Watermark}, infinity).
@@ -1988,67 +1969,33 @@ lifecycle_state(InstanceId) when is_binary(InstanceId) ->
 lifecycle_state(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, lifecycle_state, infinity).
 
-?DOC("""
-Installs a batch of catalogue-snapshot cells into the instance's
-projection. Each cell is a `{Bucket, Key, Frame}` triple where `Frame`
-is the V2 cell frame produced by the peer's projection adapter. Every
-routable cell replaces the local one; see
-`bondy_oplog_applier:install_catalogue_batch/2` for the semantics and for
-what the counts mean.
-
-Called by `bondy_oplog_sync_session:bootstrap_catalogue/3` between
-`begin_install/1` and `finalize_catalogue_bootstrap/5`.
-""").
+-doc """
+Stages a batch of catalogue-snapshot cells for the install `Token` names
+(`begin_install/3`), which `rederive_projection/2` installs. Each cell is a
+`{Bucket, Key, Frame}` triple where `Frame` is the V2 cell frame produced by
+the peer's projection adapter (`bondy_oplog_applier:stage_cells/3`).
+""".
 -spec install_catalogue_batch(
-    instance_id() | pid(), [bondy_oplog_transport:cell()]
-) ->
-    {ok, #{
-        installed := non_neg_integer(),
-        skipped := non_neg_integer(),
-        unclaimable := [binary()],
-        max_hlc := non_neg_integer()
-    }}
-    | {error, term()}.
+    instance_id(), reference(), [bondy_oplog_transport:cell()]
+) -> ok | {error, term()}.
 
-install_catalogue_batch(InstanceId, Cells) when
+install_catalogue_batch(InstanceId, Token, Cells) when
     is_binary(InstanceId), is_list(Cells)
 ->
-    install_cells(InstanceId, Cells);
-install_catalogue_batch(Pid, Cells) when is_pid(Pid) ->
-    case bondy_oplog_registry:instance_id_by_sup_pid(Pid) of
-        {ok, InstanceId} ->
-            install_catalogue_batch(InstanceId, Cells);
-        not_found ->
-            {error, instance_not_found}
-    end.
+    to_folder(InstanceId, {install_catalogue_batch, Token, Cells}).
 
 %% @private
-install_cells(InstanceId, Cells) ->
-    case bondy_oplog_registry:fused(InstanceId) of
-        true ->
-            %% A fused instance has no applier to install into: the install runs in the
-            %% instance gen_server through the same shared body
-            %% (`bondy_oplog_applier:install_catalogue_cells/3`) over its own
-            %% `#fused_drain{}` cell-apply source. For retention-bounded instances the
-            %% truncated history makes catalogue bootstrap the ONLY complete recovery path
-            %% for a joining peer — page-sync covers just the retention window.
-            case ?MODULE:whereis(InstanceId) of
-                undefined ->
-                    {error, instance_not_running};
-                Pid ->
-                    gen_server:call(
-                        Pid, {install_catalogue_batch, Cells}, infinity
-                    )
-            end;
-        _ ->
-            case bondy_oplog_registry:applier_pid(InstanceId) of
-                undefined ->
-                    {error, instance_not_running};
-                ApplierPid ->
-                    bondy_oplog_applier:install_catalogue_batch(
-                        ApplierPid, Cells
-                    )
-            end
+%% Calls the process that folds the instance's projection: the instance itself
+%% when fused, its applier otherwise.
+to_folder(InstanceId, Request) ->
+    Pid =
+        case bondy_oplog_registry:fused(InstanceId) of
+            true -> ?MODULE:whereis(InstanceId);
+            _ -> bondy_oplog_registry:applier_pid(InstanceId)
+        end,
+    case Pid of
+        undefined -> {error, instance_not_running};
+        _ -> gen_server:call(Pid, Request, infinity)
     end.
 
 -doc """
@@ -2063,50 +2010,82 @@ snapshot cursor on the instance is open
 install replaces (guard "busy"). The refused session releases the cursor it
 opened on its source (`bondy_oplog_catalogue_snapshot:release/2`), which is
 meant to stop two replicas re-bootstrapping from each other from keeping each
-other busy; the model has no cursor expiry or retry to check that. The two
-guards and the release are checked in
-`JoinInstall_Session_Split_Early_Busy_*.cfg`; neither guard suffices alone
-(`proofs/README.md`).
+other busy; the model has no cursor expiry or retry to check that. Each
+guard is needed: without "early",
+`proofs/tla/JoinInstall_Truncation_CompactMembers_NoEarly.cfg` violates
+`CompactedClaimed`; without "busy", `..._NoBusy.cfg` violates `SomeoneServes`.
 
 Writing the mark deletes the instance's cursors that have expired but not been
 reaped, so a batch request already past its cursor lookup cannot renew one
 (`bondy_oplog_bootstrap_rederive_test`,
-`expired_cursor_is_not_renewed_after_the_mark`).
-""".
--spec begin_install(instance_id()) ->
-    ok | {error, {serving_snapshot, instance_id()}} | {error, term()}.
+`expired_cursor_is_not_renewed_after_the_mark`). It then discards what an
+earlier session staged and returns the token that names this install of a
+snapshot of `Buckets` whose re-fold adopts `PeerFrontier`, the frontier the
+session read from its source before the stream
+(`bondy_oplog_applier:open_stage/3`).
 
-begin_install(InstanceId) ->
+`{error, {source_behind_truncation, Uncovered}}`, writing nothing, when
+`PeerFrontier` does not cover the instance's truncation record
+(`bondy_oplog_registry:uncovered_truncation/2`): the events of `Uncovered` are
+in neither the snapshot nor the tree, so the install's re-fold would lose them
+(`proofs/tla/JoinInstall_Truncation_CompactMembers_NoCover.cfg` violates
+`CompactedClaimed`; `bondy_oplog_bootstrap_rederive_test`,
+`install_behind_truncation_is_refused`). The check precedes the mark, so a
+refused session leaves the instance compacting and serving; no truncation
+runs while the mark is held, so the record it checked is the one the re-fold
+meets (`JoinInstall_Truncation_CompactMembers.cfg` holds,
+`_CompactMembers_NoTrunc.cfg` violates `CompactedClaimed`).
+""".
+-spec begin_install(
+    instance_id(), [binary()], #{binary() => non_neg_integer()}
+) ->
+    {ok, reference()}
+    | {error, {serving_snapshot, instance_id()}}
+    | {error, {source_behind_truncation, #{binary() => non_neg_integer()}}}
+    | {error, term()}.
+
+begin_install(InstanceId, Buckets, PeerFrontier) when
+    is_list(Buckets), is_map(PeerFrontier)
+->
     case ?MODULE:whereis(InstanceId) of
-        undefined -> {error, instance_not_running};
-        Pid -> gen_server:call(Pid, begin_install, infinity)
+        undefined ->
+            {error, instance_not_running};
+        Pid ->
+            maybe
+                ok ?=
+                    gen_server:call(
+                        Pid, {begin_install, PeerFrontier}, infinity
+                    ),
+                to_folder(InstanceId, {begin_stage, Buckets, PeerFrontier})
+            end
     end.
 
 -doc """
-Re-derives the projection after a catalogue install: empties the applied
-frontier and replays the whole retained MST through the causal hold, so a cell
-the install replaced gets back the events its installed state does not carry
-(an event its installed context covers is skipped,
-`bondy_oplog_cell_kernel:apply/6`) and the frontier claims only what the replay
-folds. Leaves the re-fold mark (`install_target/2`). Runs in the instance for a
-fused instance and in its applier otherwise
-(`bondy_oplog_applier:rederive_projection_sync/1`).
+Re-derives the projection after a catalogue install, in one call: installs the
+batches staged under `Token` and sets the applied frontier to the one
+`begin_install/3` staged, or to `#{}` when a shipped cell did not land
+(`bondy_oplog_applier:commit_stage/4`), and replays the retained MST through
+the causal hold, which folds the events that frontier does not claim. The reply
+counts what the install wrote. Leaves the re-fold mark (`install_target/2`).
+Runs in the instance for a fused instance and in its applier otherwise
+(`bondy_oplog_applier:rederive_projection_sync/2`).
 """.
--spec rederive_projection(instance_id()) -> ok | {error, any()}.
+-spec rederive_projection(instance_id(), reference()) ->
+    {ok, bondy_oplog_applier:stage_counts()} | {error, any()}.
 
-rederive_projection(InstanceId) when is_binary(InstanceId) ->
-    case bondy_oplog_registry:fused(InstanceId) of
-        true ->
-            case ?MODULE:whereis(InstanceId) of
-                undefined -> {error, instance_not_running};
-                Pid -> gen_server:call(Pid, rederive_projection, infinity)
-            end;
-        _ ->
-            case bondy_oplog_registry:applier_pid(InstanceId) of
-                undefined -> {error, instance_not_running};
-                Pid -> bondy_oplog_applier:rederive_projection_sync(Pid)
-            end
-    end.
+rederive_projection(InstanceId, Token) when is_binary(InstanceId) ->
+    to_folder(InstanceId, {rederive_projection, Token}).
+
+-doc """
+Ends a catalogue install that will not finish by dropping what `Token` staged
+(`bondy_oplog_applier:drop_stage/2`), leaving the re-fold mark for a later
+session. `{error, install_superseded}` when `Token` no longer names the
+instance's install.
+""".
+-spec abort_install(instance_id(), reference()) -> ok | {error, any()}.
+
+abort_install(InstanceId, Token) when is_binary(InstanceId) ->
+    to_folder(InstanceId, {abort_install, Token}).
 
 -doc """
 Reports that a replay from an undefined replay cursor has presented every
@@ -2125,8 +2104,8 @@ claims `Target`, a retired origin's entry aside; the first compaction tick that
 finds it claimed checkpoints without the mark. Until then the installed cells
 may reflect events the peer applied while it streamed them, which the frontier
 it read before the stream does not claim
-(`proofs/tla/JoinInstall_Session_Join_NoTarget.cfg`;
-`bondy_oplog_bootstrap_rederive_test`,
+(`proofs/tla/JoinInstall_Truncation_CompactMembers_NoTarget.cfg` violates
+`SettledSound`; `bondy_oplog_bootstrap_rederive_test`,
 `install_holds_until_claims_cover_source`; for a retired origin,
 `bondy_oplog_frontier_reap_test`, `reaped_origin_holds_no_install_target`). A
 no-op when the session installed nothing.
@@ -2157,7 +2136,7 @@ owes_install(InstanceId) when is_binary(InstanceId) ->
 
 -doc """
 `{error, {refold_owed, InstanceId}}` while the instance holds the re-fold mark:
-from the start of a catalogue install (`begin_install/1`) until its frontier
+from the start of a catalogue install (`begin_install/3`) until its frontier
 claims the install's target (`install_target/2`), and after a restart that found the mark until a
 later session has done so (`owes_install/1`); also until the replay from the replay anchor
 has presented every event the frontier does not claim (`replay_anchor/1`),
@@ -2166,7 +2145,7 @@ since until then a cell may reflect an event the frontier does not claim.
 catalogue snapshot or the applied frontier to a peer, which would otherwise
 install cells, or adopt a frontier, that the instance does not reflect
 (`proofs/tla/LiveRebootstrapRefold_NoServeGuard_TwoFaults.cfg`,
-`proofs/tla/JoinInstall_Session_Join_ClaimSkip_Crash_HlcStability_NoReplayed_RefoldFirst_3E.cfg`).
+`proofs/tla/JoinInstall_Truncation_CompactMembers_NoReplayed.cfg`).
 """.
 -spec serving(instance_id()) -> ok | {error, {refold_owed, instance_id()}}.
 
@@ -2309,104 +2288,42 @@ open_drain_gate(InstanceId) when is_binary(InstanceId) ->
     end.
 
 ?DOC("""
-Finalises a catalogue-snapshot bootstrap session.
+Finalises a catalogue-snapshot bootstrap session, after the rederive
+(`rederive_projection/2`) has installed the snapshot and set the applied
+frontier.
 
-For a fresh-bootstrap caller (`WasLive = false`) this marks the
-instance `live` durably. For a recovering caller (`WasLive = true`)
-the instance is already live and no lifecycle change is needed.
+`Watermark` is the peer's high-water HLC at session start, captured into the
+per-shard high-water atomic. `MaxInstalledHlc`, the highest cell HLC the
+install decoded, is absorbed into the local clock: the installed cells carry
+remote HLCs, and without the absorb a bootstrapped replica could mint events
+below a stability point computed from them. `0` is a no-op; the clock only
+advances.
 
-`Watermark` is the peer's high-water HLC at session start, captured
-into the per-shard high-water atomic so future replicas reading from
-this peer see at least that watermark. (In v1 this is informational —
-high-water is advanced cell-by-cell during `install_catalogue_batch/2`
-already; this call is the last-write barrier.)
+The applied frontier is then made durable in the compaction checkpoint
+(`persist_frontier/1`), in the same round trip as the absorb: an adopted peer
+frontier carries the peer's compacted-prefix maxima, which no local MST event
+or WAL replay can restore, so without it an unclean restart would lose them. For a fresh
+replica (`WasLive = false`) the instance is then marked `live` durably; a
+recovering one (`WasLive = true`) is already live.
 """).
 -spec finalize_catalogue_bootstrap(
     instance_id() | pid(),
     Watermark :: non_neg_integer(),
-    WasLive :: boolean()
-) -> ok | {error, term()}.
-
-finalize_catalogue_bootstrap(InstanceIdOrPid, Watermark, WasLive) ->
-    %% No peer frontier to adopt (legacy 3-arity / direct callers); the empty
-    %% map is a no-op merge, preserving the historical behaviour exactly.
-    finalize_catalogue_bootstrap(InstanceIdOrPid, Watermark, #{}, WasLive).
-
--doc """
-As `finalize_catalogue_bootstrap/3`, additionally adopting the peer's
-applied-frontier version vector `PeerFrontier` (`#{Origin => Seq}`).
-
-The catalogue install writes the peer's projection cells but cannot reconstruct
-the per-origin `{Origin, Seq}` the frontier is built from (the cells carry only
-HLC + value). Without adopting the peer's frontier, a fully bootstrapped replica
-holds all the data yet reports DIVERGED forever against the convergence oracle.
-The merge is a max-merge — idempotent, and safe to combine with anything the
-normal apply path has already recorded. An empty map is a no-op.
-
-WHETHER to adopt is not decided here.
-`bondy_oplog_sync_session:adopt_frontier/3` passes the peer's vector only over
-an install that landed everything the peer shipped, and `#{}` otherwise — a cell carries no origin and no seq, so the
-install cannot say WHICH origin lost history and the rule is all-or-nothing.
-""".
--spec finalize_catalogue_bootstrap(
-    instance_id() | pid(),
-    Watermark :: non_neg_integer(),
-    PeerFrontier :: #{binary() => non_neg_integer()},
-    WasLive :: boolean()
-) -> ok | {error, term()}.
-
-finalize_catalogue_bootstrap(InstanceIdOrPid, Watermark, PeerFrontier, WasLive) ->
-    finalize_catalogue_bootstrap(
-        InstanceIdOrPid, Watermark, PeerFrontier, 0, WasLive
-    ).
-
--doc """
-As `finalize_catalogue_bootstrap/4`, additionally absorbing `MaxInstalledHlc`
-— the maximum cell HLC the install loop decoded — into the local clock (A3).
-
-The catalogue install writes peer cells carrying remote HLCs straight into the
-projection without touching the clock, and the AAE round that follows absorbs
-from `bondy_mst:last/1` — `undefined` exactly when the peer has compacted,
-which is the case bootstrap exists to serve. Without this absorb a
-bootstrapped replica can mint events BELOW a stability point computed from the
-very cells it installed, silently invalidating causal-stability
-reclamation. The absorb happens inside the
-instance, before `mark_live` flips it into service. `0` means "nothing
-installed" and is a no-op. Over-absorption is safe: the clock only ever
-advances.
-""".
--spec finalize_catalogue_bootstrap(
-    instance_id() | pid(),
-    Watermark :: non_neg_integer(),
-    PeerFrontier :: #{binary() => non_neg_integer()},
     MaxInstalledHlc :: non_neg_integer(),
     WasLive :: boolean()
 ) -> ok | {error, term()}.
 
 finalize_catalogue_bootstrap(
-    InstanceId, Watermark, PeerFrontier, MaxInstalledHlc, WasLive
+    InstanceId, Watermark, MaxInstalledHlc, WasLive
 ) when
     is_binary(InstanceId),
     is_integer(Watermark),
     Watermark >= 0,
-    is_map(PeerFrontier),
     is_integer(MaxInstalledHlc),
     MaxInstalledHlc >= 0,
     is_boolean(WasLive)
 ->
     ok = maybe_advance_high_water(InstanceId, Watermark),
-    ok = bondy_oplog_registry:merge_frontier(InstanceId, PeerFrontier),
-    %% Make the adopted frontier DURABLE now, not just at the next clean stop.
-    %% The peer's frontier includes its COMPACTED-prefix maxima, which live in
-    %% neither this replica's MST (the peer compacted them away before
-    %% page-sync, so they never transfer) nor a WAL-tail replay (the bootstrap
-    %% installed a projection snapshot, not events through the WAL). They exist
-    %% only in the in-memory registry until `terminate/2` persists them — so an
-    %% UNCLEAN restart (kill/crash, no `terminate`) would lose exactly those
-    %% maxima and the convergence oracle would report DIVERGED forever despite
-    %% holding all the data. Persisting into the checkpoint here closes that gap
-    %% so `boot_frontier/2` recovers them on any restart.
-    %% The same round-trip absorbs `MaxInstalledHlc` into the clock.
     case persist_frontier(InstanceId, MaxInstalledHlc) of
         ok when WasLive ->
             ok;
@@ -2415,15 +2332,13 @@ finalize_catalogue_bootstrap(
         {error, _} = Error ->
             Error
     end;
-finalize_catalogue_bootstrap(
-    Pid, Watermark, PeerFrontier, MaxInstalledHlc, WasLive
-) when
+finalize_catalogue_bootstrap(Pid, Watermark, MaxInstalledHlc, WasLive) when
     is_pid(Pid)
 ->
     case bondy_oplog_registry:instance_id_by_sup_pid(Pid) of
         {ok, InstanceId} ->
             finalize_catalogue_bootstrap(
-                InstanceId, Watermark, PeerFrontier, MaxInstalledHlc, WasLive
+                InstanceId, Watermark, MaxInstalledHlc, WasLive
             );
         not_found ->
             ok
@@ -2520,7 +2435,7 @@ replay_anchor(Target) ->
 
 %% @private
 %% As `persist_frontier/1`, absorbing `AbsorbHlc` into the local clock first —
-%% see `finalize_catalogue_bootstrap/5`. `0` skips the absorb.
+%% see `finalize_catalogue_bootstrap/4`. `0` skips the absorb.
 persist_frontier(Target, AbsorbHlc) when
     is_integer(AbsorbHlc), AbsorbHlc >= 0
 ->
@@ -2826,7 +2741,11 @@ maybe_init_fused(#state{fused = true} = State, Opts) ->
     ApplierOpts = maps:get(applier, Opts, #{}),
     {ok, CellCtx} = bondy_oplog_applier:resolve_cell_apply_ctx(ApplierOpts),
     {ReplayRoot, ReplayOwed} = Anchor = compute_replay_anchor(State),
+    Stage = bondy_oplog_applier:new_install_stage(
+        bondy_oplog_instance_sup:wal_dir(State#state.instance_id, Opts)
+    ),
     FD = #fused_drain{
+        install_stage = Stage,
         iter = undefined,
         cell_apply_ctx = CellCtx,
         %% Rebuild the full per-bucket directory from the registry (every
@@ -3257,54 +3176,14 @@ do_handle_call({get, Key}, _From, #state{mst = MST, overlay = Overlay} = State) 
     {reply, Reply, State};
 do_handle_call(root_hash, _From, #state{mst = MST} = State) ->
     {reply, bondy_mst:root(MST), State};
-do_handle_call(aae_root, _From, #state{mst = MST} = State) ->
-    case bondy_mst:root(MST) of
-        undefined ->
-            {reply, undefined, State#state{unservable_since = undefined}};
-        Root ->
-            case State#state.aae_root_check of
-                {Root, true} ->
-                    {reply, Root, State};
-                {Root, false} ->
-                    {reply, undefined, State};
-                _ ->
-                    Servable = [] =:= bondy_mst:missing_set(MST, Root),
-                    Servable orelse
-                        ?LOG_WARNING(#{
-                            description =>
-                                "Refusing to advertise a dangling MST root "
-                                "over anti-entropy; advertising empty so peers "
-                                "do not pull unservable pages. Transient "
-                                "(truncate/GC race) heals next round; a "
-                                "PERSISTENT streak triggers the compaction-"
-                                "path self-heal (mst_rebuilt).",
-                            instance_id => State#state.instance_id,
-                            root => Root
-                        }),
-                    Since =
-                        case Servable of
-                            true ->
-                                undefined;
-                            false when
-                                State#state.unservable_since =/=
-                                    undefined
-                            ->
-                                State#state.unservable_since;
-                            false ->
-                                erlang:monotonic_time(millisecond)
-                        end,
-                    State1 = State#state{
-                        aae_root_check = {Root, Servable},
-                        unservable_since = Since
-                    },
-                    Reply =
-                        case Servable of
-                            true -> Root;
-                            false -> undefined
-                        end,
-                    {reply, Reply, State1}
-            end
-    end;
+do_handle_call(aae_root, _From, #state{} = State0) ->
+    {Servable, State} = servable_root(State0),
+    Reply =
+        case Servable of
+            true -> bondy_mst:root(State#state.mst);
+            false -> undefined
+        end,
+    {reply, Reply, State};
 do_handle_call(diagnose_root, _From, #state{mst = MST} = State) ->
     Reply =
         case bondy_mst:root(MST) of
@@ -3339,17 +3218,18 @@ do_handle_call(
     OverlayQueue = overlay_range_tab(Overlay, From, To),
     Result = fold_range_merged(MST, From, To, OverlayQueue, Fun, Acc0),
     {reply, Result, State};
-do_handle_call({truncate_prefix, Watermark}, _From, #state{mst = MST0} = State) ->
-    %% Operator-driven prefix removal: `bondy_mst:truncate/2` drops every key
-    %% `=< Watermark` in an O(log N) left-spine rewrite, the removed events
-    %% counted first for `live_size` bookkeeping. `state.watermark` advances
-    %% too, so the receive-side filter rejects re-shipped peer events at or
-    %% below it — without that, peers that have not seen the truncate keep
-    %% re-shipping what was just dropped. The advance is monotone, so a lower
-    %% Watermark cannot regress a compaction-set value. No snapshot is written:
-    %% operator truncate is documented lossy for bootstrap consumers.
+do_handle_call(
+    {truncate_prefix, _Watermark}, _From, #state{refold = Refold} = State
+) when Refold =/= none ->
+    {reply, {error, {refold_owed, State#state.instance_id}}, State};
+do_handle_call(
+    {truncate_prefix, Watermark}, _From, #state{mst = MST0} = State0
+) ->
+    %% `state.watermark` advances too, so the receive-side filter rejects
+    %% re-shipped peer events at or below it. The advance is monotone, so a
+    %% lower Watermark cannot regress a compaction-set value.
     Removed = count_in_open_range(MST0, undefined, Watermark),
-    MST1 = bondy_mst:truncate(MST0, Watermark),
+    {MST1, State} = truncate_below_or_equal(MST0, Watermark, own, State0),
     NewWatermark = advance_watermark(State#state.watermark, Watermark),
     _ = bondy_connect_hlc:update(
         State#state.hlc, bondy_oplog_event:key_hlc(Watermark)
@@ -3480,20 +3360,14 @@ do_handle_call(persist_frontier, _From, State) ->
         {ok, State1} -> {reply, ok, State1};
         {error, _} = Error -> {reply, Error, State}
     end;
-do_handle_call(begin_install, _From, #state{refold = installing} = State) ->
-    {reply, ok, State};
-do_handle_call(begin_install, _From, #state{instance_id = Id} = State0) ->
-    case bondy_oplog_catalogue_cursor:any_open(Id) of
-        true ->
-            {reply, {error, {serving_snapshot, Id}}, State0};
-        false ->
-            case maybe_persist_frontier(State0#state{refold = installing}) of
-                {ok, State} ->
-                    ok = bondy_oplog_catalogue_cursor:discard_instance(Id),
-                    {reply, ok, State};
-                {error, _} = Error ->
-                    {reply, Error, State0}
-            end
+do_handle_call(
+    {begin_install, PeerFrontier}, _From, #state{instance_id = Id} = State
+) ->
+    case bondy_oplog_registry:uncovered_truncation(Id, PeerFrontier) of
+        Uncovered when Uncovered =:= #{} ->
+            mark_install(State);
+        Uncovered ->
+            {reply, {error, {source_behind_truncation, Uncovered}}, State}
     end;
 do_handle_call(refolded, _From, State) ->
     {reply, ok, State#state{replayed = true}};
@@ -3652,32 +3526,7 @@ do_handle_call(
     ),
     {reply, Reply, State#state{ctx_guard = Guard1}};
 do_handle_call(
-    rederive_projection,
-    _From,
-    #state{fused_drain = undefined} = State
-) ->
-    {reply, {error, no_cell_apply_target}, State};
-do_handle_call(
-    rederive_projection,
-    _From,
-    #state{instance_id = Id, mst = MST, fused_drain = FD} = State
-) ->
-    %% The applier's `rederive_projection` does the same: the reset and the
-    %% replay run in one process, so no apply claims between them.
-    ok = bondy_oplog_registry:reset_frontier(Id),
-    State1 = fused_replay_cell_events(
-        State#state{
-            fused_drain = FD#fused_drain{last_replayed_root = undefined}
-        }
-    ),
-    telemetry:execute(
-        [bondy_oplog, instance, rederive_projection],
-        #{pairs => compute_live_size(MST)},
-        #{instance_id => Id}
-    ),
-    {reply, ok, State1};
-do_handle_call(
-    {install_catalogue_batch, _Cells},
+    {begin_stage, _Buckets, _PeerFrontier},
     _From,
     #state{fused_drain = undefined} = State
 ) ->
@@ -3686,20 +3535,80 @@ do_handle_call(
     %% call.
     {reply, {error, no_cell_apply_target}, State};
 do_handle_call(
-    {install_catalogue_batch, Cells},
+    {begin_stage, Buckets, PeerFrontier},
+    _From,
+    #state{fused_drain = #fused_drain{install_stage = Stage0} = FD} = State
+) ->
+    {Reply, Stage} = bondy_oplog_applier:open_stage(
+        Buckets, PeerFrontier, Stage0
+    ),
+    {reply, Reply, State#state{
+        fused_drain = FD#fused_drain{install_stage = Stage}
+    }};
+do_handle_call(
+    {install_catalogue_batch, _Token, _Cells},
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    {reply, {error, no_cell_apply_target}, State};
+do_handle_call(
+    {install_catalogue_batch, Token, Cells},
+    _From,
+    #state{fused_drain = #fused_drain{install_stage = Stage}} = State
+) ->
+    {reply, bondy_oplog_applier:stage_cells(Token, Cells, Stage), State};
+do_handle_call(
+    {abort_install, _Token}, _From, #state{fused_drain = undefined} = State
+) ->
+    {reply, {error, no_cell_apply_target}, State};
+do_handle_call(
+    {abort_install, Token},
+    _From,
+    #state{fused_drain = #fused_drain{install_stage = Stage0} = FD} = State
+) ->
+    {Reply, Stage} = bondy_oplog_applier:drop_stage(Token, Stage0),
+    {reply, Reply, State#state{
+        fused_drain = FD#fused_drain{install_stage = Stage}
+    }};
+do_handle_call(
+    {rederive_projection, _Token},
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    {reply, {error, no_cell_apply_target}, State};
+do_handle_call(
+    {rederive_projection, Token},
     _From,
     #state{
         instance_id = Id,
-        fused_drain = #fused_drain{cell_apply_source = Source}
+        mst = MST,
+        fused_drain =
+            #fused_drain{cell_apply_source = Source, install_stage = Stage0} =
+                FD
     } = State
 ) ->
-    %% Mirrors `bondy_oplog_applier`'s `{install_catalogue_batch, _}`
-    %% handler — delegates to the shared applier-state-free body over THIS
-    %% instance's own cell-apply source (a fused instance has no separate
-    %% applier to delegate to). Runs in the gen_server, serialized with
-    %% the fused drain, so an install never interleaves with an apply.
-    Reply = bondy_oplog_applier:install_catalogue_cells(Id, Source, Cells),
-    {reply, Reply, State};
+    case bondy_oplog_applier:commit_stage(Token, Id, Source, Stage0) of
+        {{error, install_superseded} = Superseded, _} ->
+            {reply, Superseded, State};
+        {Installed, Stage} ->
+            %% As the applier's `rederive_projection`: the install, the
+            %% frontier and the replay run in one call, so nothing folds or
+            %% claims between them.
+            State1 = fused_replay_cell_events(
+                State#state{
+                    ctx_guard = bondy_oplog_ctx_guard:new(),
+                    fused_drain = FD#fused_drain{
+                        install_stage = Stage, last_replayed_root = undefined
+                    }
+                }
+            ),
+            telemetry:execute(
+                [bondy_oplog, instance, rederive_projection],
+                #{pairs => compute_live_size(MST)},
+                #{instance_id => Id}
+            ),
+            {reply, Installed, State1}
+    end;
 do_handle_call(
     cell_apply_target,
     _From,
@@ -4398,7 +4307,7 @@ fused_replay_diff(
     %% the AE-freshness shards so a secondary-index read does not
     %% refuse as stale.
     ok = fused_bump_ae_targets(FD#fused_drain.ae_targets),
-    %% Prefix-closure hold: keep the cursor when events were held
+    %% Causal hold: keep the cursor when events were held
     %% so the next replay re-presents them;
     %% see `bondy_oplog_cell_apply:apply_cell_pairs_mux/5`.
     case Held of
@@ -4426,11 +4335,11 @@ maybe_refolded(_LastRoot, State) ->
 %% watermark door, replays (fused) or schedules the applier replay
 %% (non-fused), consumes the session's peer-root pin, and returns the
 %% gen_server reply tuple.
-do_integrate_peer_root(PeerRoot, #state{mst = MST0} = State) ->
+do_integrate_peer_root(PeerRoot, #state{mst = MST0} = State0) ->
     MST1 = bondy_mst:merge(MST0, MST0, PeerRoot),
     %% Watermark filter — see `watermark_door/2`, which never truncates a
     %% never-applied event.
-    MST2 = watermark_door(State, MST1),
+    {MST2, State} = watermark_door(State0, MST1),
     %% HLC update: events received via merge may carry HLCs higher than
     %% our local clock. Advance the HLC to dominate the merged tree's
     %% max key so subsequent local appends sort after every received
@@ -4513,24 +4422,25 @@ deliver_remote(#state{} = State) ->
 %% (`compaction_witnesses/1`), WITHOUT ever dropping a never-applied event. An
 %% event not every witness confirms stays in the tree, so this node can still
 %% ship it to the member that lacks it; dropping it on key order alone leaves
-%% that member a frontier gap (`proofs/tla/ConfirmedCompaction_RootVV3_Door_NoGap.cfg`
-%% against `_Door_Confirmed.cfg`; `bondy_oplog_bootstrap_rederive_test:
+%% that member a frontier gap (`proofs/tla/ConfirmedCompaction_3R_DoorDrop.cfg`
+%% violates `NoGap`, `_3R.cfg` holds it; `bondy_oplog_bootstrap_rederive_test:
 %% applier_door_keeps_what_a_member_lacks/0`). Dropping the confirmed ones is
 %% what stops two replicas that both compacted re-shipping them to each other
-%% (`_RootVV2_Door_Confirmed_Live.cfg` converges, `_Door_Keep_Live.cfg` does
-%% not).
-watermark_door(#state{watermark = undefined}, MST) ->
-    MST;
+%% (`_2R_Async_Live.cfg` converges, `_2R_Async_DoorKeep_Live.cfg` does not).
+watermark_door(#state{watermark = undefined} = State, MST) ->
+    {MST, State};
+watermark_door(#state{refold = Refold} = State, MST) when Refold =/= none ->
+    {MST, State};
 watermark_door(#state{watermark = W} = State, MST) ->
     case mst_has_entries_at_or_below(MST, W) of
         false ->
-            MST;
+            {MST, State};
         true ->
-            case witnesses(State#state.instance_id, State#state.fused) of
+            case compaction_witnesses(State#state.instance_id) of
                 {ok, PeerVVs} ->
                     trim_confirmed(State, MST, member_vvs(State, PeerVVs));
                 {error, _} ->
-                    MST
+                    {MST, State}
             end
     end.
 
@@ -4547,8 +4457,8 @@ watermark_door(#state{watermark = W} = State, MST) ->
 %%   replay folds the held events and a later pass truncates them.
 trim_confirmed(#state{watermark = W} = State, MST, Witnesses) ->
     case confirmed_point(MST, W, Witnesses) of
-        undefined -> MST;
-        Point -> door_truncate(State, MST, Point)
+        undefined -> {MST, State};
+        Point -> door_truncate(State, MST, Point, meet(Witnesses))
     end.
 
 %% @private
@@ -4559,31 +4469,50 @@ confirmed_point(_MST, _W, []) ->
 confirmed_point(MST, W, Witnesses) ->
     case compute_frontier_for(MST, Witnesses) of
         undefined -> undefined;
+        unservable -> undefined;
         Frontier -> min(Frontier, W)
     end.
 
 %% @private
-door_truncate(#state{instance_id = Id} = State, MST, Point) ->
+door_truncate(#state{instance_id = Id} = State, MST, Point, Licensed) ->
     case never_applied_at_or_below(Id, MST, Point) of
         [] ->
-            truncate_below_or_equal(MST, Point, State);
+            truncate_below_or_equal(MST, Point, Licensed, State);
         Doored ->
             ok = door_fold(State, Doored),
             case never_applied_at_or_below(Id, MST, Point) of
                 [] ->
                     ok = door_report(Id, folded, Doored),
-                    truncate_below_or_equal(MST, Point, State);
+                    truncate_below_or_equal(MST, Point, Licensed, State);
                 Held ->
                     ok = door_report(Id, held, Held),
                     MinHeld = lists:min([K || {K, _} <- Held]),
                     case bondy_mst:last_n(MST, MinHeld, 1) of
                         [{K, _V}] ->
-                            truncate_below_or_equal(MST, K, State);
+                            truncate_below_or_equal(MST, K, Licensed, State);
                         [] ->
-                            MST
+                            {MST, State}
                     end
             end
     end.
+
+%% @private
+%% What every one of `VVs` claims: their pointwise minimum. A witness with no
+%% reported frontier claims nothing.
+meet([VV | VVs]) ->
+    lists:foldl(
+        fun(V, Acc) ->
+            maps:intersect_with(
+                fun(_O, A, B) -> min(A, B) end, Acc, reported(V)
+            )
+        end,
+        reported(VV),
+        VVs
+    ).
+
+%% @private
+reported(undefined) -> #{};
+reported(VV) when is_map(VV) -> VV.
 
 %% @private
 %% `{Key, Value}` entries at or below `W` whose `{Origin, Seq}` exceeds
@@ -4621,19 +4550,20 @@ never_applied(K, {VV, Retired}) ->
         not bondy_oplog_event:covered(K, VV).
 
 %% @private
-%% The smallest tree key at or below `Bound` that the projection has not
-%% applied, or `undefined`. Reads sealed pages, so it must run in the instance
-%% process.
+%% The smallest readable tree key at or below `Bound` that the projection has
+%% not applied, or `undefined`. Reads sealed pages, so it must run in the
+%% instance process.
 first_never_applied_at_or_below(Id, MST, Bound) ->
-    first_unconfirmed(MST, [applied_witness(Id)], Bound).
+    first_unconfirmed(MST, [applied_witness(Id)], Bound, skip).
 
 %% @private
 %% The smallest tree key at or below `Bound` (`undefined`: no bound) that some
 %% witness `{VV, Retired}` has never applied (`never_applied/2`), or
 %% `undefined`. Walks the tree in key order and stops at the first such key or
 %% the first key above `Bound` (`bondy_mst:fold` has no early exit, so the stop
-%% is a throw): O(confirmed prefix), never O(tree).
-first_unconfirmed(MST, Witnesses, Bound) ->
+%% is a throw): O(confirmed prefix), never O(tree). `Missing` is the fold's
+%% `missing` option, which decides what the walk does at a page the store lacks.
+first_unconfirmed(MST, Witnesses, Bound, Missing) ->
     try
         bondy_mst:fold(
             MST,
@@ -4645,7 +4575,8 @@ first_unconfirmed(MST, Witnesses, Bound) ->
                 (_, Acc) ->
                     throw({?MODULE, hold, Acc})
             end,
-            undefined
+            undefined,
+            [{missing, Missing}]
         )
     catch
         throw:{?MODULE, hold, Result} -> Result
@@ -4661,10 +4592,12 @@ first_unconfirmed(MST, Witnesses, Bound) ->
 %% below the current watermark (watermark and checkpoint are monotone, so a held
 %% key at or below the watermark is left to the door's next pass and the
 %% applier's replay).
-%% `proofs/tla/ConfirmedCompaction_RootVV2_AsyncSweep_NoCap.cfg` is the 7-step
-%% drop without this cap; `_RootVV2_AsyncSweep.cfg` and
-%% `proofs/isabelle/Confirmed_Compaction.thy` (`no_drop`) are the cap. Pinned by
-%% `bondy_oplog_compaction_fused_test`.
+%% The retention frontier and the rebuild frontier are confirmed by no
+%% witness, so only this cap keeps them off un-applied keys
+%% (`proofs/tla/ConfirmedCompaction_2R_Seq2_Lost_Uncapped.cfg` violates
+%% `NoDrop`). A confirmed frontier is meant to stop below them already, since
+%% this replica's own durable frontier is one of its witnesses:
+%% `_2R_Async_NoCap.cfg` finds no `NoDrop` violation without the cap.
 capped_truncation_point(
     #state{instance_id = Id, mst = MST, watermark = W0}, Frontier
 ) ->
@@ -4689,111 +4622,6 @@ capped_truncation_point(
             ),
             Point
     end.
-
-%% @private
-%% THE UNSERVABLE-OWN-ROOT SELF-HEAL (the broken-node half of dangling-root
-%% recovery; the peer half is the sync scheduler's `root_unservable_behind`
-%% escalation). A fused instance whose own root has lost pages can never serve a
-%% complete page round again, so NOTHING on the shard ever earns a
-%% peer-confirmed truncation license: the MST grows forever and the shard is an
-%% AE blackout even for new writes. The events are already lost as replication
-%% currency — the tree cannot serve them — but the PROJECTION is intact and the
-%% applied VV witnesses everything, so the honest recovery is to REBUILD: drop
-%% the unservable tree, advance the watermark past the dropped range, keep
-%% projection + frontier, and let AE resume on the fresh servable tree.
-%%
-%% Gates, in order:
-%% - fused only (the s16 class; a durable instance heals
-%%   its store via reboot/WAL replay);
-%% - the unservable streak must exceed ?SELF_HEAL_UNSERVABLE_AFTER_MS
-%%   (transient truncate/GC-race unservability clears within a round);
-%% - re-verified against the CURRENT root right here (the streak
-%%   timestamp alone could be stale);
-%% - every recency-live peer's recorded frontier (peer_state, captured
-%%   by our own successful rounds) must DOMINATE our applied VV — i.e.
-%%   our surplus has already drained to the peers (normally via their
-%%   unservable-behind catalogue bootstraps), so dropping our events
-%%   strands nobody. Vacuous with no live peers: solo, there is no one
-%%   to serve; and a later-returning peer recovers via the frontier-gap
-%%   → catalogue-bootstrap chain against our intact projection.
-maybe_self_heal_unservable(
-    #state{
-        fused = true,
-        unservable_since = Since,
-        mst = MST,
-        instance_id = Id
-    } = State
-) when Since =/= undefined ->
-    Now = erlang:monotonic_time(millisecond),
-    Root = bondy_mst:root(MST),
-    StillUnservable =
-        Root =/= undefined andalso
-            [] =/= bondy_mst:missing_set(MST, Root),
-    Threshold = application:get_env(
-        bondy_oplog,
-        unservable_self_heal_after_ms,
-        ?SELF_HEAL_UNSERVABLE_AFTER_MS
-    ),
-    case
-        Now - Since > Threshold andalso
-            StillUnservable andalso live_peers_dominate(Id)
-    of
-        false ->
-            case StillUnservable of
-                true -> State;
-                false -> State#state{unservable_since = undefined}
-            end;
-        true ->
-            {LastKey, _} = bondy_mst:last(MST),
-            Dropped = State#state.live_size,
-            MST1 = truncate_below_or_equal(MST, LastKey, State),
-            _ = bondy_connect_hlc:update(
-                State#state.hlc, bondy_oplog_event:key_hlc(LastKey)
-            ),
-            telemetry:execute(
-                [bondy_oplog, instance, mst_rebuilt],
-                #{count => 1, dropped => Dropped},
-                #{instance_id => Id, reason => unservable_root}
-            ),
-            ?LOG_NOTICE(#{
-                description =>
-                    "Rebuilt an unservable MST (own root with lost "
-                    "pages): dropped the tree, advanced the watermark "
-                    "past it and kept the projection + applied "
-                    "frontier. Every recency-live peer's frontier "
-                    "dominates ours, so no peer is stranded; AE "
-                    "resumes on the fresh tree.",
-                instance_id => Id,
-                dropped_events => Dropped,
-                unservable_for_ms => Now - Since
-            }),
-            State#state{
-                mst = MST1,
-                watermark = advance_watermark(State#state.watermark, LastKey),
-                live_size = compute_live_size(MST1),
-                aae_root_check = undefined,
-                unservable_since = undefined,
-                fused_drain = fused_reanchor_cursor(
-                    State#state.fused_drain, bondy_mst:root(MST1)
-                )
-            }
-    end;
-maybe_self_heal_unservable(State) ->
-    State.
-
-%% @private
-%% True when every recency-live peer we have completed a round against
-%% has a recorded durable frontier that covers ours per-origin. A peer
-%% with NO recorded frontier blocks the heal — unknown is not coverage.
-live_peers_dominate(Id) ->
-    OurVV = applied_vv(Id),
-    lists:all(
-        fun
-            (#{frontier := F}) when is_map(F) -> dominates(F, OurVV);
-            (_) -> false
-        end,
-        bondy_oplog_peer_state:get_instance_peer_states(Id)
-    ).
 
 %% @private
 dominates(PeerVV, OurVV) ->
@@ -5095,6 +4923,24 @@ frontier_checkpoint(FrontierVV, MintedSeq, #state{} = State) ->
         checkpoint_meta(State)}.
 
 %% @private
+%% Writes the re-fold mark, unless it already says `installing`.
+mark_install(#state{refold = installing} = State) ->
+    {reply, ok, State};
+mark_install(#state{instance_id = Id} = State0) ->
+    case bondy_oplog_catalogue_cursor:any_open(Id) of
+        true ->
+            {reply, {error, {serving_snapshot, Id}}, State0};
+        false ->
+            case maybe_persist_frontier(State0#state{refold = installing}) of
+                {ok, State} ->
+                    ok = bondy_oplog_catalogue_cursor:discard_instance(Id),
+                    {reply, ok, State};
+                {error, _} = Error ->
+                    {reply, Error, State0}
+            end
+    end.
+
+%% @private
 serving_reply(#state{refold = none, replayed = true}) -> ok;
 serving_reply(#state{instance_id = Id}) -> {error, {refold_owed, Id}}.
 
@@ -5115,26 +4961,40 @@ durable_frontier_of(#state{backend = Backend} = State) ->
     end.
 
 %% @private
-checkpoint_meta(#state{frontier_provenance = Provenance, refold = none}) ->
-    #{provenance => Provenance};
-checkpoint_meta(#state{frontier_provenance = Provenance}) ->
-    #{provenance => Provenance, refold_owed => true}.
+checkpoint_meta(#state{instance_id = Id, frontier_provenance = P} = State) ->
+    Meta = #{
+        provenance => P, truncated => bondy_oplog_registry:truncated(Id)
+    },
+    case State#state.refold of
+        none -> Meta;
+        _ -> Meta#{refold_owed => true}
+    end.
 
 %% @private
 %% The applied frontier at boot, and its provenance. A checkpoint carrying the
 %% re-fold mark was written while a catalogue install may have replaced cells
 %% its frontier claims, so neither that frontier nor the one a subtree restart
-%% leaves in the registry row is trusted: the frontier is emptied, the replay
-%% anchor then owes a fold (`compute_replay_anchor/1`), and the full re-fold
-%% rebuilds it (`proofs/tla/LiveRebootstrapRefold_Proposed_Crash.cfg`). Nothing
-%% of an emptied frontier is inherited, so its provenance is `folded`, and it
-%% holds nothing durably.
+%% leaves in the registry row is trusted: the frontier is reset to the
+%% truncation record, restored first (`bondy_oplog_registry:replace_frontier/2`),
+%% the replay anchor then owes a fold (`compute_replay_anchor/1`), and the full
+%% re-fold rebuilds the rest (`proofs/tla/LiveRebootstrapRefold_Proposed_Crash.cfg`).
+%% A reset frontier inherits only the record, so it is `folded` when the record
+%% is empty and keeps the checkpoint's provenance otherwise. It holds nothing
+%% durably.
 boot_frontier(InstanceId, Checkpoint) ->
+    ok = bondy_oplog_registry:raise_truncated(
+        InstanceId, checkpoint_truncated(Checkpoint)
+    ),
     VV = restored_frontier(Checkpoint),
     case refold_owed(Checkpoint) of
         true ->
-            ok = bondy_oplog_registry:reset_frontier(InstanceId),
-            {refold, folded, VV};
+            ok = bondy_oplog_registry:replace_frontier(InstanceId, #{}),
+            Provenance =
+                case bondy_oplog_registry:frontier(InstanceId) of
+                    Floor when Floor =:= #{} -> folded;
+                    _ -> checkpoint_provenance(Checkpoint)
+                end,
+            {refold, Provenance, VV};
         false ->
             ok = bondy_oplog_registry:merge_frontier(InstanceId, VV),
             {none, checkpoint_provenance(Checkpoint), VV}
@@ -5148,6 +5008,14 @@ restored_frontier(Checkpoint) ->
         true -> #{};
         false -> checkpoint_frontier(Checkpoint)
     end.
+
+%% @private
+checkpoint_truncated(
+    {_W, {projection_managed, frontier, _VV, _M, #{truncated := VV}}}
+) ->
+    VV;
+checkpoint_truncated(_Checkpoint) ->
+    #{}.
 
 %% @private
 refold_owed(
@@ -6344,9 +6212,9 @@ backpressure_admit(
 
 %% @private
 %% Monotone watermark advance: returns whichever of the two values is
-%% higher, treating `undefined` as the bottom. Used by both compaction
-%% (via direct assignment, which is safe by construction — compaction
-%% rejects frontiers ≤ current watermark) and operator-driven
+%% higher, treating `undefined` as the bottom. Compaction assigns its point
+%% directly, never below the current watermark (`run_compaction/2` and
+%% `rebuild_frontier/2`); this function serves operator-driven
 %% `truncate_prefix`, where the caller's value could in principle be
 %% lower than a previously installed compaction watermark.
 advance_watermark(undefined, New) -> New;
@@ -6354,49 +6222,48 @@ advance_watermark(Cur, New) when New > Cur -> New;
 advance_watermark(Cur, _New) -> Cur.
 
 %% @private
-%% Drops every key `=< Watermark`, keeping the suffix. Delegates to
-%% `bondy_mst:truncate/2`, a structural prefix-truncate that rewrites only the
-%% tree's left spine: its cost is independent of the prefix size, which is what
-%% keeps the live MST bounded under sustained write saturation, where a per-key
-%% delete loop cannot keep pace. The result is byte-identical to the equivalent
-%% delete sequence (the MST is history-independent), so the root peers sync
-%% against is unchanged.
+%% The cut: drops every key `=< Point` and returns the new tree and state. It is
+%% meant to be the only truncation of the tree: only `cut/3` calls
+%% `bondy_mst:truncate/2`, and only this function calls `cut/3`.
 %%
-%% Delegates to `bondy_mst:truncate/2', a structural prefix-truncate that
-%% rewrites only the tree's left spine. Its cost is independent of the
-%% prefix size, which is what keeps the live MST bounded under sustained
-%% write saturation; a per-key delete loop cannot keep pace with the write
-%% rate. The result is byte-identical to the equivalent delete sequence
-%% (the MST is history-independent), so the root peers sync against is
-%% unchanged.
+%% `Licensed` bounds every event at or below `Point` that the applied frontier
+%% claims: the meet of the confirming witnesses, or `own` for this replica's
+%% applied frontier. It raises the truncation record before the cut, and a
+%% durable backend checkpoints the record first whenever its checkpoint does not
+%% cover it, as the model's `Reserve` precedes its `Cut`
+%% (`proofs/tla/JoinInstall.tla`). An install whose source does not cover the
+%% record is refused (`begin_install/3`). Matches only while no re-fold mark is
+%% held, so the record cannot move under an install.
 %%
-%% Truncation only UNLINKS the dropped subtrees: their interior pages are
-%% left unreachable for the store's collector, and nothing else ever runs
-%% it. On the ephemeral (ETS) backend that leaked the whole dropped prefix
-%% into the page table — shards reading 0 events still pinned hundreds of
-%% MB — so the mark-and-sweep runs HERE, at the only moment bulk garbage
-%% is created. Not run for the pack backend, whose reclamation is a
-%% sealed-pack rewrite with its own lifecycle (see
-%% `maybe_collect_durable/1'). There, a truncation that drops anything first
-%% syncs the projection (`sync_projection/1`), and a failed sync raises: the
-%% truncate itself may write the new root to disk (`bondy_mst_store:set_root/2`).
-truncate_below_or_equal(MST, Watermark, #state{backend = ets} = State) ->
-    %% The session-pinned peer roots (`pinned_roots/1`, see `pin_peer_root/2`)
-    %% protect pulled-but-not-yet-merged sync pages from the sweep —
-    %% they are unreachable from OUR current root until
-    %% `integrate_peer_root/2` merges them, and without the pin every
-    %% compaction cycle during a multi-round pull collected the earlier
-    %% rounds' pages (observed as silent partial merges — see
-    %% `do_integrate_peer_root/2`). `bondy_mst:gc/2` adds the current
-    %% root itself.
-    bondy_mst:gc(bondy_mst:truncate(MST, Watermark), pinned_roots(State));
-truncate_below_or_equal(MST, Watermark, #state{instance_id = Id}) ->
-    case
-        mst_has_entries_at_or_below(MST, Watermark) andalso
-            sync_projection(Id)
-    of
+%% On the ETS backend the cut also runs the store's mark-and-sweep: truncation
+%% only unlinks the dropped subtrees, and nothing else collects their pages. The
+%% pack backend reclaims through its own sealed-pack rewrite
+%% (`maybe_collect_durable/1`); there the cut first syncs the projection, and a
+%% failed sync raises, since the truncate may write the new root to disk.
+truncate_below_or_equal(MST, Point, Licensed, #state{refold = none} = State0) ->
+    State = record_truncation(Licensed, State0),
+    {cut(MST, Point, State), State}.
+
+%% @private
+record_truncation(own, #state{instance_id = Id} = State) ->
+    record_truncation(applied_vv(Id), State);
+record_truncation(Licensed, #state{instance_id = Id} = State) ->
+    ok = bondy_oplog_registry:raise_truncated(Id, Licensed),
+    Durable = checkpoint_truncated(State#state.cached_checkpoint),
+    case dominates(Durable, bondy_oplog_registry:truncated(Id)) of
+        true -> State;
+        false -> checkpoint(State)
+    end.
+
+%% @private
+cut(MST, Point, #state{backend = ets} = State) ->
+    %% The session-pinned peer roots (`pin_peer_root/2`) keep pulled but not
+    %% yet merged sync pages from the sweep; `bondy_mst:gc/2` adds our root.
+    bondy_mst:gc(bondy_mst:truncate(MST, Point), pinned_roots(State));
+cut(MST, Point, #state{instance_id = Id}) ->
+    case mst_has_entries_at_or_below(MST, Point) andalso sync_projection(Id) of
         {error, Reason} -> error(Reason);
-        _ -> bondy_mst:truncate(MST, Watermark)
+        _ -> bondy_mst:truncate(MST, Point)
     end.
 
 %% @private
@@ -6412,17 +6279,6 @@ truncate_below_or_equal(MST, Watermark, #state{instance_id = Id}) ->
 %% pack store, on no seal being in flight (a collection rewrites the very packs
 %% a seal is producing), and on at most one collection per
 %% `durable_gc_interval_ms`.
-%%
-%% Runs on the compaction tick (the one periodic in-process hook, alongside
-%% `maybe_self_heal_unservable/1`) rather than per truncation, because a pack
-%% collection is a full sealed-pack REWRITE: `should_compact/3` coalesces
-%% whenever there is more than one sealed pack, so invoking it per cycle would
-%% rewrite the entire sealed set every cycle. Gated on:
-%%
-%%   - the store actually being a pack store (ETS collects inline already);
-%%   - no seal in flight — a collection rewrites the very packs a seal is
-%%     producing;
-%%   - at most one collection per `durable_gc_interval_ms` (default 1 hour).
 %%
 %% It must run HERE, in the instance process: the pack store declares
 %% `process_bound_reads => true` because its sealed-pack fds are owned by this
@@ -6506,24 +6362,21 @@ pinned_roots(#state{pinned_peer_roots = Pins}) ->
 %% gap, raising the VV over a hole. The hold needs neither.)
 do_compact_sync(#state{} = State0, PeerWitnesses) ->
     Started = erlang:monotonic_time(),
-    %% Unservable-own-root self-heal runs on the compaction tick — the
-    %% one periodic in-process hook — BEFORE the frontier computation
-    %% (a rebuilt tree simply compacts as `no_change`).
-    State = checkpoint_moved_frontier(
-        maybe_collect_durable(maybe_self_heal_unservable(State0))
-    ),
+    State = checkpoint_moved_frontier(maybe_collect_durable(State0)),
+    {Reply, State1} = truncate_unmarked(State, Started, PeerWitnesses),
+    ok = publish(State1),
+    {reply, Reply, State1}.
+
+%% @private
+%% The cycle's truncations, none of which runs while the re-fold mark is held
+%% (`truncate_below_or_equal/4`).
+truncate_unmarked(#state{refold = none} = State, Started, PeerWitnesses) ->
     Witnesses = member_vvs(State, PeerWitnesses),
-    Result = run_compaction(
-        State#state.instance_id,
-        State#state.mst,
-        State#state.watermark,
-        Witnesses,
-        retention_ctx(State)
-    ),
+    Result = run_compaction(State, Witnesses),
     {Reply, State1} = commit_compaction(State, Started, Result),
-    {Reply1, State2} = trim_below_watermark(Reply, State1, Witnesses),
-    ok = publish(State2),
-    {reply, Reply1, State2}.
+    trim_below_watermark(Reply, State1, Witnesses);
+truncate_unmarked(State, _Started, _PeerWitnesses) ->
+    {{ok, no_change}, State}.
 
 %% @private
 %% The compaction cycle's share of the door's rule, when the confirmed frontier
@@ -6540,40 +6393,39 @@ trim_below_watermark({ok, no_change} = Reply, State, Witnesses) ->
         true ->
             Before = compute_live_size(MST0),
             ok = drive_secondary_indexes(State),
-            MST = trim_confirmed(State, MST0, Witnesses),
+            {MST, State1} = trim_confirmed(State, MST0, Witnesses),
             LiveSize = compute_live_size(MST),
             Reply1 =
                 case Before - LiveSize of
                     0 -> Reply;
                     Trimmed -> {ok, {compacted, W, Trimmed}}
                 end,
-            {Reply1, State#state{mst = MST, live_size = LiveSize}}
+            {Reply1, State1#state{mst = MST, live_size = LiveSize}}
     end;
 trim_below_watermark(Reply, State, _Witnesses) ->
     {Reply, State}.
 
 %% @private
 run_compaction(
-    InstanceId,
-    MST,
-    Watermark0,
-    Witnesses,
-    Retention
+    #state{instance_id = InstanceId, mst = MST, watermark = Watermark0} = State,
+    Witnesses
 ) ->
     try
         case compute_frontier_for(MST, Witnesses) of
+            unservable ->
+                rebuild_frontier(State, Witnesses);
             undefined ->
-                retention(InstanceId, MST, Watermark0, Retention);
+                retention(InstanceId, MST, Watermark0, retention_ctx(State));
             Frontier when
                 Watermark0 =/= undefined,
                 Frontier =< Watermark0
             ->
-                retention(InstanceId, MST, Watermark0, Retention);
+                retention(InstanceId, MST, Watermark0, retention_ctx(State));
             Frontier ->
                 %% The projection is the durable checkpoint, so compaction
                 %% only bounds the MST: no per-cycle `interpret_cog` re-fold of
                 %% the stable range. `commit_compaction/3` truncates.
-                {ok, {catalogue_compacted, Frontier}}
+                {ok, {catalogue_compacted, Frontier, meet(Witnesses)}}
         end
     catch
         Class:Reason:Stack ->
@@ -6588,10 +6440,68 @@ run_compaction(
     end.
 
 %% @private
+%% The frontier of a tree whose own root has lost pages: the whole tree.
+%% It applies only once every witness covers the applied frontier of this
+%% replica, so every member holds every event this replica applied
+%% (`proofs/tla/ConfirmedCompaction_3R_Lost.cfg` holds `NoStrand`;
+%% `_3R_Lost_Ungated.cfg` violates it). The point is the largest readable key,
+%% or the watermark when that is higher. The truncation site caps it below the
+%% first readable key this replica has not applied
+%% (`_2R_Seq2_Lost_Uncapped.cfg` violates `NoDrop`), and the lost pages above
+%% the cap wait for a later cycle (`_2R_Async_Lost_Live.cfg` holds
+%% `Convergence`). An uncapped point is at or above every readable key, and
+%% `bondy_mst:truncate/2` then empties the tree
+%% (`bondy_oplog_compaction_fused_test:unservable_own_root_self_heals_when_right_edge_lost/0`).
+rebuild_frontier(State, Witnesses) ->
+    Applied = applied_vv(State#state.instance_id),
+    Covered = lists:all(
+        fun(VV) -> dominates(reported(VV), Applied) end, Witnesses
+    ),
+    Readable =
+        case bondy_mst:last_n(State#state.mst, undefined, 1) of
+            [{K, _V}] -> K;
+            [] -> undefined
+        end,
+    case {Covered, max_key(Readable, State#state.watermark)} of
+        {true, {ok, Point}} ->
+            {ok, {rebuilt, Point, meet(Witnesses)}};
+        _ ->
+            {ok, no_change}
+    end.
+
+%% @private
+%% Whether every page the root reaches is in the store, memoised per root hash
+%% in `aae_root_check`. An empty tree is servable.
+servable_root(#state{mst = MST} = State) ->
+    case bondy_mst:root(MST) of
+        undefined ->
+            {true, State};
+        Root ->
+            case State#state.aae_root_check of
+                {Root, Servable} ->
+                    {Servable, State};
+                _ ->
+                    Servable = [] =:= bondy_mst:missing_set(MST, Root),
+                    Servable orelse
+                        ?LOG_WARNING(#{
+                            description =>
+                                "The MST root has lost pages. Anti-entropy "
+                                "advertises it as empty, so peers pull "
+                                "nothing from it. Compaction rebuilds the "
+                                "tree once every member covers what this "
+                                "replica applied.",
+                            instance_id => State#state.instance_id,
+                            root => Root
+                        }),
+                    {Servable, State#state{aae_root_check = {Root, Servable}}}
+            end
+    end.
+
+%% @private
 %% True iff the MST's smallest key is `=< Watermark`, i.e. the MST still
 %% holds at least one entry the watermark says is already compacted. Event
 %% keys use the MST's default term-order comparator, so `=<` matches the
-%% ordering `truncate_below_or_equal/2` applies.
+%% ordering `truncate_below_or_equal/4` applies.
 mst_has_entries_at_or_below(MST, Watermark) ->
     case bondy_mst:first(MST) of
         undefined -> false;
@@ -6604,36 +6514,43 @@ mst_has_entries_at_or_below(MST, Watermark) ->
 
 -doc """
 The membership set for causal-stability reclamation and MST truncation
-(`compaction_witnesses/1`): the full known Partisan membership minus this node.
+(`compaction_witnesses/1`): `bondy_cluster:members/0` minus this node.
 The ONLY member source either may use.
 
 Deliberately NOT `bondy_oplog_peer_source:peers_for/2` — that returns a random
 sample (default 3), and a sample confirms a frontier the unsampled members
-never saw. `partisan_peer_service:members/0` returns the full known membership
-INCLUDING currently-unreachable peers (membership changes only by a deliberate
-join/leave, never by connectivity), which is what makes a partitioned member
-hold stability down instead of vanishing.
+never saw. The membership lists unreachable members too, which is what makes a
+partitioned member hold stability down instead of vanishing.
 
-Returns `error` — never `[]` — when the membership service is unavailable.
-The two MUST NOT be conflated: `[]` means *solo*, which licenses maximal
-reclamation, while `error` must propagate as "no stability, reclaim nothing".
-Conflating them would let a node that merely cannot see its membership service
-reclaim as though nothing could contradict it.
+`{ok, []}`, no other replica, only with clustering disabled
+(`bondy_cluster:enabled/0`). Every error means "no stability, reclaim
+nothing":
+
+- `{error, no_members}`: clustering is enabled and no other member is listed.
+  That is not evidence of being alone: Partisan keeps no membership across a
+  restart without `partisan_data_dir`, which Bondy does not set
+  (`partisan_full_membership_strategy` starts from this node alone), so it is
+  also a member that has just restarted and not yet rejoined.
+- `{error, membership_unavailable}`: the membership cannot be read.
 """.
--spec reclamation_members() -> {ok, [node()]} | error.
+-spec reclamation_members() ->
+    {ok, [node()]} | {error, no_members | membership_unavailable}.
 
 reclamation_members() ->
-    %% The whole call sequence is protected: a dead or hung peer service EXITS
-    %% the `gen_server` call rather than returning an error tuple, and that
-    %% exit must become `error`, not a crash inside a GC worker (where
-    %% `run_trigger/2` would swallow it into a warning with no signal).
-    try
-        {ok, Members} = partisan_peer_service:members(),
-        true = is_list(Members),
-        {ok, Members -- [partisan:node()]}
+    %% An unavailable membership raises; it must become an error, not a crash
+    %% inside a GC worker, where the scheduler would log it as a warning with
+    %% no signal.
+    try bondy_cluster:members() -- [partisan:node()] of
+        [] ->
+            case bondy_cluster:enabled() of
+                true -> {error, no_members};
+                false -> {ok, []}
+            end;
+        Members ->
+            {ok, Members}
     catch
         _:_ ->
-            error
+            {error, membership_unavailable}
     end.
 
 -doc """
@@ -6641,37 +6558,28 @@ The witnesses MST compaction (`bondy_oplog_compaction:compact/1`) and the
 watermark door truncate on: the durable frontier each peer last reported
 (`bondy_oplog_peer_state`), `undefined` for one it has not.
 
-On an instance that is not fused, every member witnesses, reachable or not:
-the full membership (`reclamation_members/0`), each with a confirmed row
+Every member witnesses, reachable or not, on every instance: the full
+membership (`reclamation_members/0`), each with a confirmed row
 (`bondy_oplog_peer_state:confirmed_peer_states/2`) however long it has been
 silent. A member drops out only through a Partisan `leave`; until then a down
 or partitioned member holds truncation, because truncating what it has not
 received loses for good the writes each side accepted alone, once both sides
-have truncated (`proofs/tla/ConfirmedCompaction_RootVV3_Fresh_Partition.cfg`
-violates `NoLoss` under a recency filter; the `_Members_` configs hold it).
+have truncated (`proofs/tla/ConfirmedCompaction_3R_Fresh_Partition.cfg`
+violates `NoLoss` under a recency filter; `_3R_Partition.cfg` holds it). A
+truncation some member did not confirm also strands that member behind this
+replica's truncation record, so no install from it is ever admitted
+(`proofs/tla/JoinInstall_Truncation_CompactRecorded_Stranded_3R.cfg` violates
+`NoStrandedRecord`; `_CompactMembers.cfg` holds it).
 
 - `{error, {unconfirmed, Members}}`: those members have no confirmed row.
-- `{error, membership_unavailable}`: the membership cannot be read. Not the
-  same as solo, which is `{ok, []}`.
-
-A fused instance (ephemeral, which `bondy_db:assert_fused_requires_ephemeral/2`
-enforces) witnesses the peers heard from within `peer_timeout_ms`
-(`bondy_oplog_peer_state:get_instance_peer_states/1`): its history lives in
-memory, so a down member must not hold it, and it may lose what a silent peer
-alone holds, as its retention policy already may (`validate_retention/2`
-admits retention only on a fused instance).
+- `{error, no_members}` and `{error, membership_unavailable}`: as
+  `reclamation_members/0`.
 """.
 -spec compaction_witnesses(instance_id()) ->
     {ok, [#{binary() => non_neg_integer()} | undefined]}
-    | {error, {unconfirmed, [node()]} | membership_unavailable}.
+    | {error, {unconfirmed, [node()]} | no_members | membership_unavailable}.
 
 compaction_witnesses(InstanceId) when is_binary(InstanceId) ->
-    witnesses(InstanceId, bondy_oplog_registry:fused(InstanceId)).
-
-%% @private
-witnesses(InstanceId, true) ->
-    {ok, peer_vvs(bondy_oplog_peer_state:get_instance_peer_states(InstanceId))};
-witnesses(InstanceId, false) ->
     case reclamation_members() of
         {ok, Members} ->
             case
@@ -6682,8 +6590,8 @@ witnesses(InstanceId, false) ->
                 {ok, States} -> {ok, peer_vvs(States)};
                 {unconfirmed, _} = Unconfirmed -> {error, Unconfirmed}
             end;
-        error ->
-            {error, membership_unavailable}
+        {error, _} = Error ->
+            Error
     end.
 
 %% @private
@@ -6692,10 +6600,15 @@ peer_vvs(States) ->
 
 %% @private
 %% The witnesses a truncation or the reclamation bound needs: every peer's
-%% durable frontier and this replica's own. With no peer there is nothing to
-%% confirm against, and nothing is confirmed.
-member_vvs(_State, []) ->
-    [];
+%% durable frontier and this replica's own. With no peer, clustering disabled
+%% leaves this replica's own frontier the only witness
+%% (`proofs/tla/JoinInstall_Truncation_CompactMembers_Leave.cfg`); clustering
+%% enabled confirms nothing, since only a held cycle then passes no peer.
+member_vvs(State, []) ->
+    case bondy_cluster:enabled() of
+        true -> [];
+        false -> [durable_frontier_of(State)]
+    end;
 member_vvs(State, PeerVVs) ->
     [durable_frontier_of(State) | PeerVVs].
 
@@ -6741,21 +6654,20 @@ The chain runs inside the instance because it owns the MST: membership
 member's durable frontier, this replica's included (`compute_frontier_for/2`)
 → the frontier key's HLC.
 
-**Solo** (`members =:= []`) short-circuits to a fresh local tick: with no
-member that could contradict this node, every event it holds is stable, and —
+With clustering disabled (`bondy_cluster:enabled/0`) the chain short-circuits
+to a fresh local tick: with no replica that could contradict this node, every
+event it holds is stable, and —
 because the clock dominates every held event's HLC (locally minted events by
 construction, remote deliveries by absorption, bootstrap installs by the
 finalize absorb) — a fresh tick strictly exceeds them all. The tick also
-covers the two holes an MST-derived point has: an ex-cluster node whose MST
-has compacted empty, and the tail tombstone a strict `<` bound would
-otherwise never license.
+covers the two holes an MST-derived point has: an MST compacted empty, and the
+tail tombstone a strict `<` bound would otherwise never license.
 
 Every negative outcome names its reason, and callers MUST reclaim nothing on
 any `{error, _}`:
 
-- `{error, membership_unavailable}` — the membership service cannot be read.
-  NOT the same as solo; conflating them would license maximal reclamation on
-  a node that merely cannot see its membership service.
+- `{error, no_members}`, `{error, membership_unavailable}` — as
+  `reclamation_members/0`.
 - `{error, idle}` — this replica's MST holds no events (fully compacted or
   never written): no frontier can exist and there is nothing whose
   stability needs certifying. The steady state of a converged quiescent
@@ -6764,6 +6676,8 @@ any `{error, _}`:
 - `{error, {unconfirmed, Peers}}` — members with no recorded durable frontier;
   a silent member holds stability down instead of vanishing (A4).
 - `{error, no_frontier}` — no local key is confirmed by every member.
+- `{error, unservable}` — the tree walk met a page the store lacks, so it
+  confirms nothing.
 - `{error, non_event_frontier}` — the frontier key is not an event key.
 """.
 -spec stability_point(instance_id() | pid()) ->
@@ -6883,45 +6797,28 @@ reclamation_stalled(InstanceId, Reason) ->
     {error, Reason}.
 
 %% @private
-%% The single point of truth for classifying a `reclamation_members/0` result
-%% into `solo | {clustered, Members} | error`, consumed by
-%% `reclamation_stability_point/1` (CRDT-cell reclamation's solo shortcut).
-%% `reclamation_members/0`'s own contract — never conflate `[]` with `error` —
-%% is preserved verbatim here: `error` in => `error` out, never `solo`. MST/WAL
-%% compaction needs no solo shortcut: `retention_frontier/3` bounds ephemeral
-%% catalogue instances by local policy regardless of membership.
--spec membership_class({ok, [node()]} | error) ->
-    solo | {clustered, [node()]} | error.
-
-membership_class({ok, []}) -> solo;
-membership_class({ok, [_ | _] = Members}) -> {clustered, Members};
-membership_class(error) -> error.
+%% See `stability_point/1`. The flag is read FIRST: the clustering-disabled
+%% carve-out needs only the clock, and an instance with no MST yet must still
+%% answer.
+reclamation_stability_point(State) ->
+    case bondy_cluster:enabled() of
+        false ->
+            {ok, bondy_connect_hlc:now(State#state.hlc)};
+        true ->
+            clustered_stability_point(State, reclamation_members())
+    end.
 
 %% @private
-%% See `stability_point/1`. Membership is read FIRST: the solo carve-out
-%% needs only the clock, and an instance with no MST yet must still answer.
-reclamation_stability_point(State) ->
-    case membership_class(reclamation_members()) of
-        error ->
-            {error, membership_unavailable};
-        solo ->
-            %% Solo: a fresh tick strictly exceeds every event this node
-            %% holds — see `stability_point/1`.
-            {ok, bondy_connect_hlc:now(State#state.hlc)};
-        {clustered, Members} ->
-            case local_mst_empty(State) of
-                true ->
-                    %% Clustered but this replica's tree is empty (fully
-                    %% compacted, or never written): a frontier over local
-                    %% keys cannot exist by construction, and there is
-                    %% nothing whose stability needs certifying. Reported
-                    %% as `idle` — distinct from `unconfirmed`/
-                    %% `no_frontier`, which name actionable conditions —
-                    %% and it clears itself on the next local event.
-                    {error, idle};
-                false ->
-                    confirmed_stability_point(State, Members)
-            end
+clustered_stability_point(_State, {error, _} = Error) ->
+    Error;
+clustered_stability_point(State, {ok, Members}) ->
+    case local_mst_empty(State) of
+        true ->
+            %% An empty tree has no local key to certify; `idle` clears on
+            %% the next local event.
+            {error, idle};
+        false ->
+            confirmed_stability_point(State, Members)
     end.
 
 %% @private
@@ -6949,6 +6846,8 @@ confirmed_stability_point(#state{instance_id = Id, mst = MST} = State, Members) 
 %% `bondy_oplog_gc_scheduler:run_trigger/2` would swallow it into a warning.
 frontier_stability_point(undefined) ->
     {error, no_frontier};
+frontier_stability_point(unservable) ->
+    {error, unservable};
 frontier_stability_point(Key) ->
     case bondy_oplog_event:is_key(Key) of
         true -> {ok, bondy_oplog_event:key_hlc(Key)};
@@ -6966,17 +6865,25 @@ frontier_stability_point(Key) ->
 %% confirms nothing either.
 %%
 %% Confirmation is by checkpointed claims, not receipt: the reclamation bound
-%% walks only the keys the tree still holds, so a key may leave it only once
-%% every member, this replica included, holds its effect durably
-%% (`proofs/tla/JoinInstall.tla`: the `CompactReceipt` configuration is
-%% violated, `CompactDurable` is clean). A frontier survives the member's own
+%% walks only the keys the tree still holds, so a key is meant to leave it
+%% only once every member, this replica included, holds its effect durably
+%% (`proofs/tla/JoinInstall_Truncation_CompactDurable_Crash.cfg` holds; the
+%% receipt ablation, `..._CompactMembers_CompactReceipt.cfg`, finds no
+%% violation at its bounds). A frontier survives the member's own
 %% compaction, so two replicas that both compact keep confirming each other's
 %% prefix (`bondy_oplog_compaction_fused_test:peer_compaction_does_not_stall_ours/0`).
+%%
+%% The result is `unservable` when the walk meets a page the store lacks. The
+%% walk cannot tell whether the members hold the keys on that page, so it
+%% confirms nothing (`proofs/tla/ConfirmedCompaction_3R_Lost.cfg` holds
+%% `NoStrand`; `_3R_Lost_SkipWalk.cfg`, whose walk skips the page, violates it).
 compute_frontier_for(_MST, []) ->
     undefined;
 compute_frontier_for(MST, VVs) ->
     Retired = bondy_oplog_origin_bans:retired_set(),
-    case first_unconfirmed(MST, [{VV, Retired} || VV <- VVs], undefined) of
+    try
+        first_unconfirmed(MST, [{VV, Retired} || VV <- VVs], undefined, throw)
+    of
         undefined ->
             case bondy_mst:last(MST) of
                 {K, _V} -> K;
@@ -6987,6 +6894,8 @@ compute_frontier_for(MST, VVs) ->
                 [{K, _V}] -> K;
                 [] -> undefined
             end
+    catch
+        throw:{missing_page, _} -> unservable
     end.
 
 %% @private
@@ -7046,7 +6955,7 @@ retention(InstanceId, MST, Watermark0, Retention) ->
                 #{count => 1},
                 #{instance_id => InstanceId, kind => Kind}
             ),
-            {ok, {catalogue_compacted, Frontier}}
+            {ok, {catalogue_compacted, Frontier, own}}
     end.
 
 %% @private
@@ -7166,12 +7075,41 @@ commit_compaction(State, Started, {ok, no_change}) ->
 commit_compaction(
     State,
     Started,
-    {ok, {catalogue_compacted, Frontier}}
+    {ok, {catalogue_compacted, Frontier, Licensed}}
 ) ->
     %% The projection is the checkpoint; this only bounds the MST, and
     %% never below a key the projection has not folded
     %% (`capped_truncation_point/2`).
-    finalize_catalogue_compaction(State, Started, Frontier);
+    finalize_catalogue_compaction(State, Started, Frontier, Licensed);
+commit_compaction(State, Started, {ok, {rebuilt, Frontier, Licensed}}) ->
+    case finalize_catalogue_compaction(State, Started, Frontier, Licensed) of
+        {{ok, {compacted, _, Dropped}} = Reply, State1} ->
+            case servable_root(State1) of
+                {true, State2} ->
+                    telemetry:execute(
+                        [bondy_oplog, instance, mst_rebuilt],
+                        #{count => 1, dropped => Dropped},
+                        #{
+                            instance_id => State#state.instance_id,
+                            reason => unservable_root
+                        }
+                    ),
+                    ?LOG_NOTICE(#{
+                        description =>
+                            "Rebuilt an MST whose own root lost pages: every "
+                            "member covers what this replica applied, so the "
+                            "tree was truncated past every lost page and "
+                            "anti-entropy resumes on it.",
+                        instance_id => State#state.instance_id,
+                        dropped_events => Dropped
+                    }),
+                    {Reply, State2};
+                {false, State2} ->
+                    {Reply, State2}
+            end;
+        NotRebuilt ->
+            NotRebuilt
+    end;
 commit_compaction(State, _Started, {error, _} = Error) ->
     {Error, State}.
 
@@ -7190,7 +7128,7 @@ commit_compaction(State, _Started, {error, _} = Error) ->
 %% The requested frontier is first capped below the first never-applied key at
 %% or below it (`capped_truncation_point/2`): "the projection is current up to
 %% `Frontier`" is CHECKED against the applied VV here, not assumed.
-finalize_catalogue_compaction(State0, Started, Frontier0) ->
+finalize_catalogue_compaction(State0, Started, Frontier0, Licensed) ->
     case capped_truncation_point(State0, Frontier0) of
         undefined ->
             %% Nothing may go this cycle: the first un-applied key at or
@@ -7201,11 +7139,13 @@ finalize_catalogue_compaction(State0, Started, Frontier0) ->
             emit_compaction_telemetry(State0, Started, undefined, 0),
             {{ok, no_change}, State0};
         Frontier ->
-            do_finalize_catalogue_compaction(State0, Started, Frontier)
+            do_finalize_catalogue_compaction(
+                State0, Started, Frontier, Licensed
+            )
     end.
 
 %% @private
-do_finalize_catalogue_compaction(State, Started, Frontier) ->
+do_finalize_catalogue_compaction(State, Started, Frontier, Licensed) ->
     %% Index flush barrier. Drive the secondary indexes durably to
     %% >= Frontier BEFORE the MST tail is truncated. Every index op for an
     %% event <= Frontier has already been DISPATCHED to the secondary writers
@@ -7232,21 +7172,21 @@ do_finalize_catalogue_compaction(State, Started, Frontier) ->
     %% (un-truncated) projection; re-deriving the dropped window here would
     %% need the applier.
     ok = drive_secondary_indexes(State),
-    {MST1, TruncateUs} = tc(fun() ->
-        truncate_below_or_equal(State#state.mst, Frontier, State)
+    {{MST1, StateT}, TruncateUs} = tc(fun() ->
+        truncate_below_or_equal(State#state.mst, Frontier, Licensed, State)
     end),
     %% The truncated root is durable BEFORE the checkpoint is written, so the
     %% checkpoint never outruns the root (`bondy_oplog_applier:resume_position/2`
     %% resumes from their max; `bondy_oplog_compaction_root_durability_test`).
     {StateF, FlushUs} = tc(fun() ->
-        flush_mst_root(State#state{mst = MST1})
+        flush_mst_root(StateT#state{mst = MST1})
     end),
     finalize_catalogue_compaction_commit(
         StateF, State, Started, Frontier, TruncateUs, FlushUs
     ).
 
 %% @private
-%% Tail of `finalize_catalogue_compaction/3`, reached once the truncated
+%% Tail of `finalize_catalogue_compaction/4`, reached once the truncated
 %% root is durable. `StateF` carries the flushed MST handle; `State` is the
 %% pre-truncate state (for the live-size delta and telemetry baseline).
 finalize_catalogue_compaction_commit(

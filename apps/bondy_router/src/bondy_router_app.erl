@@ -117,28 +117,26 @@ start_substrate_and_services() ->
     %% dependencies
     {ok, _} = application:ensure_all_started(tuplespace, permanent),
 
-    %% Start Partisan explicitly: bondy_router owns the cluster transport.
-    %% bondy_db is transport-agnostic (it works over disterl or Partisan via
-    %% its callbacks). Partisan was configured by bondy_config:init/1 above.
-    {ok, _} = application:ensure_all_started(partisan, permanent),
+    %% Partisan was configured by bondy_config:init/1 above. A standalone node
+    %% never starts it, so it opens no cluster port
+    %% (bondy_cluster_standalone_SUITE).
+    ok = maybe_start_partisan(bondy_cluster:enabled()),
 
-    %% C-1: refuse to boot an auto-clustering node whose peer plane is insecure
+    %% Refuse to boot an auto-clustering node whose peer plane is insecure
     %% (plaintext or `verify_none`) unless the operator acknowledged it via
     %% `cluster.tls.allow_insecure`. Runs before the substrate/listeners start.
     ok = guard_peer_plane(),
 
-    %% When oplog anti-entropy is enabled (off by default) wire the sync
+    %% When oplog anti-entropy is enabled, wire the sync
     %% scheduler to Partisan BEFORE the substrate starts, so it reads the
     %% peer source / transport from app env at init.
     ok = maybe_setup_oplog_replication(),
 
     %% Start the bondy_db storage substrate (pulls in bondy_oplog, bondy_mst and
-    %% leveled). Partisan — its cluster transport — is already up, started
-    %% explicitly above by bondy_router. Nothing reads from it yet — tables are
-    %% opened per-domain by the migration.
+    %% leveled). Nothing reads from it yet — tables are opened per-domain by
+    %% the migration.
     {ok, _} = application:ensure_all_started(bondy_db, permanent),
 
-    %% Now that Partisan is up we can get our nodename
     ok = logger:update_primary_config(#{
         metadata => #{
             node => partisan:node(),
@@ -262,11 +260,12 @@ setup_commons() ->
     ok.
 
 %% @private
-%% C-1 peer-plane safety gate. Reads the effective Partisan config and the
+%% Peer-plane safety gate. Reads the effective Partisan config and the
 %% `cluster.tls.allow_insecure` acknowledgement, then acts on the verdict:
 %% `refuse` aborts startup (fail-closed), `warn` logs prominently and continues.
 %% The gate only engages when auto-clustering is configured
-%% (`cluster.peer_discovery.enabled`), so solo / dev / test nodes are untouched.
+%% (`cluster.enabled` and `cluster.peer_discovery.enabled`), so standalone,
+%% dev and test nodes are untouched.
 guard_peer_plane() ->
     Input = #{
         clustering => auto_clustering_enabled(),
@@ -346,7 +345,7 @@ insecure_reason(true, _SV, _CV) ->
 %% @private
 auto_clustering_enabled() ->
     PeerDiscovery = application:get_env(partisan, peer_discovery, #{}),
-    opt(enabled, PeerDiscovery, false) == true.
+    bondy_cluster:enabled() andalso opt(enabled, PeerDiscovery, false) == true.
 
 %% @private
 partisan_tls_enabled() ->
@@ -571,11 +570,11 @@ setup_event_handlers() ->
     ok = bondy_meta_events:setup(),
 
     %% We subscribe to partisan up and down events and republish them
-    partisan_peer_service:on_up('_', fun(Node) ->
+    bondy_cluster:on_up(fun(Node) ->
         bondy_event_manager:notify({[bondy, cluster, connection, up], Node})
     end),
 
-    partisan_peer_service:on_down('_', fun(Node) ->
+    bondy_cluster:on_down(fun(Node) ->
         bondy_event_manager:notify({[bondy, cluster, connection, down], Node})
     end),
 
@@ -595,15 +594,31 @@ setup_wamp_subscriptions() ->
     ok.
 
 %% @private
-%% Wires the bondy_oplog sync scheduler to the Partisan cluster when oplog
-%% anti-entropy is enabled (`db.aae`, off by default). Sets the env the
+maybe_start_partisan(true) ->
+    {ok, _} = application:ensure_all_started(partisan, permanent),
+    ok;
+maybe_start_partisan(false) ->
+    ?LOG_NOTICE(#{
+        description =>
+            "Clustering is disabled (cluster.enabled = off); this node runs "
+            "standalone and starts no cluster peer service."
+    }),
+    ok.
+
+%% @private
+%% Wires the bondy_oplog sync scheduler to the Partisan cluster when the node
+%% is clustered and oplog anti-entropy is enabled (`db.aae`). Sets the env the
 %% scheduler reads at init: peers from live Partisan membership
 %% (`bondy_oplog_peer_source_partisan`) and sessions over the Partisan
-%% transport on the dedicated AE channel. A no-op when disabled — the
-%% scheduler keeps its defaults (static no-peer source + inline transport),
-%% so a non-clustered or replication-off node boots exactly as before.
+%% transport on the dedicated AE channel. Otherwise the scheduler keeps its
+%% defaults (static no-peer source + inline transport); with no peers its tick
+%% still certifies a standalone node's freshness
+%% (`bondy_cluster_standalone_SUITE`).
 maybe_setup_oplog_replication() ->
-    case application:get_env(bondy_oplog, aae_enabled, false) of
+    case
+        bondy_cluster:enabled() andalso
+            application:get_env(bondy_oplog, aae_enabled, false)
+    of
         true ->
             Fanout = application:get_env(bondy_oplog, aae_fanout, 3),
             Channel = bondy_config:get(aae_channel),
@@ -665,7 +680,7 @@ maybe_leave() ->
                 description => "Leaving Bondy cluster.",
                 automatic_leave => true
             }),
-            partisan_peer_service:leave();
+            bondy_cluster:leave();
         false ->
             ok
     end.

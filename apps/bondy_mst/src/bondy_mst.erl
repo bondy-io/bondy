@@ -100,7 +100,8 @@ hash.
     | {match_spec, term()}
     | {stop, key()}
     | {keys_only, boolean()}
-    | {limit, pos_integer() | infinity}.
+    | {limit, pos_integer() | infinity}
+    | {missing, skip | throw}.
 -type fold_pages_fun() :: fun(({hash(), bondy_mst_page:t()}, any()) -> any()).
 %% Opaque token returned by maybe_roll_for_seal/1. Carries the backend
 %% module and its self-contained seal job so a worker process can run the
@@ -586,6 +587,12 @@ Calls `Fun(Elem, AccIn)` on successive elements of tree `T`, starting
 from the current root with `AccIn == Acc0`. `Fun/2` must return a new
 accumulator, which is passed to the next call. The function returns the final
 value of the accumulator. `Acc0` is returned if the tree is empty.
+
+A page that the store does not hold contributes no elements. The `missing`
+option decides what the fold does when it reaches such a page:
+
+- `skip`, the default, folds past the page.
+- `throw` throws `{missing_page, Hash}`.
 """).
 -spec fold(t(), Fun :: fold_fun(), AccIn :: any(), Opts :: fold_opts()) ->
     AccOut :: any().
@@ -1772,14 +1779,10 @@ split(T, Store, Hash, Key) ->
 %%               splitting the donor `B` while writing into the receiver's
 %%               store). Freeing there would tombstone `Hash` in a store that
 %%               either never held it or — because pages are content-addressed
-%%               — holds it as a LIVE page of the receiver's own tree. On
-%%               `bondy_mst_ets_store` that is currently masked by reachability
-%%               GC re-marking it; on `bondy_mst_pack_store` the pack rewrite
-%%               keeps `reachable INTERSECT non-tombstoned`, so a reachable
-%%               page carrying a stray tombstone would be dropped outright.
-%%               Skipping the free instead leaves a temporary page for the next
-%%               collection: deleting late is a bounded memory cost, deleting
-%%               early is data loss.
+%%               — holds it as a LIVE page of the receiver's own tree.
+%%               `bondy_mst_map_store:free/3` deletes the page at once, so a
+%%               free there drops a live page. Skipping the free leaves a
+%%               temporary page for the next collection.
 split(_, Store, undefined, _, _) ->
     {undefined, undefined, Store};
 split(T, Store0, Hash, Key, Owner) ->
@@ -1901,11 +1904,24 @@ truncate_scan(T, Store0, W, Level, Prev, [{K, _V, R} | Rest] = List) ->
         eq ->
             %% W == K: K is dropped; `Prev` (keys `< K =< W`) is dropped
             %% wholesale. R (keys in `(K, next)`, all `> W`) becomes the
-            %% new low; the remaining entries survive untouched.
-            rebuild_truncated(Store0, Level, R, Rest);
+            %% new low. A dangling R becomes nothing, as in `truncate_at/4`.
+            %% The remaining entries survive untouched.
+            rebuild_truncated(Store0, Level, held(T, Store0, R, W), Rest);
         gt ->
             %% W > K: K is dropped; advance, R becomes the next `Prev`.
             truncate_scan(T, Store0, W, Level, R, Rest)
+    end.
+
+%% @private
+held(_T, _Store, undefined, _W) ->
+    undefined;
+held(T, Store, Hash, W) ->
+    case get_page(T, Store, Hash) of
+        undefined ->
+            log_dangling_page("truncate: page missing", T, Store, Hash, W),
+            undefined;
+        _ ->
+            Hash
     end.
 
 %% @private
@@ -2127,7 +2143,10 @@ do_fold(_, _, AccIn, _, undefined) ->
 do_fold(Store, Fun, AccIn, Opts, Root) ->
     case bondy_mst_store:get(Store, Root) of
         undefined ->
-            AccIn;
+            case key_value:get(missing, Opts, skip) of
+                skip -> AccIn;
+                throw -> throw({missing_page, Root})
+            end;
         Page ->
             Low = bondy_mst_page:low(Page),
             AccOut = do_fold(Store, Fun, AccIn, Opts, Low),

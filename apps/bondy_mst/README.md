@@ -1,39 +1,37 @@
 # bondy_mst
 
-An Erlang/OTP library for **Merkle Search Trees (MSTs)** and the
-**coordination-free, state-based CRDTs** you build on them.
+An Erlang/OTP library for **Merkle Search Trees (MSTs)**, their page stores,
+and the anti-entropy exchange that keeps replicas of a tree in step.
 
-A *Merkle Search Tree* is a balanced search tree whose shape is fixed by the
-*content* of its items rather than their insertion order. Two replicas that
-hold the same set of items build the **same tree**, with the **same root
-hash** — so peers reconcile by exchanging only the pages that differ, never
-the full state. This is *anti-entropy in O(diff)*, not O(set size), and it is
-the one property that makes large replicated stores converge without
-consensus.
+A *Merkle Search Tree* is a search tree whose shape depends on the *content*
+of its items, not on the order of insertion. Two replicas that hold the same
+set of items build the same tree, with the same root hash. Peers therefore
+reconcile by exchanging only the pages that one of them lacks. The pages
+that cross the network follow the size of the difference, not the size of
+the set.
 
-The construction is from Alex Auvolat & François Taïani's 2019 paper
+The construction is from Alex Auvolat and François Taïani,
 [*Merkle Search Trees: Efficient State-Based CRDTs in Open
 Networks*](https://inria.hal.science/hal-02303490/document) (SRDS 2019, Inria
 HAL-02303490). This Erlang implementation is ported from the authors'
-[reference Elixir prototype](https://gitlab.inria.fr/aauvolat/mst_exp) and
-extended with multiple storage backends, configurable garbage collection,
-deletion, and a durable packfile store.
+[reference Elixir prototype](https://gitlab.inria.fr/aauvolat/mst_exp). It
+adds several storage backends, reachability-based garbage collection,
+structural deletion, truncation, and a durable packfile store.
 
 ## What this library gives you
 
 | Layer | Module | What it is |
 |---|---|---|
-| **The tree** | `bondy_mst` | The Merkle Search Tree data structure: insert, read, merge, diff, truncate, GC. A *state-based CRDT* in itself — `merge/2` is the join. |
-| **The CRDT** | `bondy_mst_crdt` | A state-based CRDT *built on* the tree — a grow-only set, an LWW key-value register store, or a nested map — with background, non-blocking anti-entropy and a pluggable transport. |
-| **Storage** | `bondy_mst_store` | The page-store behaviour. Three backends ship: in-memory `map` and `ets`, and the durable, content-addressed `pack_store`. |
-| **Operations** | `bondy_mst_admin` | Cold backup and restore of a durable tree, with a SHA-256 manifest and verification. |
+| **The tree** | `bondy_mst` | The Merkle Search Tree: insert, read, merge, diff, truncate, garbage collection. |
+| **Replication** | `bondy_mst_crdt`, `bondy_mst_exchange` | A replicated tree with gossip and background anti-entropy over a transport that you supply. |
+| **Storage** | `bondy_mst_store` | The page-store behaviour. Three backends ship: the in-memory `bondy_mst_map_store` and `bondy_mst_ets_store`, and the durable `bondy_mst_pack_store`. |
+| **Operations** | `bondy_mst_admin` | Cold backup and restore of a storage directory, with a SHA-256 manifest and verification. |
 
-This library is the **primitive**. If you want a ready-made replicated
-*datastore* — typed tables, a CRDT catalogue, a durable write-ahead log,
-compaction, and replication schedulers — use **`bondy_oplog`** (the
-write/replication framework) and **`bondy_db`** (the consumer-facing database
-facade), which are built on this library and live in the
-[Bondy umbrella](https://github.com/bondy-io/bondy).
+This library is the primitive. The operation-log datastore of the
+[Bondy umbrella](https://github.com/bondy-io/bondy) is built on it:
+`bondy_oplog` is the write and replication framework, and `bondy_db` is the
+database facade. Use them when you want typed tables, a write-ahead log,
+compaction and replication schedulers.
 
 ---
 
@@ -41,8 +39,8 @@ facade), which are built on this library and live in the
 
 - [When to use this library](#when-to-use-this-library)
 - [How an MST converges](#how-an-mst-converges)
-- [Quick start — the tree](#quick-start--the-tree)
-- [Quick start — the CRDT](#quick-start--the-crdt)
+- [Quick start: the tree](#quick-start-the-tree)
+- [Quick start: replication](#quick-start-replication)
 - [API surface](#api-surface)
 - [Storage backends](#storage-backends)
 - [Backup and restore](#backup-and-restore)
@@ -55,81 +53,83 @@ facade), which are built on this library and live in the
 
 ## When to use this library
 
-Reach for `bondy_mst` directly when you need:
+Use `bondy_mst` directly when you need one of these:
 
-- **A content-addressed, history-independent set or map** whose root hash is a
-  cryptographic summary of its contents — for integrity verification, or as
-  the substrate of a replicated value.
-- **Bandwidth-proportional anti-entropy** — two replicas converge by
-  exchanging only the differing pages, found in a logarithmic number of hash
-  comparisons.
-- **A state-based CRDT you drive yourself** — `bondy_mst_crdt` gives you the
-  convergence logic (grow-only set, LWW register store, or map) and leaves the
-  process model and transport to you (a `gen_server`, a `gen_statem`, a
-  Partisan process — your choice).
+- **A content-addressed, history-independent set or map.** Its root hash
+  summarises its contents, for integrity checks or as the basis of a
+  replicated value.
+- **Anti-entropy that transfers what differs.** A replica requests only the
+  pages that it does not hold, starting from the root hash of a peer.
+- **Replication that you drive yourself.** `bondy_mst_crdt` holds the
+  replication logic and leaves the process model and the transport to you: a
+  `gen_server`, a `gen_statem`, or a Partisan process.
 
-Do **not** use it when you need strong consistency, linearizable writes, or
-read-your-writes across replicas. Those require consensus; this library trades
-them for availability and partition tolerance.
-
-And if you want the whole datastore rather than the primitive — durable
-tables, a typed CRDT catalogue, a WAL, compaction, and replication schedulers
-out of the box — use `bondy_oplog` and `bondy_db` in the Bondy umbrella. They
-are built on exactly this library.
+Do not use it when you need linearisable writes or read-your-writes across
+replicas. Those need consensus, and this library does not provide it.
 
 ---
 
 ## How an MST converges
 
-Three properties do all the work:
+Three properties do the work.
 
-1. **The tree is balanced by hash, not by insertion order.** Each item's layer
-   is decided by hashing its key, so two replicas inserting the same items —
-   in any order — assign the same layers and draw the same page boundaries.
-   Same items ⇒ same tree ⇒ same root hash.
+1. **The hash of the key decides the layer of an item.** The layer is the
+   number of leading zero 4-bit nibbles in the hash of the key. Two replicas
+   that insert the same items, in any order, assign the same layers and draw
+   the same page boundaries. `truncate_matches_delete_and_fresh_test_` in
+   `bondy_mst_truncate_test` checks this for its inputs: a tree built from
+   shuffled insertions has the same root as a tree built in order from the
+   same keys.
 
-2. **Every page is content-addressed.** A page's address *is* the hash of its
-   contents, including the hashes of its children. Two pages with the same hash
-   are bit-identical and have identical subtrees beneath them.
+2. **Every page is content-addressed.** The address of a page is the hash of
+   its level, its left child hash and its entries. Each entry carries a key, a
+   value and the hash of its right child. Two pages with the same hash
+   therefore hold the same entries and reference the same subtrees.
 
-3. **Reconciliation is a parallel tree walk that prunes matching subtrees.** To
-   converge, peer A asks peer B for its root hash. Equal? Done. Different? A
-   descends, fetching only the pages whose hashes it does not already hold.
-   For 10⁶ items differing in 10, an MST exchange ships those 10 plus a
-   logarithmic number of internal pages — not 10⁶.
+3. **Reconciliation requests only absent pages.** Peer A compares its root
+   hash with the root hash of peer B. When they are equal, A stops. When they
+   differ, A requests the pages under B's root that its store does not hold.
 
-The merge of two trees is the CRDT **join**: commutative, associative, and
-idempotent. `merge(A, B)` and `merge(B, A)` produce the same tree and the same
-root.
+`bondy_mst:merge/2` adds every entry of the second tree to the first. When
+both trees hold the same key, the `merger` function of the receiving tree
+decides the resulting value.
 
-> For the full treatment — the page anatomy, the on-disk pack format, the
-> anti-entropy protocol, truncation, and GC — read
+> The page anatomy, the on-disk pack format, the anti-entropy exchange,
+> truncation and garbage collection are in
 > [`doc_extras/architecture/02_bondy_mst.md`](doc_extras/architecture/02_bondy_mst.md).
 
 ---
 
-## Quick start — the tree
+## Quick start: the tree
 
 ```erlang
-%% A tree over an in-memory ETS store. The `merger` resolves a key
-%% collision during put/merge — it IS the per-key conflict resolution.
+%% A tree over an ETS store. The `merger` decides the value when a key
+%% is already present.
 T0 = bondy_mst:new(#{
     store          => bondy_mst_ets_store,
     store_opts     => #{name => <<"users">>},
     hash_algorithm => sha256,
-    merger         => fun(_Key, _V1, V2) -> V2 end  %% last-writer-wins
+    merger         => fun(_Key, _Old, New) -> New end
 }),
 
 T1 = bondy_mst:put(T0, <<"alice">>, <<"Alice">>),
 T2 = bondy_mst:put(T1, <<"bob">>,   <<"Bob">>),
 
-<<"Alice">>  = bondy_mst:get(T2, <<"alice">>),
-RootHash     = bondy_mst:root(T2).
+<<"Alice">> = bondy_mst:get(T2, <<"alice">>),
+RootHash    = bondy_mst:root(T2).
 ```
 
-For bulk inserts prefer `put_batch/2` — it builds a small volatile tree from
-the batch and merges it in a single traversal, rebuilding the spine once
-instead of once per item:
+`bondy_mst_ets_store` requires the `name` option, a binary.
+
+Without options, `bondy_mst:new/0` uses `bondy_mst_map_store`, `sha256`, the
+standard term order as comparator, and a merger that accepts only the value
+`true`. That configuration is a set: `bondy_mst:put/2` inserts a key with the
+value `true`.
+
+For bulk inserts, use `put_batch/2`. It builds the canonical pages of the
+batch directly, then merges them into the tree in one traversal.
+`prop_bulk_equals_sequential` in `bondy_mst_put_batch_bulk_test` checks that
+the result has the same root as a sequence of `put/3` calls.
 
 ```erlang
 T = bondy_mst:put_batch(T0, [
@@ -142,70 +142,74 @@ T = bondy_mst:put_batch(T0, [
 ### Converging two trees
 
 ```erlang
-%% A and B independently received different writes.
 A1 = bondy_mst:put(A0, <<"x">>, <<"1">>),
 B1 = bondy_mst:put(B0, <<"y">>, <<"2">>),
 
-%% If you hold both trees locally, merge directly:
-Merged = bondy_mst:merge(A1, B1),   %% contains x and y; same as merge(B1, A1)
+%% With both trees in the same process, merge directly.
+Merged = bondy_mst:merge(A1, B1),
 
-%% Over a network, ship only the difference:
-Missing = bondy_mst:missing_set(A1, bondy_mst:root(B1)),  %% page hashes A lacks
-%% ... fetch those pages from B, then `bondy_mst:put_page/2` each into A,
-%%     or `bondy_mst:merge/3` against B's root.
+%% Across a network, find the pages of B's tree that A does not hold.
+Missing = bondy_mst:missing_set(A1, bondy_mst:root(B1)).
+%% Fetch those pages from B and store each one with put_page/2. When every
+%% page is local, merge B's root from A's own store:
+%%   A2 = bondy_mst:merge(A1, A1, BRoot).
 ```
 
-`missing_set/2` is the heart of anti-entropy: given a peer's root hash it
-returns only the page hashes this tree is missing, pruning every subtree the
-two already share.
+`missing_set/2` takes the root hash of a peer. It walks the pages under that
+root that the local store holds, and returns the hashes that the store cannot
+find. It cannot descend below an absent page, because the children of that
+page are unknown until the page arrives. A caller therefore repeats the
+fetch-and-check cycle until the missing set is empty.
 
 ---
 
-## Quick start — the CRDT
+## Quick start: replication
 
-`bondy_mst_crdt` wraps the tree as a state-based CRDT and adds the
-**background anti-entropy logic** — buffering a peer's incoming root, fetching
-the missing pages, and merging once they are all local, without blocking local
-writes. You choose the value type to choose the CRDT:
+`bondy_mst_crdt` wraps a tree and adds gossip and background anti-entropy. It
+holds an incoming peer root, requests the missing pages, and merges only when
+every page is local. Local writes continue while pages are in flight. The page
+exchange itself is in `bondy_mst_exchange`.
 
-- a **boolean** value → a **grow-only set**;
-- an **LWW register** (value + version) → a **last-writer-wins key-value store**;
-- another **CRDT** value → a **map CRDT** with efficient differing-item detection.
+The value type and the `merger` decide the reconciliation rule:
 
-You own the process and the transport. The CRDT calls back into a module you
-supply (`send/2`, `broadcast/1`, `on_merge/1`) to move messages; you feed
-inbound messages to `handle/2`. It supports **causal** consistency (full state
-sync per gossip — the default) and **eventual** consistency (gossip individual
-operations, sync periodically).
+- a **boolean** value gives a grow-only set;
+- a **last-writer-wins register** (a value and a version) gives a
+  last-writer-wins key-value store;
+- a value with its own merge function gives a map of those values.
+
+You own the process and the transport. The module calls back into a module
+that you supply (`send/2`, `broadcast/1`, and the optional `on_merge/1`) to
+move messages. You give inbound messages to `handle/2`. The
+`consistency_model` option selects one of two modes:
+
+- `causal` (the default): every gossip from a peer starts a full sync with
+  that peer.
+- `eventual`: peers gossip single operations and apply them on receipt. Full
+  syncs run only when you call `trigger/2`.
 
 ```erlang
-%% Create a replica. `NodeId` is this replica's identity; `Opts` carries the
-%% tree options above plus your callback module.
+%% `NodeId` is the identity of this replica. `Opts` holds the tree options
+%% and `callback_mod`.
 C0 = bondy_mst_crdt:new(NodeId, Opts),
 
-%% Local write — returns the updated CRDT and broadcasts a gossip if the root
-%% changed.
+%% A local write. When the root changes, the module broadcasts a gossip.
 C1 = bondy_mst_crdt:put(C0, <<"alice">>, true),
 
-%% Inbound sync messages (gossip / get / put / missing) are handled here.
+%% Inbound gossip and page-exchange messages.
 C2 = bondy_mst_crdt:handle(C1, Message),
 
 bondy_mst_crdt:root(C2).
 ```
 
-The message protocol (which messages may be handled concurrently, the gossip /
-get / put / missing exchange, and the `send`/`broadcast`/`on_merge` callback
-contract) is documented in full on the `bondy_mst_crdt` module page. Wire it
-into a `gen_server`, a `gen_statem`, or a Partisan process — the library is
-deliberately agnostic to the process infrastructure.
+The module page of `bondy_mst_crdt` documents the message protocol, the
+messages that you can handle concurrently, and the callback contract.
 
 ---
 
 ## API surface
 
-The authoritative reference is the generated module documentation (`bondy
-docs` / `rebar3 ex_doc`). The public functions of `bondy_mst`, grouped by
-task:
+The generated module documentation (`rebar3 ex_doc`) is the reference. The
+public functions of `bondy_mst`, grouped by task:
 
 **Build and update**
 `new/0,1` · `put/2,3` · `put_batch/2` · `put_page/2` · `delete/2` ·
@@ -213,61 +217,96 @@ task:
 
 **Read and iterate**
 `get/2,3` · `first/1` · `last/1` · `last_n/3` · `keys/1` · `to_list/1,2` ·
-`fold/3,4` · `fold_pages/4` · `foreach/2,3` · `root/1` · `capabilities/1`
+`fold/3,4` · `fold_pages/4` · `foreach/2,3` · `root/1`
 
 **Anti-entropy and merge**
-`root/1` · `missing_set/2` · `merge/2,3` · `diff_to_list/2`
+`missing_set/2` · `merge/2,3` · `diff_to_list/2`
 
 **Maintenance and storage**
-`gc/1,2` · `store/1` · `set_store/2` · `dump/1` · `destroy/1`
+`gc/1,2` · `store/1` · `set_store/2` · `capabilities/1` · `dump/1` ·
+`close/1` · `destroy/1`
 
 **Durability and sealing**
-`flush/1` · `close/1` · `maybe_roll_for_seal/1` · `run_seal_job/1` ·
+`flush/1` · `maybe_roll_for_seal/1` · `run_seal_job/1` ·
 `seal_job_pack_id/1` · `complete_seal/2` · `seal_in_flight/1`
 
-`flush/1` persists the root at a commit barrier (pages before root); on a
-durable pack store the `maybe_roll_for_seal/1` → `run_seal_job/1` →
-`complete_seal/2` handshake moves the pack-seal rewrite off the caller's
-critical path (a no-op on in-memory backends — see `capabilities/1`).
+**Diagnostics**
+`gc_aborts/0` · `forget_gc_aborts/0` · `recent_swept/0` · `forget_swept/0` ·
+`verify_default/0`
 
-`diff_to_list/2` is a *read-only* structural diff — it descends both roots and
-surfaces the differing entries without mutating either tree. `truncate/2`
-physically removes every entry at or below a watermark (it is **not** a
-tombstone), so truncated keys never reappear in a later `missing_set/2` result.
+`fold/4` reads two options:
+
+- `{root, Hash}` folds the tree under `Hash` instead of the current root.
+- `{missing, skip | throw}` sets what the fold does at a page that the store
+  does not hold. `skip`, the default, folds past the page. `throw` throws
+  `{missing_page, Hash}`.
+
+The `fold_opt()` type also lists `first`, `stop`, `match_spec`, `keys_only`
+and `limit`. `fold/4` ignores them. `fold_pages/4` reads `root` only and
+always skips a missing page.
+
+`flush/1` makes the staged root durable. On the pack store it makes the pages
+durable before it writes the root. On the in-memory backends it does nothing.
+The `maybe_roll_for_seal/1`, `run_seal_job/1` and `complete_seal/2` sequence
+moves the pack-seal rewrite off the calling process. It does nothing on the
+in-memory backends; the `async_seal` key of `capabilities/1` tells you which
+case applies.
+
+`diff_to_list/2` is a read-only structural diff. It descends both roots, skips
+the subtrees they share, and returns the entries that differ. It changes
+neither tree.
+
+`truncate/2` removes every key that is less than or equal to a watermark. It
+removes the entries from the tree; it does not write tombstones. The pages
+that only the removed keys used stay in the store until garbage collection
+reclaims them.
+
+`gc/2` keeps every page reachable from the current root and from the roots
+that you pass, and lets the backend drop the rest. When a page under the
+current root is missing, `gc/2` sweeps nothing and records a report that
+`gc_aborts/0` returns (`gc_aborts_on_unservable_root_test` in
+`bondy_mst_gc_guard_test`). The caller has to serialise `gc/2` with every
+writer of the tree, or pass every root that a writer can publish.
 
 ---
 
 ## Storage backends
 
-`bondy_mst_store` is the behaviour every backend implements — a small,
-page-level key-value contract (`open`, `close`, `get_root`/`set_root`, `get`,
-`put`, `has`, `delete`, `copy`, `free`, `gc`, `missing_set`, `page_refs`,
-`list`, `destroy`, plus the optional `flush`, `transaction`, `capabilities`,
-and the async-seal callbacks `maybe_roll_for_seal`/`complete_seal`/`seal_in_flight`).
-GC is **mark-from-root**: keep only
-pages reachable from the live roots, drop the rest. Three backends ship:
+`bondy_mst_store` is the behaviour that every backend implements. It is a
+page-level key-value contract:
 
-| Backend | Module | Persistent? | Use it for |
-|---|---|---|---|
-| In-memory map | `bondy_mst_map_store` | No (process state) | Tiny embedded use; single writer; `free/3` deletes immediately. The default. |
-| ETS | `bondy_mst_ets_store` | No (RAM) | Tests and ephemeral trees. Read-concurrent. |
-| Pack store | `bondy_mst_pack_store` | **Yes** | Production. Durable content-addressed packfiles. |
+- required callbacks: `open`, `close`, `get_root`, `set_root`, `get`, `has`,
+  `put`, `delete`, `copy`, `free`, `gc`, `list`, `missing_set`, `page_refs`,
+  `destroy`;
+- optional callbacks: `flush`, `transaction`, `capabilities`, `name`,
+  `page_state`, `maybe_roll_for_seal`, `complete_seal`, `seal_in_flight`.
 
-Select a backend by passing its **module** as the `store` option to
-`bondy_mst:new/1`, with any backend-specific settings under `store_opts`;
-`new/1` opens the store for you. The default is `bondy_mst_map_store`.
+| Backend | Module | Durable | `free/3` | Use it for |
+|---|---|---|---|---|
+| In-memory map | `bondy_mst_map_store` | No | Removes the page. | Small trees owned by one process. The default. |
+| ETS | `bondy_mst_ets_store` | No | Marks the page; `gc/2` reclaims it. | Tests and ephemeral trees. Concurrent reads and writes. |
+| Pack store | `bondy_mst_pack_store` | Yes | Records a tombstone; `gc/2` reclaims by reachability. | Durable trees. |
+
+Select a backend with the `store` option of `bondy_mst:new/1`, and put its
+settings under `store_opts`. `new/1` opens the store.
 
 ### The durable pack store
 
-`bondy_mst_pack_store` is the production backend: an **append-only,
-content-addressed packfile format** — git's object database, scoped to MST
-pages. Each instance owns a directory with an atomically-swapped `manifest`, a
-mutable `incoming.pack`, and sealed immutable `pack-NNNN.pack` files each with
-a companion `.idx` (sorted hashes + a 256-way fanout table + a bloom filter).
-Reads are a bloom probe, a fanout lookup, and a couple of `pread`s; sealed
-packs are immutable, which is what makes concurrent GC and crash recovery
-safe. `incoming.pack` auto-seals once it crosses a record or byte threshold
-(`auto_seal_records`, default 10 000; `auto_seal_bytes`, default 16 MB).
+`bondy_mst_pack_store` keeps pages in append-only, content-addressed
+packfiles, in the manner of the git object database. Each store owns a
+directory that holds:
+
+- `manifest`, replaced atomically, which names the sealed packs and the
+  current root;
+- `incoming.pack`, the mutable file that new pages append to;
+- sealed, immutable `pack-NNNN.pack` files, each with a `pack-NNNN.idx` that
+  holds a bloom filter, a 256-entry fanout table and the sorted hashes;
+- `tombstones`, the set of hashes that `free/3` marked.
+
+A read of a sealed page probes the in-memory index of each sealed pack, then
+reads the record with two `pread` calls. When `incoming.pack` reaches
+`auto_seal_records` records (default `10_000`) or `auto_seal_bytes` bytes
+(default `16_000_000`), the store seals it into a new sealed pack.
 
 ```erlang
 T = bondy_mst:new(#{
@@ -280,37 +319,40 @@ T = bondy_mst:new(#{
 }).
 ```
 
-The pack store is **single-writer**: its file handles are owned by the calling
-process and cannot be shared, so serialise all mutations through one owner
-process (typically a `gen_server` above it). Unlike the in-memory backends,
-which cannot fail at I/O, the pack store raises `error({Op, Reason})` on
-unrecoverable disk failures — the owning process is expected to restart and
-recover from the manifest.
+`dir` and `instance_id` are required. The pack store supports `sha256` only.
 
-> The on-disk format, the seal pipeline, and the recovery path are documented
-> in [`doc_extras/architecture/02_bondy_mst.md`](doc_extras/architecture/02_bondy_mst.md)
-> and in each `bondy_mst_pack_*` module's own page.
+The pack store has a single writer. It reads sealed packs through raw file
+descriptors that belong to the process that opened the store, and its
+`capabilities/1` reports `process_bound_reads => true`. Send every operation
+through the owning process, typically a `gen_server`. When a disk operation
+fails, the pack store raises `error({Op, Reason})`. The owning process then
+restarts and reopens the store from its manifest.
+
+> The on-disk format, the seal pipeline and recovery are in
+> [`doc_extras/architecture/02_bondy_mst.md`](doc_extras/architecture/02_bondy_mst.md)
+> and in the module pages of `bondy_mst_pack_*`.
 
 ---
 
 ## Backup and restore
 
-`bondy_mst_admin` is the **cold-backup** primitive for a durable tree. It
-assumes no writer is active against the source directory; the recommended
-sequence stops the writer, backs up, and restarts:
+`bondy_mst_admin` is a cold-backup tool. No writer may be active on the source
+directory while it runs:
 
 ```erlang
 {ok, Manifest} = bondy_mst_admin:backup(StoragePath, BackupDir),
-ok             = bondy_mst_admin:verify(BackupDir),
+{ok, Manifest} = bondy_mst_admin:verify(BackupDir),
 {ok, _}        = bondy_mst_admin:restore(BackupDir, StoragePath).
 ```
 
-`backup/2,3` copies the storage tree byte-for-byte and writes a `manifest.etf`
-recording every file's size and SHA-256; `verify/1` re-hashes every file
-against the manifest; `restore/2,3` verifies before copying. All three emit
-`[bondy_mst, admin, …]` telemetry. For zero-downtime backups, take a
-filesystem-level snapshot (LVM, ZFS, btrfs, EBS) of the storage path and hand
-that to `backup/3` for the manifest and checksum step.
+- `backup/2,3` copies every regular file under the source directory and
+  writes `manifest.etf`, which records the size and SHA-256 of each file.
+- `verify/1` hashes every file again and compares it with the manifest.
+- `restore/2,3` calls `verify/1` and copies nothing when verification fails.
+
+All three emit `[bondy_mst, admin, ...]` telemetry events. For a backup
+without downtime, take a filesystem snapshot (LVM, ZFS, btrfs, EBS) of the
+storage path and give the snapshot to `backup/2,3`.
 
 > Operator runbook:
 > [`doc_extras/architecture/08_backup_and_restore.md`](doc_extras/architecture/08_backup_and_restore.md).
@@ -319,24 +361,18 @@ that to `backup/3` for the manifest and checksum step.
 
 ## Architecture documentation
 
-Two chapters ship with this library:
-
 | Doc | Topic |
 |---|---|
-| [02 — bondy_mst](doc_extras/architecture/02_bondy_mst.md) | The Merkle Search Tree, the pack-store on-disk format, and the anti-entropy protocol. |
-| [08 — Backup & restore](doc_extras/architecture/08_backup_and_restore.md) | Operator runbook for `bondy_mst_admin`. |
+| [bondy_mst: the Merkle Search Tree](doc_extras/architecture/02_bondy_mst.md) | The tree, the pack-store format, sealing, truncation, garbage collection and anti-entropy. |
+| [Backup and restore](doc_extras/architecture/08_backup_and_restore.md) | Operator runbook for `bondy_mst_admin`. |
 
-The remaining chapters of the storage architecture — the layered overview, the
-`bondy_oplog` write side, the `bondy_db` facade, the applier, the CRDT
-catalogue, compaction, and the app developer's tour — describe the layers
-*built on* this library and ship in the
-[Bondy umbrella](https://github.com/bondy-io/bondy) alongside the
-`bondy_oplog`/`bondy_db` apps. The original MST and Canteen papers are under
+The layers built on this library are described in the
+[Bondy umbrella](https://github.com/bondy-io/bondy), under
+`apps/bondy_db/doc_extras/architecture/`. The MST and Canteen papers are under
 [`reference/`](reference/).
 
-These chapters render alongside the module reference in the ex_doc output
-(`rebar3 ex_doc`). They are the authoritative architecture reference; the
-module docs carry the implementation-level contracts.
+These chapters render with the module reference in the ex_doc output
+(`rebar3 ex_doc`). The module docs hold the contract of each function.
 
 ---
 
@@ -344,51 +380,45 @@ module docs carry the implementation-level contracts.
 
 ### Requirements
 
-- **Erlang/OTP 27+** — the source uses triple-quoted string literals and the
-  `-doc`/`-moduledoc` attributes.
+- **Erlang/OTP 27 or later.** The source uses triple-quoted strings and the
+  `-doc` and `-moduledoc` attributes.
 
 ### As a dependency
 
-`bondy_mst` is vendored in the Bondy umbrella as `apps/bondy_mst`. Consume it
-via a rebar3 `git_subdir` dependency:
+`bondy_mst` lives in the Bondy umbrella as `apps/bondy_mst`. Add it with a
+rebar3 `git_subdir` dependency:
 
 ```erlang
 {deps, [
     {bondy_mst,
         {git_subdir, "https://github.com/bondy-io/bondy.git",
-            {branch, "main"}, "apps/bondy_mst"}}
+            {branch, "develop"}, "apps/bondy_mst"}}
 ]}.
 ```
 
 ### Application start
 
-`bondy_mst` is a **pure library**: it has no long-lived processes of its own.
-Its application start
-(`application:ensure_all_started(bondy_mst)`) only initialises the library's
-configuration defaults — it brings up no registries, schedulers, or
-responders. The tree API (`bondy_mst:new/1` and friends) is usable directly;
-start the application when you want the configured defaults to apply. The
-replication framework that *does* run processes — `bondy_oplog` — is booted
-separately in the Bondy umbrella.
+`application:ensure_all_started(bondy_mst)` starts a supervisor with no
+children and initialises the library configuration. The tree API
+(`bondy_mst:new/1` and the rest) does not need the application to run.
 
 ---
 
 ## Credits
 
-This library is a direct realization of:
+This library implements:
 
 - **Alex Auvolat** and **François Taïani** (Univ. Rennes, Inria, IRISA, CNRS),
   *"Merkle Search Trees: Efficient State-Based CRDTs in Open Networks"*,
-  **SRDS 2019** —
+  **SRDS 2019**:
   [Inria HAL-02303490](https://inria.hal.science/hal-02303490/document) ·
   [reference Elixir prototype](https://gitlab.inria.fr/aauvolat/mst_exp). The
-  MST construction and the state-based-CRDT framing (`bondy_mst` and
-  `bondy_mst_crdt`) come from this work.
+  MST construction in `bondy_mst` and the replication scheme in
+  `bondy_mst_crdt` come from this work.
 
-The `bondy_oplog` layer that builds an operation-log datastore on top of this
-primitive draws on Preston McCrary's *Canteen* (UC Berkeley, 2022) for its
-Concurrent Operation Group abstraction; that lineage is credited in the Bondy
-umbrella alongside `bondy_oplog`.
+The `bondy_oplog` layer built on this library draws on Preston McCrary's
+*Canteen* (UC Berkeley, 2022) for its Concurrent Operation Group abstraction.
+The Bondy umbrella credits that work with `bondy_oplog`.
 
 Any errors in this library's interpretation or adaptation of the above work are
 ours, not theirs.

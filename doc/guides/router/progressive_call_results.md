@@ -46,27 +46,22 @@ single ordered pipeline across the cluster connection).
 
 ## Enabling the feature
 
-The dealer feature is **disabled by default** and is enabled per node:
+Progressive Call Results is a capability of the build, not a setting: Bondy
+advertises `progressive_call_results` as a dealer feature in every `WELCOME`,
+and there is no `bondy.conf` key to turn it off. See
+[WAMP features](wamp_features.md).
 
-```
-wamp.dealer.progressive_call_results = on
-```
-
-> #### Mixed-version clusters {: .warning}
-> Only enable the flag once **every** node in the cluster runs a Bondy
-> version that supports it. A node without support settles a call on the
-> first progressive result, so a stream crossing that node would be
-> truncated. The flag is read at call time on the node the caller is
-> connected to, so it can be flipped without a restart.
+A session obtains the feature only when its `HELLO` announces it. The feature
+is strict opt-in: a client role that omits `progressive_call_results` is given
+`false`, rather than inheriting the router's advertised value.
 
 ## Semantics and guarantees
 
-- **Opt-in end to end.** `receive_progress` is honoured only when (a) the
-  dealer feature is enabled, (b) the caller announced
-  `progressive_call_results` in `HELLO`, and (c) the callee announced it
-  too. If any of these fail the option is removed: the callee sees a plain
-  invocation, replies once, and the caller receives a single final result.
-  Degradation is silent by design — the call still succeeds.
+- **Opt-in end to end.** `receive_progress` is honoured only when the
+  caller announced `progressive_call_results` in `HELLO` and the callee
+  announced it too. If either did not, the option is removed: the callee sees
+  a plain invocation, replies once, and the caller receives a single final
+  result. The call still succeeds.
 - **`call_canceling` pairing.** Per the WAMP specification, a peer
   requesting `progressive_call_results` must also announce
   `call_canceling`; Bondy enforces this at `HELLO` validation.
@@ -91,7 +86,10 @@ wamp.dealer.progressive_call_results = on
 - **Caller departure.** If the caller's session ends mid-stream, the
   dealer sends the callee an `INTERRUPT` (mode `killnowait`) so it stops
   producing results nobody will consume — for local callees directly, and
-  for callees on other nodes by relaying the cancellation to their node.
+  for callees on other nodes by relaying the cancellation to their node
+  (`bondy_connect_cluster_rpc_SUITE:progressive_remote_caller_death_interrupts_callee`).
+  On caller departure the `INTERRUPT` goes only to a callee that announced
+  `call_canceling`.
 - **Protocol violations.** A progressive `YIELD` for a call that did not
   request progressive results is a protocol violation: the callee's
   session is closed with `wamp.error.protocol_violation` and the caller's
@@ -131,7 +129,10 @@ receive_loop(Token) ->
 
 Each progressive result is delivered as
 `{bondy_connect_client, Token, {progress, Result}}`; the `{ok, _}` or
-`{error, _}` delivery remains the single terminal message.
+`{error, _}` delivery remains the single terminal message. Every result,
+progressive or final, is a map with the keys `args`, `kwargs` and `details`;
+`details` holds the `RESULT.Details` the router sent, or `#{}` when it sent
+none.
 
 **Callee** — when the caller requested progressive results, the handler
 receives a `progress` fun in its details; each call emits one progressive

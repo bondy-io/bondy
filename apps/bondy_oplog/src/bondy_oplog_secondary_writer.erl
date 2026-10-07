@@ -300,8 +300,8 @@ maybe_request_rebuild(NS, IName, Entry) ->
     %% `terminate/2` does not run on a `kill`, and the leaked reservation is
     %% the only post-restart signal that the dead writer had buffered work);
     %% OR the shard was previously populated (AE past the stale sentinel). A
-    %% first-ever start is sentinel-stale, unflagged, with a zero counter, so
-    %% it is left to the startup backfill.
+    %% first-ever start is sentinel-stale, unflagged, with a zero counter, and
+    %% has no trust marker, so it is left to the rebuild its table's open runs.
     Trigger =
         bondy_oplog_core_registry:index_needs_rebuild(Entry) orelse
             bondy_oplog_core_registry:index_inflight(Entry) > 0 orelse

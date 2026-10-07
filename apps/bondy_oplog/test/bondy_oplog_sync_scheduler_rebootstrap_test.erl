@@ -234,7 +234,7 @@ other_failures_do_not_flag() ->
 owed_install_rebootstraps() ->
     set_mode(error),
     Inst = mk_inst(),
-    ok = bondy_oplog_instance:begin_install(Inst),
+    {ok, _} = bondy_oplog_instance:begin_install(Inst, [], #{}),
     ?assert(bondy_oplog_instance:owes_install(Inst)),
     with_telemetry(fun() ->
         bondy_oplog_sync_scheduler:trigger(),

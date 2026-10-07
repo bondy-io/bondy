@@ -193,25 +193,28 @@ the_durable_frontier_is_the_checkpoint(Dir) ->
 the_stability_point_waits_for_the_own_checkpoint(Dir) ->
     {Id, NS, _Origin, Shard} = fresh(Dir),
     Ghost = 'peer@durable',
-    ok = meck:new(partisan_peer_service, [passthrough]),
     try
-        ok = meck:expect(partisan_peer_service, members, fun() ->
-            {ok, [partisan:node(), Ghost]}
-        end),
-        _ = append_batch(Id, 3),
-        _ = bondy_oplog_instance:await_apply(Id),
-        ok = bondy_oplog_peer_state:record_sync_complete(
-            Ghost, Id, frontier(Id)
-        ),
-        ok = bondy_oplog_peer_state:sync(),
-        ?assertEqual(
-            {error, no_frontier}, bondy_oplog_instance:stability_point(Id)
-        ),
+        bondy_oplog_test_helpers:with_members(
+            fun() -> lists:usort([partisan:node(), Ghost]) end,
+            fun() ->
+                _ = append_batch(Id, 3),
+                _ = bondy_oplog_instance:await_apply(Id),
+                ok = bondy_oplog_peer_state:record_sync_complete(
+                    Ghost, Id, frontier(Id)
+                ),
+                ok = bondy_oplog_peer_state:sync(),
+                ?assertEqual(
+                    {error, no_frontier},
+                    bondy_oplog_instance:stability_point(Id)
+                ),
 
-        ok = bondy_oplog_instance:persist_frontier(Id),
-        ?assertMatch({ok, _}, bondy_oplog_instance:stability_point(Id))
+                ok = bondy_oplog_instance:persist_frontier(Id),
+                ?assertMatch(
+                    {ok, _}, bondy_oplog_instance:stability_point(Id)
+                )
+            end
+        )
     after
-        meck:unload(partisan_peer_service),
         cleanup_instance(Id, NS, Shard)
     end.
 

@@ -472,7 +472,7 @@ rules() ->
         {{match, ["wamp", "broker", "event_history"]},
             {drop, unimplemented_why()}},
         {{match, ["wamp", "broker", "payload_passthru_mode"]},
-            {drop, unimplemented_why()}},
+            {drop, capability_why()}},
         {{match, ["wamp", "broker", "publication_trustlevels"]},
             {drop, unimplemented_why()}},
         {{match, ["wamp", "broker", "sharded_subscription"]},
@@ -491,9 +491,9 @@ rules() ->
                 " see it disappear, which is the announcement being corrected"
                 " rather than a capability being withdrawn."}},
         {{match, ["wamp", "dealer", "payload_passthru_mode"]},
-            {drop, unimplemented_why()}},
+            {drop, capability_why()}},
         {{match, ["wamp", "dealer", "reflection"]},
-            {drop, unimplemented_why()}},
+            {drop, capability_why()}},
         {{match, ["wamp", "dealer", "registration_revocation"]},
             {drop, unimplemented_why()}},
         {{match, ["wamp", "dealer", "sharded_registration"]},
@@ -517,7 +517,7 @@ rules() ->
         {{match, ["wamp", "dealer", "call_timeout"]},
             {drop, capability_why()}},
         {{match, ["wamp", "dealer", "call_trustlevels"]},
-            {drop, capability_why()}},
+            {drop, unimplemented_why()}},
         {{match, ["wamp", "dealer", "caller_auth_claims"]},
             {drop, capability_why()}},
         {{match, ["wamp", "dealer", "caller_identification"]},
@@ -2979,9 +2979,8 @@ selftest_capabilities(Schema) ->
             failed;
         ok ->
             Caps = [
-                {["wamp", atom_to_list(Role), atom_to_list(Feature)],
-                    {Role, Feature}}
-             || {Role, Feature} <- bondy_config:code_defined_features()
+                {["wamp", atom_to_list(Role), atom_to_list(Feature)], Value}
+             || {Role, Feature, Value} <- bondy_config:code_defined_features()
             ],
             StillMapped = [K || {K, _} <- Caps, is_known(K, Schema)],
             Unexplained = [
@@ -2992,7 +2991,16 @@ selftest_capabilities(Schema) ->
                     _ -> true
                 end
             ],
-            case {Caps, StillMapped, Unexplained} of
+            %% The reason given for dropping a feature must agree with what the
+            %% build advertises for it.
+            Misexplained = [
+                K
+             || {K, Value} <- Caps,
+                {drop, Why} <- [match_rule(K, rules())],
+                (Value andalso Why == unimplemented_why()) orelse
+                    (not Value andalso Why == capability_why())
+            ],
+            case {Caps, StillMapped, Unexplained ++ Misexplained} of
                 {[_ | _], [], []} ->
                     out("  capabilities: ~p features seated in bondy_config,"
                         " none still mapped by a schema, all explained by a"
@@ -3008,6 +3016,10 @@ selftest_capabilities(Schema) ->
                     [err("  capabilities: ~s has no drop rule -- an operator"
                         " who sets it gets `NO RULE'", [key_str(K)])
                      || K <- Unexplained],
+                    [err("  capabilities: ~s is dropped with a reason that"
+                        " contradicts the value this build advertises",
+                        [key_str(K)])
+                     || K <- Misexplained],
                     failed
             end
     end.

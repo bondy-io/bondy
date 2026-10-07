@@ -393,10 +393,10 @@ aae_fence_refuses_password_when_stale(Config) ->
     %% path, so a stale/isolated node refuses EVERY method — not just the
     %% bearer-token path. Proven here for password auth (a non-oauth2 method).
     %%
-    %% The refusal is conditional on the node being part of a cluster it cannot
-    %% confirm against: a genuine single-node deployment is vacuously fresh and
-    %% authenticates (asserted first), so the stale-refusal is exercised against
-    %% a mocked non-solo membership.
+    %% The refusal is conditional on clustering being enabled: with clustering
+    %% disabled there is no peer to lag and the node authenticates (asserted
+    %% first), so the stale refusal is exercised against a membership with an
+    %% unreachable peer.
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
     {ok, Ctxt} = bondy_auth:init(SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}),
@@ -410,18 +410,21 @@ aae_fence_refuses_password_when_stale(Config) ->
     ok = application:set_env(bondy_oplog, aae_enabled, true),
     ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
     try
-        %% Solo node: vacuously fresh, so password auth still works with AAE on.
+        %% Clustering disabled: no peer to lag, so password auth still works
+        %% with AAE on.
+        ok = application:set_env(bondy_cluster, enabled, false),
         ok = bondy_ct:aae_reset_all_stale(),
         ok = bondy_ct:aae_bump_isolated_all(),
         ?assertMatch(
             {ok, _, _},
             bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
         ),
+        ok = application:set_env(bondy_cluster, enabled, true),
 
-        %% Non-solo node that cannot reach its peer: the security tables read
+        %% A member that cannot reach its peer: the security tables read
         %% stale, so the common fence refuses with the generic, method-agnostic
         %% reason — even though the password itself is correct.
-        ok = bondy_ct:aae_mock_nonsolo_membership(),
+        ok = bondy_ct:aae_mock_unreachable_peer(),
         try
             ok = bondy_ct:aae_reset_all_stale(),
             ok = bondy_ct:aae_bump_isolated_all(),
@@ -430,9 +433,10 @@ aae_fence_refuses_password_when_stale(Config) ->
                 bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
             )
         after
-            ok = bondy_ct:aae_unmock_nonsolo_membership()
+            ok = bondy_ct:aae_unmock_unreachable_peer()
         end
     after
+        ok = application:set_env(bondy_cluster, enabled, true),
         ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
         ok = application:set_env(bondy_oplog, aae_enabled, false)
     end,

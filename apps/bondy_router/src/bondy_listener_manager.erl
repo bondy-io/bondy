@@ -358,18 +358,18 @@ admin_local_spec() ->
     %% which `bondy_ct:node_env/2` works around with a per-peer directory.
     %%
     %% What blocks it is boot order, not effort. Any node identity comes from
-    %% Partisan, which `bondy_router_app:start/2` starts only AFTER
-    %% `bondy_config:init/1` returns — deliberately, because `init/1` spends
-    %% its whole body editing Partisan's application environment by hand. This
-    %% function runs inside `init/1`, so there is no node name yet. Worse,
-    %% `nodestring/0` and `node_hash/0` CACHE, so reading one here would pin a
-    %% wrong node identity into session ids for the lifetime of the node.
+    %% Partisan's configuration, which `bondy_config:init/1` re-reads only at
+    %% its end, because it spends its body editing Partisan's application
+    %% environment by hand. This function runs inside `init/1` before that, so
+    %% there is no final node name yet. Worse, `nodestring/0` and
+    %% `node_hash/0` CACHE, so reading one here would pin a wrong node identity
+    %% into session ids for the lifetime of the node.
     %%
     %% Closing it means resolving the path where the identity exists
-    %% (`start/1`, which runs long after Partisan is up) and republishing the
-    %% `[admin_local, path]` block `bondy_config:splat_listener_blocks/1` has
-    %% already emitted from the value below — a change to the write-once
-    %% inventory, not made here.
+    %% (`start/1`, which runs after `bondy_config:init/1` returns) and
+    %% republishing the `[admin_local, path]` block
+    %% `bondy_config:splat_listener_blocks/1` has already emitted from the
+    %% value below — a change to the write-once inventory, not made here.
     #{
         transport => uds,
         protocol => http,

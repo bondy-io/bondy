@@ -414,13 +414,8 @@ name creates it afresh rather than reviving what was there.
         default => timer:seconds(10),
         datatype => pos_integer
     },
-    %% 3, matching every listener's `ping.max_attempts'
-    %% (`bondy_listener_config:option_defaults/2' for a raw-socket or
-    %% bridge-relay listener, `wamp.websocket.ping.max_attempts' for a WebSocket
-    %% one). How many unanswered probes mean a dead peer is one judgement, and
-    %% this end of a bridge has no reason to make it differently from the end
-    %% that accepts the connection. It shipped 2 while the schema's own commented
-    %% example showed 3.
+    %% 3, matching every listener's `ping.max_attempts': how many unanswered
+    %% probes mean a dead peer is one judgement for both ends of a bridge.
     max_attempts => #{
         alias => <<"max_attempts">>,
         required => true,

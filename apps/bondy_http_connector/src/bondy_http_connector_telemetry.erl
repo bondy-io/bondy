@@ -357,7 +357,7 @@ declare_families() ->
     ok = bondy_metrics:declare(#{
         name => bondy_http_connector_token_refresh_total,
         help =>
-            ~"Total preemptive or reactive token refreshes, by service, outcome and trigger."
+            ~"Total preemptive or reactive token refreshes, by service and outcome."
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_http_connector_secret_resolution_total,

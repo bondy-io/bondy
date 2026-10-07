@@ -44,7 +44,9 @@ all() ->
         cancel_killnowait,
         cancel_kill_interrupts_callee,
         cancel_specific_among_many,
-        cancel_unknown_token
+        cancel_unknown_token,
+        kill_without_callee_support_skips,
+        killnowait_without_callee_support_skips
     ].
 
 init_per_suite(Config) ->
@@ -59,6 +61,40 @@ end_per_suite(_) ->
 %% =============================================================================
 %% TESTS
 %% =============================================================================
+
+%% A callee that did not announce `call_canceling` is never sent an INTERRUPT:
+%% `kill` and `killnowait` act as `skip`. The caller is errored at once and the
+%% handler, never interrupted, runs to completion.
+kill_without_callee_support_skips(_) ->
+    cancel_without_callee_support(kill).
+
+killnowait_without_callee_support_skips(_) ->
+    cancel_without_callee_support(killnowait).
+
+cancel_without_callee_support(Mode) ->
+    Uri = <<"com.example.cancel.unsupported.", (atom_to_binary(Mode))/binary>>,
+    Self = self(),
+    Callee = connect(#{
+        callee => #{features => #{caller_identification => true}}
+    }),
+    {ok, _} = bondy_connect_client:register(Callee, Uri, fun(_, _, _) ->
+        timer:sleep(1000),
+        Self ! {handler_done, Uri},
+        {ok, #{args => [<<"done">>]}}
+    end),
+
+    Caller = connect(),
+    {ok, Token} = bondy_connect_client:call_async(Caller, Uri, []),
+    ok = bondy_connect_client:cancel(Caller, Token, Mode),
+    assert_canceled(Token),
+    receive
+        {handler_done, Uri} -> ok
+    after ?RECV_MS ->
+        ct:fail(handler_interrupted)
+    end,
+
+    ok = bondy_connect_client:disconnect(Caller),
+    ok = bondy_connect_client:disconnect(Callee).
 
 %% skip: caller errored immediately, no INTERRUPT to the callee.
 cancel_skip(_) ->
@@ -197,13 +233,23 @@ assert_canceled(Token) ->
 
 %% @private
 connect() ->
-    {ok, Conn} = bondy_connect_client:connect(#{
+    connect(undefined).
+
+%% @private `Roles` replaces the client's announced roles when given.
+connect(Roles) ->
+    Spec0 = #{
         transport => tcp,
         endpoint => {?HOST, ?PORT},
         realm => ?REALM,
         auth => #{method => ?WAMP_ANON_AUTH},
         serializers => [json]
-    }),
+    },
+    Spec =
+        case Roles of
+            undefined -> Spec0;
+            _ -> Spec0#{roles => Roles}
+        end,
+    {ok, Conn} = bondy_connect_client:connect(Spec),
     Conn.
 
 %% @private

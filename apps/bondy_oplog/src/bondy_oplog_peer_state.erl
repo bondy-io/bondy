@@ -30,32 +30,19 @@ time we heard from the peer at all.
   recorded durable frontier (folded and checkpointed, and possibly compacted
   since).
 
-## Two readings, for two different safety requirements
+## Confirmation is by membership, never by recency
 
-**Recency-filtered** (`get_instance_peer_states/1,2`) — entries older than
-`now - peer_timeout_ms` (app env, default 30 000ms) are excluded: the peers
-heard from recently.
-
-It is **not** sound for anything that must not lose history or reclaims. A
-peer partitioned for `peer_timeout_ms + 1` is silently left out, stability
-advances without it, and it may return holding writes no other member has.
-Truncating the MST on this reading loses them once both sides have truncated
-(`proofs/tla/ConfirmedCompaction_RootVV3_Fresh_Partition.cfg` violates
-`NoLoss`), which only a fused instance's compaction accepts
-(`bondy_oplog_compaction`); reclaiming projection cells on it resurrects
-deleted data.
-
-**Strict** (`confirmed_peer_states/2`) — no recency filter, and membership is
-supplied by the caller rather than inferred from who happens to be in this
-table. Every member must have a recorded durable frontier or the call reports
-which do not, so a silent peer holds stability down instead of vanishing from
-the computation. Removing a permanently departed node is then an explicit,
-replicated membership act — a Partisan `leave`, never a timeout; peer
-discovery only joins (see `bondy_oplog_origin_retirement`).
-
-The distinction is deliberate: these are not two ways of asking the same
-question. Reclamation, and compaction of any instance that is not fused, MUST
-use the strict reading.
+`confirmed_peer_states/2` takes the membership from the caller rather than
+inferring it from who happens to be in this table. Every member must have a
+recorded durable frontier or the call reports which do not, so a silent peer
+holds stability down instead of vanishing from the computation. Removing a
+permanently departed node is an explicit, replicated membership act — a
+Partisan `leave`, never a timeout; peer discovery only joins (see
+`bondy_oplog_origin_retirement`). A reading that dropped silent peers would
+let stability advance without a peer that may return holding writes no other
+member has: truncating on it loses them once both sides have truncated
+(`proofs/tla/ConfirmedCompaction_3R_Fresh_Partition.cfg` violates
+`NoLoss`), and reclaiming projection cells on it resurrects deleted data.
 
 ## Concurrency
 
@@ -76,9 +63,9 @@ process can read it without round-tripping the gen_server.
     %% The peer's durable frontier (`bondy_oplog_instance:durable_frontier/1`),
     %% as it last reported it. `undefined` until it reports a non-empty one.
     %% Two consumers in `bondy_oplog_instance`: the stability frontier
-    %% (`compute_frontier_for/2`) and the unservable-own-root self-heal (a
-    %% rebuild is licensed only when every recency-live peer's recorded
-    %% frontier dominates the local one).
+    %% (`compute_frontier_for/2`) and the rebuild of a tree whose own root
+    %% lost pages (licensed only when every member's recorded frontier
+    %% covers the local applied one).
     frontier :: #{binary() => non_neg_integer()} | undefined,
     %% ms since UNIX epoch
     last_sync :: integer(),
@@ -86,9 +73,7 @@ process can read it without round-tripping the gen_server.
     last_seen :: integer()
 }).
 
--record(state, {
-    peer_timeout_ms :: non_neg_integer()
-}).
+-record(state, {}).
 
 -type peer_state_entry() :: #{
     peer := peer_id(),
@@ -113,16 +98,11 @@ process can read it without round-tripping the gen_server.
 -export([forget_instance/1]).
 
 %% Reads (direct ETS, no gen_server roundtrip)
--export([get_known_peers/1]).
 -export([get_known_peers/2]).
 -export([confirmed_peer_states/2]).
--export([get_instance_peer_states/1]).
 -export([get_instance_peer_states/2]).
 -export([info/0]).
 -export([sync/0]).
-
-%% Tuning
--export([peer_timeout_ms/0]).
 
 %% gen_server callbacks
 -export([init/1]).
@@ -165,7 +145,7 @@ child_spec(Opts) ->
 Records a completed anti-entropy round between the local replica and `Peer`
 for `Instance`, and `Frontier`, the durable frontier `Peer` reported.
 `undefined` (none reported) or an empty one refreshes recency and keeps the
-frontier recorded before, so the self-heal's domination gate never reads
+frontier recorded before, so the rebuild's cover check never reads
 "claims nothing" as covering an empty local frontier. Keeping it is meant for a
 member whose durable frontier only grows; a member that lost its disk, or an
 ephemeral one that restarted, keeps confirming its old claims until it reports
@@ -227,16 +207,9 @@ forget_instance(InstanceId) ->
 %% =============================================================================
 
 ?DOC("""
-Returns the list of peers that have any record for `Instance`,
-excluding peers whose `last_seen` is older than the configured
-`peer_timeout_ms`.
+Returns the peers that have a record for `Instance` whose `last_seen` is at or
+after `Since` (ms since UNIX epoch).
 """).
--spec get_known_peers(instance_id()) -> [peer_id()].
-
-get_known_peers(Instance) ->
-    Cutoff = os:system_time(millisecond) - peer_timeout_ms(),
-    get_known_peers(Instance, Cutoff).
-
 -spec get_known_peers(instance_id(), Since :: integer()) -> [peer_id()].
 
 get_known_peers(Instance, Since) ->
@@ -258,24 +231,6 @@ get_known_peers(Instance, Since) ->
     ets:select(?TABLE, MatchSpec).
 
 ?DOC("""
-Returns the full per-peer record set for `Instance`, excluding stale
-peers. Each entry is a map with `peer`, `instance`, `frontier`, `last_sync`,
-`last_seen`.
-""").
--spec get_instance_peer_states(instance_id()) -> [peer_state_entry()].
-
-get_instance_peer_states(Instance) ->
-    Cutoff = os:system_time(millisecond) - peer_timeout_ms(),
-    %% One unfiltered select, partitioned here, so reporting the exclusions
-    %% costs no second select.
-    {Fresh, Excluded} = lists:partition(
-        fun(#{last_seen := Seen}) -> Seen >= Cutoff end,
-        get_instance_peer_states(Instance, 0)
-    ),
-    ok = report_excluded(Instance, Excluded),
-    Fresh.
-
-?DOC("""
 Strict reading of the peer states for `Instance`, for callers that drop
 history or reclaim irreversibly.
 
@@ -288,17 +243,13 @@ There is **no recency filter**: a silent member holds stability down rather
 than being dropped, which is what makes reclamation safe.
 `{unconfirmed, Peers}` names the members still missing, so a caller can log or
 expose why stability is not advancing.
-
-Contrast `get_instance_peer_states/1`, which drops peers unheard-from within
-`peer_timeout_ms`, and is unsound for any caller that must not lose history.
 """).
 -spec confirmed_peer_states(instance_id(), Members :: [peer_id()]) ->
     {ok, [peer_state_entry()]} | {unconfirmed, [peer_id()]}.
 
 confirmed_peer_states(_Instance, []) ->
-    %% No members: nothing can contradict us, so everything is trivially
-    %% stable. A genuinely solo instance is the one case where reclamation
-    %% needs no confirmation at all.
+    %% No members to confirm. `reclamation_members/0` lists none only with
+    %% clustering disabled, where no other replica exists.
     {ok, []};
 confirmed_peer_states(Instance, Members) when is_list(Members) ->
     %% `0` ⇒ no recency filter, deliberately. A row with no recorded
@@ -318,6 +269,11 @@ confirmed_peer_states(Instance, Members) when is_list(Members) ->
             {unconfirmed, Missing}
     end.
 
+?DOC("""
+Returns the per-peer records for `Instance` whose `last_seen` is at or after
+`Since` (ms since UNIX epoch). Each entry is a map with `peer`, `instance`,
+`frontier`, `last_sync`, `last_seen`.
+""").
 -spec get_instance_peer_states(instance_id(), integer()) ->
     [peer_state_entry()].
 
@@ -356,38 +312,8 @@ Returns operational diagnostics. Cheap.
 info() ->
     #{
         table_size => ets:info(?TABLE, size),
-        memory_words => ets:info(?TABLE, memory),
-        peer_timeout_ms => peer_timeout_ms()
+        memory_words => ets:info(?TABLE, memory)
     }.
-
-?DOC("""
-Returns the configured `peer_timeout_ms` from app env, defaulting to
-30 000ms. Read on every recency-filtered read.
-""").
--spec peer_timeout_ms() -> non_neg_integer().
-
-peer_timeout_ms() ->
-    bondy_oplog_config:peer_timeout_ms().
-
-%% @private
-%% A peer left out of a recency-filtered read must not be invisible: an
-%% operator needs to connect the decision taken without it to a peer that keeps
-%% ageing out. Telemetry only, deliberately no log: a level-triggered log line
-%% would storm for as long as the peer stays silent, and telemetry handlers can
-%% aggregate or rate-limit where a log statement here cannot.
-report_excluded(_Instance, []) ->
-    ok;
-report_excluded(Instance, Excluded) ->
-    telemetry:execute(
-        [bondy_oplog, peer_state, excluded],
-        #{count => length(Excluded)},
-        #{
-            instance_id => Instance,
-            peers => [maps:get(peer, S) || S <- Excluded],
-            peer_timeout_ms => peer_timeout_ms()
-        }
-    ),
-    ok.
 
 ?DOC("""
 Synchronous round-trip through the gen_server. Returns when every
@@ -403,7 +329,7 @@ sync() ->
 %% gen_server CALLBACKS
 %% =============================================================================
 
-init(Opts) ->
+init(_Opts) ->
     process_flag(trap_exit, true),
     %% Absorbs remote-event / anti-entropy bursts during sync; off_heap
     %% mailbox so a sync burst backlog isn't re-scanned by the GC.
@@ -415,9 +341,7 @@ init(Opts) ->
         {keypos, #peer_instance_state.peer_instance},
         {read_concurrency, true}
     ]),
-    {ok, #state{
-        peer_timeout_ms = maps:get(peer_timeout_ms, Opts, peer_timeout_ms())
-    }}.
+    {ok, #state{}}.
 
 handle_call(sync, _From, State) ->
     {reply, ok, State};

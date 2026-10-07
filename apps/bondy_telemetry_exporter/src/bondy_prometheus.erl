@@ -405,13 +405,6 @@ declare_partisan_families() ->
         >>
     }),
     ok = bondy_metrics:declare(#{
-        name => bondy_cluster_channel_connections,
-        help => <<
-            "Current Partisan connection count for a peer/channel; below the "
-            "target it is under-provisioned."
-        >>
-    }),
-    ok = bondy_metrics:declare(#{
         name => bondy_cluster_channel_connections_target,
         help => <<
             "Configured target connection count (parallelism) for a "
@@ -979,20 +972,14 @@ handle_partisan_event([partisan, connection, down], Meas, Meta, _) ->
     }),
     ok;
 handle_partisan_event([partisan, channel, connections], Meas, Meta, _) ->
-    Label = #{
-        peer => maps:get(peer_node, Meta, undefined),
-        channel => maps:get(channel, Meta, undefined)
-    },
-    _ = bondy_metrics:gauge(#{
-        name => bondy_cluster_channel_connections,
-        label => Label,
-        value => pint(maps:get(size, Meas, 0))
-    }),
     case maps:get(target, Meas, undefined) of
         Target when is_integer(Target) ->
             _ = bondy_metrics:gauge(#{
                 name => bondy_cluster_channel_connections_target,
-                label => Label,
+                label => #{
+                    peer => maps:get(peer_node, Meta, undefined),
+                    channel => maps:get(channel, Meta, undefined)
+                },
                 value => Target
             });
         _ ->

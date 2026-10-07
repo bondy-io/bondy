@@ -633,9 +633,9 @@ protocol_option_defaults(_Unknown) ->
 %% The keepalive contract both stream protocols implement: probe a connection
 %% that has been idle for `ping.idle_timeout', give up on the peer after
 %% `max_attempts' probes each unanswered for `timeout', and reap a connection
-%% idle for `idle_timeout' whether or not it is being probed. The two handlers
-%% read the same key names and mean the same thing by them, so this is one rule
-%% expressed once, not two that happen to agree.
+%% whose peer has sent nothing for `idle_timeout'; a pong is something, so a
+%% peer that answers probes is not reaped. The raw-socket and bridge-relay
+%% handlers read the same key names and mean the same thing by them.
 %%
 %% `max_attempts' is 3 for every listener: the transport does not change how
 %% many unanswered probes mean a dead peer, and 3 is what a WebSocket

@@ -45,7 +45,55 @@ there. When a directory cannot be synced:
 - A storage shard whose directories cannot be synced when it starts, or whose
   sync after replacing a manifest, offset or checkpoint fails, is restarted.
   If it keeps failing, it is stopped and started again with a backoff, and
-  the node reports NOT READY while it is stopped.
+  the node reports NOT READY while it is stopped (see
+  [When a storage shard stops](#when-a-storage-shard-stops)).
+
+### Install spool
+
+A shard that re-bootstraps from a peer stages the peer's snapshot in a file
+named `catalogue_install.spool` before it changes anything
+(see [Re-bootstrap](../database/convergence.md#re-bootstrap)). The file grows
+to the encoded size of the peer's snapshot of that shard, and several shards
+can re-bootstrap at once, each with its own file. Leave room for it.
+
+- A `main` shard stages in its WAL directory,
+  `<platform_data_dir>/bondy_db/wal/<instance id>/`.
+- A `registry` shard stages under
+  `<platform_tmp_dir>/bondy_db/registry/wal/<instance id>/`
+  (`bondy_namespace_catalog_test`: `registry_spool_under_tmp_dir`).
+
+The file is deleted when the install is written or abandoned. A file left by a
+crash is deleted when the next install on that shard begins.
+
+## When a storage shard stops
+
+Each shard runs as its own instance. When an instance stops without being
+stopped on purpose, the instance keeper starts it again with the options it
+was first started with. The delay before a start is 1 s and doubles with each
+consecutive failure, up to 60 s; an instance that ran for 60 s before stopping
+counts as a first failure again. Restarts run one at a time.
+
+While a kept instance is not running:
+
+- its tables are unavailable on this node;
+- the node reports NOT READY, because `bondy_router_app:is_ready/0` requires
+  every kept instance to be running
+  (`bondy_router_app_readiness_test`: `a_kept_instance_not_running_is_not_ready`);
+- the critical alarm `{bondy_oplog_instance_down, InstanceId}` is raised. It
+  clears when the instance runs again.
+
+An instance stopped on purpose, through `bondy_oplog:stop_instance/1`, is not
+kept: it is not started again and does not affect readiness. Closing a table
+stops its shard instances this way once no other open table uses them.
+
+A durable shard that crashed while sealing its tree leaves an
+`incoming-sealing-NNNN.pack` file in its directory, and its next start seals
+that file. If the file cannot be read, the start fails with an error carrying
+`{recover_seal, Reason}` and the file is kept, so a later start can seal it
+(`bondy_mst_pack_writer_async_seal_test`:
+`recovery_keeps_an_unreadable_sealing_file_test`). The file holds pages of the
+shard's current tree: do not delete it. Fix what makes it unreadable, such as
+permissions or the open-file limit, and the keeper's next start recovers it.
 
 ## `platform_runtime_dir`
 

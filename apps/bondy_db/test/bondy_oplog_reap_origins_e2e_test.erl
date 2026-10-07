@@ -321,10 +321,10 @@ complement_fails_closed_on_unreachable() ->
             _:_ -> ok
         end,
 
-    ok = meck:new(partisan_peer_service, [passthrough]),
+    ok = meck:new(bondy_cluster, [passthrough]),
     try
-        ok = meck:expect(partisan_peer_service, members, fun() ->
-            {ok, [partisan:node(), 'ghost@nowhere']}
+        ok = meck:expect(bondy_cluster, members, fun() ->
+            lists:usort([partisan:node(), 'ghost@nowhere'])
         end),
         %% The inline transport cannot address a node atom, standing in for
         %% an unreachable member: the pass must abort, reaping NOTHING.
@@ -333,11 +333,24 @@ complement_fails_closed_on_unreachable() ->
             bondy_oplog_origin_retirement:run()
         )
     after
-        meck:unload(partisan_peer_service)
+        meck:unload(bondy_cluster)
     end,
 
-    %% The dead origin survived the aborted pass; a later successful (solo)
-    %% pass reaps it — the retry semantics the reactor relies on.
+    %% With clustering enabled, a membership listing only this node is also a
+    %% member that has just restarted: the pass must not read every other
+    %% origin as dead.
+    ok = meck:new(bondy_cluster, [passthrough]),
+    try
+        ok = meck:expect(bondy_cluster, enabled, fun() -> true end),
+        ok = meck:expect(bondy_cluster, members, fun() -> [partisan:node()] end),
+        ?assertEqual({error, no_members}, bondy_oplog_origin_retirement:run())
+    after
+        meck:unload(bondy_cluster)
+    end,
+
+    %% The dead origin survived the aborted passes; a later successful pass,
+    %% with clustering disabled, reaps it — the retry semantics the reactor
+    %% relies on.
     {ok, Report} = bondy_oplog_origin_retirement:run(),
     ?assert(lists:member(Ob, maps:get(origins_reaped, Report))),
     ok = bondy_db:close(DbA).

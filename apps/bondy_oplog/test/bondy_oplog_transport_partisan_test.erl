@@ -13,6 +13,7 @@
 
 %% Helper invoked from the peer node via erpc:call/4.
 -export([do_responder_call/3]).
+-export([start_clustered/0]).
 
 setup() ->
     case net_kernel:get_state() of
@@ -27,7 +28,7 @@ setup() ->
         _ ->
             ok
     end,
-    {ok, _} = application:ensure_all_started(bondy_db),
+    ok = start_clustered(),
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
     ok.
@@ -37,7 +38,18 @@ cleanup(_) ->
         bondy_oplog:stop_instance(I)
      || I <- bondy_oplog:list_instances()
     ],
-    leave_all_peers().
+    ok = leave_all_peers(),
+    ok = application:stop(bondy_db),
+    ok = application:stop(partisan),
+    ok = application:unset_env(bondy_cluster, enabled).
+
+%% Unset, `bondy_cluster` is standalone and nothing starts Partisan, so a node
+%% joins a cluster only after declaring itself clustered.
+start_clustered() ->
+    ok = application:set_env(bondy_cluster, enabled, true),
+    {ok, _} = application:ensure_all_started(partisan),
+    {ok, _} = application:ensure_all_started(bondy_db),
+    ok.
 
 %% `peer:stop/1` kills the peer BEAM but the LOCAL Partisan membership
 %% set retains the dead node, leaking it into every later test module in
@@ -131,6 +143,17 @@ partisan_request_routes_through_responder() ->
         ),
         ?assert(is_binary(R1)),
         ?assertEqual(undefined, R2),
+        %% Through the transport itself: the frontier answer is the
+        %% protocol's only four-element reply.
+        ?assertMatch(
+            {ok, #{}, _Fp, #{}},
+            remote_call(
+                NodeB,
+                bondy_oplog_transport_partisan,
+                request,
+                [SelfPeerName, Inst1, get_frontier, #{}]
+            )
+        ),
         ok = bondy_oplog:stop_instance(Inst1),
         ok = bondy_oplog:stop_instance(Inst2)
     after
@@ -285,13 +308,9 @@ controller_host() ->
     end.
 
 setup_peer(Node) ->
-    %% Start bondy_db, not bondy_mst: the chain is
-    %% bondy_db -> bondy_oplog -> bondy_mst, and bondy_mst alone brings up
-    %% no supervision tree -> noproc. `partisan` is a declared bondy_oplog
-    %% application dependency, so it comes up too.
-    {ok, _} = erpc:call(Node, application, ensure_all_started, [bondy_db]),
     {Mod, Bin, File} = code:get_object_code(?MODULE),
     {module, Mod} = erpc:call(Node, code, load_binary, [Mod, File, Bin]),
+    ok = erpc:call(Node, ?MODULE, start_clustered, []),
     ok = erpc:call(
         Node,
         bondy_oplog_sync_scheduler,

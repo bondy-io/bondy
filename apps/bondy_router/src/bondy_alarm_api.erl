@@ -70,13 +70,10 @@ the reply is identical whether the fan-out works or is absent:
 - **`answered` and `silent` partition the membership.** `answered` is derived
   from the replies actually received, never from the transport's own bad-node
   bookkeeping; `silent` is the remainder. No member can fall out of both.
-- **Membership is read lock-free.** `partisan_membership:node_names/0` is an
-  ETS read, where `partisan_peer_service:members/0` is a
-  `gen_server:call(..., infinity)` — an unbounded wait on the very process a
-  cluster fault would block. Connected peers (`partisan:nodes/0`) would be the
-  wrong set for the opposite reason: a member that is DOWN would vanish from the
-  reply rather than appear as silent, and the vanished node is usually the
-  interesting one. Removing the fan-out fails all four cases; targeting
+- **The fan-out targets the membership** (`bondy_cluster:members/0`), never
+  the connected peers (`partisan:nodes/0`): a member that is DOWN would vanish
+  from the reply rather than appear as silent, and the vanished node is usually
+  the interesting one. Removing the fan-out fails all four cases; targeting
   connected peers instead of members fails the stopped-peer case.
 
 One part of `envelope/2` is NOT covered: replies are filtered to known members,
@@ -430,7 +427,7 @@ history_page(Deadline, Limit, Cursor) ->
 %% next node would filter that node's ring by a sequence number minted on a
 %% different one, silently skipping transitions instead of failing.
 still_members(Nodes, After) ->
-    still_members(Nodes, After, partisan_membership:node_names()).
+    still_members(Nodes, After, bondy_cluster:members()).
 
 %% @private
 still_members([], After, _Members) ->
@@ -468,7 +465,7 @@ now_ms() ->
 %% @private
 history_nodes() ->
     Self = partisan:node(),
-    [Self | lists:sort(partisan_membership:node_names() -- [Self])].
+    [Self | bondy_cluster:members() -- [Self]].
 
 %% @private
 %% One page of the walk.
@@ -585,7 +582,7 @@ node_history(Node, After, Limit, Timeout) ->
             {ok, element(2, local_history(After, Limit))};
         false ->
             try
-                partisan_rpc:call(
+                bondy_cluster:call(
                     Node, ?MODULE, local_history, [After, Limit], Timeout
                 )
             of
@@ -667,8 +664,7 @@ page_error(Reason, M) ->
 %% it survives a Partisan failure that makes every peer silent.
 cluster_alarms(Deadline) ->
     Local = local_alarms(),
-    Members = partisan_membership:node_names(),
-    Peers = Members -- [partisan:node()],
+    Peers = bondy_cluster:members() -- [partisan:node()],
     Timeout = bondy_wamp_api_utils:budget(Deadline, ?FANOUT_TIMEOUT),
     envelope([Local | peer_answers(Peers, Timeout)], [partisan:node() | Peers]).
 
@@ -682,7 +678,7 @@ peer_answers([], _Timeout) ->
     [];
 peer_answers(Peers, Timeout) ->
     try
-        {Replies, _BadNodes} = partisan_rpc:multicall(
+        {Replies, _BadNodes} = bondy_cluster:multicall(
             Peers, ?MODULE, local_alarms, [], Timeout
         ),
         Replies

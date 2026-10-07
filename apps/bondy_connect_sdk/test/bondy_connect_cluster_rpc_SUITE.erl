@@ -41,7 +41,8 @@ all() ->
         progressive_input_across_cluster_callee_unsupported,
         progressive_input_remote_cancel_interrupts_callee,
         progressive_input_remote_caller_death_interrupts_callee,
-        progressive_input_remote_callee_death_errors_caller
+        progressive_input_remote_callee_death_errors_caller,
+        remote_kill_without_callee_support_skips
     ].
 
 suite() ->
@@ -677,6 +678,57 @@ connect_roles(Port, Roles, Deadline) ->
                     connect_roles(Port, Roles, Deadline)
             end
     end.
+
+%% A `kill` CANCEL relayed to a callee on another node that did not announce
+%% `call_canceling` acts as `skip`: node2 sends no INTERRUPT and settles the
+%% call, so the caller on node1 is answered at once and the handler runs to
+%% completion.
+remote_kill_without_callee_support_skips(Config) ->
+    [{_, Node1, _}, {_, _Node2, _}] = ?config(nodes, Config),
+    TestPid = self(),
+    Callee = connect_roles(?NODE2_WAMP_PORT, #{
+        callee => #{features => #{caller_identification => true}}
+    }),
+    Proc = <<"com.example.cluster.cancel.unsupported">>,
+    {ok, _} = bondy_connect_client:register(Callee, Proc, fun(_, _, _) ->
+        TestPid ! handler_started,
+        timer:sleep(2000),
+        TestPid ! handler_done,
+        {ok, #{args => [<<"done">>]}}
+    end),
+    ok = wait_until(
+        fun() ->
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
+        end,
+        30000,
+        registration_not_visible_on_node1
+    ),
+
+    Caller = connect(?NODE1_WAMP_PORT),
+    {ok, Token} = bondy_connect_client:call_async(Caller, Proc, []),
+    receive
+        handler_started -> ok
+    after 5000 -> ct:fail(handler_not_started)
+    end,
+    ok = bondy_connect_client:cancel(Caller, Token, kill),
+
+    receive
+        {bondy_connect_client, Token, Reply} ->
+            ?assertMatch(
+                {error, #{kind := wamp, uri := <<"wamp.error.canceled">>}},
+                Reply
+            )
+    after 1500 ->
+        ct:fail(caller_not_answered_before_the_handler_finished)
+    end,
+    receive
+        handler_done -> ok
+    after 5000 -> ct:fail(handler_interrupted)
+    end,
+
+    ok = bondy_connect_client:disconnect(Caller),
+    ok = bondy_connect_client:disconnect(Callee).
 
 %% @private
 %% A callee role set that simply OMITS progressive_calls — the router's

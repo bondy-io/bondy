@@ -21,11 +21,15 @@ instance gen_server.
 ## Witnesses
 
 The witnesses are `bondy_oplog_instance:compaction_witnesses/1`, which the
-watermark door reads too. A member's frontier advances only when it writes a
-checkpoint, which each compaction cycle does when its frontier has moved, so a
-member whose cycles do not run holds compaction for every replica. A solo membership passes no witness, so nothing is
-truncated on peer confirmation. When the membership is unreadable or a member has no confirmed row,
-the instance still runs its cycle with no witness (page collection and, on a
+watermark door reads too. On a durable backend a member's frontier advances
+only when it writes a checkpoint, which each compaction cycle does when its
+applied frontier has moved, so a member whose cycles do not run holds
+compaction for every replica; on the `ets` and `map` backends it is the live
+applied frontier. With no
+other member, the instance truncates on its own frontier when clustering is
+disabled (`bondy_cluster:enabled/0`), and truncates nothing when it is enabled.
+When the membership is unreadable or a member has no confirmed row, the
+instance still runs its cycle with no witness (page collection and, on a
 fused instance, retention) and the call returns the cause as an error, which
 the GC scheduler reports as its trigger outcome
 (`bondy_oplog_compaction_test:held_compaction_reaches_the_scheduler/0`). A
@@ -50,9 +54,9 @@ Runs one compaction cycle for `InstanceId`. Returns:
   frontier ≤ current watermark).
 - `{ok, {compacted, NewWatermark, EventCount}}` on success.
 - `{error, {unconfirmed, Members}}` when those members have no recorded
-  frontier,
-  and `{error, membership_unavailable}` when the membership cannot be read.
-  Either is returned after the instance's cycle has run with no witness, whose
+  frontier, and `{error, no_members}` or `{error, membership_unavailable}` as
+  `bondy_oplog_instance:reclamation_members/0` returns them.
+  Each is returned after the instance's cycle has run with no witness, whose
   own outcome is then visible only through `[bondy_oplog, compaction, ok]`.
 - `{error, Reason}` on failure.
 """).

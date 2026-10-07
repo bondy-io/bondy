@@ -139,8 +139,10 @@ scheduler, then smoothed with an exponentially weighted moving average across
 ticks.
 
 A ratio rather than a count, because the comparison is against an intuitive
-figure: a healthy node hovers near 0–1, and a sustained 2 or more means work
-is queuing faster than the schedulers drain it. Smoothed rather than raw,
+figure: the default threshold of 2.0 means that, on average, two ready
+processes wait behind each scheduler. Only normal schedulers count, so
+disk-bound dirty work, which yielding anti-entropy would not relieve, does not
+move the ratio. Smoothed rather than raw,
 because deferring background reconciliation on a single unlucky sample would
 make convergence latency jittery for no benefit — a momentary spike is not a
 reason to stop syncing.
@@ -251,12 +253,15 @@ is `db.aae.max_pages_in_flight` divided by this value, so raising concurrency
 shrinks each session's batch and leaves the node-wide page budget unchanged.
 More concurrency means more shards make progress at once, each more slowly, so
 no shard starves behind a single serial sync. Setting it to `1` serialises
-anti-entropy entirely.
+anti-entropy, except for the shards that back the authentication freshness
+fence, which bypass the cap.
 
 **Memory** — `db.aae.max_pages_in_flight` (2048) is the node-wide budget, in
-pages, for reconciliation in flight at any instant. This is the lever that
-bounds peak memory, and it holds regardless of dataset size or concurrency.
-Larger syncs faster and peaks higher; smaller is gentler and slower.
+pages, for reconciliation in flight at any instant. This is the lever for peak
+memory, and it does not depend on dataset size or concurrency. Each session
+of a fence-backing shard bypasses the concurrency cap and adds one batch above
+the budget. Larger syncs faster and peaks higher; smaller is gentler and
+slower.
 
 **Time** — the other two bound anti-entropy in aggregate; neither stops it
 from competing with a routing spike happening right now.
@@ -269,16 +274,17 @@ convergence bound you need.
 
 `db.aae.load_adaptive` (off) handles the spike: while the smoothed load ratio
 sits at or above `db.aae.load_run_queue_threshold` (2.0), the scheduler skips
-its throttleable dispatches for that tick. In-flight sessions are never
-aborted and deferred shards retry on the next quiet tick, so this can only
-affect convergence latency, never correctness. It is off by default because
+bootstrap transfers and the live syncs of shards that do not back the fence
+for that tick. The scheduler does not stop sessions already running, and the
+deferred shards are dispatched on the next tick below the threshold. The
+throttle therefore delays convergence. It is off by default because
 the concurrency cap and the live-sync backoff already keep anti-entropy
 subordinate; turn it on where routing latency is sensitive to background
 pressure.
 
-Both throttles exempt the shards backing the authentication freshness fence.
-Those shards always sync every tick, so no amount of throttling can turn into
-an authentication outage.
+Both throttles, and the concurrency cap, exempt the shards that back the
+authentication freshness fence. Those shards start a sync on every tick, so
+throttling does not delay the certification the fence reads.
 
 The work anti-entropy triggers when a sync lands — session close, RBAC cache
 invalidation, routing summary updates — runs on its own pool, sized by
@@ -313,10 +319,10 @@ not overreact to one sample.
 | `HELLO` admission gate | latency of admitted sessions; the node's memory limit | node monitor busy state; memory monitor high state | immediate retryable `ABORT` (`wamp.error.unavailable`); established sessions unaffected | `load_regulation.hello.enabled` (`on`) | `bondy_wamp_dropped_total{reason="admission"}` · the `bondy_memory_high` alarm |
 | OAuth2 admission gate | latency of admitted grants; the node's memory limit | node monitor busy state; memory monitor high state | `503` + `retry-after` before any credential work | `load_regulation.oauth2.enabled` (`on`) | `cowboy_requests_total{status_class="5xx"}` · the `bondy_memory_high` alarm |
 | Flow-pool bound | memory and ordering on cluster ingress | a worker's queue vs its share of the budget | the message is shed (at-most-once delivery) | `load_regulation.router.flow_pool.capacity` (100,000) | `bondy_wamp_dropped_total{reason="shed"}` |
-| Anti-entropy concurrency cap | routing fairness | count of running sync sessions | further syncs wait; per-round batch = pages ÷ concurrency | `db.aae.max_concurrency` (3) | — |
-| Anti-entropy page budget | peak memory | reconciliation pages in flight | batches shrink; the node-wide budget holds regardless of dataset size | `db.aae.max_pages_in_flight` (2048) | — |
+| Anti-entropy concurrency cap | routing fairness | count of running sync sessions | further syncs are skipped until a later tick; per-round batch = pages ÷ concurrency; fence-backing shards exempt | `db.aae.max_concurrency` (3) | — |
+| Anti-entropy page budget | peak memory | reconciliation pages in flight | batches shrink; the budget does not depend on dataset size | `db.aae.max_pages_in_flight` (2048) | — |
 | Live-sync backoff | steady-state background cost | whether the shard's data moved | poll interval backs off geometrically to `db.aae.live_sync.max` (5s), resets on change | `db.aae.live_sync` (`on`) | — |
-| Load-adaptive throttle | routing during a spike | the smoothed run-queue ratio | that tick's throttleable dispatches are skipped; in-flight syncs never aborted | `db.aae.load_adaptive` (`off`) | — |
+| Load-adaptive throttle | routing during a spike | the smoothed run-queue ratio | that tick's bootstraps and non-fence live syncs are skipped; running syncs continue | `db.aae.load_adaptive` (`off`) | `bondy_oplog_sync_scheduler_yielding` |
 | Rate limiting — five classes, three scopes | fair share per source IP / session / tenant | token buckets, consumed node → listener → realm | `429` / `ABORT` / `ERROR` / silent drop, per class — next section | `security.rate_limit.*` · `listeners.$name.rate_limit.*` · the realm `rate_limit` property | `bondy_rate_limited_total{class, scope}` |
 | Callee admission (`bondy_connect_sdk`) | the callee's handler pool | in-flight invocation count, plus an optional token bucket | backpressure `ERROR` instead of running the handler | `handler.max_concurrency` · `handler.rate` (client-side, not `bondy.conf`) | — |
 

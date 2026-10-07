@@ -71,7 +71,7 @@ partisan_gen_server:call(
 | `get_origins`                            | `{ok, [origin()]}`                                                     |
 | `get_retired`                            | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                       | `{ok, #{hash() => page()}}`                                            |
-| `get_catalogue_snapshot_init`            | `{ok, no_snapshot}` \| `{ok, {init, {watermark(), cursor()}}}` \| `{error, {refold_owed, Id}}` |
+| `get_catalogue_snapshot_init`            | `{ok, no_snapshot}` \| `{ok, {init, {watermark(), cursor(), [bucket()]}}}` \| `{error, {refold_owed, Id}}` |
 | `{get_catalogue_snapshot_next, Cursor}`  | `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {done, []}}` \| `{error, cursor_expired}` |
 | `{release_catalogue_snapshot, Cursor}`   | `{ok, ok}`                                                             |
 
@@ -289,8 +289,8 @@ dispatch(InstanceId, get_catalogue_snapshot_init) when
                     case bondy_oplog_catalogue_snapshot:init(InstanceId) of
                         {ok, no_snapshot} ->
                             {ok, no_snapshot};
-                        {ok, {Watermark, Cursor}} ->
-                            {ok, {init, {Watermark, Cursor}}};
+                        {ok, {Watermark, Cursor, Buckets}} ->
+                            {ok, {init, {Watermark, Cursor, Buckets}}};
                         {error, _} = Error ->
                             Error
                     end

@@ -9,10 +9,12 @@ A `prometheus_collector` producing scrape-time gauges from router-level
 runtime state, collecting only when the `bondy_router` application is
 running:
 
-- **Partisan** — connection counts per peer and per channel (lock-free
-  reads of the `partisan_peer_connections` ETS registry), one level deeper
-  than the membership/connectivity gauges exported by
-  `bondy_prometheus_db`.
+- **Partisan** — connection counts per peer, and per peer and channel
+  (lock-free reads of the `partisan_peer_connections` ETS registry), one
+  level deeper than the membership/connectivity gauges exported by
+  `bondy_prometheus_db`. The per-channel family pairs, by its labels, with
+  the event-driven `bondy_cluster_channel_connections_target`
+  (`bondy_prometheus`).
 - **RPC** — in-flight promises (pending calls/invocations awaiting yield),
   summed over the `bondy_rpc_promise` tuplespace partitions.
 - **Listeners** — per-ranch-listener active vs max connections and
@@ -168,8 +170,9 @@ families() ->
             "Partisan connections established to each peer.", gauge,
             fun peer_connection_rows/0},
         {bondy_cluster_channel_connections,
-            "Partisan connections per channel (all peers).", gauge,
-            fun channel_connection_rows/0},
+            "Partisan connections per peer and channel; below "
+            "bondy_cluster_channel_connections_target the channel is "
+            "under-provisioned.", gauge, fun channel_connection_rows/0},
         {bondy_rpc_promises_inflight,
             "Pending RPC promises (calls/invocations awaiting a yield or "
             "error). Rising values mean callee saturation.", gauge,
@@ -244,19 +247,28 @@ channel_connection_rows() ->
         catch
             _:_ -> []
         end,
-    lists:filtermap(
-        fun(Channel) ->
-            try partisan_peer_connections:count('_', Channel) of
-                N when is_integer(N) ->
-                    {true, {[{channel, Channel}], N}};
-                _ ->
-                    false
-            catch
-                _:_ -> false
-            end
+    Nodes =
+        try partisan:nodes() of
+            L when is_list(L) -> L;
+            _ -> []
+        catch
+            _:_ -> []
         end,
-        Channels
-    ).
+    [
+        {[{peer, Node}, {channel, Channel}], N}
+     || Node <- Nodes,
+        Channel <- Channels,
+        N <- channel_count(Node, Channel)
+    ].
+
+%% @private
+channel_count(Node, Channel) ->
+    try partisan_peer_connections:count(Node, Channel) of
+        N when is_integer(N) -> [N];
+        _ -> []
+    catch
+        _:_ -> []
+    end.
 
 %% @private
 rpc_promises() ->

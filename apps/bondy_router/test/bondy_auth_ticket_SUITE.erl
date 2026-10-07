@@ -555,7 +555,7 @@ scope_survives_jwt_roundtrip(Config) ->
     %% Revocation must therefore be observable through verify/1's store check
     ok = bondy_ticket:revoke(VerifiedClaims),
     ?assertEqual(
-        {error, not_found},
+        {error, revoked},
         bondy_ticket:lookup(RealmUri, ?U1, VerifiedScope)
     ).
 

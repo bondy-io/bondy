@@ -1,0 +1,23 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_cluster, [
+    {description,
+        "The cluster as every Bondy app reaches it, over Partisan."},
+    {vsn, "1.0.0"},
+    {registered, [bondy_cluster_sup]},
+    {mod, {bondy_cluster_app, []}},
+    {applications, [
+        kernel,
+        stdlib
+        %% Partisan is `{partisan, load}` in the release and started by
+        %% `bondy_router_app` only when clustering is enabled, so it is not
+        %% listed. See bondy_cluster_app.
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

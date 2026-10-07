@@ -41,6 +41,7 @@ frontier_reap_test_() ->
         fun reap_frontier_is_idempotent/0,
         fun reap_frontier_ignores_unknown_instance/0,
         fun retired_origin_never_re_enters_the_frontier/0,
+        fun replaced_frontier_drops_a_retired_origin/0,
         fun reaped_origin_holds_no_install_target/0,
         fun solo_reaps_no_frontier/0,
         fun get_retired_answers_the_retirement_set/0,
@@ -78,6 +79,18 @@ unreachable_member_still_learns_from_the_rest() ->
     %% ...and an answer from no member at all teaches nothing.
     ?assertEqual([], bondy_oplog_origin_retirement:learn_retirements([])).
 
+%% A catalogue install replaces the frontier with its source's, which may still
+%% name an origin this node retired; the replace drops it as a merge would.
+replaced_frontier_drops_a_retired_origin() ->
+    Id = mk_id(),
+    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
+    O = <<"replace-retired">>,
+    Other = <<"replace-other">>,
+    ok = bondy_oplog_origin_bans:retire(O, decommissioned),
+    ok = bondy_oplog_registry:replace_frontier(Id, #{O => 4, Other => 2}),
+    ?assertEqual(#{Other => 2}, bondy_oplog_instance:frontier(Id)),
+    ok = bondy_oplog:stop_instance(Id).
+
 %% The reap runs on the retirement worker while merges run on the applier and
 %% the instance. A plain read-modify-write would let a merge that read the
 %% pre-reap map put the entry back; the compare-and-swap makes one of the two
@@ -114,9 +127,7 @@ reap_is_atomic_against_a_concurrent_merge() ->
 %% THE DIRECTION `reap_is_atomic_against_a_concurrent_merge/0` DOES NOT COVER.
 %% That case races merges that change an existing origin's SEQ, which a stale
 %% compare catches. This one stages a merge that ADDS an origin — the common
-%% case, since a new remote origin's first event adds a key, and
-%% `finalize_catalogue_bootstrap/5` adds a whole peer frontier at once from
-%% the sync-session process while the applier merges its own batch.
+%% case, since a new remote origin's first event adds a key.
 %%
 %% A map in a match-spec head is a SUBSET pattern, so a stale head matches a
 %% row that has gained an origin and the replace drops it.

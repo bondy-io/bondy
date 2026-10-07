@@ -131,7 +131,7 @@ all() ->
         context_method_set_after_auth,
 
         %% CP-for-security (§9.2) — AAE-phase fence gating
-        aae_fence_single_node_available,
+        aae_fence_certifies_only_with_clustering_disabled,
         aae_fence_isolation_policy
     ].
 
@@ -352,12 +352,12 @@ password_grant_jwt_has_required_claims(Config) ->
     ?assert(maps:is_key(<<"client_id">>, Scope)),
     ?assert(maps:is_key(<<"device_id">>, Scope)).
 
-aae_fence_single_node_available(Config) ->
-    %% A genuine single-node deployment (Partisan membership is just this node)
-    %% is vacuously fresh: there is no peer it could lag. Flipping the AAE phase
-    %% on must therefore NOT lock it out — `is_solo/0` certifies a solo node
-    %% under any `on_isolation` policy, including the fail-closed `refuse`
-    %% default, so authentication keeps working.
+aae_fence_certifies_only_with_clustering_disabled(Config) ->
+    %% This node runs with clustering enabled and lists only itself, as a
+    %% member that has just restarted does: that is no evidence its tables are
+    %% fresh, so under `refuse` the fence refuses. With clustering disabled
+    %% there is no peer it could lag, so the same bump certifies under any
+    %% `on_isolation` policy.
     RealmUri = ?config(realm_uri, Config),
     JWT = issue_jwt(RealmUri, ?U1, [<<"group_1">>]),
 
@@ -367,13 +367,21 @@ aae_fence_single_node_available(Config) ->
     ok = application:set_env(bondy_oplog, aae_enabled, true),
     ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
     try
-        %% Start from maximally-stale shards; the scheduler's no-peer seam
-        %% (driven directly here) certifies a solo node even under `refuse`, so
-        %% the fence passes.
+        %% Start from maximally-stale shards and drive the scheduler's no-peer
+        %% seam directly.
+        ok = bondy_ct:aae_reset_all_stale(),
+        ok = bondy_ct:aae_bump_isolated_all(),
+        ?assertEqual(
+            {error, temporarily_unavailable},
+            do_authenticate(RealmUri, JWT)
+        ),
+
+        ok = application:set_env(bondy_cluster, enabled, false),
         ok = bondy_ct:aae_reset_all_stale(),
         ok = bondy_ct:aae_bump_isolated_all(),
         ?assertMatch({ok, _, _}, do_authenticate(RealmUri, JWT))
     after
+        ok = application:set_env(bondy_cluster, enabled, true),
         ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
         ok = application:set_env(bondy_oplog, aae_enabled, false)
     end,
@@ -383,7 +391,7 @@ aae_fence_single_node_available(Config) ->
 
 aae_fence_isolation_policy(Config) ->
     %% The `db.aae.fence.on_isolation` policy governs a node that is part of a
-    %% multi-node cluster but cannot reach a peer this round (so it is NOT solo).
+    %% multi-node cluster but cannot reach a peer this round.
     %% We simulate that on a single test node by mocking the Partisan membership
     %% to include an unreachable peer; `maybe_bump_ae_isolated/1` (the exact
     %% function the scheduler invokes at its no-peer seam) is then driven directly
@@ -391,9 +399,9 @@ aae_fence_isolation_policy(Config) ->
     RealmUri = ?config(realm_uri, Config),
     JWT = issue_jwt(RealmUri, ?U1, [<<"group_1">>]),
     ok = application:set_env(bondy_oplog, aae_enabled, true),
-    ok = bondy_ct:aae_mock_nonsolo_membership(),
+    ok = bondy_ct:aae_mock_unreachable_peer(),
     try
-        %% refuse (the secure default): an isolated bump on a non-solo node is a
+        %% refuse (the secure default): an isolated bump on a member is a
         %% strict no-op, the security shards stay stale, and the fence refuses.
         ok = bondy_ct:aae_reset_all_stale(),
         ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
@@ -420,7 +428,7 @@ aae_fence_isolation_policy(Config) ->
             do_authenticate(RealmUri, JWT)
         )
     after
-        ok = bondy_ct:aae_unmock_nonsolo_membership(),
+        ok = bondy_ct:aae_unmock_unreachable_peer(),
         ok = application:set_env(bondy_oplog, aae_fence_on_isolation, refuse),
         ok = application:set_env(bondy_oplog, aae_enabled, false)
     end.

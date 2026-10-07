@@ -3,14 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% End-to-end RPC across a REAL bridge relay: two sovereign routers (no
-%% Partisan membership, no replicated registry), the edge dialing the
-%% core's `bridge_relay` listener and authenticating by cryptosign. A
-%% callee registered on the edge is proxied into the core's registry by
-%% the bridge, and a core-side caller's CALL crosses the bridge on the
-%% dealer's entry-addressed forward path — the path a clustered suite
-%% can never reach, since RIB routing node-addresses every cluster
-%% forward.
+%% End-to-end RPC across a REAL bridge relay: two sovereign standalone routers
+%% (`bondy_ct:start_nodes/2`: no Partisan, no replicated registry), the edge
+%% dialing the core's `bridge_relay` listener and authenticating by
+%% cryptosign. A callee registered on the edge is proxied into the core's
+%% registry by the bridge, and a core-side caller's CALL crosses the bridge on
+%% the dealer's entry-addressed forward path — the path a clustered suite can
+%% never reach, since RIB routing node-addresses every cluster forward.
 %%
 %% Pinned here: the cluster-forward hop marker
 %% (`bondy_telemetry:maybe_hop_trace/1`) is stamped on that path too —
@@ -20,6 +19,10 @@
 %% assertion machinery is `bondy_trace_context_SUITE`'s, reused
 %% cross-module so the bridged path is held to exactly the assertions
 %% the RIB path already passes.
+%%
+%% Not covered: the edge's network monitor. Standalone, the bridge client's
+%% `bondy_cluster:monitor_network/1` subscribes to nothing, so no case here
+%% delivers a `network_disconnected` signal.
 -module(bondy_bridge_relay_rpc_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
@@ -43,7 +46,8 @@ all() ->
         boot_loads_every_app_module,
         bridged_call_hop_trace,
         bridged_encoded_publish_keeps_payload,
-        crashing_server_redials_with_backoff
+        crashing_server_redials_with_backoff,
+        retry_budget_has_no_time_limit
     ].
 
 init_per_suite(Config) ->
@@ -311,6 +315,54 @@ crashing_server_redials_with_backoff(Config) ->
             end
     end.
 
+%% `bondy_connect_retry` ends a budget at its deadline, 30 s by default. A
+%% bridge's budget is `max_retries` alone: 100 retries a second apart are not
+%% exhausted 34 s in.
+retry_budget_has_no_time_limit(Config) ->
+    [_, {_, Edge, _}] = proplists:get_value(nodes, Config),
+    Self = self(),
+    {ok, LSock} = gen_tcp:listen(0, [
+        binary, {ip, {127, 0, 0, 1}}, {active, false}, {reuseaddr, true}
+    ]),
+    {ok, Port} = inet:port(LSock),
+    Acceptor = spawn(fun() -> accept_close_loop(LSock, Self) end),
+    try
+        %% The log relay forwards 20 events at most; another bridge's
+        %% warnings must not use them up.
+        undefined = erpc:call(Edge, ?MODULE, do_bridge_child_pid, [
+            <<"ct_bridge_backoff">>
+        ]),
+        ok = erpc:call(Edge, ?MODULE, do_attach_log_relay, [Self]),
+        ok = erpc:call(Edge, ?MODULE, do_add_crashing_bridge, [
+            <<"ct_bridge_budget">>,
+            Port,
+            #{
+                enabled => true,
+                max_retries => 100,
+                backoff_min => 1000,
+                backoff_max => 1000,
+                backoff_type => normal
+            }
+        ]),
+        ok = refute_exhaustion_warning(
+            Edge,
+            <<"ct_bridge_budget">>,
+            erlang:monotonic_time(millisecond) + 34000
+        ),
+        ?assert(drain_accepts(0) >= 25)
+    after
+        exit(Acceptor, kill),
+        gen_tcp:close(LSock),
+        _ =
+            try
+                erpc:call(Edge, bondy_bridge_relay_manager, remove_bridge, [
+                    <<"ct_bridge_budget">>
+                ])
+            catch
+                _:_ -> ok
+            end
+    end.
+
 %% =============================================================================
 %% REMOTE FUNCTIONS (run on the peer nodes via erpc)
 %% =============================================================================
@@ -443,19 +495,22 @@ do_add_bridge(Port, RealmUri, #{public := Pub, secret := Priv}, Name, Topics) ->
 %% never exercised — every connection dies before AUTH — but the spec
 %% requires a well-formed entry.
 do_add_crashing_bridge(Port) ->
+    do_add_crashing_bridge(<<"ct_bridge_backoff">>, Port, #{
+        enabled => true,
+        max_retries => 3,
+        backoff_min => 500,
+        backoff_max => 1000,
+        backoff_type => normal
+    }).
+
+do_add_crashing_bridge(Name, Port, Reconnect) ->
     Hex = binary:copy(<<"ab">>, 32),
     Data = #{
-        name => <<"ct_bridge_backoff">>,
+        name => Name,
         enabled => true,
         endpoint => {{127, 0, 0, 1}, Port},
         transport => tcp,
-        reconnect => #{
-            enabled => true,
-            max_retries => 3,
-            backoff_min => 500,
-            backoff_max => 1000,
-            backoff_type => normal
-        },
+        reconnect => Reconnect,
         realms => [
             #{
                 uri => <<"com.bondy.bridge_backoff">>,
@@ -524,6 +579,24 @@ await_exhaustion_warning(Node, Deadline) ->
             await_exhaustion_warning(Node, Deadline)
     after Timeout ->
         error(retry_budget_never_exhausted)
+    end.
+
+%% @private Fails if `Node` relays bridge `Name`'s retry-budget-exhaustion
+%% warning before `Deadline`.
+refute_exhaustion_warning(Node, Name, Deadline) ->
+    Timeout = max(0, Deadline - erlang:monotonic_time(millisecond)),
+    receive
+        {peer_log, Node, #{
+            msg := {report, #{description := D}}, meta := #{id := Name}
+        }} when is_list(D) ->
+            case string:prefix(D, "Bridge relay retry budget exhausted") of
+                nomatch -> refute_exhaustion_warning(Node, Name, Deadline);
+                _ -> error(retry_budget_exhausted)
+            end;
+        {peer_log, _, _} ->
+            refute_exhaustion_warning(Node, Name, Deadline)
+    after Timeout ->
+        ok
     end.
 
 %% @private The suite's own module plus the helper module whose probe,

@@ -92,8 +92,9 @@ above our applied seq. A replica that ends up holding all of a compacted
 peer's data takes its frontier from the paths that also deliver that data: the
 catalogue bootstrap and, across a restart, the compaction checkpoint.
 
-The bootstrap is the one path that adopts, and it decides after the install,
-only for an install that claimed everything. Two conditions must both hold for
+The bootstrap is the one path that adopts: its rederive takes the frontier
+read before the stream as the applied frontier, only over an install that
+claimed everything (`bondy_oplog_applier:commit_stage/4`). Two conditions must both hold for
 that to be sound, and they are enforced in different places. The peer must
 ship everything it holds, which is why its responder refuses to serve until
 its own tables have registered: the snapshot producer enumerates the peer's
@@ -325,12 +326,12 @@ bootstrap_catalogue(Instance, Peer, Opts) when is_binary(Instance) ->
 
 %% @private
 %% Catalogue-snapshot bootstrap: replace the local projection's cells with the
-%% peer's, re-fold the local MST over them, adopt the peer's frontier read
-%% before the stream, mark live (a `pre_bootstrap` caller) and hand the
+%% peer's, adopt the peer's frontier read before the stream and re-fold the
+%% local MST events it does not claim, mark live (a `pre_bootstrap` caller) and hand the
 %% instance the peer's frontier read after it as the target that ends the
 %% re-fold mark, then run an anti-entropy round. The order and the mark are
-%% checked in `proofs/tla/LiveRebootstrapRefold.tla`; the target, for a join
-%% install rather than this replace, in `proofs/tla/JoinInstall.tla` (`Session`).
+%% checked in `proofs/tla/LiveRebootstrapRefold.tla`; the adoption and the
+%% target in `proofs/tla/JoinInstall.tla` (`Rederive`, `Session`).
 do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) ->
     case
         Transport:request(
@@ -343,17 +344,21 @@ do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) -
             %% as `live` (genesis) or expects a future bootstrap against a
             %% non-empty peer.
             run(Instance, Peer, Opts);
-        {ok, {init, {Watermark, Cursor}}} ->
+        {ok, {init, {Watermark, Cursor, Buckets}}} ->
             %% Captured at init, before streaming: a lower bound for what the
             %% live scan ships, and best-effort (`#{}` on error) so the
             %% oracle heals via the normal sync path rather than falsely
-            %% reporting converged. Adoption is decided AFTER the install, on
-            %% `unclaimable` — see `adopt_frontier/3` and the module doc.
+            %% reporting converged. Adopted at the rederive, on the install's
+            %% `unclaimable` (`bondy_oplog_applier:commit_stage/4`).
             PeerFrontier = request_peer_frontier(
                 Instance, Peer, Transport, TransportOpts
             ),
-            case bondy_oplog_instance:begin_install(Instance) of
-                ok ->
+            case
+                bondy_oplog_instance:begin_install(
+                    Instance, Buckets, PeerFrontier
+                )
+            of
+                {ok, Token} ->
                     install_snapshot(
                         Instance,
                         Peer,
@@ -361,7 +366,7 @@ do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) -
                         Transport,
                         TransportOpts,
                         WasLive,
-                        {Watermark, Cursor, PeerFrontier}
+                        {Watermark, Cursor, PeerFrontier, Token}
                     );
                 {error, _} = E ->
                     _ = Transport:request(
@@ -377,6 +382,9 @@ do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) -
     end.
 
 %% @private
+%% A stream that fails drops what it staged; the mark stays until a later
+%% session settles, which the scheduler dispatches
+%% (`bondy_oplog_instance:owes_install/1`).
 install_snapshot(
     Instance,
     Peer,
@@ -384,98 +392,84 @@ install_snapshot(
     Transport,
     TransportOpts,
     WasLive,
-    {Watermark, Cursor, PeerFrontier}
+    {Watermark, Cursor, PeerFrontier, Token}
 ) ->
     case
         pull_install_loop(
-            Instance,
-            Peer,
-            Transport,
-            TransportOpts,
-            Cursor,
-            #{
-                installed => 0,
-                skipped => 0,
-                unclaimable => [],
-                max_hlc => 0
-            },
-            #{}
+            Instance, Peer, Transport, TransportOpts, Cursor, Token, #{}
         )
     of
-        {ok, #{
-            installed := Installed,
-            skipped := Skipped,
-            unclaimable := Unclaimable,
-            max_hlc := MaxInstalledHlc
-        }} ->
-            Adopted = adopt_frontier(
-                Unclaimable, Instance, PeerFrontier
-            ),
-            %% `MaxInstalledHlc` is absorbed into the local clock
-            %% at finalize, BEFORE the instance can be marked live.
-            %% The session-start `Watermark` alone would under-absorb:
-            %% it is a lower bound for what the live scan ships.
-            %% It is absorbed whether or not the frontier was adopted:
-            %% the cells that DID land carry those HLCs either way.
-            Finalized =
-                maybe
-                    ok ?=
-                        bondy_oplog_instance:rederive_projection(
-                            Instance
-                        ),
-                    {ok, {Target, _}} ?=
-                        fetch_peer_frontiers(
-                            Instance, Peer, Transport, TransportOpts
-                        ),
-                    ok ?=
-                        bondy_oplog_instance:finalize_catalogue_bootstrap(
-                            Instance,
-                            Watermark,
-                            Adopted,
-                            MaxInstalledHlc,
-                            WasLive
-                        ),
-                    bondy_oplog_instance:install_target(
-                        Instance, Target
-                    )
-                end,
-            telemetry:execute(
-                [bondy_oplog, sync, catalogue_bootstrap, complete],
-                #{
-                    installed => Installed,
-                    skipped => Skipped,
-                    unclaimable => length(Unclaimable),
-                    watermark => Watermark
-                },
-                #{
-                    instance_id => Instance,
-                    peer => Peer,
-                    was_live => WasLive,
-                    frontier_adopted => Unclaimable =:= [],
-                    %% The names, next to the peer that shipped them:
-                    %% the alarm carries only what is stable across
-                    %% cycles, so this is where the two join.
-                    unclaimable_buckets => Unclaimable
-                }
-            ),
-            finish_bootstrap(Finalized, Instance, Peer, Opts);
+        ok ->
+            maybe
+                {ok, Counts} ?=
+                    bondy_oplog_instance:rederive_projection(Instance, Token),
+                finish_install(
+                    Instance,
+                    Peer,
+                    Opts,
+                    Transport,
+                    TransportOpts,
+                    WasLive,
+                    {Watermark, Counts}
+                )
+            end;
         {error, _} = E ->
-            ok = refold_after_failure(Instance),
+            _ = bondy_oplog_instance:abort_install(Instance, Token),
             E
     end.
 
 %% @private
-%% A stream that failed after installing has replaced cells the re-fold
-%% restores. The mark stays until a later session settles, which the scheduler
-%% dispatches (`bondy_oplog_instance:owes_install/1`).
-refold_after_failure(Instance) ->
-    case bondy_oplog_instance:serving(Instance) of
-        ok ->
-            ok;
-        {error, {refold_owed, _}} ->
-            _ = bondy_oplog_instance:rederive_projection(Instance),
-            ok
-    end.
+finish_install(
+    Instance,
+    Peer,
+    Opts,
+    Transport,
+    TransportOpts,
+    WasLive,
+    {Watermark, Counts}
+) ->
+    #{
+        installed := Installed,
+        pruned := Pruned,
+        skipped := Skipped,
+        unclaimable := Unclaimable,
+        max_hlc := MaxInstalledHlc
+    } = Counts,
+    ok = report_unroutable(Unclaimable, Instance),
+    %% `MaxInstalledHlc` is absorbed into the local clock at finalize, BEFORE
+    %% the instance can be marked live: the session-start `Watermark` is only a
+    %% lower bound for what the live scan ships.
+    Finalized =
+        maybe
+            {ok, {Target, _}} ?=
+                fetch_peer_frontiers(Instance, Peer, Transport, TransportOpts),
+            ok ?=
+                bondy_oplog_instance:finalize_catalogue_bootstrap(
+                    Instance, Watermark, MaxInstalledHlc, WasLive
+                ),
+            bondy_oplog_instance:install_target(Instance, Target)
+        end,
+    telemetry:execute(
+        [bondy_oplog, sync, catalogue_bootstrap, complete],
+        #{
+            installed => Installed,
+            pruned => Pruned,
+            skipped => Skipped,
+            unclaimable => length(Unclaimable),
+            watermark => Watermark
+        },
+        #{
+            instance_id => Instance,
+            peer => Peer,
+            was_live => WasLive,
+            frontier_adopted => Unclaimable =:= [],
+            %% The names, next to the peer that shipped them: the alarm
+            %% carries only what is stable across cycles, so this is where
+            %% the two join.
+            unclaimable_buckets => Unclaimable
+        }
+    ),
+    finish_bootstrap(Finalized, Instance, Peer, Opts).
 
 %% @private
 %% Run anti-entropy (MST page union + diff-replay) for the events past the
@@ -487,14 +481,14 @@ finish_bootstrap(ok, Instance, Peer, Opts) ->
         {ok, _} = Ok ->
             Ok;
         {error, {root_unservable, _}} ->
-            %% The catalogue install + finalize already supplied the data
+            %% The catalogue install + rederive already supplied the data
             %% and the frontier; this trailing AE round only covers events
             %% past the new watermark, which an UNSERVABLE peer cannot
             %% serve by definition — it is exactly the peer this bootstrap
             %% was escalated against. Failing the whole bootstrap here
             %% would discard a successful recovery (and re-strike
             %% forever); complete it and leave the residual tail to the
-            %% peer's own self-heal.
+            %% peer's rebuild.
             {ok, bootstrapped_unservable_tail};
         {error, _} = E ->
             E
@@ -547,7 +541,7 @@ pull_install_loop(
     Transport,
     TransportOpts,
     Cursor,
-    Counts,
+    Token,
     Pending
 ) ->
     %% The rederive in `do_bootstrap_snapshot/6` restores the local events
@@ -556,13 +550,11 @@ pull_install_loop(
     Req = {get_catalogue_snapshot_next, Cursor},
     case Transport:request(Peer, Instance, Req, TransportOpts) of
         {ok, {done, []}} when map_size(Pending) =:= 0 ->
-            {ok, Counts};
+            ok;
         {ok, {done, []}} ->
-            %% THE STREAM ENDED MID-CELL. Returning ok here would let
-            %% `finalize_catalogue_bootstrap/5` adopt the peer's frontier over
-            %% a projection missing those cells — exactly the silent
-            %% over-claim that part-shipping exists to remove. Fail instead;
-            %% the bootstrap retries from `get_catalogue_snapshot_init`.
+            %% The stream ended mid-cell: an ok here would let the rederive
+            %% adopt the peer's frontier over a projection missing those
+            %% cells. The bootstrap retries from `get_catalogue_snapshot_init`.
             {error, {incomplete_chunked_cells, maps:keys(Pending)}};
         {ok, {batch, {NextCursor, Cells}}} ->
             install_and_continue(
@@ -571,8 +563,8 @@ pull_install_loop(
                 Transport,
                 TransportOpts,
                 NextCursor,
+                Token,
                 Cells,
-                Counts,
                 Pending
             );
         {ok, {chunked_batch, {NextCursor, Cells, Chunks}}} ->
@@ -583,8 +575,8 @@ pull_install_loop(
                 Transport,
                 TransportOpts,
                 NextCursor,
+                Token,
                 Cells ++ Completed,
-                Counts,
                 Pending1
             );
         {error, _} = E ->
@@ -598,19 +590,19 @@ install_and_continue(
     Transport,
     TransportOpts,
     NextCursor,
+    Token,
     Cells,
-    Counts,
     Pending
 ) ->
-    case install_batch(Instance, Cells) of
-        {ok, Batch} ->
+    case install_batch(Instance, Token, Cells) of
+        ok ->
             pull_install_loop(
                 Instance,
                 Peer,
                 Transport,
                 TransportOpts,
                 NextCursor,
-                merge_counts(Counts, Batch),
+                Token,
                 Pending
             );
         {error, _} = E ->
@@ -618,56 +610,23 @@ install_and_continue(
     end.
 
 %% @private
-%% A round that carried only parts has nothing to install yet, and an empty
-%% map merges as a no-op.
-install_batch(_Instance, []) ->
-    {ok, #{}};
-install_batch(Instance, Cells) ->
-    bondy_oplog_instance:install_catalogue_batch(Instance, Cells).
+%% A round that carried only parts has nothing to stage yet.
+install_batch(_Instance, _Token, []) ->
+    ok;
+install_batch(Instance, Token, Cells) ->
+    bondy_oplog_instance:install_catalogue_batch(Instance, Token, Cells).
 
 %% @private
-%% Fold one batch's counts into the running total: sums for the counters,
-%% max for the clock, set union for the buckets.
-merge_counts(Acc, Batch) ->
-    maps:merge_with(
-        fun
-            (max_hlc, A, B) -> max(A, B);
-            (unclaimable, A, B) -> ordsets:union(A, B);
-            (_, A, B) -> A + B
-        end,
-        Acc,
-        Batch
-    ).
-
-%% @private
-%% ADOPT THE PEER'S FRONTIER ONLY OVER A COMPLETE INSTALL. The vector says
-%% "every event of this origin up to N is materialised here". If a cell did not
-%% land that is false for whichever origin minted it, and the install cannot say
-%% which — a cell carries no origin and no seq — so the only sound rule is
-%% all-or-nothing. `#{}` is already a no-op merge in
-%% `bondy_oplog_registry:merge_frontier/2`.
-%%
-%% Failing the bootstrap instead is NOT the safer choice. The usual cause is a
-%% peer running a build that declares a table this node does not, which never
-%% resolves on its own, so the replica would retry forever and never receive the
-%% data it CAN route. `MuxBucketSkip.tla` checks both: adopting unconditionally
-%% violates `NoOverClaim` (`MuxBucketSkip_Minus_AdoptIfComplete`) and refusing
-%% violates `Live`.
-%%
-%% The withheld claim provokes a frontier-gap verdict and a re-bootstrap every
-%% cycle. That cycle is the DELIVERY PATH, not waste: a routable event above an
-%% unroutable seq of the same origin is parked by the per-origin contiguity
-%% hold, and the catalogue install is the only writer of applied state that does
-%% not pass through the fold. Suppressing the verdict to stop the cycle also
-%% violates `Live` (`MuxBucketSkip_Minus_GapVerdict`). What ends it is an
-%% operator, which is why this raises an alarm — restated once per cycle and
-%% deliberately NOT logged here, since `bondy_alarm_handler` logs only the
-%% transition. The peer and the counts go out on the `catalogue_bootstrap`
-%% telemetry event.
-adopt_frontier([], InstanceId, PeerFrontier) ->
-    ok = alarm_handler:clear_alarm({bondy_oplog_bucket_unroutable, InstanceId}),
-    PeerFrontier;
-adopt_frontier(Buckets, InstanceId, _PeerFrontier) ->
+%% A bucket with no table here keeps the rederive from adopting the peer's
+%% frontier (`bondy_oplog_applier:commit_stage/4`), which provokes a
+%% frontier-gap verdict and a re-bootstrap every cycle. That cycle is the
+%% DELIVERY PATH, not waste: suppressing the verdict violates `Live`
+%% (`MuxBucketSkip_Minus_GapVerdict`). An operator ends it, hence the alarm,
+%% restated each cycle and not logged here, since `bondy_alarm_handler` logs only
+%% the transition.
+report_unroutable([], InstanceId) ->
+    alarm_handler:clear_alarm({bondy_oplog_bucket_unroutable, InstanceId});
+report_unroutable(Buckets, InstanceId) ->
     Info = #{instance_id => InstanceId, buckets => Buckets},
     Desc =
         <<
@@ -680,10 +639,9 @@ adopt_frontier(Buckets, InstanceId, _PeerFrontier) ->
             "the remedy is to declare it here, after which the next "
             "bootstrap installs completely and clears this alarm."
         >>,
-    ok = alarm_handler:set_alarm(
+    alarm_handler:set_alarm(
         {{bondy_oplog_bucket_unroutable, InstanceId}, Desc, #{details => Info}}
-    ),
-    #{}.
+    ).
 
 %% @private
 %% Fold this round's parts into the reassembly map and extract every cell
@@ -735,7 +693,7 @@ start_bootstrap_catalogue(Instance, Peer, Opts) ->
                 ok;
             {error, Reason} ->
                 ?LOG_WARNING(#{
-                    description => "bootstrap_catalogue session failed",
+                    description => bootstrap_failure_description(Reason),
                     instance => Instance,
                     peer => Peer,
                     reason => Reason
@@ -744,6 +702,15 @@ start_bootstrap_catalogue(Instance, Peer, Opts) ->
         end
     end),
     {ok, Pid}.
+
+%% @private
+bootstrap_failure_description({source_behind_truncation, _}) ->
+    "Refused to install the peer's snapshot: the peer has not seen events "
+    "this node truncated. If this persists, the two nodes truncated history "
+    "separately before they were joined (for example, each ran with "
+    "cluster.enabled = off). Empty one of them and rejoin it.";
+bootstrap_failure_description(_) ->
+    "bootstrap_catalogue session failed".
 
 %% @private
 is_live(Instance) ->
@@ -1176,23 +1143,19 @@ maybe_unservable_behind(Result, _Instance, _PeerFrontier) ->
 %% applied frontier is still strictly ahead of ours after the round.
 %%
 %% The frontier adoption in this module rests on "a peer having dropped an
-%% event from its tree implies this node already held it". Compaction of an
-%% instance that is not fused keeps that (`bondy_oplog_compaction`); other
-%% truncations do not: a fused instance's compaction stops waiting for a peer
-%% silent past `peer_timeout_ms`, its `mst_retention` truncates by local
-%% policy with no confirmation, the
-%% unservable-root self-heal drops a tree once every recency-live peer covers
-%% it, and the operator's `truncate_prefix/2` truncates where told. The
-%% watermark door drops only what every compaction witness confirms
-%% (`bondy_oplog_bootstrap_rederive_test:applier_door_keeps_what_a_member_lacks/0`),
-%% so it inherits whichever of these readings the instance uses. The missing
-%% events then can never arrive by page-sync, so adopting would flip the
+%% event from its tree implies this node already held it". Compaction keeps
+%% that, as do the watermark door and the unservable-root rebuild: each waits
+%% for every member (`bondy_oplog_instance:compaction_witnesses/1`;
+%% `bondy_oplog_bootstrap_rederive_test:applier_door_keeps_what_a_member_lacks/0`).
+%% Two truncations do not: `mst_retention` truncates by local policy with no
+%% confirmation, and the operator's `truncate_prefix/2` truncates where told.
+%% The missing events then can never arrive by page-sync, so adopting would flip the
 %% convergence oracle to CONVERGED over silently missing data. The session fails
 %% with `{frontier_gap, Origins}` instead and the scheduler flags a catalogue
-%% rebootstrap, whose install + finalize supply BOTH the data and the frontier
+%% rebootstrap, whose install + rederive supply BOTH the data and the frontier
 %% (`bondy_oplog_compaction_cluster_SUITE`'s prefix-hole case). A further cause
 %% — this replica withheld the peer's frontier at its last bootstrap
-%% (`adopt_frontier/3`) — resolves the same way;
+%% (`bondy_oplog_applier:commit_stage/4`) — resolves the same way;
 %% `bondy_oplog_sync_scheduler:maybe_flag_rebootstrap/3` enumerates them.
 %%
 %% On an applier-backed instance the pulled events reach the projection, and the
@@ -1411,8 +1374,9 @@ bump_ae_on_sync(Instance, Peer) ->
 -doc """
 Freshen this instance's AE targets for a node whose peer list is empty
 this round (no peer reachable). Certification follows
-`should_certify_freshness/1`: a genuine single-node deployment
-(`is_solo/0`) always certifies, since it has no peer to lag. Otherwise the
+`should_certify_freshness/1`: with clustering disabled
+(`bondy_cluster:enabled/0`) it always certifies, since there is no peer to
+lag. Otherwise the
 `db.aae.fence.on_isolation` policy decides — `proceed` always bumps
 (treat isolation as vacuously fresh), `refuse` never bumps (fail closed —
 the fence will refuse), `quorum` bumps only while connected to a majority.
@@ -1455,17 +1419,16 @@ isolation_policy() ->
 %% policy, for a bump arising from `Site` (`synced` = a successful round
 %% that reached a peer; `isolated` = a tick with no peers in membership).
 %%
-%% A genuine single-node deployment (`is_solo/0`) certifies unconditionally: it
-%% IS the whole cluster, so its local view cannot lag a peer that does not
-%% exist. This is what lets a single-node deployment authenticate with the AAE
-%% fence on, and a cold-started node serve auth before its first peer round —
-%% without weakening `refuse` for a real isolated minority, whose membership
-%% still lists the unreachable peers (so `is_solo/0` is false).
+%% With clustering disabled the node certifies unconditionally: there is no
+%% peer its local view could lag. With clustering enabled a membership of this
+%% node alone is not evidence of that, since a member that has just restarted
+%% lists only itself (`bondy_oplog_instance:reclamation_members/0`), so the
+%% policy decides.
 should_certify_freshness(Site) ->
-    case is_solo() of
-        true ->
-            true;
+    case bondy_cluster:enabled() of
         false ->
+            true;
+        true ->
             case isolation_policy() of
                 proceed -> true;
                 refuse -> Site =:= synced;
@@ -1474,30 +1437,16 @@ should_certify_freshness(Site) ->
     end.
 
 %% @private
-%% True iff this node is the sole member of its Partisan membership — a genuine
-%% single-node deployment. `partisan_peer_service:members/0` returns the full
-%% known membership (every peer ever joined, INCLUDING currently-unreachable
-%% ones — the same set `connected_majority/0` reads as `Expected`), so a node
-%% that was clustered and is now partitioned still lists its peers and is NOT
-%% solo. Only a deployment that never had a peer is.
-is_solo() ->
-    case partisan_peer_service:members() of
-        {ok, Members} when is_list(Members) -> length(Members) =< 1;
-        _ -> false
-    end.
-
-%% @private
 %% True iff this node is connected to a strict majority of its expected
-%% Partisan membership (self counts). Solo membership is trivially a
-%% majority; a minority partition is not.
+%% Partisan membership (self counts). A membership with no other member is
+%% unknown, not a majority.
 connected_majority() ->
-    Expected =
-        case partisan_peer_service:members() of
-            {ok, Members} when is_list(Members) -> length(Members);
-            _ -> 1
-        end,
-    Connected = length(partisan:nodes()) + 1,
-    Connected * 2 > Expected.
+    case bondy_oplog_instance:reclamation_members() of
+        {ok, Others} ->
+            (length(partisan:nodes()) + 1) * 2 > length(Others) + 1;
+        {error, _} ->
+            false
+    end.
 
 %% @private
 %% Inserts pages into the local store. When the backend supports

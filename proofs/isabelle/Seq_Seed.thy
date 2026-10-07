@@ -126,7 +126,7 @@ text \<open>
     only what is at or below the durable checkpoint watermark may go.
   \<^item> @{text persist}: @{text "maybe_persist_frontier/5"} --- the registry
     frontier is written into the checkpoint, watermark unchanged.
-  \<^item> @{text truncate_flush}: @{text "finalize_catalogue_compaction/3"} ---
+  \<^item> @{text truncate_flush}: @{text "finalize_catalogue_compaction/4"} ---
     the MST is truncated at or below a key it holds and the truncated root
     is flushed durably. The key is above the current watermark: it is a
     live key, and the live tree holds nothing at or below the watermark

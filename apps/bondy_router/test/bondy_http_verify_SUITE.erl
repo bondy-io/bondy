@@ -300,12 +300,9 @@ tampered_ticket_is_rejected(_) ->
     ).
 
 revoked_ticket_is_rejected(_) ->
-    %% Revocation is only enforced when the stored copy of the ticket is
-    %% required. With `security.ticket.allow_not_found` at its shipped default
-    %% of `on`, verification falls back to trusting the signature, so a revoked
-    %% ticket keeps passing until it expires — the endpoint deliberately
-    %% behaves exactly like WAMP ticket authentication here. Both halves are
-    %% asserted so the trade-off cannot change silently.
+    %% `allow_not_found` lets a node trust the signature of a ticket it has not
+    %% received yet. A revoked ticket is not that case: its cell holds a
+    %% marker, so it is refused under both settings.
     Key = [security, ticket, allow_not_found],
     Original = bondy_config:get(Key),
 
@@ -315,18 +312,9 @@ revoked_ticket_is_rejected(_) ->
 
     try
         ok = bondy_config:set(Key, true),
-        ?assertMatch(
-            {200, _, _},
-            get_verify(cookie_header(?REALM, JWT)),
-            "with allow_not_found on, a revoked ticket still verifies"
-        ),
-
+        ?assertMatch({401, _, _}, get_verify(cookie_header(?REALM, JWT))),
         ok = bondy_config:set(Key, false),
-        ?assertMatch(
-            {401, _, _},
-            get_verify(cookie_header(?REALM, JWT)),
-            "with allow_not_found off, revocation closes the gate"
-        )
+        ?assertMatch({401, _, _}, get_verify(cookie_header(?REALM, JWT)))
     after
         bondy_config:set(Key, Original)
     end.
@@ -512,9 +500,11 @@ sso_ticket_rejected_when_not_a_member_of_target_realm(_) ->
 
 sso_ticket_rejected_when_user_disabled_in_target_realm(_) ->
     %% Disabled in M2 only: M1 must keep working, so this proves the check is
-    %% made against the realm being accessed, not the issuing one.
-    {JWT, _} = issue_sso_ticket(),
+    %% made against the realm being accessed, not the issuing one. The ticket
+    %% is issued after the disable, which revokes every ticket the user held
+    %% (`bondy_ticket:revoke_all/2`).
     ok = bondy_rbac_user:disable(?M2, ?USER),
+    {JWT, _} = issue_sso_ticket(),
     try
         ?assertMatch(
             {401, _, _}, get_verify(?M2_VERIFY, cookie_header(?SSO, JWT))

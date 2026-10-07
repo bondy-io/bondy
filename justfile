@@ -194,7 +194,7 @@ cover:
 # Serial by design — see the concurrency warning above.
 
 # Every static check, then the full test gate.
-check: xref dialyzer eqwalizer spellcheck test
+check: xref xref-layering dialyzer eqwalizer spellcheck test
 
 # Cross-reference check over the umbrella.
 xref: compile
@@ -222,9 +222,10 @@ spellfix:
     @command -v codespell >/dev/null || { echo "aborting: codespell not found in PATH" >&2; exit 1; }
     codespell {{spell_args}} -i 3 -w
 
-# Enforce the storage-stack layering invariant: dependencies flow strictly
-# bondy_db -> bondy_oplog -> bondy_mst, with no cycles and no layer-skips.
-# Scoped xref check over those three apps (see scripts/check_layering.escript).
+# Enforce the architecture boundaries (see scripts/check_layering.escript):
+# storage dependencies flow strictly bondy_db -> bondy_oplog -> bondy_mst, with
+# no cycles and no layer-skips, and only bondy_cluster calls the Partisan
+# services that run inside the Partisan application.
 xref-layering:
     {{rebar}} compile
     ./scripts/check_layering.escript _build/default/lib

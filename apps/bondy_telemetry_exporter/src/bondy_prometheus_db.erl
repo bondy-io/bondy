@@ -279,8 +279,7 @@ events() ->
         [bondy_oplog, scheduler, gc, tick],
         [bondy_oplog, scheduler, gc, skipped],
         [bondy_oplog, scheduler, gc, trigger_outcome],
-        %% Peer state / origin retirement
-        [bondy_oplog, peer_state, excluded],
+        %% Origin retirement
         [bondy_oplog, retirement, completed],
         [bondy_oplog, retirement, skipped],
         %% Secondary indexes
@@ -414,10 +413,10 @@ declare_metrics() ->
                 instance_id, peer
             ]},
         {bondy_oplog_mst_rebuilt_total,
-            "Unservable-own-root self-heals: the instance dropped an MST "
-            "whose own root lost pages (after the domination gate proved "
-            "no peer is stranded) and resumed AE on a fresh tree. Any "
-            "occurrence deserves a look at WHY pages went missing.", [
+            "Rebuilds of an MST whose own root lost pages: compaction "
+            "truncated the tree past every lost page once every member "
+            "covered what this replica applied. Any occurrence deserves a "
+            "look at why pages went missing.", [
                 instance_id, reason
             ]},
         {bondy_mst_gc_aborted_total,
@@ -480,8 +479,6 @@ declare_metrics() ->
             "GC scheduler activity by scheduler and event kind.", [
                 scheduler, event
             ]},
-        {bondy_oplog_peer_exclusions_total,
-            "Sync peer exclusions (stale peer_state).", [instance_id]},
         {bondy_oplog_retirements_total, "Origin retirement outcomes.", [
             outcome
         ]},
@@ -878,6 +875,9 @@ do_handle_event(
         num(installed, Meas)
     ),
     counter(
+        bondy_oplog_bootstrap_cells_total, [Id, pruned], num(pruned, Meas)
+    ),
+    counter(
         bondy_oplog_bootstrap_cells_total, [Id, skipped], num(skipped, Meas)
     );
 do_handle_event([bondy_oplog, sync, catalogue_bootstrap, Outcome], Meas, Meta) ->
@@ -977,12 +977,6 @@ do_handle_event([bondy_oplog, scheduler, gc, Event], _Meas, Meta) ->
         bondy_oplog_gc_scheduler_events_total,
         [label(maps:get(scheduler, Meta, undefined)), Event],
         1
-    );
-do_handle_event([bondy_oplog, peer_state, excluded], Meas, Meta) ->
-    counter(
-        bondy_oplog_peer_exclusions_total,
-        [instance_id(Meta)],
-        max(1, num(count, Meas))
     );
 do_handle_event([bondy_oplog, retirement, completed], _Meas, _Meta) ->
     counter(bondy_oplog_retirements_total, [completed], 1);
@@ -1736,10 +1730,8 @@ self_node() ->
 
 %% @private
 members() ->
-    try partisan_peer_service:members() of
-        {ok, M} when is_list(M) -> M;
-        M when is_list(M) -> M;
-        _ -> []
+    try
+        bondy_cluster:members()
     catch
         _:_ -> []
     end.

@@ -117,7 +117,7 @@
 %% interface), so for local development without and network connection you want
 %% to disable this functionality. Setting a value to infinity, disables it.
 {mapping, "bridge.$name.network_timeout", "bondy_router.bridges", [
-  {commented, "60s"},
+  {commented, "30s"},
   {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 

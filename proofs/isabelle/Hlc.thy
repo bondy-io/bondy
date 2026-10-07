@@ -10,7 +10,7 @@ begin
 section \<open>The hybrid logical clock\<close>
 
 text \<open>
-  A faithful model of @{text "bondy_oplog_hlc.erl"}: a 64-bit value packed as
+  A faithful model of @{text "bondy_connect_hlc.erl"}: a 64-bit value packed as
   48 bits physical (ms) and 16 bits logical, with @{text "local_next"} for a
   local tick and @{text "peer_next"} for the merge on receipt of a peer event.
 
@@ -245,7 +245,7 @@ text \<open>
   H3, operationally. Once a replica has received a peer HLC, its clock
   strictly exceeds that value for the rest of the run --- so every event it
   subsequently mints sorts strictly after every event it has received. This
-  is what @{text "bondy_oplog_hlc:update/2"} is for, and it is the property
+  is what @{text "bondy_connect_hlc:update/2"} is for, and it is the property
   @{text Oplog_Model} takes as the hypothesis @{text hlc_respects_hb}.
 \<close>
 theorem run_dominates_received:

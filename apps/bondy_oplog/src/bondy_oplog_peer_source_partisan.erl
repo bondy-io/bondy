@@ -47,10 +47,9 @@ reconnect are picked up on the next round without any explicit refresh.
 -spec peers_for(instance_id(), map()) -> [peer_id()].
 
 peers_for(InstanceId, Opts) when is_map(Opts) ->
-    {ok, Members} = partisan_peer_service:members(),
     Pool = [
         Peer
-     || Peer <- Members -- [partisan:node()],
+     || Peer <- bondy_cluster:members() -- [partisan:node()],
         partisan_peer_connections:is_connected(Peer)
     ],
     Count = maps:get(count, Opts, 3),

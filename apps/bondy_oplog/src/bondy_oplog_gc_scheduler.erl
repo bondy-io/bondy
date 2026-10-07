@@ -470,7 +470,10 @@ maybe_log_stall(InstanceId, Reason, State) ->
                     "last_sync_age_ms, or never_synced). Bring them back "
                     "online, or retire them with a deliberate cluster "
                     "membership removal — a stalled member never ages "
-                    "out.",
+                    "out. For reason no_members, clustering is enabled "
+                    "and no other member is listed: a member that has "
+                    "just restarted holds until it rejoins, and a node "
+                    "meant to run alone needs cluster.enabled = off.",
                 scheduler => State#state.name,
                 instance => InstanceId,
                 reason =>

@@ -288,8 +288,8 @@ respect to the fused drain, so there is no mid-install interleaving. Every op
 the install can replace is either peer-confirmed — a fused peer folds at
 integrate before its root is confirmable, so the op is in the snapshot — or
 still retained in the local MST, peer-confirmed compaction being unable to
-have truncated it, and `bondy_oplog_instance:rederive_projection/1` restores
-it before the peer's frontier is adopted;
+have truncated it, and `bondy_oplog_instance:rederive_projection/2` re-folds
+it, since the peer's frontier it adopts does not claim it;
 under `mst_retention` the retained window bounds this leg, which is that
 policy's documented residual trade. Finalizing the bootstrap does not
 truncate the MST, so unshared local-origin events survive for peers to

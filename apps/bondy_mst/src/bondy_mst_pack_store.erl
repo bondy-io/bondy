@@ -409,17 +409,9 @@ set_root(#?MODULE{writer = W} = T, Root) ->
 
 get(#?MODULE{} = T, Hash) when is_binary(Hash) ->
     StartTs = erlang:monotonic_time(microsecond),
-    %% Serve any physically-present page. The `free_set` is a GC / enumeration
-    %% hint (see `list/1` and `gc/2`), NOT a read mask. Masking reads here was
-    %% a second, conflicting source of truth about whether a page is live:
-    %% `truncate`/`merge` churn can leave a page tombstoned while it is still
-    %% reachable from a live (or a peer's) root, and since physical GC never
-    %% runs in this deployment the bytes are still on disk — masking them made
-    %% `get`/`missing_set`/`do_diff` report a dangling root for a page that is
-    %% actually present (`peer_returned_empty_pages`, replay `function_clause`,
-    %% and an endless re-pull). Reachability from the root is the single source
-    %% of truth for liveness; the tombstone only gates physical reclamation and
-    %% `list/1` enumeration.
+    %% The `free_set` is not a read mask: `truncate`/`merge` can tombstone a
+    %% page that a live or a peer's root still reaches. Reachability decides
+    %% liveness; the tombstone only filters `list/1` enumeration.
     {Page, Source, ByteSize} = do_get(T, Hash),
     emit_get(
         T,
@@ -463,9 +455,9 @@ a DURABLE shard rather than reporting `unknown`.
 
 - `absent` — nothing on disk for this hash. Something deleted a page a live
   root references: a store-layer fault.
-- `{tombstoned, undefined}` — the bytes ARE on disk but the `free_set` masks
-  them from `get/2`, so a walk that called the page missing did not learn that
-  from the disk: a consumer / read-path fault. The epoch slot is `undefined`
+- `{tombstoned, undefined}` — the bytes are on disk and the hash is in the
+  `free_set`. `get/2` serves such a page, so a miss on it did not come from
+  this store: a consumer / read-path fault. The epoch slot is `undefined`
   because this backend tombstones by set membership and keeps no per-hash
   free time (contrast `bondy_mst_ets_store`, whose `FreedAt` column carries a
   monotonic timestamp).
@@ -577,9 +569,9 @@ free(#?MODULE{} = T, Hash, _Page) when is_binary(Hash) ->
 
 ?DOC("""
 Pack-rewrite compaction. Given a list of `KeepRoots`, computes the
-transitively reachable hash set, intersects it with the set of
-non-tombstoned hashes, and rewrites every sealed pack into a single
-new sealed pack containing only those entries.
+transitively reachable hash set and rewrites every sealed pack into a
+single new sealed pack containing only those entries. Tombstones do not
+decide what is kept: a reachable page survives even when tombstoned.
 
 * If there are no sealed packs to compact, the call is a no-op.
 * If no entries would be dropped and there is exactly one sealed
@@ -1414,28 +1406,9 @@ partition_sealed(#?MODULE{sealed_views = Views}, Reachable) ->
                             {K, D, S};
                         false ->
                             S1 = sets:add_element(H, S),
-                            %% REACHABILITY ALONE decides. The `free_set` is
-                            %% deliberately NOT a second kill criterion here,
-                            %% for the same reason `get/2` refuses to treat it
-                            %% as a read mask: reachability from the keep-roots
-                            %% is the single source of truth for liveness, and
-                            %% a tombstone is only a hint that a page is
-                            %% PROBABLY garbage.
-                            %%
-                            %% Adding `andalso not tombstoned` (the previous
-                            %% shape) could only ever change the outcome for a
-                            %% page that is REACHABLE FROM A LIVE ROOT yet
-                            %% carries a tombstone — and it would delete that
-                            %% page from disk permanently. Such a page is
-                            %% exactly what a stray `free/3` produces; one such
-                            %% bug (a merge freeing a donor hash in the
-                            %% receiver's store) was live in this tree until
-                            %% 2026-08-07. It costs nothing to be conservative:
-                            %% a genuinely dead page is unreachable and gets
-                            %% dropped by this same test, so keeping
-                            %% reachable-but-tombstoned pages delays no
-                            %% reclamation — they are collected on the next
-                            %% cycle once they actually fall out of the tree.
+                            %% Reachability alone decides: a stray `free/3`
+                            %% can tombstone a reachable page, and dropping it
+                            %% would lose it. A dead page is unreachable anyway.
                             Keep = sets:is_element(H, Reachable),
                             case Keep of
                                 true -> {[H | K], D, S1};

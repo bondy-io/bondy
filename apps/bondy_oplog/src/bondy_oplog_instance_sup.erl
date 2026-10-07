@@ -70,6 +70,7 @@ the order across a restart.
 -export([applier_pid/1]).
 -export([scrubber_pid/1]).
 -export([warn_default_wal_path/1]).
+-export([wal_dir/2]).
 
 %% =============================================================================
 %% API
@@ -332,6 +333,16 @@ wal_opts(InstanceId, Opts) ->
     Dir = wal_base_dir(InstanceId, Opts),
     Base0#{dir => Dir, origin => Origin}.
 
+-doc """
+The directory the instance's WAL keeps its segments in: the configured base
+(`wal_base_dir/2`) joined with `InstanceId`, which the WAL writer's `open/2`
+appends. The applier locates its `consumer.offset` there.
+""".
+-spec wal_dir(binary(), map()) -> binary().
+
+wal_dir(InstanceId, Opts) ->
+    iolist_to_binary(filename:join(wal_base_dir(InstanceId, Opts), InstanceId)).
+
 %% @private
 %% The WAL stores its segments under `Dir/<InstanceId>` — the writer's
 %% `open/2` appends `InstanceId` to the configured base directory.
@@ -373,11 +384,7 @@ wal_base_dir(InstanceId, Opts) ->
 %% own init has returned — by which time the applier is already being
 %% started by the supervisor.
 applier_opts(InstanceId, Opts) ->
-    Base = wal_base_dir(InstanceId, Opts),
-    %% The WAL writer's `open/2` appends `InstanceId` to the configured
-    %% base directory; the applier needs the same fully-qualified path
-    %% to locate the on-disk `consumer.offset`.
-    WalDir = iolist_to_binary(filename:join(Base, InstanceId)),
+    WalDir = wal_dir(InstanceId, Opts),
     Applier0 = maps:get(applier, Opts, #{}),
     %% `ae_targets` is conceptually per-instance (both the applier and
     %% AE rounds bump the same set) so we accept it at the top level

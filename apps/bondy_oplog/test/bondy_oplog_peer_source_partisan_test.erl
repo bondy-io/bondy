@@ -27,11 +27,11 @@ peer_source_test_() ->
 
 setup() ->
     ok = meck:new(partisan, [passthrough, unstick]),
-    ok = meck:new(partisan_peer_service, [passthrough, unstick]),
+    ok = meck:new(bondy_cluster, [passthrough, unstick]),
     ok = meck:new(partisan_peer_connections, [passthrough, unstick]),
     ok = meck:expect(partisan, node, fun() -> ?SELF end),
     ok = meck:expect(
-        partisan_peer_service, members, fun() -> {ok, [?SELF, ?UP, ?DOWN]} end
+        bondy_cluster, members, fun() -> lists:usort([?SELF, ?UP, ?DOWN]) end
     ),
     ok = meck:expect(
         partisan_peer_connections,
@@ -45,7 +45,7 @@ setup() ->
 
 cleanup(_) ->
     _ = meck:unload(partisan_peer_connections),
-    _ = meck:unload(partisan_peer_service),
+    _ = meck:unload(bondy_cluster),
     _ = meck:unload(partisan),
     ok.
 

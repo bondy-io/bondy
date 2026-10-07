@@ -27,6 +27,7 @@ all() ->
         lookup_key_only_current_id,
         fail_closed_missing_env,
         fail_closed_invalid_key_size,
+        out_of_range_key_id_fails_closed,
         works_as_wal_key_registry
     ].
 
@@ -138,6 +139,22 @@ fail_closed_missing_env(_Config) ->
     ?assert(bondy_keyring:is_enabled()),
     ?assertError({master_key_unavailable, _}, bondy_keyring:current_key()),
     ?assertError({master_key_unavailable, _}, bondy_keyring:seal(<<"x">>)).
+
+%% The envelope holds the id in 16 bits. An id past 65535 would be sealed under
+%% its truncation, which no node looks up, so it is refused before anything is
+%% sealed.
+out_of_range_key_id_fails_closed(_Config) ->
+    configure_env_key(new_key()),
+    WithId = fun(Id) ->
+        ok = bondy_config:set([security, master_key], #{
+            provider => env, var => ?ENV_VAR, encoding => base64, id => Id
+        })
+    end,
+    WithId(70000),
+    ?assertError({invalid_master_key_id, 70000}, bondy_keyring:seal(<<"x">>)),
+    WithId(65535),
+    Envelope = bondy_keyring:seal(<<"x">>),
+    ?assertEqual({ok, <<"x">>}, bondy_keyring:open(Envelope)).
 
 fail_closed_invalid_key_size(_Config) ->
     %% A key that is not 32 bytes must fail closed.

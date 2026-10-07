@@ -54,6 +54,7 @@
         bondy_msgpack,
         bondy_metrics,
         bondy_connect_lib,
+        bondy_cluster,
         bondy_regulator,
         %% bondy implements bondy_connect_local's handler behaviour and
         %% registers it at boot (the in-VM WAMP transport for co-located clients)

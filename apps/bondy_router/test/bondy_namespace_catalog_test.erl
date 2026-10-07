@@ -162,7 +162,10 @@ lifecycle_test_() ->
         end,
         fun(_) -> ok end, [
             {timeout, 60,
-                {"provisions every declared table", fun provisions_all/0}}
+                {"provisions every declared table", fun provisions_all/0}},
+            {timeout, 60,
+                {"a registry install spools under platform_tmp_dir",
+                    fun registry_spool_under_tmp_dir/0}}
         ]}.
 
 provisions_all() ->
@@ -330,6 +333,60 @@ provisions_all() ->
 
 fold(ByName, Name) ->
     maps:get(fold, maps:get(Name, ByName)).
+
+%% The registry's WAL is in memory, so its directory holds only an install's
+%% spool. Without a configured directory it would land in `/tmp`, outside every
+%% directory an operator provisions.
+registry_spool_under_tmp_dir() ->
+    Tmp = make_tmpdir(),
+    set_env(1, Tmp),
+    ok = application:set_env(bondy_router, platform_tmp_dir, Tmp),
+    {ok, Pid} = ?CAT:start_link(),
+    try
+        Ids = [
+            I
+         || I <- bondy_oplog:list_instances(),
+            bondy_oplog:db_of(I) =:= ?CAT:registry_db_name()
+        ],
+        ?assertNotEqual([], Ids),
+        [
+            ?assertNotEqual(
+                nomatch,
+                string:prefix(
+                    unicode:characters_to_list(
+                        find_spool(sys:get_state(folder(I)))
+                    ),
+                    Tmp
+                )
+            )
+         || I <- Ids
+        ]
+    after
+        ok = stop_catalog(Pid),
+        reset_env(),
+        application:unset_env(bondy_router, platform_tmp_dir)
+    end.
+
+%% A fused instance folds its own events, so it holds the install stage.
+folder(Id) ->
+    case bondy_oplog_registry:applier_pid(Id) of
+        undefined -> bondy_oplog_instance:whereis(Id);
+        Pid -> Pid
+    end.
+
+find_spool(#{spool := Spool}) ->
+    Spool;
+find_spool(Term) when is_tuple(Term) ->
+    find_spool(tuple_to_list(Term));
+find_spool(Term) when is_map(Term) ->
+    find_spool(maps:values(Term));
+find_spool([H | T]) ->
+    case find_spool(H) of
+        undefined -> find_spool(T);
+        Spool -> Spool
+    end;
+find_spool(_) ->
+    undefined.
 
 set_env(Shards, Dir) ->
     ok = bondy_db_config:set([databases, main, oplog, shard_count], Shards),

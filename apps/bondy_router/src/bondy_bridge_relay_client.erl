@@ -191,7 +191,7 @@ init(Config0) ->
     %% We monitor net status. We will get two info messages:
     %% 1. {network_connected, Ref}
     %% 2. {network_disconnected, Ref}
-    ok = partisan_inet:monitor(true),
+    ok = bondy_cluster:monitor_network(true),
 
     {ok, connecting, State}.
 
@@ -243,7 +243,7 @@ terminate(Reason, StateName, #state{} = State0) ->
     State = cleanup(State1),
 
     %% Cancel monitor
-    ok = partisan_inet:monitor(false),
+    ok = bondy_cluster:monitor_network(false),
 
     %% Notify
     ok = on_disconnect(State),
@@ -264,16 +264,12 @@ format_status(#{state := State} = Status) ->
 A state function. In the `connecting` state the client is trying to establish a
 connection to a remote router (server). This is the initial state of the client.
 
-If establishing the connection fails because there is no network the client
-transitions to the `waiting_for_network` state. Otherwise, if `reconnect` is
-enabled it will retry up the configured limit (deadline or maximum number of
-retries). If the reconnect limit is reached the client will crash with an error
-reason and thus it will be restarted by the supervisor.
+If establishing the connection fails and `reconnect` is enabled, the client
+retries with backoff up to `max_retries`; `enetdown`, `ehostunreach` and
+`enetunreach` are retried like the other transient reasons. When the budget is
+exhausted the client stops and its supervisor restarts it.
 
-The client regards the connection error reasons `enetdown`, `ehostunreach` and
-`enetunreach` as the absence of network connectivity.
-
-The client also monitors the network status using `partisa_inet:monitor/1` and
+The client also monitors the network status using `bondy_cluster:monitor_network/1` and
 handles the resulting `{network_connected, ref()}` and
 `{network_disconnected, ref()}` signals but gives priority to the connection
 socket status.
@@ -422,7 +418,7 @@ active(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
             ],
             {keep_state_and_data, Actions};
         {error, Reason} ->
-            {stop, Reason}
+            redial(Reason, State)
     end;
 active(internal, {welcome, SessionId, _Details}, State0) ->
     try
@@ -618,7 +614,7 @@ handle_event(cast, {forward_message, Msg, SessionId}, _, State) ->
             ],
             {next_state, active, State, Actions};
         {error, Reason} ->
-            {stop, Reason}
+            redial(Reason, State)
     end;
 handle_event(internal, {ping, Data}, _, State) ->
     %% The remote (server) is sending us a ping
@@ -627,7 +623,7 @@ handle_event(internal, {ping, Data}, _, State) ->
             %% We keep all timers as a ping should not reset the idle state
             keep_state_and_data;
         {error, Reason} ->
-            {stop, Reason}
+            redial(Reason, State)
     end;
 handle_event(internal, {pong, _}, active, _) ->
     %% A late pong, but we are active, so we ignore, the retry state was reset
@@ -646,7 +642,7 @@ handle_event(info, {?BONDY_REQ, _Pid, RealmUri, Msg}, _StateName, State) ->
             ],
             {next_state, active, State, Actions};
         {error, Reason} ->
-            {stop, Reason}
+            redial(Reason, State)
     end;
 handle_event(info, {Tag, Socket, Data}, _, #state{socket = Socket} = State) when
     ?SOCKET_DATA(Tag)
@@ -777,8 +773,12 @@ handle_event(EventType, EventContent, StateName, _) ->
 %% =============================================================================
 
 %% @private
+%% `max_retries` is the whole budget: `bondy_connect_retry`'s default deadline
+%% would end it 30 s after the first failure, long before 100 backoff retries.
 maybe_enable_reconnect(#{enabled := true} = Opts0, State) ->
-    Opts = key_value:set(backoff_enabled, true, Opts0),
+    Opts = key_value:set(
+        deadline, 0, key_value:set(backoff_enabled, true, Opts0)
+    ),
     State#state{
         reconnect_retry = bondy_connect_retry:init(connect, Opts)
     };
@@ -1050,7 +1050,7 @@ maybe_send_ping(#state{} = State, Actions0) ->
                     ],
                     {keep_state, State, Actions};
                 {error, Reason} ->
-                    {stop, Reason}
+                    redial(Reason, State)
             end;
         Limit when Limit == deadline orelse Limit == max_retries ->
             Info = #{

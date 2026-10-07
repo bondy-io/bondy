@@ -831,7 +831,7 @@ departed_stub_nodes(RealmUri) ->
 live_nodestrings() ->
     [
         atom_to_binary(Node, utf8)
-     || Node <- partisan_membership:node_names()
+     || Node <- bondy_cluster:members()
     ] ++ [bondy_config:nodestring()].
 
 %% @private

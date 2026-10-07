@@ -86,7 +86,7 @@ Event == [o : Origins, q : Nat, s : Nat, c : Nat]
 Top(S) == CHOOSE e \in S : \A f \in S : f.s < e.s \/ (f.s = e.s /\ f.c =< e.c)
 Value(r) == IF cell[r] = {} THEN 0 ELSE Top(cell[r]).c
 
-\* `bondy_oplog_hlc:now/1`: the physical clock if it is ahead, else the
+\* `bondy_connect_hlc:now/1`: the physical clock if it is ahead, else the
 \* next logical value (an overflowing logical part carries into the
 \* physical, which the packing makes `+ 1`).
 HlcNow(c) == IF wall * K > c THEN wall * K ELSE c + 1

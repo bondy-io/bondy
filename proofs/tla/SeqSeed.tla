@@ -34,7 +34,7 @@
 (*     production calls that function, so the sweep drops nothing; the     *)
 (*     rule modelled is the one the code states, which is also the         *)
 (*     stronger of the two.)                                               *)
-(*   - Compact (`finalize_catalogue_compaction/3`): truncate the MST at    *)
+(*   - Compact (`finalize_catalogue_compaction/4`): truncate the MST at    *)
 (*     or below a frontier key, flush the truncated root durably, THEN     *)
 (*     write the checkpoint `{projection_managed, frontier, VV}` carrying  *)
 (*     the registry frontier -- in that order, so the durable checkpoint   *)
@@ -192,7 +192,7 @@ DropWal ==
                    pend, acked>>
 
 \* Compaction step 1: truncate the MST at or below W and flush the truncated
-\* root durably.  `finalize_catalogue_compaction/3` reaches this only once
+\* root durably.  `finalize_catalogue_compaction/4` reaches this only once
 \* the projection is current up to W, which for this origin's own events is
 \* always so (apply precedes install).  Under FrontierBeforeTruncate the
 \* frontier VV is checkpointed first, under the watermark still in force.

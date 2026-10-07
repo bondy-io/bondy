@@ -4296,7 +4296,7 @@
     {
       "id": 225,
       "type": "timeseries",
-      "title": "Peer bookkeeping \u2014 last-seen age, exclusions & table size",
+      "title": "Peer bookkeeping \u2014 last-seen age & table size",
       "datasource": {
         "type": "prometheus",
         "uid": "bondy-prometheus"
@@ -4336,15 +4336,6 @@
           "expr": "max by (peer) (bondy_oplog_peer_last_seen_age_seconds{node=~\"$node\"})",
           "legendFormat": "last seen {{peer}}",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum by (instance_id) (rate(bondy_oplog_peer_exclusions_total{node=~\"$node\"}[5m]))",
-          "legendFormat": "exclusions {{instance_id}}",
-          "refId": "B"
         },
         {
           "datasource": {

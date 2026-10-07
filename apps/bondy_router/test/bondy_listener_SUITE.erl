@@ -83,6 +83,8 @@ all() ->
         splatted_cors_and_security_headers_reach_the_consumers,
         wamp_handshake_on_a_listener_with_no_option_block,
         rawsocket_ping_interval_comes_from_the_ping_block,
+        rawsocket_silent_peer_is_reaped,
+        rawsocket_peer_answering_pings_is_kept,
         ipv6_listener_binds_without_an_explicit_ip,
         explicit_ipv6_binds_without_an_ip_version,
         one_port_two_addresses,
@@ -1186,6 +1188,58 @@ rawsocket_ping_interval_comes_from_the_ping_block(_Config) ->
     ?assertEqual(Len, byte_size(Payload)),
     ok = gen_tcp:close(Sock),
     ok = bondy_listener_manager:stop(all).
+
+%% `idle_timeout` closes a connection whose peer has sent nothing for that
+%% long. With ping off nothing else closes it.
+rawsocket_silent_peer_is_reaped(_Config) ->
+    Sock = rawsocket_connect(ct_reap, #{
+        idle_timeout => 500, ping => #{enabled => false}
+    }),
+    ?assertEqual({error, closed}, gen_tcp:recv(Sock, 0, 3000)),
+    ok = bondy_listener_manager:stop(all).
+
+%% A pong is data from the peer, so a peer that answers every probe outlives
+%% `idle_timeout` many times over.
+rawsocket_peer_answering_pings_is_kept(_Config) ->
+    Sock = rawsocket_connect(ct_keep, #{
+        idle_timeout => 1000,
+        ping => #{
+            enabled => true,
+            idle_timeout => 200,
+            timeout => 5000,
+            max_attempts => 2
+        }
+    }),
+    Deadline = erlang:monotonic_time(millisecond) + 3000,
+    ok = answer_pings(Sock, Deadline),
+    ok = gen_tcp:close(Sock),
+    ok = bondy_listener_manager:stop(all).
+
+answer_pings(Sock, Deadline) ->
+    case erlang:monotonic_time(millisecond) >= Deadline of
+        true ->
+            ok;
+        false ->
+            {ok, <<0:5, 1:3, Len:24>>} = gen_tcp:recv(Sock, 4, 2000),
+            {ok, Payload} = gen_tcp:recv(Sock, Len, 1000),
+            ok = gen_tcp:send(Sock, <<0:5, 2:3, Len:24, Payload/binary>>),
+            answer_pings(Sock, Deadline)
+    end.
+
+%% A raw-socket client that has completed the WAMP handshake on a fresh
+%% listener `Name` with options `Opts`.
+rawsocket_connect(Name, Opts) ->
+    ok = bondy_config:set(listeners, [
+        {Name, Opts#{transport => tcp, protocol => wamp_rawsocket, port => 0}}
+    ]),
+    ok = bondy_listener_manager:init(),
+    ok = bondy_listener_manager:start(normal),
+    {ok, Sock} = gen_tcp:connect(
+        {127, 0, 0, 1}, ranch:get_port(Name), [binary, {active, false}], 5000
+    ),
+    ok = gen_tcp:send(Sock, <<16#7F, 15:4, 1:4, 0:8, 0:8>>),
+    {ok, <<16#7F, 13:4, 1:4, 0:8, 0:8>>} = gen_tcp:recv(Sock, 4, 5000),
+    Sock.
 
 %% A listener block in the shape a legacy `*.ip_version = 6' mapping renders:
 %% `[Name, transport_opts, socket_opts, ip_version]' and no `ip' anywhere.

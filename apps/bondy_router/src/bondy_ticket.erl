@@ -394,6 +394,8 @@ verify(Ticket, Opts) ->
                         OK;
                     {ok, _Other} ->
                         throw(no_match);
+                    {error, revoked} ->
+                        throw(no_match);
                     {error, not_found} when AllowNotFound == true ->
                         %% We trust the signed JWT
                         {ok, Claims};
@@ -437,7 +439,8 @@ verify(Ticket, Opts) ->
     end.
 
 -doc """
-Returns the claims persisted for `Authid` under `Scope` in `RealmUri`, or
+Returns the claims persisted for `Authid` under `Scope` in `RealmUri`,
+`{error, revoked}` when they were revoked and have not yet expired, or
 `{error, not_found}`.
 
 `RealmUri` is the authentication realm — the ticket's `authrealm` claim — not
@@ -452,7 +455,7 @@ ticket wants `verify/1`.
     RealmUri :: uri(),
     Authid :: bondy_rbac_user:username(),
     Scope :: scope()
-) -> {ok, Claims :: t()} | {error, no_found}.
+) -> {ok, Claims :: t()} | {error, revoked | not_found}.
 
 lookup(RealmUri, Authid, Scope) ->
     Key = lookup_key(Authid, Scope),
@@ -460,12 +463,16 @@ lookup(RealmUri, Authid, Scope) ->
     case bondy_db:read(table(), RealmUri, encode_key(Key)) of
         {error, not_found} ->
             {error, not_found};
+        {ok, {{revoked, _}, _Hlc}} ->
+            {error, revoked};
         {ok, {Claims, _Hlc}} when is_map(Claims) ->
             {ok, Claims};
         {ok, {List, _Hlc}} when is_list(List) ->
             %% List :: [t()]
             LKey = list_key(Scope),
             case lists:keyfind(LKey, 1, List) of
+                {LKey, {revoked, _}} ->
+                    {error, revoked};
                 {LKey, Claims} ->
                     {ok, Claims};
                 false ->
@@ -474,13 +481,17 @@ lookup(RealmUri, Authid, Scope) ->
     end.
 
 -doc """
-Revokes a ticket, given either the encoded ticket or its claims, by deleting the
-claims stored under its scope. A ticket that cannot be verified is not revoked
-and the verification error is returned; `undefined` is accepted and does
-nothing.
+Revokes a ticket, given either the encoded ticket or its claims, by replacing
+the claims stored under its scope with a revocation marker. A ticket that cannot
+be verified is not revoked and the verification error is returned; `undefined`
+is accepted and does nothing.
 
-Revocation is by scope, so it also invalidates any other ticket issued into the
-same scope. The next `verify/1` of a revoked ticket answers `no_match`.
+The marker replicates like any other write and stays until the ticket would
+have expired, so a node that verifies the ticket rejects it once the marker has
+reached it, whatever `security.ticket.allow_not_found` says
+(`bondy_http_verify_SUITE`: `revoked_ticket_is_rejected`). Revocation is by
+scope, so it also invalidates any other ticket issued into the same scope. The
+next `verify/1` of a revoked ticket answers `no_match`.
 """.
 -spec revoke(optional(t())) -> ok | {error, any()}.
 
@@ -499,15 +510,15 @@ revoke(Claims) when is_map(Claims) ->
         authid := Authid,
         scope := Scope
     } = Claims,
-    revoke(RealmUri, Authid, Scope).
+    mark_revoked(RealmUri, Authid, Scope, stored_form(Scope, revoked(Claims))).
 
 -doc """
-Revokes whatever ticket `Authid` holds in `Scope`, by clearing the claims stored
-there.
+Revokes whatever ticket `Authid` holds in `Scope`, by replacing the claims stored
+there with a revocation marker (see `revoke/1`).
 
 `RealmUri` is the ticket's `authrealm` claim — the authentication realm — which
 for an SSO ticket is not the realm the ticket grants access to. Revoking a scope
-that holds no ticket succeeds.
+that holds no ticket on this node succeeds and writes nothing.
 """.
 -spec revoke(
     RealmUri :: uri(),
@@ -518,8 +529,55 @@ that holds no ticket succeeds.
 revoke(RealmUri, Authid, Scope) when
     is_binary(RealmUri), is_binary(Authid), is_map(Scope)
 ->
-    Key = lookup_key(Authid, Scope),
-    bondy_db:apply(table(), RealmUri, encode_key(Key), clear).
+    mark_revoked(RealmUri, Authid, Scope, undefined).
+
+%% @private
+%% `Absent` is what to write when this node holds no copy: the marker for a
+%% ticket whose claims are known, or `undefined` to write nothing.
+mark_revoked(RealmUri, Authid, Scope, Absent) ->
+    Table = table(),
+    Key = encode_key(lookup_key(Authid, Scope)),
+
+    case bondy_db:read(Table, RealmUri, Key) of
+        {ok, {Value, _Hlc}} ->
+            set_revoked(Table, RealmUri, Key, Value);
+        {error, not_found} when Absent =:= undefined ->
+            ok;
+        {error, not_found} ->
+            bondy_db:apply(Table, RealmUri, Key, {set, Absent})
+    end.
+
+%% @private
+set_revoked(Table, Bucket, Key, Value) ->
+    case revoked_value(Value) of
+        Value -> ok;
+        Revoked -> bondy_db:apply(Table, Bucket, Key, {set, Revoked})
+    end.
+
+%% @private
+stored_form(Scope, Marker) ->
+    case bondy_auth_scope:normalize(Scope) of
+        #{client_id := all} -> Marker;
+        Normalized -> [{list_key(Normalized), Marker}]
+    end.
+
+%% @private
+revoked(#{expires_at := ExpiresAt}) ->
+    {revoked, ExpiresAt}.
+
+%% @private
+revoked_value(Claims) when is_map(Claims) ->
+    revoked(Claims);
+revoked_value(Entries) when is_list(Entries) ->
+    [revoked_entry(E) || E <- Entries];
+revoked_value(Marker) ->
+    Marker.
+
+%% @private
+revoked_entry({LKey, Claims}) when is_map(Claims) ->
+    {LKey, revoked(Claims)};
+revoked_entry(Entry) ->
+    Entry.
 
 -doc """
 Reclaims persisted ticket cells that can no longer authenticate anyone, across
@@ -941,10 +999,7 @@ update_tickets({_, _} = Key, Claims, Tickets) ->
 %% authenticated against this realm, and those users go with it.
 revoke_all_in(Table, RealmUri, RealmUri) ->
     {ok, Rows} = bondy_db:list(Table, RealmUri),
-    _ = [
-        bondy_db:apply(Table, RealmUri, Key, clear)
-     || {Key, _V, _Hlc} <- Rows
-    ],
+    _ = [set_revoked(Table, RealmUri, Key, V) || {Key, V, _Hlc} <- Rows],
     ok;
 %% Any OTHER bucket is an SSO realm shared by several member realms. Clearing it
 %% would revoke the siblings' users too, so only tickets scoped to
@@ -964,7 +1019,7 @@ revoke_scoped(Table, Bucket, {Key, Claims, _Hlc}, ScopeRealmUri) when
 ->
     case key_scope_realm(Key) of
         {ok, ScopeRealmUri} ->
-            bondy_db:apply(Table, Bucket, Key, clear);
+            set_revoked(Table, Bucket, Key, Claims);
         _ ->
             ok
     end;
@@ -975,15 +1030,17 @@ revoke_scoped(Table, Bucket, {Key, Claims, _Hlc}, ScopeRealmUri) when
 revoke_scoped(Table, Bucket, {Key, Entries, _Hlc}, ScopeRealmUri) when
     is_list(Entries)
 ->
-    Keep = [E || E <- Entries, not entry_has_realm(E, ScopeRealmUri)],
+    Marked = [
+        case entry_has_realm(E, ScopeRealmUri) of
+            true -> revoked_entry(E);
+            false -> E
+        end
+     || E <- Entries
+    ],
 
-    case length(Keep) =:= length(Entries) of
-        true ->
-            ok;
-        false when Keep == [] ->
-            bondy_db:apply(Table, Bucket, Key, clear);
-        false ->
-            bondy_db:apply(Table, Bucket, Key, {set, lists:sort(Keep)})
+    case Marked of
+        Entries -> ok;
+        _ -> bondy_db:apply(Table, Bucket, Key, {set, Marked})
     end;
 revoke_scoped(_, _, _Row, _ScopeRealmUri) ->
     ok.
@@ -1026,8 +1083,8 @@ ticket_buckets(RealmUri) ->
 revoke_all_for(Table, Bucket, Authid) ->
     {ok, Rows} = bondy_db:list(Table, Bucket),
     _ = [
-        bondy_db:apply(Table, Bucket, Key, clear)
-     || {Key, _V, _Hlc} <- Rows, is_authid_key(Key, Authid)
+        set_revoked(Table, Bucket, Key, V)
+     || {Key, V, _Hlc} <- Rows, is_authid_key(Key, Authid)
     ],
     ok.
 
@@ -1121,6 +1178,16 @@ cleanup_cell(Table, RealmUri, {Key, Entries, _Hlc}, Now, Stats0) when
         error ->
             Stats1
     end;
+cleanup_cell(Table, RealmUri, {Key, {revoked, _} = Marker, _Hlc}, Now, Stats0) ->
+    Stats = bump(Stats0, scanned, 1),
+
+    case is_expired(Marker, Now) of
+        true ->
+            ok = bondy_db:apply(Table, RealmUri, Key, clear),
+            bump(bump(Stats, expired, 1), cells_cleared, 1);
+        false ->
+            Stats
+    end;
 cleanup_cell(_, _, _Row, _Now, Stats) ->
     Stats.
 
@@ -1147,6 +1214,8 @@ classify(Key, Claims, RealmUri, Now) ->
     end.
 
 %% @private
+entry_is_live({_LKey, {revoked, _} = Marker}, Now) ->
+    not is_expired(Marker, Now);
 entry_is_live({_LKey, Claims}, Now) when is_map(Claims) ->
     not (is_map_key(expires_at, Claims) andalso is_expired(Claims, Now));
 entry_is_live(_Other, _Now) ->
@@ -1206,6 +1275,8 @@ add_error(#{errors := Errors} = Stats, RealmUri, Reason) ->
 prune_expired(Tickets) ->
     lists:filter(
         fun
+            ({_, {revoked, _} = Marker}) ->
+                not is_expired(Marker);
             ({_, Claims}) when is_map(Claims) ->
                 not (is_map_key(expires_at, Claims) andalso is_expired(Claims));
             (_) ->
@@ -1245,6 +1316,8 @@ is_expired(Claims) ->
 %% @private
 %% Explicit `Now` so a sweep judges every cell in a realm against ONE instant —
 %% otherwise a long scan applies a drifting cutoff and is not reproducible.
+is_expired({revoked, Exp}, Now) ->
+    Exp =< Now + ?LEEWAY_SECS;
 is_expired(#{expires_at := Exp}, Now) ->
     Exp =< Now + ?LEEWAY_SECS.
 

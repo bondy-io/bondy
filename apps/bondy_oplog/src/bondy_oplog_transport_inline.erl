@@ -31,7 +31,7 @@ behaviour.
     instance_id(),
     bondy_oplog_transport:request(),
     map()
-) -> {ok, term()} | {error, term()}.
+) -> bondy_oplog_transport:response() | {error, term()}.
 
 %% peer_id is treated as a local instance id.
 request(PeerInstanceId, _InstanceId, Request, _Opts) when
@@ -90,8 +90,8 @@ do_request(PeerInstance, get_catalogue_snapshot_init) ->
     case bondy_oplog_catalogue_snapshot:init(PeerInstance) of
         {ok, no_snapshot} ->
             {ok, no_snapshot};
-        {ok, {Watermark, Cursor}} ->
-            {ok, {init, {Watermark, Cursor}}};
+        {ok, {Watermark, Cursor, Buckets}} ->
+            {ok, {init, {Watermark, Cursor, Buckets}}};
         {error, _} = Error ->
             Error
     end;

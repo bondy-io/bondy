@@ -205,9 +205,11 @@ init(Args) ->
 
     ok = setup_partisan_channels(),
 
-    ok = setup_partisan(),
-
     ok = apply_private_config(prepare_private_config()),
+
+    %% After every edit to Partisan's environment: on a standalone node nothing
+    %% reads it again.
+    ok = setup_partisan(),
 
     ?LOG_NOTICE(#{description => "Bondy configuration finished"}),
     ok.
@@ -502,8 +504,8 @@ setup_partisan_channels() ->
 
 %% @private
 setup_partisan() ->
-    %% We re-apply partisan config, this reads the partisan env and re-caches
-    %% the values. We do this because partisan might have started already.
+    %% `bondy_cluster_app` read Partisan's configuration when it started, before
+    %% this module edited Partisan's environment, so it is read again here.
     ok = partisan_config:init(),
 
     %% We add the wamp_relay channel
@@ -569,20 +571,21 @@ setup_wamp() ->
     ok = bondy_wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
 
 -doc """
-Every WAMP feature this build defines a value for, as `{Role, Feature}` pairs.
+Every WAMP feature this build defines a value for, as `{Role, Feature, Value}`
+triples.
 
 These are capabilities, not settings: none of them is a `bondy.conf` key, and
 `scripts/migrate_conf.escript` reports each one as dropped so an operator
 upgrading from a release that mapped them is told why the key is gone.
 """.
--spec code_defined_features() -> [{broker | dealer, atom()}].
+-spec code_defined_features() -> [{broker | dealer, atom(), boolean()}].
 
 code_defined_features() ->
     [
-        {Role, Feature}
+        {Role, Feature, Value}
      || {Role, Features} <-
             [{broker, ?BROKER_FEATURES}, {dealer, ?DEALER_FEATURES}],
-        Feature <- maps:keys(Features)
+        {Feature, Value} <- maps:to_list(Features)
     ].
 
 %% @private

@@ -37,7 +37,8 @@ all() ->
         anonymous_establishes,
         wampcra_establishes,
         cryptosign_establishes,
-        ticket_establishes
+        ticket_establishes,
+        revoked_ticket_stops_authenticating
     ].
 
 init_per_suite(Config) ->
@@ -121,6 +122,31 @@ ticket_establishes(_) ->
     }),
     ?assertEqual(established, bondy_connect_client:status(Conn)),
     ok = bondy_connect_client:disconnect(Conn).
+
+%% A client revokes its own ticket through `bondy.ticket.revoke`; the next
+%% connection presenting it is refused.
+revoked_ticket_stops_authenticating(_) ->
+    Session = make_session(?TICKET_REALM, ?USER, ?WAMP_CRA_AUTH),
+    {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
+    Spec = #{
+        transport => tcp,
+        endpoint => {?HOST, ?PORT},
+        realm => ?TICKET_REALM,
+        auth => #{
+            method => ?WAMP_TICKET_AUTH,
+            authid => ?USER,
+            ticket => Ticket
+        },
+        serializers => [json]
+    },
+
+    {ok, Conn} = bondy_connect_client:connect(Spec),
+    {ok, _} = bondy_connect_client:call(Conn, <<"bondy.ticket.revoke">>, [
+        Ticket
+    ]),
+    ok = bondy_connect_client:disconnect(Conn),
+
+    ?assertMatch({error, _}, bondy_connect_client:connect(Spec)).
 
 %% =============================================================================
 %% HELPERS

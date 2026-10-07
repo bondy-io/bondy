@@ -6,7 +6,7 @@
 %%
 %% Drives `bondy_oplog_transport_inline:request/4` with the new
 %% request shapes and verifies the wire envelopes:
-%%   - get_catalogue_snapshot_init -> {ok, {init, {W, C}}} | {ok, no_snapshot}
+%%   - get_catalogue_snapshot_init -> {ok, {init, {W, C, Buckets}}} | {ok, no_snapshot}
 %%   - {get_catalogue_snapshot_next, C} -> {ok, {batch, {C, [Cell]}}}
 %%                                        | {ok, {done, []}}
 %%                                        | {error, cursor_expired}
@@ -46,7 +46,7 @@ init_wire_envelope() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"x">>, {set, 50, <<"v">>}}),
     ok = bondy_oplog_test_projection:drain(Id),
     ?assertMatch(
-        {ok, {init, {50, Cursor}}} when is_binary(Cursor),
+        {ok, {init, {50, Cursor, [?B]}}} when is_binary(Cursor),
         ?T:request(Id, Id, get_catalogue_snapshot_init, #{})
     ),
     teardown(Id).
@@ -56,7 +56,7 @@ next_batch_then_done_wire_envelope() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"a">>, {set, 1, <<"va">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"b">>, {set, 2, <<"vb">>}}),
     ok = bondy_oplog_test_projection:drain(Id),
-    {ok, {init, {_W, Cursor}}} =
+    {ok, {init, {_W, Cursor, _}}} =
         ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
     %% First call returns a batch.
     ?assertMatch(
@@ -99,7 +99,7 @@ oversized_cell_ships_in_parts_and_reassembles() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"big">>, {set, 1, Big}}),
     ok = bondy_oplog_test_projection:drain(Id),
     with_ceiling(4000, fun() ->
-        {ok, {init, {_W, Cursor}}} =
+        {ok, {init, {_W, Cursor, _}}} =
             ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
         {Cells, Pending, Rounds} = drain(Id, Cursor, [], #{}, 0),
         %% More than one round, or nothing was actually chunked.
@@ -124,7 +124,7 @@ oversized_cell_is_never_advanced_past() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"zzz">>, {set, 2, <<"v">>}}),
     ok = bondy_oplog_test_projection:drain(Id),
     with_ceiling(4000, fun() ->
-        {ok, {init, {_W, Cursor}}} =
+        {ok, {init, {_W, Cursor, _}}} =
             ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
         %% First chunked round must NOT be `done`, and must carry parts of
         %% part 1 of the big cell only.

@@ -139,10 +139,8 @@ self_node() ->
 
 %% @private
 members() ->
-    try partisan_peer_service:members() of
-        {ok, M} when is_list(M) -> M;
-        M when is_list(M) -> M;
-        _ -> []
+    try
+        bondy_cluster:members()
     catch
         _:_ -> []
     end.

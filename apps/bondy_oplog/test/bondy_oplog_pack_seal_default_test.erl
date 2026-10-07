@@ -5,21 +5,16 @@
 
 -module(bondy_oplog_pack_seal_default_test).
 -moduledoc """
-Asserts the durable pack-store seal-threshold default (lever 2 of the #101
-durable-write investigation).
-
-The pack store's own `auto_seal_bytes` default (16 MiB) lets `incoming.pack`
-grow large enough that `seal_incoming` rewrites it in one ~600ms+ pass, which
-freezes the apply pipeline and spikes read-after-write freshness lag toward the
-auth fence `max_lag` (1s). bondy_oplog overrides that default down to a
-latency-appropriate value at the single chokepoint where it builds the pack
-store's open opts (`bondy_oplog_instance:backend_opts/3`), and the value is
-operator-tunable via `bondy_oplog_config:pack_auto_seal_bytes/0`.
+Asserts the durable pack-store seal-threshold default. bondy_oplog overrides
+the pack store's own `auto_seal_bytes` default (16 MiB) at the single place it
+builds the pack store's open opts (`bondy_oplog_instance:backend_opts/3`), and
+the value is operator-tunable via `bondy_oplog_config:pack_auto_seal_bytes/0`.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
 
--define(DEFAULT_BYTES, 2_000_000).
+%% The `db.pack_auto_seal_bytes` schema default, "2MB" as a cuttlefish bytesize.
+-define(DEFAULT_BYTES, 2 * 1024 * 1024).
 
 %% =============================================================================
 %% CONFIG ACCESSOR

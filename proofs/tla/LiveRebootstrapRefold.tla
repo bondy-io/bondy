@@ -67,7 +67,7 @@
 (* cell as it was. The shipped install logs it and counts the cell        *)
 (* installed, so the session goes on to adopt the peer frontier. With      *)
 (* WriteFailAborts the batch returns the error instead, and the session    *)
-(* takes its failed-stream path (`refold_after_failure/1`): a rederive    *)
+(* takes its failed-stream path: a rederive                              *)
 (* when the mark is set, no finalize, and no new re-bootstrap flag.        *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
@@ -278,7 +278,7 @@ Install(r) ==
                    gapFlag, sess, pfront, sep, faultVars>>
 
 (* The install write fails and the cell keeps its old events. The mark   *)
-(* and the session expiry come first (`begin_install/1`).                  *)
+(* and the session expiry come first (`begin_install/3`).                  *)
 InstallWriteFail(r) ==
     /\ writeFails < MaxWriteFails
     /\ phase[r] = "streaming"

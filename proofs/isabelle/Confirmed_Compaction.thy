@@ -12,42 +12,45 @@ section \<open>Compaction by peer confirmation: nothing un-applied is ever unshi
 text \<open>
   A replica may truncate an event out of its MST only once every other
   member can be shown to hold it, or the event becomes unreachable for a
-  member that has not applied it yet. @{text "../tla/ConfirmedCompaction.tla"}
-  models the shipped confirmation --- a peer's recorded ROOT --- and the
-  rule under proof --- root OR the peer's recorded applied VV --- with keys
-  in HLC order and TLC-checked at two and three replicas. This theory proves
-  the rule under proof for any number of replicas and any number of events,
-  over a state machine that over-approximates the TLA+ model:
+  member that has not applied it yet. A member is shown to hold an event
+  by the durable frontier it last reported: the event's seq is at or below
+  that frontier's entry for its origin
+  (@{text "bondy_oplog_instance:compute_frontier_for/2"},
+  @{text "bondy_oplog_event:covered/2"}). @{text "../tla/ConfirmedCompaction.tla"}
+  models the same rule with keys in HLC order and TLC-checks it at two and
+  three replicas. This theory proves it for any number of replicas and any
+  number of events, over a state machine that over-approximates the TLA+
+  model:
 
   \<^item> truncation removes ANY subset of the tree that is applied locally and
-    confirmed by every peer --- no key order, so every frontier the code
-    can pick (and every retention policy that respects the two conditions)
-    is covered;
+    confirmed by every other member --- no key order, so every frontier the
+    code can pick is covered. Applied locally is what the replica's own
+    durable frontier, also a witness, confirms;
   \<^item> the watermark door removes ANY applied subset after a merge;
   \<^item> a fold applies ANY prefix-closed set between what was applied and what
     the tree offers --- the inline fold of the fused instance and the
     applier's replay with the prefix hold are both instances;
-  \<^item> a recorded root may be forgotten at any time (the ETS page GC) --- a
-    pure weakening of what a replica can certify.
+  \<^item> a report writes, at any time and independently of any merge, the
+    frontier of ANY prefix-closed subset of what the peer has applied. A
+    reported durable frontier is one: it is the frontier of what the peer had
+    applied when it was read (at its last checkpoint on a durable backend, the
+    live applied frontier on ETS), and the applied set only grows. So a
+    report recorded late, out of order, or not at all (an empty report keeps
+    the previous row) is an instance.
 
-  Two facts about the rule carry the proof:
-
-  \<^item> a recorded root is a set of events its peer HELD at record time, and
-    holding (in the tree or applied) is stable: the tree loses an event only
-    into the applied set, and the applied set only grows;
-  \<^item> a recorded VV entry is the per-origin maximum of a prefix-closed applied
-    set, so everything at or below it was applied, and stays applied.
-
-  The confirm half of a round --- the initiator tells the peer it holds the
-  peer's root --- is sound for the same reason: the initiator's merged tree
-  contains that root minus what its door dropped, and the door drops only
-  applied events.
+  One fact about the rule carries the proof: a recorded frontier is the
+  per-origin maximum of a prefix-closed set the peer applied, so everything
+  at or below it was applied, and stays applied.
 
   What the theory does NOT establish: liveness (the TLA+ liveness configs),
-  anything under the recency filter or @{text mst_retention} (both let a
-  replica truncate past a member that has not confirmed --- out of scope
-  by design, repaired by catalogue rebootstrap), and that the code
-  implements the rule.
+  anything under @{text mst_retention} (it truncates past a member that has
+  not confirmed), a retired origin's keys (every witness counts them as
+  confirmed), membership change (the member set is fixed here; the code
+  reads it on every cycle), the unservable-root rebuild
+  (@{text "rebuild_frontier/2"} truncates the whole tree on a cover check,
+  not this rule; the TLA+ lost-page configurations model it), crashes (a member that restarts with
+  less applied than it reported keeps its old row until it reports a
+  non-empty frontier), and that the code implements the rule.
 \<close>
 
 subsection \<open>Events, prefix closure, the per-origin maximum\<close>
@@ -63,14 +66,14 @@ definition mx :: "nat set \<Rightarrow> nat" where
 lemma mx_in: "finite S \<Longrightarrow> S \<noteq> {} \<Longrightarrow> mx S \<in> S"
   by (simp add: mx_def)
 
-text \<open>What @{text get_frontier} reports for origin @{term og}: the largest
-  applied seq of that origin.\<close>
+text \<open>A frontier's entry for origin @{term og}: the largest seq of that
+  origin in the set.\<close>
 definition vv_of :: "event set \<Rightarrow> nat \<Rightarrow> nat" where
   "vv_of S og = mx {s. (og, s) \<in> S}"
 
 text \<open>Under prefix closure the maximum is a contiguous bound: everything at
-  or below it is present. This is the one property of the VV the rule
-  relies on, and the reason the shipped prefix hold is a precondition.\<close>
+  or below it is present. This is the one property of the frontier the rule
+  relies on, and the reason the prefix hold is a precondition.\<close>
 lemma vv_of_witness:
   assumes "finite S" and "prefix_closed S" and "1 \<le> s" and "s \<le> vv_of S og"
   shows "(og, s) \<in> S"
@@ -98,17 +101,15 @@ subsection \<open>The state\<close>
 text \<open>
   Replicas and origins share the naturals; the member set @{term R} is a
   parameter. Per replica: the tree (items under the MST root), the applied
-  set (the projection), per peer the recorded root (@{term None} once
-  forgotten or never recorded) and the recorded VV, and @{term cw}, a
-  history variable: everything the replica has ever truncated. @{term minted}
-  is the per-origin count.
+  set (the projection), per peer the recorded frontier, and @{term cw}, a
+  history variable: everything the replica has ever truncated.
+  @{term minted} is the per-origin count.
 \<close>
 
 record cst =
   minted  :: "nat \<Rightarrow> nat"
   tree    :: "nat \<Rightarrow> event set"
   applied :: "nat \<Rightarrow> event set"
-  root    :: "nat \<Rightarrow> nat \<Rightarrow> event set option"
   vv      :: "nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat"
   cw      :: "nat \<Rightarrow> event set"   \<comment> \<open>history: what this replica has truncated\<close>
 
@@ -118,10 +119,9 @@ definition events :: "nat set \<Rightarrow> cst \<Rightarrow> event set" where
 definition holds :: "cst \<Rightarrow> nat \<Rightarrow> event \<Rightarrow> bool" where
   "holds s q e \<longleftrightarrow> e \<in> tree s q \<or> e \<in> applied s q"
 
-text \<open>The rule under proof.\<close>
+text \<open>The rule.\<close>
 definition confirmed :: "cst \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> event \<Rightarrow> bool" where
-  "confirmed s r p e \<longleftrightarrow>
-     (\<exists>T. root s r p = Some T \<and> e \<in> T) \<or> snd e \<le> vv s r p (fst e)"
+  "confirmed s r p e \<longleftrightarrow> snd e \<le> vv s r p (fst e)"
 
 
 subsection \<open>The protocol\<close>
@@ -136,29 +136,25 @@ text \<open>
 
   \<^item> @{text mint}: a local append --- in the tree and applied (the applier
     writes the projection before the MST install).
-  \<^item> @{text sync}: a complete pull round of @{term r} from @{term p} with a
-    non-empty peer tree. The merged tree is the union; the fold applies a
+  \<^item> @{text sync}: a pull round of @{term r} from @{term p}. The merged tree is the union; the fold applies a
     prefix-closed set @{term A} (@{text "apply_cell_pairs_mux"} with the
     hold; @{term "A = applied s r"} is the applier-backed instance whose
     replay comes later); the door drops @{term D}, a subset of what is
-    applied after the fold (@{text "watermark_door/3"}) --- and, for the
+    applied after the fold (@{text "watermark_door/2"}) --- and, for the
     replica's OWN events, only what it truncated before: the door acts at
     or below the watermark, and an own event is minted above every
-    watermark then in force (@{text "bondy_oplog_hlc"}), so an own event
+    watermark then in force (@{text "bondy_connect_hlc"}), so an own event
     at or below it was in the tree when the watermark was set and went
     with that truncation. This is the one place key order enters this
-    theory, as a hypothesis the TLA+ model discharges; the round records
-    the peer's root and VV (@{text "maybe_record/6"}) and confirms the root
-    to the peer (@{text "maybe_confirm_root/7"}).
-  \<^item> @{text sync_empty}: a round against an empty peer tree --- nothing
-    pulled, the VV recorded, a previous root preserved
-    (@{text "record_sync_complete/5"}).
+    theory, as a hypothesis the TLA+ model discharges.
+  \<^item> @{text report}: @{term r} records a frontier for @{term p}
+    (@{text "bondy_oplog_peer_state:record_sync_complete/3"}): the one the
+    initiator read from @{term p} before a round, or the one @{term p}
+    reported after a round it initiated (@{text confirm_frontier}). Both
+    writes are casts, so neither is ordered with the merge.
   \<^item> @{text replay}: the applier folds a prefix-closed set from the tree.
   \<^item> @{text compact}: truncation of a subset that is applied here and
-    confirmed by every other member. The first condition is the cap the
-    door already enforces, applied at the compaction sites; the second is
-    the rule.
-  \<^item> @{text forget}: the page GC makes a recorded root unreadable.
+    confirmed by every other member.
 \<close>
 
 inductive step :: "cst \<Rightarrow> cst \<Rightarrow> bool" where
@@ -168,18 +164,16 @@ inductive step :: "cst \<Rightarrow> cst \<Rightarrow> bool" where
                tree := (tree s)(r := insert e (tree s r)),
                applied := (applied s)(r := insert e (applied s r))\<rparr>)"
 | sync:
-    "r \<in> R \<Longrightarrow> p \<in> R \<Longrightarrow> r \<noteq> p \<Longrightarrow> tree s p \<noteq> {} \<Longrightarrow>
+    "r \<in> R \<Longrightarrow> p \<in> R \<Longrightarrow> r \<noteq> p \<Longrightarrow>
      U = tree s r \<union> tree s p \<Longrightarrow>
      applied s r \<subseteq> A \<Longrightarrow> A \<subseteq> applied s r \<union> U \<Longrightarrow> prefix_closed A \<Longrightarrow>
      D \<subseteq> A \<Longrightarrow> (\<And>x. x \<in> D \<Longrightarrow> fst x = r \<Longrightarrow> x \<in> cw s r) \<Longrightarrow>
      step s (s\<lparr>tree := (tree s)(r := U - D),
-               applied := (applied s)(r := A),
-               root := (root s)(r := (root s r)(p := Some (tree s p)),
-                                p := (root s p)(r := Some (tree s p))),
-               vv := (vv s)(r := (vv s r)(p := vv_of (applied s p)))\<rparr>)"
-| sync_empty:
-    "r \<in> R \<Longrightarrow> p \<in> R \<Longrightarrow> r \<noteq> p \<Longrightarrow> tree s p = {} \<Longrightarrow>
-     step s (s\<lparr>vv := (vv s)(r := (vv s r)(p := vv_of (applied s p)))\<rparr>)"
+               applied := (applied s)(r := A)\<rparr>)"
+| report:
+    "r \<in> R \<Longrightarrow> p \<in> R \<Longrightarrow> r \<noteq> p \<Longrightarrow>
+     B \<subseteq> applied s p \<Longrightarrow> prefix_closed B \<Longrightarrow>
+     step s (s\<lparr>vv := (vv s)(r := (vv s r)(p := vv_of B))\<rparr>)"
 | replay:
     "r \<in> R \<Longrightarrow>
      applied s r \<subseteq> A \<Longrightarrow> A \<subseteq> applied s r \<union> tree s r \<Longrightarrow> prefix_closed A \<Longrightarrow>
@@ -189,13 +183,10 @@ inductive step :: "cst \<Rightarrow> cst \<Rightarrow> bool" where
      (\<And>e p. e \<in> C \<Longrightarrow> p \<in> R \<Longrightarrow> p \<noteq> r \<Longrightarrow> confirmed s r p e) \<Longrightarrow>
      step s (s\<lparr>tree := (tree s)(r := tree s r - C),
                cw := (cw s)(r := cw s r \<union> C)\<rparr>)"
-| forget:
-    "r \<in> R \<Longrightarrow> p \<in> R \<Longrightarrow>
-     step s (s\<lparr>root := (root s)(r := (root s r)(p := None))\<rparr>)"
 
 definition init :: cst where
   "init = \<lparr>minted = (\<lambda>_. 0), tree = (\<lambda>_. {}), applied = (\<lambda>_. {}),
-           root = (\<lambda>_ _. None), vv = (\<lambda>_ _ _. 0), cw = (\<lambda>_. {})\<rparr>"
+           vv = (\<lambda>_ _ _. 0), cw = (\<lambda>_. {})\<rparr>"
 
 inductive reachable :: "cst \<Rightarrow> bool" where
   reachable_init: "reachable init"
@@ -209,8 +200,7 @@ text \<open>
   \<^item> OWN: a replica has applied every event it minted --- own origins are
     contiguous by minting;
   \<^item> PC: every applied set is prefix-closed --- the hold;
-  \<^item> ROOT: a recorded root is held by the peer it was recorded for;
-  \<^item> VV: a recorded VV entry bounds a prefix the peer has applied;
+  \<^item> VV: a recorded frontier entry bounds a prefix the peer has applied;
   \<^item> TRUNC: what a replica truncated, every other member holds;
   \<^item> SHIP: a minted event is in its minter's tree, was truncated by its
     minter (and so, by TRUNC, is held by everyone else), or is held by the
@@ -228,9 +218,6 @@ definition OWN :: "cst \<Rightarrow> bool" where
 definition PC :: "cst \<Rightarrow> bool" where
   "PC s \<longleftrightarrow> (\<forall>r \<in> R. prefix_closed (applied s r))"
 
-definition ROOT :: "cst \<Rightarrow> bool" where
-  "ROOT s \<longleftrightarrow> (\<forall>r \<in> R. \<forall>p \<in> R. \<forall>T. root s r p = Some T \<longrightarrow> (\<forall>e \<in> T. holds s p e))"
-
 definition VVI :: "cst \<Rightarrow> bool" where
   "VVI s \<longleftrightarrow> (\<forall>r \<in> R. \<forall>p \<in> R. \<forall>og i. 1 \<le> i \<longrightarrow> i \<le> vv s r p og \<longrightarrow> (og, i) \<in> applied s p)"
 
@@ -242,7 +229,7 @@ definition SHIP :: "cst \<Rightarrow> bool" where
                  e \<in> cw s (fst e) \<or> e \<in> tree s (fst e) \<or> holds s q e)"
 
 definition inv :: "cst \<Rightarrow> bool" where
-  "inv s \<longleftrightarrow> WF s \<and> OWN s \<and> PC s \<and> ROOT s \<and> VVI s \<and> TRUNC s \<and> SHIP s"
+  "inv s \<longleftrightarrow> WF s \<and> OWN s \<and> PC s \<and> VVI s \<and> TRUNC s \<and> SHIP s"
 
 lemma events_finite: "finite (events R s)"
 proof -
@@ -268,50 +255,69 @@ proof -
 qed
 
 lemma inv_init: "inv init"
-  by (simp add: inv_def WF_def OWN_def PC_def ROOT_def VVI_def TRUNC_def SHIP_def
+  by (simp add: inv_def WF_def OWN_def PC_def VVI_def TRUNC_def SHIP_def
                 init_def events_def holds_def prefix_closed_def)
 
-text \<open>A confirmed event is held by the confirming peer --- from ROOT and VV.\<close>
+text \<open>A confirmed event is held by the confirming peer --- from VV.\<close>
 lemma confirmed_holds:
-  assumes "ROOT s" and "VVI s" and "r \<in> R" and "p \<in> R" and "confirmed s r p e"
+  assumes "VVI s" and "r \<in> R" and "p \<in> R" and "confirmed s r p e"
     and "e \<in> events R s"
   shows "holds s p e"
 proof -
-  from assms(5) show ?thesis unfolding confirmed_def
-  proof
-    assume "\<exists>T. root s r p = Some T \<and> e \<in> T"
-    with assms(1,3,4) show ?thesis unfolding ROOT_def by blast
-  next
-    assume le: "snd e \<le> vv s r p (fst e)"
-    obtain og i where e: "e = (og, i)" by (cases e)
-    with assms(6) have "1 \<le> i" unfolding events_def by auto
-    with le e assms(2,3,4) have "(og, i) \<in> applied s p" unfolding VVI_def by auto
-    thus ?thesis using e unfolding holds_def by simp
-  qed
+  obtain og i where e: "e = (og, i)" by (cases e)
+  with assms(5) have "1 \<le> i" unfolding events_def by auto
+  with assms(1-4) e have "(og, i) \<in> applied s p" unfolding VVI_def confirmed_def by auto
+  thus ?thesis using e unfolding holds_def by simp
 qed
 
-text \<open>The recorded VV entry is a witness: the per-origin maximum of a
-  finite prefix-closed set.\<close>
+text \<open>A recorded frontier is a witness: the per-origin maximum of a
+  prefix-closed set the peer applied.\<close>
 lemma vv_record_witness:
-  assumes "WF s" and "PC s" and "p \<in> R" and "1 \<le> i" and "i \<le> vv_of (applied s p) og"
+  assumes "WF s" and "p \<in> R" and "B \<subseteq> applied s p" and "prefix_closed B"
+    and "1 \<le> i" and "i \<le> vv_of B og"
   shows "(og, i) \<in> applied s p"
-  using applied_finite[OF assms(1,3)] assms(2,4,5)
-  unfolding PC_def by (auto intro: vv_of_witness simp: assms(3))
+proof -
+  have "finite B" using assms(3) applied_finite[OF assms(1,2)] by (rule finite_subset)
+  hence "(og, i) \<in> B" using assms(4-6) by (rule vv_of_witness)
+  thus ?thesis using assms(3) by blast
+qed
 
 lemma prefix_closed_insert_own:
   assumes "prefix_closed S" and "\<forall>i. 1 \<le> i \<longrightarrow> i \<le> n \<longrightarrow> (r, i) \<in> S"
   shows "prefix_closed (insert (r, Suc n) S)"
   using assms unfolding prefix_closed_def by (auto simp: le_Suc_eq)
 
+text \<open>A record keeps VV, given that the recorded set is prefix-closed and
+  applied by the peer.\<close>
+lemma VVI_record:
+  assumes "VVI s" and "WF s" and "p \<in> R"
+    and B: "B \<subseteq> applied s p" "prefix_closed B"
+  shows "VVI (s\<lparr>vv := (vv s)(r := (vv s r)(p := vv_of B))\<rparr>)"
+  unfolding VVI_def
+proof (intro ballI allI impI)
+  fix q q' og i assume q: "q \<in> R" "q' \<in> R" and i: "1 \<le> i"
+    and le: "i \<le> vv (s\<lparr>vv := (vv s)(r := (vv s r)(p := vv_of B))\<rparr>) q q' og"
+  show "(og, i) \<in> applied (s\<lparr>vv := (vv s)(r := (vv s r)(p := vv_of B))\<rparr>) q'"
+  proof (cases "q = r \<and> q' = p")
+    case True
+    with le have "i \<le> vv_of B og" by simp
+    with True assms(2,3) B i show ?thesis by (auto intro: vv_record_witness)
+  next
+    case False
+    with le have "i \<le> vv s q q' og" by (auto split: if_splits)
+    with assms(1) q i show ?thesis unfolding VVI_def by simp
+  qed
+qed
+
 text \<open>The generic preservation argument: a step that keeps the minted
   counts, grows every applied and truncated set, moves a tree item only
-  into the applied set, and re-establishes WF, PC, ROOT and VV, preserves
-  the invariant once TRUNC and SHIP are shown for what changed.\<close>
+  into the applied set, and re-establishes WF, PC and VV, preserves the
+  invariant once TRUNC and SHIP are shown for what changed.\<close>
 lemma inv_stable:
   assumes "inv s"
     and minted: "minted s' = minted s"
     and app: "\<And>r. applied s r \<subseteq> applied s' r"
-    and wf: "WF s'" and pc: "PC s'" and rt: "ROOT s'" and vvi: "VVI s'"
+    and wf: "WF s'" and pc: "PC s'" and vvi: "VVI s'"
     and hm: "\<And>q x. holds s q x \<Longrightarrow> holds s' q x"
     and cwm: "\<And>r. cw s r \<subseteq> cw s' r"
     and cwn: "\<And>r e q. r \<in> R \<Longrightarrow> e \<in> cw s' r \<Longrightarrow> e \<notin> cw s r \<Longrightarrow> q \<in> R \<Longrightarrow> q \<noteq> r \<Longrightarrow> holds s' q e"
@@ -337,16 +343,11 @@ proof -
     thus "e \<in> cw s' (fst e) \<or> e \<in> tree s' (fst e) \<or> holds s' q e"
       using cwm hm ship[OF es q] by blast
   qed
-  ultimately show ?thesis unfolding inv_def using wf pc rt vvi by blast
+  ultimately show ?thesis unfolding inv_def using wf pc vvi by blast
 qed
 
-text \<open>ROOT and VV are untouched by a step that leaves the records alone and
-  only grows what is held.\<close>
-lemma ROOT_keep:
-  assumes "ROOT s" and "root s' = root s" and "\<And>q x. holds s q x \<Longrightarrow> holds s' q x"
-  shows "ROOT s'"
-  using assms(1,3) unfolding ROOT_def assms(2) by blast
-
+text \<open>VV is untouched by a step that leaves the records alone and only grows
+  what is applied.\<close>
 lemma VVI_keep:
   assumes "VVI s" and "vv s' = vv s" and "\<And>r. applied s r \<subseteq> applied s' r"
   shows "VVI s'"
@@ -369,7 +370,6 @@ proof (induction rule: step.induct)
   moreover have "OWN ?s'" using I mint.hyps unfolding OWN_def by (auto simp: le_Suc_eq)
   moreover have "PC ?s'" using I mint.hyps unfolding PC_def OWN_def
     by (auto intro: prefix_closed_insert_own)
-  moreover have "ROOT ?s'" using I hm unfolding ROOT_def by (simp; blast)
   moreover have "VVI ?s'" using I unfolding VVI_def by (simp; blast)
   moreover have "TRUNC ?s'" using I hm unfolding TRUNC_def by (simp; blast)
   moreover have "SHIP ?s'" unfolding SHIP_def
@@ -396,17 +396,13 @@ proof (induction rule: step.induct)
   qed
   ultimately show ?case unfolding inv_def by blast
 next
-  case (sync r p s U A D)
+  case (sync r p U s A D)
   note I = sync.prems[unfolded inv_def]
   let ?s' = "s\<lparr>tree := (tree s)(r := U - D),
-               applied := (applied s)(r := A),
-               root := (root s)(r := (root s r)(p := Some (tree s p)),
-                                p := (root s p)(r := Some (tree s p))),
-               vv := (vv s)(r := (vv s r)(p := vv_of (applied s p)))\<rparr>"
+               applied := (applied s)(r := A)\<rparr>"
   have hm: "\<And>q x. holds s q x \<Longrightarrow> holds ?s' q x"
     using sync.hyps unfolding holds_def by auto
-  have r_holds_peer: "\<And>x. x \<in> tree s p \<Longrightarrow> holds ?s' r x"
-    using sync.hyps unfolding holds_def by auto
+  have app: "\<And>q. applied s q \<subseteq> applied ?s' q" using sync.hyps by simp
   have ev: "events R ?s' = events R s" unfolding events_def by simp
   have wf: "WF ?s'"
   proof -
@@ -415,54 +411,11 @@ next
     thus ?thesis using I ev unfolding WF_def by auto
   qed
   have pc: "PC ?s'" using I sync.hyps unfolding PC_def by simp
-  have rt: "ROOT ?s'" unfolding ROOT_def
-  proof (intro ballI allI impI)
-    fix q q' T x assume q: "q \<in> R" "q' \<in> R" and T: "root ?s' q q' = Some T"
-      and x: "x \<in> T"
-    show "holds ?s' q' x"
-    proof (cases "q = r \<and> q' = p")
-      case True
-      with T sync.hyps have "T = tree s p" by simp
-      with x have "holds s p x" unfolding holds_def by simp
-      thus ?thesis using True by (simp add: hm)
-    next
-      case False
-      show ?thesis
-      proof (cases "q = p \<and> q' = r")
-        case True
-        with T sync.hyps have "T = tree s p" by simp
-        thus ?thesis using True x r_holds_peer by simp
-      next
-        case False
-        with \<open>\<not> (q = r \<and> q' = p)\<close> T have "root s q q' = Some T"
-          by (auto split: if_splits)
-        with I q x have "holds s q' x" unfolding ROOT_def by blast
-        thus ?thesis by (rule hm)
-      qed
-    qed
-  qed
-  have vvi: "VVI ?s'" unfolding VVI_def
-  proof (intro ballI allI impI)
-    fix q q' og i assume q: "q \<in> R" "q' \<in> R" and i: "1 \<le> i" "i \<le> vv ?s' q q' og"
-    show "(og, i) \<in> applied ?s' q'"
-    proof (cases "q = r \<and> q' = p")
-      case True
-      with i sync.hyps have "i \<le> vv_of (applied s p) og" by simp
-      with I i(1) sync.hyps have "(og, i) \<in> applied s p"
-        unfolding inv_def by (intro vv_record_witness) auto
-      with True sync.hyps show ?thesis by simp
-    next
-      case False
-      with i have "i \<le> vv s q q' og" by (auto split: if_splits)
-      with I q i(1) have "(og, i) \<in> applied s q'" unfolding VVI_def by blast
-      thus ?thesis using sync.hyps by auto
-    qed
-  qed
+  have "VVI s" using I by blast
+  have vvi: "VVI ?s'" by (rule VVI_keep[OF \<open>VVI s\<close> _ app]) simp
   show ?case
-  proof (rule inv_stable[OF sync.prems _ _ wf pc rt vvi hm])
+  proof (rule inv_stable[OF sync.prems _ app wf pc vvi hm])
     show "minted ?s' = minted s" by simp
-  next
-    fix q show "applied s q \<subseteq> applied ?s' q" using sync.hyps by simp
   next
     fix q show "cw s q \<subseteq> cw ?s' q" by simp
   next
@@ -489,34 +442,19 @@ next
     qed
   qed
 next
-  case (sync_empty r p s)
-  note I = sync_empty.prems[unfolded inv_def]
-  let ?s' = "s\<lparr>vv := (vv s)(r := (vv s r)(p := vv_of (applied s p)))\<rparr>"
+  case (report r p B s)
+  note I = report.prems[unfolded inv_def]
+  let ?s' = "s\<lparr>vv := (vv s)(r := (vv s r)(p := vv_of B))\<rparr>"
   have hm: "\<And>q x. holds s q x \<Longrightarrow> holds ?s' q x" unfolding holds_def by simp
+  have app: "\<And>q. applied s q \<subseteq> applied ?s' q" by simp
   have wf: "WF ?s'" using I unfolding WF_def events_def by simp
   have pc: "PC ?s'" using I unfolding PC_def by simp
-  have rt: "ROOT ?s'" using I unfolding ROOT_def holds_def by simp
-  have vvi: "VVI ?s'" unfolding VVI_def
-  proof (intro ballI allI impI)
-    fix q q' og i assume q: "q \<in> R" "q' \<in> R" and i: "1 \<le> i" "i \<le> vv ?s' q q' og"
-    show "(og, i) \<in> applied ?s' q'"
-    proof (cases "q = r \<and> q' = p")
-      case True
-      with i have "i \<le> vv_of (applied s p) og" by simp
-      with I i(1) sync_empty.hyps have "(og, i) \<in> applied s p"
-        unfolding inv_def by (intro vv_record_witness) auto
-      with True show ?thesis by simp
-    next
-      case False
-      with i have "i \<le> vv s q q' og" by (auto split: if_splits)
-      with I q i(1) show ?thesis unfolding VVI_def by (simp; blast)
-    qed
-  qed
+  have "VVI s" and "WF s" using I by blast+
+  have vvi: "VVI ?s'"
+    by (rule VVI_record[OF \<open>VVI s\<close> \<open>WF s\<close>]) (use report.hyps in simp_all)
   show ?case
-  proof (rule inv_stable[OF sync_empty.prems _ _ wf pc rt vvi hm])
+  proof (rule inv_stable[OF report.prems _ app wf pc vvi hm])
     show "minted ?s' = minted s" by simp
-  next
-    fix q show "applied s q \<subseteq> applied ?s' q" by simp
   next
     fix q show "cw s q \<subseteq> cw ?s' q" by simp
   next
@@ -539,11 +477,10 @@ next
     thus ?thesis using I unfolding WF_def events_def by auto
   qed
   have pc: "PC ?s'" using I replay.hyps unfolding PC_def by simp
-  have "ROOT s" and "VVI s" using I by blast+
-  have rt: "ROOT ?s'" by (rule ROOT_keep[OF \<open>ROOT s\<close> _ hm]) simp
+  have "VVI s" using I by blast
   have vvi: "VVI ?s'" by (rule VVI_keep[OF \<open>VVI s\<close> _ app]) simp
   show ?case
-  proof (rule inv_stable[OF replay.prems _ app wf pc rt vvi hm])
+  proof (rule inv_stable[OF replay.prems _ app wf pc vvi hm])
     show "minted ?s' = minted s" by simp
   next
     fix q show "cw s q \<subseteq> cw ?s' q" by simp
@@ -561,21 +498,19 @@ next
                cw := (cw s)(r := cw s r \<union> C)\<rparr>"
   have hm: "\<And>q x. holds s q x \<Longrightarrow> holds ?s' q x"
     using compact.hyps unfolding holds_def by auto
+  have "VVI s" using I by blast
   have conf: "\<And>x q. x \<in> C \<Longrightarrow> q \<in> R \<Longrightarrow> q \<noteq> r \<Longrightarrow> holds ?s' q x"
   proof -
     fix x q assume x: "x \<in> C" and q: "q \<in> R" "q \<noteq> r"
     from x compact.hyps I have xe: "x \<in> events R s" unfolding WF_def by blast
-    have "ROOT s" and "VVI s" using I by blast+
-    from confirmed_holds[OF this compact.hyps(1) q(1) compact.hyps(4)[OF x q] xe]
+    from confirmed_holds[OF \<open>VVI s\<close> compact.hyps(1) q(1) compact.hyps(4)[OF x q] xe]
     show "holds ?s' q x" by (rule hm)
   qed
   have wf: "WF ?s'" using I unfolding WF_def events_def by auto
   have pc: "PC ?s'" using I unfolding PC_def by simp
-  have "ROOT s" and "VVI s" using I by blast+
-  have rt: "ROOT ?s'" by (rule ROOT_keep[OF \<open>ROOT s\<close> _ hm]) simp
   have vvi: "VVI ?s'" by (rule VVI_keep[OF \<open>VVI s\<close>]) simp_all
   show ?case
-  proof (rule inv_stable[OF compact.prems _ _ wf pc rt vvi hm])
+  proof (rule inv_stable[OF compact.prems _ _ wf pc vvi hm])
     show "minted ?s' = minted s" by simp
   next
     fix q show "applied s q \<subseteq> applied ?s' q" by simp
@@ -588,35 +523,6 @@ next
     fix x q assume t: "x \<in> tree s (fst x)"
     show "x \<in> cw ?s' (fst x) \<or> x \<in> tree ?s' (fst x) \<or> holds ?s' q x"
       using t by (cases "fst x = r") auto
-  qed
-next
-  case (forget r p s)
-  note I = forget.prems[unfolded inv_def]
-  let ?s' = "s\<lparr>root := (root s)(r := (root s r)(p := None))\<rparr>"
-  have hm: "\<And>q x. holds s q x \<Longrightarrow> holds ?s' q x" unfolding holds_def by simp
-  have wf: "WF ?s'" using I unfolding WF_def events_def by simp
-  have pc: "PC ?s'" using I unfolding PC_def by simp
-  have rt: "ROOT ?s'" unfolding ROOT_def
-  proof (intro ballI allI impI)
-    fix q q' T x assume "q \<in> R" "q' \<in> R" "root ?s' q q' = Some T" "x \<in> T"
-    thus "holds ?s' q' x" using I unfolding ROOT_def holds_def
-      by (cases "q = r \<and> q' = p") (auto split: if_splits)
-  qed
-  have "VVI s" using I by blast
-  have vvi: "VVI ?s'" by (rule VVI_keep[OF \<open>VVI s\<close>]) simp_all
-  show ?case
-  proof (rule inv_stable[OF forget.prems _ _ wf pc rt vvi hm])
-    show "minted ?s' = minted s" by simp
-  next
-    fix q show "applied s q \<subseteq> applied ?s' q" by simp
-  next
-    fix q show "cw s q \<subseteq> cw ?s' q" by simp
-  next
-    fix q x q' assume "x \<in> cw ?s' q" "x \<notin> cw s q"
-    thus "holds ?s' q' x" by simp
-  next
-    fix x q assume "x \<in> tree s (fst x)"
-    thus "x \<in> cw ?s' (fst x) \<or> x \<in> tree ?s' (fst x) \<or> holds ?s' q x" by simp
   qed
 qed
 
@@ -659,7 +565,7 @@ proof -
 qed
 
 text \<open>NoDrop: no step removes an event from a tree without it being applied
-  there --- the cap at the compaction sites plus the door's own rule.\<close>
+  there --- the compact rule's own condition plus the door's.\<close>
 theorem no_drop:
   assumes "step s s'" and "r \<in> R" and "e \<in> tree s r" and "e \<notin> tree s' r"
   shows "e \<in> applied s' r"

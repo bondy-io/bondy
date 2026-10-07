@@ -602,14 +602,6 @@ not_found_error(M, _Ctxt) ->
         ]
     ),
 
-    ErrorDetails =
-        case M of
-            #publish{options = Opts} ->
-                maps:with(?WAMP_PPT_ATTRS, Opts);
-            _ ->
-                #{}
-        end,
-
     bondy_wamp_error:to_wamp(
         bondy_connect_error:new(no_such_subscription, #{
             message => Msg,
@@ -618,7 +610,7 @@ not_found_error(M, _Ctxt) ->
         }),
         ?UNSUBSCRIBE,
         M#unsubscribe.request_id,
-        ErrorDetails
+        #{}
     ).
 
 %% @private

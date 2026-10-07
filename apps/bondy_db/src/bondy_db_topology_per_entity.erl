@@ -10,8 +10,8 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-**T2** reference topology for `bondy_db`: one leveled Bookie per
-`(EntityType, Shard)` shared across realms; bucket = EntityType binary.
+Reference topology for `bondy_db`: one leveled Bookie per
+`(EntityType, Shard)` shared across realms; the bucket is the realm.
 
 ```
 DB
@@ -24,19 +24,18 @@ DB
     └── ...
 ```
 
-Inside each Bookie a single bucket holds every cell for the
-`(EntityType, Shard)`; realm is encoded into the key by the facade
-as `<<Realm/binary, "/", UserKey/binary>>` so realms are logically
-separated inside the bucket without requiring multiple physical
-buckets:
+The Bookie already separates entity types, so inside it each realm
+has its own bucket (`bucket_for/3` returns the realm) and the storage
+key is the caller's key, unchanged:
 
 ```
 Bookie(users, 0)
-└── bucket=<<"users">>
-    ├── <<"realm-1/alice">>   → frame
-    ├── <<"realm-1/bob">>     → frame
-    ├── <<"realm-2/carol">>   → frame
-    └── <<"realm-2/dave">>    → frame
+├── bucket=<<"realm-1">>
+│   ├── <<"alice">>   → frame
+│   └── <<"bob">>     → frame
+└── bucket=<<"realm-2">>
+    ├── <<"carol">>   → frame
+    └── <<"dave">>    → frame
 ```
 
 ## When to use it
@@ -48,8 +47,7 @@ write-serialised because they share a Bookie, but Bondy realms are
 expected to be many-and-small — distributing them across shards by key
 gives even concurrency without per-realm Bookies.
 
-For per-realm physical isolation (one Bookie per Realm), use a
-different topology — that layout shows up later in the design as T1.
+No topology gives each realm its own Bookie.
 
 ## Required `topology_opts`
 
@@ -70,17 +68,14 @@ Optional:
 #{
     entity_type := atom(),
     shard_count := pos_integer(),
-    bucket      := binary(),
     shards      := #{Shard :: non_neg_integer() := pid()}
 }
 ```
 
 ## Bucket
 
-Bucket is the UTF-8 binary form of the entity type atom. All cells for
-the `(EntityType, Shard)` live inside this one bucket — realm
-isolation happens above the topology, in the facade's cell-key
-encoding.
+The bucket is the realm binary (`bucket_for/3`). The entity type needs
+no encoding because each `(EntityType, Shard)` has its own Bookie.
 """).
 
 -export([init/2]).

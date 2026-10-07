@@ -579,6 +579,8 @@ status_of(~"bondy.error.cluster_not_formed") ->
     ?HTTP_SERVICE_UNAVAILABLE;
 status_of(~"bondy.error.partition_detected") ->
     ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.cluster_disabled") ->
+    ?HTTP_NOT_IMPLEMENTED;
 status_of(~"bondy.error.insufficient_resources") ->
     ?HTTP_SERVICE_UNAVAILABLE;
 %% Mail. A permanent mail failure is a 4xx because the request is what has to

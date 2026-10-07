@@ -331,7 +331,7 @@ await_rib_convergence(Nodes, Deadline) ->
 %% STALE-PEER REJOIN (durable path)
 %% =============================================================================
 %%
-%% A member silent past `peer_timeout_ms` is still a member: compaction on the
+%% A silent member is still a member: compaction on the
 %% live pair keeps everything it has not confirmed (`bondy_oplog_compaction`),
 %% so on rejoin ordinary anti-entropy rounds carry the live pair's writes to it
 %% and its UNIQUE silence-era writes back out, with no re-bootstrap, on the
@@ -433,19 +433,7 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ?assertEqual({error, not_found}, stale_read(N1, UB, UK)),
 
     %% ---------------------------------------------------------------------
-    %% 4. STALE-OUT: with a lowered `peer_timeout_ms`, N3's last-confirmed
-    %%    entries are past the recency window on the live pair.
-    %% ---------------------------------------------------------------------
-    _ = [
-        ok = erpc:call(
-            N, application, set_env, [bondy_oplog, peer_timeout_ms, 1500]
-        )
-     || N <- [N1, N2]
-    ],
-    timer:sleep(2000),
-
-    %% ---------------------------------------------------------------------
-    %% 5. COMPACT through the production entry on both live nodes. N3 has
+    %% 4. COMPACT through the production entry on both live nodes. N3 has
     %%    confirmed only the seed, so the watermarks advance over the seed
     %%    and stay below everything N3 has not received.
     %% ---------------------------------------------------------------------
@@ -467,7 +455,7 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ?assert(length(Advanced2) >= 1),
 
     %% ---------------------------------------------------------------------
-    %% 6. REJOIN through the PRODUCTION schedulers on every node, with the
+    %% 5. REJOIN through the PRODUCTION schedulers on every node, with the
     %%    default peer timeout restored.
     %% ---------------------------------------------------------------------
     _ = [
@@ -519,7 +507,7 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ),
 
     %% ---------------------------------------------------------------------
-    %% 7. Nothing was truncated past N3, so no node needed a re-bootstrap.
+    %% 6. Nothing was truncated past N3, so no node needed a re-bootstrap.
     %% ---------------------------------------------------------------------
     Rebootstraps = [
         {N, maps:with([instance_id, reason], Meta)}
@@ -530,7 +518,7 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ?assertEqual([], Rebootstraps),
 
     %% ---------------------------------------------------------------------
-    %% 8. Full agreement everywhere on every key this case ever wrote.
+    %% 7. Full agreement everywhere on every key this case ever wrote.
     %% ---------------------------------------------------------------------
     _ = [
         ?assertEqual({ok_val, V}, stale_read(N, Band, K), {N, Band, K})
@@ -1238,10 +1226,8 @@ do_hole_origins_main() ->
     ].
 
 %% @private
-%% Restores the production sync scheduler dispatch and the default peer
-%% recency window on THIS node.
+%% Restores the production sync scheduler dispatch on THIS node.
 do_restore_sync_defaults() ->
-    ok = application:set_env(bondy_oplog, peer_timeout_ms, 30_000),
     ok = bondy_oplog_sync_scheduler:set_dispatch(
         fun bondy_oplog_sync_scheduler:default_dispatch/2
     ).

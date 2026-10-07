@@ -124,14 +124,13 @@ as the sole convergence kernel.
   identity (the projection value *is* the state) — a storage optimisation
   for value-carrying CRDTs (e.g. g-sets). Default `false`.
 
-- `order_independent() -> boolean()` the **commutativity marker** the
-  applier uses to pick the projection-maintenance path: `true` selects
-  the O(1) incremental step (apply one op onto the materialised state,
-  safe because order cannot change the result); `false` selects
-  re-interpretation of the cell's live group via `interpret_cog/2`
-  (the only correct path for non-commutative CRDTs, e.g. an observed-remove
-  map or a bounded counter). It is a property of the CRDT *module*,
-  validated by test — never an arrival-order heuristic. Default `false`.
+- `order_independent() -> boolean()` the **commutativity marker**: `true`
+  lets the applier apply one operation onto the materialised state, because
+  order cannot change the result. The eager kernel refuses a CRDT that
+  declares `false` (`bondy_oplog_cell_kernel:apply/6` raises
+  `non_commutative_crdt_eager_unsupported`), and `bondy_db:open_table/3`
+  refuses it at `tier_2`. It is a property of the CRDT *module*, checked by
+  each CRDT's tests, never an arrival-order heuristic. Default `false`.
 
 - `state_to_op(State) -> Op | undefined` — **tier_0 accumulators.** The
   single operation that rebuilds an equivalent state from bottom:

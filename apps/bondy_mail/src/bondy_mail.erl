@@ -500,7 +500,7 @@ named_relay(_) ->
 route(Node, RealmUri, Map, Kind, Opts) ->
     Args = [RealmUri, Map, Kind, Opts],
     Timeout = route_timeout(Map, Kind),
-    try partisan_rpc:call(Node, ?MODULE, accept, Args, Timeout) of
+    try bondy_cluster:call(Node, ?MODULE, accept, Args, Timeout) of
         {badrpc, Reason} ->
             ok = log_route_failure(Node, RealmUri, Reason),
             {error, {transient, owner_unavailable, Node}};

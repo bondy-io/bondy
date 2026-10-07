@@ -91,7 +91,7 @@ definition causal_delivery :: "event set \<Rightarrow> (replica \<Rightarrow> ev
   "causal_delivery E D \<longleftrightarrow> (\<forall>r. \<forall>e \<in> D r. \<forall>f \<in> E. hb f e \<longrightarrow> f \<in> D r)"
 
 text \<open>H3 --- the HLC is a logical clock: it respects happens-before. This
-  is what @{text "bondy_oplog_hlc:update/2"} buys on receipt of a peer
+  is what @{text "bondy_connect_hlc:update/2"} buys on receipt of a peer
   event. Note it constrains ORDERED pairs only: concurrent events have
   unordered HLCs, which is the hinge of the counterexample in
   theory Aw_Counterexample.\<close>

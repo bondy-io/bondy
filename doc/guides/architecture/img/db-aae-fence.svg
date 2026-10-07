@@ -78,7 +78,7 @@
 
   <!-- isolation policy -->
   <text class="t ink" x="40" y="446">isolated,</text>
-  <text class="t ink" x="40" y="462">non-solo</text>
+  <text class="t ink" x="40" y="462">clustered</text>
   <text class="t ink" x="40" y="478">minority</text>
   <rect class="fill" x="200" y="432" width="120" height="30"/>
   <text class="ts ink" x="260" y="452" text-anchor="middle">refuse</text>

@@ -217,7 +217,21 @@ summary(Table, Key) ->
 %% re-ships nothing and its routing stays blackholed until it happens to
 %% rewrite a cell. Only the backing cell being GONE licenses the delete —
 %% that is the membership signal already laundered through retirement.
+%%
+%% Membership is clustered and seeded by hand: the membership table is the one
+%% Partisan publishes into, created here without starting Partisan.
 orphan_stub_pruning() ->
+    ok = application:set_env(bondy_cluster, enabled, true),
+    Tab = ets:new(partisan_membership, [named_table, public, set]),
+    try
+        ok = partisan_membership:set([#{name => partisan:node()}]),
+        orphan_stub_pruning_clustered()
+    after
+        true = ets:delete(Tab),
+        ok = application:unset_env(bondy_cluster, enabled)
+    end.
+
+orphan_stub_pruning_clustered() ->
     ok = ensure_stubs_tab(),
     Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
     Gone = <<"peer_departed@127.0.0.1">>,

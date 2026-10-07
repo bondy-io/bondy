@@ -95,7 +95,7 @@ tolerates_absent_counters_test() ->
 %% =============================================================================
 %%
 %% The decision tests above pin WHEN an install should announce itself. This
-%% pins that it DOES — end to end, from `install_catalogue_batch/2` through
+%% pins that it DOES — end to end, from `bondy_oplog_applier:rederive_projection_sync/2` through
 %% `maybe_publish_bootstrap/4` and the dispatcher to a live subscriber.
 %%
 %% WHY HERE RATHER THAN IN THE CLUSTER SUITE. `bondy_registry_rib_restart_SUITE`
@@ -129,8 +129,7 @@ install_announces_to_subscribers() ->
     {TgtNs, TgtApplier} = target(#{publish_ns_opt => true}),
 
     {ok, _Ref} = bondy_oplog_core:subscribe(TgtNs, all),
-    {ok, Counts} =
-        bondy_oplog_applier:install_catalogue_batch(TgtApplier, Cells),
+    {ok, Counts} = bondy_oplog_test_helpers:applier_install(TgtApplier, Cells),
     ?assert(maps:get(installed, Counts) > 0),
 
     receive
@@ -151,8 +150,7 @@ install_without_publish_ns_is_silent() ->
     {TgtNs, TgtApplier} = target(#{publish_ns_opt => false}),
 
     {ok, _Ref} = bondy_oplog_core:subscribe(TgtNs, all),
-    {ok, Counts} =
-        bondy_oplog_applier:install_catalogue_batch(TgtApplier, Cells),
+    {ok, Counts} = bondy_oplog_test_helpers:applier_install(TgtApplier, Cells),
     ?assert(maps:get(installed, Counts) > 0),
 
     receive
@@ -227,7 +225,7 @@ register_shard(NS, Id, Extra) ->
 
 %% @private
 pull_snapshot(Id) ->
-    {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
+    {ok, {_W, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(Id),
     pull_snapshot_loop(Id, Cursor, []).
 
 %% @private

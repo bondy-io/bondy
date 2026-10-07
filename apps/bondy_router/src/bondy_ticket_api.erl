@@ -58,8 +58,13 @@ handle_call(?BONDY_TICKET_REVOKE_ALL, #call{} = M, Ctxt) ->
     ok = bondy_ticket:revoke_all(Uri, Authid),
     R = bondy_wamp_message:result(M#call.request_id, #{}),
     {reply, R};
+%% Holding a ticket is enough to revoke it: whoever holds it can already use
+%% it, and revoking only takes that away.
+handle_call(?BONDY_TICKET_REVOKE, #call{} = M, Ctxt) ->
+    [_Uri, Ticket] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
+    R = bondy_wamp_api_utils:maybe_error(bondy_ticket:revoke(Ticket), M),
+    {reply, R};
 %% TODO BONDY_TICKET_VERIFY
-%% TODO BONDY_TICKET_REVOKE
 
 handle_call(_, #call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),

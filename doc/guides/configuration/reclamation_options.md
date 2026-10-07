@@ -17,9 +17,8 @@ global, node-wide settings — not scoped to a specific `bondy_db` database
 
 `on | off`, default `on`.
 
-Whether the reclamation scheduler ticks. When `off` the scheduler process
-runs idle: deletes still converge and tombstones are retained indefinitely,
-exactly as before the feature existed.
+Whether the reclamation scheduler ticks. When `off`, the scheduler process
+runs idle: deletes still converge, and tombstones are kept indefinitely.
 
 ### `db.reclaim.interval` (`bondy_oplog.reclaim_interval_ms`)
 
@@ -34,10 +33,11 @@ changes as anti-entropy rounds complete. `0` disables periodic passes.
 
 `pos_integer()`, default `500`.
 
-Cells scanned per applier call within a pass. The sweep executes inside the
-applier — the sole writer to a shard's projection — so this bound is the cap
-on how long one batch can stall a concurrent write. A pass loops batches to
-completion; writes interleave between batches.
+Cells scanned per sweep call within a pass. The sweep runs inside the
+process that writes the shard's projection: the applier, or the instance
+itself on a shard without an applier. This bound therefore caps how long one
+batch can delay a concurrent write. A pass loops batches to completion, and
+writes interleave between batches.
 
 ## Origin retirement
 
@@ -45,54 +45,59 @@ completion; writes interleave between batches.
 
 `on | off`, default `on`.
 
-Whether the origin-retirement pass runs. When enabled, each node reacts to
-an observed membership removal — and reconciles once at boot, covering
-removals that happened while it was down — by forgetting departed peers from
-its peer state and reaping dead origins from cell states by complement. Each
-pass also pulls every member's retirement set and unions it in, and drops
-the applied-frontier entry of any origin every member has retired.
+Whether the origin-retirement pass runs. When enabled, a node runs the pass
+on each membership change it observes, once at boot (to cover removals that
+happened while it was down), and every `db.origin_retirement.interval`. Each
+pass:
 
-The pass is fail-closed: if any current member cannot be queried, nothing is
-learned and nothing is reaped, and the pass retries on the next trigger. It
-never retires an origin on its own — see *Retiring a decommissioned node*
-below.
+- forgets departed peers from the node's peer state;
+- pulls the retirement set of every member that answers and unions it into
+  its own;
+- drops the applied-frontier entry of an origin when every member has
+  answered and every answer holds the retirement;
+- reaps dead origins from cell states by complement.
+
+The reaps are fail-closed. If any current member cannot be queried, the pass
+reaps nothing and retries on the next trigger. Retirements learned from the
+members that did answer still apply. The pass never retires an origin by
+itself: see *Retiring a decommissioned node* below.
 
 ### `db.origin_retirement.path` (`bondy_oplog.retirement_path`)
 
 Path, default `origin_retirement` relative to `platform_data_dir`.
 
 Where this node stores its retirement set. A retirement is permanent, so it
-must survive a restart: a node that forgot one would re-learn the origin's
-frontier entry from a peer and then read its own absence as a deficit,
-paying a catalogue rebootstrap for data it already holds. A node that cannot
-write this file refuses to retire and refuses to reap — retirement is
-disabled there and nothing else is affected.
+has to survive a restart. A node that forgot one would re-learn the origin's
+frontier entry from a peer and then read its own absence as a deficit. A node
+that cannot write this file refuses to retire and refuses to reap. Nothing
+else is affected.
 
-The file is written **before** the retirement takes effect, so a failed
-write retires nothing at all — there is no half-applied state to recover
-from, and the operation can simply be retried. A node whose write fails
-keeps its already-persisted retirements (the write sequence is
-tmp+datasync+rename, so the previous file survives) and stops reaping until
-a write succeeds; the next successful write restores both.
+The node writes the file **before** the retirement takes effect, so a failed
+write retires nothing and the operation can be retried
+(`bondy_oplog_origin_bans_test`: `a_failed_persist_enforces_nothing`). The
+write goes to a temporary file, which is synced and then renamed over the
+previous one, so a failed write leaves the previous file in place. A node
+whose write fails stops reaping until a later write succeeds.
 
-Because reaping requires **every** member to hold the retirement, one node
-that cannot persist stops the whole cluster from reclaiming. That is a
-cluster-level condition, so a configured path that cannot be read or written
-raises the `bondy_oplog_retirement_not_persistent` alarm as well as logging
-at ERROR — once per episode, cleared by the next successful write. An
-*unconfigured* path is a deployment choice, announced once at INFO and never
-alarmed.
+Reaping requires **every** member to hold the retirement, so one node that
+cannot persist stops the whole cluster from reclaiming frontier entries. A
+path that cannot be read or written therefore raises the
+`bondy_oplog_retirement_not_persistent` alarm and logs at error level. The
+alarm is raised once per episode and cleared by the next successful write. An
+application that embeds `bondy_oplog` without a path logs this once at info
+level and raises no alarm.
 
 ### `db.origin_retirement.interval` (`bondy_oplog.origin_retirement_interval_ms`)
 
 Duration, default `10m`.
 
 Interval between periodic retirement passes, in addition to the
-membership-event trigger. The periodic pass covers origin-epoch turnover
-that produces no membership event — a node that loses its storage and
-rejoins under the same name mints fresh origins without any member joining
-or leaving, and only a periodic pass on the surviving nodes reaps the dead
-epoch. It is also the cadence at which retirements propagate between nodes.
+membership-event trigger. The periodic pass covers origin turnover that
+produces no membership event. A node that loses its storage and rejoins
+under the same name mints fresh origins without any member joining or
+leaving, and only a periodic pass on the surviving nodes reaps the old ones.
+The interval is also the cadence at which retirements propagate between
+nodes.
 
 ### Retiring a decommissioned node
 
@@ -113,10 +118,10 @@ After removing the node from the membership, on any remaining node:
 {ok, Retired} = bondy_oplog_origin_retirement:retire_dead().
 ```
 
-This takes the origins no current member claims and retires them. Each
-retirement is banned, persisted, and replicated to the other nodes by the
-periodic pass; once every member holds it, each node drops the corresponding
-frontier entries on its own next pass.
+The call takes the origins no current member claims and retires them. Each
+retirement is persisted, then banned, and the retirement passes of the other
+nodes replicate it. Once every member holds it, each node drops the
+corresponding frontier entries on its own next pass.
 
 Retiring bans the origin cluster-wide, and a ban is permanent. **Retire only
 once the cluster has converged on that node's events** — any of its events a
@@ -125,17 +130,18 @@ taken over replicas that disagree on the origin's sequence logs a WARNING
 and emits `[bondy_oplog, retirement, reaped_unconverged]`, which is the
 signal that retirement happened too early.
 
-A partitioned node cannot retire the rest of the cluster: Partisan
-membership changes only by a deliberate join/leave, so an unreachable peer
-is still a member, and a member that cannot answer aborts the pass.
+An unreachable peer is still a member, because Partisan membership changes
+only through a join or a leave. A member that cannot answer aborts the
+complement, so a partitioned node does not retire the origins of the rest of
+the cluster.
 
-Run it with every instance up. The complement is built from what nodes
-advertise, and a durable instance that is stopped does not advertise its
-origin, so a live origin could be caught in it. This node's own half is
-checked: while any local instance is down the call refuses with
-`{error, {instances_down, Ids}}`. A *peer* under-advertising cannot be
-detected from here, so the instruction stands as well as the check. The
-origins retired are named in a NOTICE log, but retirement cannot be undone.
+Run the call with every instance up. The complement is built from what nodes
+advertise, and an instance that has been stopped does not advertise its
+origin, so a live origin could fall into the complement. The call checks this
+node's own instances: while any local instance is down, it refuses with
+`{error, {instances_down, Ids}}`. The call cannot detect a peer that
+under-advertises, so the instruction applies on every node. A notice log names
+the retired origins. Retirement cannot be undone.
 
 ## Shared scheduler machinery
 
@@ -149,26 +155,11 @@ and are listed here only to state that they do **not** govern reclamation.
 
 `pos_integer()`, default `4`.
 
-Cap on concurrently running trigger workers. Shared machinery: this applies
-to both the compaction scheduler and the reclamation scheduler (they read
-the same cap), and is unrelated to `db.gc_interval` /
-`db.gc_heap_delta` (each instance's own BEAM heap monitor, a separate
-subsystem that happens to also use the word "gc"). Instances over the cap
-on a tick are skipped that round and retried on the next.
-
-### `db.compaction.peer_timeout` (`bondy_oplog.peer_timeout_ms`)
-
-Duration, default `30s`.
-
-Listed to state a boundary: this recency filter bounds neither reclamation
-nor MST compaction of durable databases. Both use the strict,
-membership-based reading with no recency filter — a member that is down or
-partitioned holds both down until it returns or is retired by a membership
-act (`db.origin_retirement`), and no timeout changes that. The filter
-applies to MST compaction of the in-memory `registry` database, whose
-history must not grow while a member is down, and decides which peers count
-as live when an instance whose own root has become unservable considers
-rebuilding its tree.
+The cap on trigger workers that one scheduler runs at once. The compaction
+scheduler and the reclamation scheduler each apply this value to their own
+workers. Instances over the cap on a tick are skipped and retried on the next
+tick. The option is unrelated to `db.gc_interval` and `db.gc_heap_delta`,
+which configure each instance's BEAM heap monitor.
 
 ## Telemetry
 
@@ -178,36 +169,35 @@ is part of the contract. Events, with their measurement and metadata keys:
 ### `[bondy_oplog, applier, cells_swept]`
 
 Emitted per sweep batch. Measurements: `scanned`, `discarded` (cells
-physically reclaimed), `rewritten` (cells whose state was reduced by a
-value-preserving causal-stabilization rewrite, e.g. a struct field's
-stable per-origin sub-op runs folded into synthetic ops), `skipped`.
-Metadata: `instance_id`, `stable_hlc` — the stability point the batch
+physically reclaimed), `rewritten` (cells whose causally stable operations
+were folded into fewer operations without changing the value), `skipped`.
+Metadata: `instance_id`, and `stable_hlc`, the stability point the batch
 ran at.
 
 ### `[bondy_oplog, reclamation, stalled]`
 
 Emitted on every reclamation attempt that reclaims nothing, naming why.
 Measurement: `count`. Metadata: `instance_id`, `reason` (`idle`,
-`unconfirmed`, `membership_unavailable`, `no_frontier`,
+`unconfirmed`, `no_members`, `membership_unavailable`, `no_frontier`,
 `non_event_frontier`, `no_applier`), and `missing_members` — for
 `unconfirmed`, the members holding stability down. Never rate-limited.
 
-`idle` is the benign steady state of a converged quiescent shard: this
-replica's tree is empty (fully compacted or never written), so there is
-nothing whose stability needs certifying. It is the only reason that never
-produces the rate-limited stall log line — it is not operator-actionable
-and it ends on the shard's next local event. See the deletion and
-reclamation guide for the full reason table and the known quiescent-shard
-liveness gap this classification deliberately leaves open.
+`idle` is the steady state of a converged, quiet shard: this replica's tree
+is empty (fully compacted or never written), so there is nothing whose
+stability needs certifying. It is the only reason that never produces the
+stall log line, because no operator action applies to it. It ends on the
+shard's next local event. The
+[deletion and reclamation guide](../database/deletion_and_reclamation.md)
+lists every reason.
 
 ### `[bondy_oplog, scheduler, gc, trigger_outcome]`
 
 Emitted per trigger run by every scheduler instance. Measurement: `count`.
 Metadata: `scheduler` (e.g. `bondy_oplog_reclaim_scheduler`), `instance_id`,
 `outcome`. A permanently failing instance is visible here even if nothing
-else surfaces it. `unconfirmed` and `membership_unavailable` from the
-compaction scheduler (`bondy_oplog_gc_scheduler`) mean compaction of a durable
-database is waiting on members. The Prometheus counter
+else surfaces it. `unconfirmed`, `no_members` and `membership_unavailable`
+from the compaction scheduler (`bondy_oplog_gc_scheduler`) mean compaction is
+waiting on members. The Prometheus counter
 `bondy_oplog_gc_scheduler_events_total` carries `scheduler` and `event` (here
 `trigger_<outcome>`).
 
@@ -218,11 +208,12 @@ One `completed` per retirement pass, with measurements `dead_origins`,
 pulled from members this pass) and `frontiers_reaped`, and metadata
 `forgotten_peers`.
 
-One `skipped` per pass whose reap-by-complement aborted, with the abort
-`reason` in metadata (an unreachable member, an unavailable membership
-service). Retirement replication is independent of the complement and runs
-either way, so `skipped` still carries `retirements_learned` and
-`frontiers_reaped`.
+One `skipped` per pass whose reap by complement aborted, with the abort
+`reason` in metadata: an unreachable member, an unavailable membership, or
+`no_members`. Measurements: `count`, `retirements_learned` and
+`frontiers_reaped`. When the membership was read, retirement replication ran
+before the abort, and the two counts report it. When the membership could
+not be read or listed no other member, both counts are `0`.
 
 ### `[bondy_oplog, retirement, reaped_unconverged]`
 
@@ -244,14 +235,6 @@ replicated from.
 Emitted when a reap pass rewrites cells. Measurements: `cells`, `origins`.
 Metadata: `instance_id`.
 
-### `[bondy_oplog, peer_state, excluded]`
-
-Emitted when a recency-filtered read drops an aged-out peer: compaction of
-the in-memory `registry` database, or an unservable-root rebuild deciding
-which peers are live. Telemetry only, by design — it fires on every registry
-compaction tick for as long as a peer stays silent, and a log line at that
-rate would storm.
-
 ### The stall log
 
 Alongside the telemetry, a scheduler-driven stall produces a warning log
@@ -259,8 +242,10 @@ naming the scheduler, the instance and the missing members, rate-limited to
 one line per scheduler and instance per 60 seconds. Both schedulers report
 every error their trigger returns. For the reclamation scheduler that includes
 stability not advancing. For the compaction scheduler it includes compaction
-of a durable database waiting on a member this node has no confirmed row for
-(`unconfirmed`), or on an unreadable membership. A member that confirmed and
+waiting on a member this node has no confirmed row for (`unconfirmed`), on an
+unreadable membership, or on a membership that lists no other node while
+clustering is enabled (`no_members`; see
+[Clustering](clustering.md#running-a-single-node)). A member that confirmed and
 then went down does not produce a compaction warning: its stale row only stops
 the frontier advancing, which looks the same as a peer that has not synced
 yet. The reclamation scheduler reports it as `no_frontier`, naming it in

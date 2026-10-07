@@ -408,16 +408,12 @@ end}.
 
 %% -----------------------------------------------------------------------------
 %% @doc Byte threshold at which a durable shard's pack-store MST seals its
-%% `incoming.pack` into a sealed pack. The seal rewrites the whole incoming
-%% pack in one datasync'd pass that runs on the apply pipeline, so its duration
-%% is a freeze of local writes' visibility (read-after-write freshness lag),
-%% NOT of the write calls. The cost scales linearly with this threshold: the
-%% pack store's native 16MB default produces ~600ms+ freezes, large enough to
-%% push freshness lag toward a tightly-set `db.aae.fence.max_lag` and trigger
-%% spurious auth refusals. 2MB keeps each freeze to ~tens of ms at no throughput or
-%% hot-read cost (reads serve from the projection + cache, never the MST). A
-%% smaller value seals more often into more sealed packs, adding only
-%% AAE/compaction/cold-boot work (GC-bounded), never read-path work.
+%% `incoming.pack` into a sealed pack. With `db.pack_seal_mode = sync` the seal
+%% rewrites the whole incoming pack on the apply pipeline, delaying the
+%% visibility of local writes for a time that grows with this threshold. A
+%% smaller value seals more often into more sealed packs, which adds
+%% anti-entropy, compaction and cold-boot work but no read-path work: reads are
+%% served from the projection and its cache, never the MST.
 %% Runtime-tunable (not in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
@@ -431,15 +427,10 @@ end}.
 %% -----------------------------------------------------------------------------
 %% @doc Seal driver for the durable shard pack-store MST. `async` (default)
 %% rolls `incoming.pack` aside at the commit barrier and rewrites it into a
-%% sealed pack in a monitored worker, keeping the multi-hundred-ms rewrite off
-%% the apply pipeline — so the seal is no longer a freeze of local writes'
-%% visibility (read-after-write freshness lag). Measured ~44% lower install
-%% p99 with the inline seal freezes (84-188ms locally, up to ~750ms under disk
-%% contention, close to `db.aae.fence.max_lag`) removed entirely. It does
-%% NOT change durable write throughput — the per-writer ceiling is bounded by
-%% disk fsync bandwidth, independent of where the seal runs. `sync` restores
-%% the historical inline seal (the store seals on `put` at the threshold).
-%% Affects only durable shards; ephemeral instances never seal.
+%% sealed pack in a monitored worker, off the apply pipeline, so sealing does
+%% not delay the visibility of local writes. `sync` seals inline on `put` when
+%% the threshold is reached. Affects only durable shards; ephemeral instances
+%% never seal.
 %% Runtime-tunable (not in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
@@ -695,23 +686,6 @@ end}.
  "bondy_oplog.origin_retirement_interval_ms", [
   {datatype, {duration, ms}},
   {default, "10m"}
-]}.
-
-%% -----------------------------------------------------------------------------
-%% @doc Recency window for a peer's last-seen state. A peer silent longer
-%% than this stops holding back MST compaction of the in-memory `registry`
-%% database, and does not count as live when an instance whose own MST root
-%% has become unservable decides whether it may rebuild that tree. It bounds
-%% neither compaction of durable databases nor projection-cell reclamation:
-%% both use the full cluster membership with no recency filter, so a member
-%% that is down or partitioned holds both back until it returns or is retired
-%% by an explicit membership act (`db.origin_retirement`); no timeout changes
-%% that.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "db.compaction.peer_timeout", "bondy_oplog.peer_timeout_ms", [
-  {datatype, {duration, ms}},
-  {default, "30s"}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -1241,7 +1215,8 @@ end}.
 %% -----------------------------------------------------------------------------
 %% @doc Master key for at-rest encryption of realm signing/encryption keys (and,
 %% when wired, the WAL body codec). The master key is a 32-byte value resolved
-%% once at startup via the shared secret resolver.
+%% via the shared secret resolver on first use and cached until the node
+%% restarts.
 %%
 %% Encryption is OFF by default (`provider = none`) — key material is stored in
 %% cleartext (filesystem/disk-encryption is then the only at-rest control). Set
@@ -1295,11 +1270,15 @@ end}.
   {datatype, {enum, [raw, base64]}}
 ]}.
 
-%% @doc The key id baked into new encryption envelopes; bump on rotation.
+%% @doc The key id recorded in every encryption envelope, 0..65535. A node
+%% decrypts only envelopes carrying the current id, so changing it makes every
+%% realm key encrypted under the old id unreadable. Master key rotation is not
+%% supported.
 {mapping, "security.master_key.id",
 "bondy_router.security.master_key.id", [
   {default, 1},
-  {datatype, integer}
+  {datatype, integer},
+  {validators, ["key_id"]}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -2474,8 +2453,9 @@ end}.
 
 %% @doc Lower bound of the dynamically resized socket receive buffer. To tune
 %% it, BOTH min and max must be set, within 1KB..128KB and with min =< max;
-%% setting either to 0 disables dynamic buffering entirely. Ignored when the
-%% socket `buffer' size is set explicitly.
+%% setting either to 0 disables dynamic buffering entirely. Left unset, Cowboy
+%% resizes between 512 bytes and 128KB, unless the socket `buffer' size is set
+%% explicitly, which turns dynamic buffering off.
 {mapping, "listeners.$name.http.buffer.min", "bondy_router.listeners", [
   {datatype, bytesize}
 ]}.
@@ -3960,6 +3940,14 @@ end}.
 
 
 
+%% @doc Defines whether this node runs as a member of a cluster. When off the
+%% node is standalone: the cluster peer service is not started, so the node
+%% listens on no cluster port.
+{mapping, "cluster.enabled", "bondy_cluster.enabled", [
+  {default, on},
+  {datatype, flag}
+]}.
+
 %% @doc Defines whether a Bondy node should perform a cluster leave operation
 %% automatically when it is being shutdown.
 {mapping, "cluster.automatic_leave",
@@ -4655,6 +4643,12 @@ end}.
   "non_neg_integer",
   "greater than 0",
   fun(Size) -> Size >= 0 end
+}.
+
+{validator,
+  "key_id",
+  "between 0 and 65535",
+  fun(N) -> N >= 0 andalso N =< 65535 end
 }.
 
 {validator,

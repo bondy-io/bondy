@@ -113,12 +113,11 @@ sync_records_peer_state() ->
     {ok, _} = bondy_oplog:sync(A, B),
     bondy_oplog_peer_state:sync(),
     ?assertMatch(
-        [#{peer := B}], bondy_oplog_peer_state:get_instance_peer_states(A)
+        [#{peer := B}], bondy_oplog_peer_state:get_instance_peer_states(A, 0)
     ),
-    %% Cross-check: get_known_peers(A) lists B (with default
-    %% peer_timeout_ms of 30s, the entry is fresh).
+    %% Cross-check: get_known_peers(A, 0) lists B.
     ?assert(
-        lists:member(B, bondy_oplog_peer_state:get_known_peers(A))
+        lists:member(B, bondy_oplog_peer_state:get_known_peers(A, 0))
     ).
 
 %% Sync of one (logical) instance does not affect another.

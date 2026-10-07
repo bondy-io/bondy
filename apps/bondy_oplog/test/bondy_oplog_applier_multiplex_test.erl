@@ -33,6 +33,7 @@ multiplex_test_() ->
         fun release_before_it_reads_the_pid_opens_the_gate/0,
         fun install_catalogue_batch_routes_by_bucket/0,
         fun install_names_the_buckets_it_could_not_route/0,
+        fun install_names_a_bucket_unregistered_after_staging/0,
         fun partial_install_does_not_adopt_the_peer_frontier/0,
         {timeout, 600, fun adoption_survives_any_batching/0}
     ]}.
@@ -340,8 +341,7 @@ install_catalogue_batch_routes_by_bucket() ->
     %% Install onto a fresh target multiplexed instance.
     {TgtId, TgtNsA, TgtNsB, TgtHA, TgtHB} = setup_two_tables(),
     TgtApplier = bondy_oplog_registry:applier_pid(TgtId),
-    {ok, Counts} =
-        bondy_oplog_applier:install_catalogue_batch(TgtApplier, Cells),
+    {ok, Counts} = bondy_oplog_test_helpers:applier_install(TgtApplier, Cells),
     ?assertEqual(length(Cells), maps:get(installed, Counts)),
 
     %% Each bucket's cells materialised in its OWN table's projection.
@@ -382,19 +382,16 @@ install_catalogue_batch_routes_by_bucket() ->
 %% peer's `catalogue_snapshot_batch_size`, the inter-node frame cap and the
 %% chunking of an oversized cell all move the boundaries. The adoption verdict
 %% must be a property of WHAT was shipped and not of how it was cut, so this
-%% drives the real path end to end — snapshot, batching, install,
-%% `merge_counts/2`, `adopt_frontier/3` — at batch sizes from one cell up, with
-%% the unroutable cells at generated positions in the mint order.
+%% drives the real path end to end — snapshot, batching, staging, the install
+%% that counts every staged batch (`bondy_oplog_applier:commit_stage/4`),
+%% `bondy_oplog_applier:commit_stage/4` — at batch sizes from one cell up, with the unroutable
+%% cells at generated positions in the mint order.
 %%
 %% `partial_install_does_not_adopt_the_peer_frontier/0` above is one point of
-%% this space and cannot see the fold at all: it ships two cells in a single
-%% batch. Two mutants were run against this, and every eunit case above passed
-%% under both:
-%%
-%%   - `merge_counts/2` as plain `maps:merge/2` (right-wins, so a later clean
-%%     batch erases an earlier batch's `unclaimable`) — caught in 3 to 21
-%%     trials, and only because `skew/0` also generates the FIRST bucket;
-%%   - `adopt_frontier/3` raising under a different alarm id — caught in 1.
+%% this space and cannot see the fold across batches: it ships two cells in a
+%% single batch. Mutants run against this: the install dropping each staged
+%% batch's counts, caught; the session raising the unroutable-bucket alarm
+%% under a different id, caught in 1 trial.
 prop_adoption_survives_any_batching() ->
     ?FORALL(
         {BatchSize, Plan, Skew},
@@ -518,7 +515,7 @@ adoption_survives_any_batching() ->
 %% Pull the complete whole-shard catalogue snapshot (every table on the shard)
 %% off a collapsed instance.
 pull_snapshot(Id) ->
-    {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(Id),
+    {ok, {_W, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(Id),
     pull_snapshot_loop(Id, Cursor, []).
 
 pull_snapshot_loop(Id, Cursor, Acc) ->
@@ -608,7 +605,7 @@ partial_install_does_not_adopt_the_peer_frontier() ->
     %% so it is how the events the contiguity hold parks are eventually
     %% delivered. Suppressing the verdict to stop the cycle violates `Live`
     %% (`MuxBucketSkip_Minus_GapVerdict`). What ends the cycle is an operator,
-    %% which is what `adopt_frontier/3` raises its alarm for.
+    %% which is what the `bondy_oplog_bucket_unroutable` alarm is for.
     _ = bondy_oplog_sync_session:bootstrap_catalogue(
         TgtId, PeerId, #{transport_opts => #{}}
     ),
@@ -635,9 +632,8 @@ partial_install_does_not_adopt_the_peer_frontier() ->
 %% skipped and the projection ends up short of what the peer shipped. The
 %% install must NAME that bucket, because
 %% `bondy_oplog_sync_session:do_bootstrap_snapshot/6` decides whether to adopt
-%% the peer's applied frontier on it. Mutation-checked:
-%% drop the `unclaimable(Bucket, Acc)` wrapper in
-%% `bondy_oplog_applier:do_install_catalogue_batch/3` and the third assertion
+%% the peer's applied frontier on it. Mutation-checked: drop the bucket from
+%% `unclaimable` in `bondy_oplog_applier`'s install and the third assertion
 %% fails with `[]`.
 install_names_the_buckets_it_could_not_route() ->
     {SrcId, SrcNsA, SrcNsB, SrcHA, SrcHB} = setup_two_tables(),
@@ -655,7 +651,7 @@ install_names_the_buckets_it_could_not_route() ->
 
     %% CONTROL: every bucket resolves here, so nothing is unclaimable and the
     %% caller may adopt the peer's frontier.
-    {ok, Ok} = bondy_oplog_applier:install_catalogue_batch(TgtApplier, Cells),
+    {ok, Ok} = bondy_oplog_test_helpers:applier_install(TgtApplier, Cells),
     ?assertEqual(2, maps:get(installed, Ok)),
     ?assertEqual([], maps:get(unclaimable, Ok)),
 
@@ -668,12 +664,40 @@ install_names_the_buckets_it_could_not_route() ->
         end
      || {B, K, F} <- Cells
     ],
-    {ok, Counts} = bondy_oplog_applier:install_catalogue_batch(
+    {ok, Counts} = bondy_oplog_test_helpers:applier_install(
         TgtApplier, Skewed
     ),
     ?assertEqual([<<"table_c">>], maps:get(unclaimable, Counts)),
     %% The A cell replaces its own earlier install.
     ?assertEqual(1, maps:get(skipped, Counts)),
+    ?assertEqual(1, maps:get(installed, Counts)),
+
+    teardown_two_tables(SrcId, SrcNsA, SrcNsB, SrcHA, SrcHB),
+    teardown_two_tables(TgtId, TgtNsA, TgtNsB, TgtHA, TgtHB).
+
+%% Table B's cells are staged while B is registered, and B is unregistered before
+%% the re-derive installs them: the counts are the install's, so they name B and
+%% the caller adopts no frontier over cells that did not land.
+install_names_a_bucket_unregistered_after_staging() ->
+    {SrcId, SrcNsA, SrcNsB, SrcHA, SrcHB} = setup_two_tables(),
+    _ = bondy_oplog:append(
+        SrcId, {cell_apply, ?BUCKET_A, <<"ka">>, {set, 5, <<"va">>}}
+    ),
+    _ = bondy_oplog:append(
+        SrcId, {cell_apply, ?BUCKET_B, <<"kb">>, {set, 7, <<"vb">>}}
+    ),
+    ok = bondy_oplog_test_projection:drain(SrcId),
+    Cells = pull_snapshot(SrcId),
+
+    {TgtId, TgtNsA, TgtNsB, TgtHA, TgtHB} = setup_two_tables(),
+    TgtApplier = bondy_oplog_registry:applier_pid(TgtId),
+    {ok, Token} = bondy_oplog_applier:begin_stage(TgtApplier, [], #{}),
+    ok = bondy_oplog_applier:install_catalogue_batch(TgtApplier, Token, Cells),
+    ok = bondy_oplog_applier:unregister_table(TgtApplier, ?BUCKET_B),
+    {ok, Counts} = bondy_oplog_applier:rederive_projection_sync(
+        TgtApplier, Token
+    ),
+    ?assertEqual([?BUCKET_B], maps:get(unclaimable, Counts)),
     ?assertEqual(1, maps:get(installed, Counts)),
 
     teardown_two_tables(SrcId, SrcNsA, SrcNsB, SrcHA, SrcHB),

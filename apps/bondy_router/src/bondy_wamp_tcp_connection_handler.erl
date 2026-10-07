@@ -28,8 +28,6 @@ A ranch handler for the wamp protocol over either tcp or tls transports.
 %% 4 MiB.
 -define(RAW_MAX_LEN_CODE, 13).
 
--define(TIMEOUT(S), S#state.idle_timeout).
-
 -record(state, {
     listener :: atom(),
     socket :: gen_tcp:socket() | ssl:socket(),
@@ -45,6 +43,7 @@ A ranch handler for the wamp protocol over either tcp or tls transports.
     %% the handshake can read `ping' out of it without a second lookup.
     opts = [] :: key_value:t(),
     idle_timeout :: timeout(),
+    idle_tref :: optional(reference()),
     ping_idle_timeout :: non_neg_integer(),
     ping_tref :: optional(reference()),
     ping_payload :: binary(),
@@ -180,7 +179,7 @@ init({Ref, Transport, Opts}) ->
         description => "Established connection with client."
     }),
 
-    gen_server:enter_loop(?MODULE, [], State, ?TIMEOUT(State)).
+    gen_server:enter_loop(?MODULE, [], reset_idle(State)).
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -188,14 +187,14 @@ handle_call(Event, From, State) ->
         event => Event,
         from => From
     }),
-    {noreply, State, ?TIMEOUT(State)}.
+    {noreply, State}.
 
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
-    {noreply, State, ?TIMEOUT(State)}.
+    {noreply, State}.
 
 %% Handle TCP & SSL handshake
 handle_info(
@@ -208,7 +207,7 @@ handle_info(
         {ok, State} ->
             case maybe_active_once(State) of
                 ok ->
-                    {noreply, reset_ping(State), ?TIMEOUT(State)};
+                    {noreply, reset_idle(reset_ping(State))};
                 {error, Reason} ->
                     {stop, Reason, State}
             end;
@@ -246,7 +245,7 @@ handle_info({Transport, Socket, Data}, #state{socket = Socket} = State0) when
         {ok, State} ->
             case maybe_active_once(State1) of
                 ok ->
-                    {noreply, reset_ping(State), ?TIMEOUT(State)};
+                    {noreply, reset_idle(reset_ping(State))};
                 {error, Reason} ->
                     {stop, Reason, State}
             end;
@@ -256,7 +255,7 @@ handle_info({Transport, Socket, Data}, #state{socket = Socket} = State0) when
 handle_info({tcp_passive, Socket}, #state{socket = Socket} = State) ->
     %% We are using {active, N} and we consumed N messages from the socket
     ok = reset_inet_opts(State),
-    {noreply, State, ?TIMEOUT(State)};
+    {noreply, State};
 handle_info({tcp_closed, _Socket}, State) ->
     {stop, normal, State};
 handle_info({tcp_error, _, _} = Reason, State) ->
@@ -265,7 +264,7 @@ handle_info({tcp_error, _, _} = Reason, State) ->
 handle_info({ssl_passive, Socket}, #state{socket = Socket} = State) ->
     %% We are using {active, N} and we consumed N messages from the socket
     ok = reset_inet_opts(State),
-    {noreply, State, ?TIMEOUT(State)};
+    {noreply, State};
 handle_info({ssl_closed, _Socket}, State) ->
     {stop, normal, State};
 handle_info({ssl_error, _, _} = Reason, State) ->
@@ -299,6 +298,8 @@ handle_info({timeout, Ref, ping_timeout}, #state{ping_tref = Ref} = State) ->
     }),
     %% We will retry or fail depending on retry configuration and state
     maybe_send_ping(State);
+handle_info({timeout, Ref, idle_timeout}, #state{idle_tref = Ref} = State) ->
+    {stop, timeout, State};
 handle_info({timeout, Ref, Msg}, State) ->
     ?LOG_DEBUG(#{
         description => "Received unknown timeout",
@@ -546,19 +547,18 @@ handle_inbound(Data, State0) ->
     {ok, State}.
 
 -spec handle_outbound(any(), state()) ->
-    {noreply, state(), timeout()}
-    | {stop, normal, state()}.
+    {noreply, state()} | {stop, term(), state()}.
 
 handle_outbound(M, State0) ->
     case bondy_wamp_protocol:handle_outbound(M, State0#state.protocol_state) of
         {ok, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {noreply, State, ?TIMEOUT(State)};
+            {noreply, State};
         {ok, Bin, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
             case send_message(Bin, State) of
                 ok ->
-                    {noreply, State, ?TIMEOUT(State)};
+                    {noreply, State};
                 {error, Reason} ->
                     {stop, Reason, State}
             end;
@@ -901,6 +901,16 @@ disable_ping(#state{ping_retry = undefined} = State) ->
 disable_ping(#state{} = State) ->
     ok = cancel_timer(State#state.ping_tref),
     State#state{ping_retry = undefined}.
+
+%% @private
+%% `idle_timeout` is how long the peer may stay silent, so only data from the
+%% peer restarts it: a router delivery or one of this process's own timers is
+%% not the peer speaking.
+reset_idle(#state{idle_timeout = infinity} = State) ->
+    State;
+reset_idle(#state{idle_tref = Ref, idle_timeout = Timeout} = State) ->
+    ok = cancel_timer(Ref),
+    State#state{idle_tref = erlang:start_timer(Timeout, self(), idle_timeout)}.
 
 %% @private
 cancel_timer(Ref) when is_reference(Ref) ->

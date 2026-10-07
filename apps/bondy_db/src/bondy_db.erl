@@ -284,7 +284,7 @@ Optional keys (cascade to table defaults):
 |---|---|---|
 | `topology_opts` | `#{}` | Passed to `Topology:init/2` |
 | `shard_count` | `8` | Default shard count for tables |
-| `fold_module` | `lww_register` | Default fold strategy |
+| `fold_module` | none | Default fold strategy. `open_table/3` returns `{error, {missing_required_opt, fold_module}}` when neither the database nor the table sets it. |
 
 Returns the opaque `Db` handle. Callers MUST eventually call `close/1`
 to release the topology's physical resources.
@@ -1938,9 +1938,10 @@ move), and it buys nothing until a range read is actually on a hot path.
   unless the touched shard was freshened within `max_lag` ms (defaults to
   the spec's `max_lag`, itself `infinity` = never refuse). `Lag` is the
   shard's wall-clock ms lag, or `infinity` when it was never freshened or
-  is flagged for rebuild. The startup backfill freshens every shard at
-  open, so a finite `max_lag` over an up-to-date index passes; refusal
-  signals a genuinely lagging or rebuilding shard.
+  is flagged for rebuild. Opening the table freshens every shard of a
+  trusted index and rebuilds, then freshens, an untrusted one, so a finite
+  `max_lag` over an up-to-date index passes; refusal signals a genuinely
+  lagging or rebuilding shard.
 - `fallback => primary` — instead of refusing a stale read, scan the
   primary directly and recompute the matching keys (slow but correct).
   Bounded by an internal cell cap.

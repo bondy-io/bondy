@@ -161,6 +161,21 @@ truncate_first_last_test() ->
     ?assertEqual({31, 31}, bondy_mst:first(T1)),
     ?assertEqual({50, 50}, bondy_mst:last(T1)).
 
+%% Truncating at a key whose right child is missing from the store drops that
+%% child, so the result references no missing page.
+truncate_at_key_with_missing_right_child_test() ->
+    T0 = build("trunc_missing_right", [{K, K} || K <- lists:seq(1, 200)]),
+    Store0 = bondy_mst:store(T0),
+    RootPage = bondy_mst_store:get(Store0, bondy_mst:root(T0)),
+    [{W, R} | _] = [
+        {K, R}
+     || {K, _, R} <- bondy_mst_page:list(RootPage), is_binary(R)
+    ],
+    T = bondy_mst:set_store(T0, bondy_mst_store:delete(Store0, R)),
+    T1 = bondy_mst:truncate(T, W),
+    ?assertEqual([], bondy_mst:missing_set(T1, bondy_mst:root(T1))),
+    ?assert(lists:all(fun({K, _}) -> K > W end, to_kv(T1))).
+
 %% -----------------------------------------------------------------------------
 %% ETS store: the actual compaction backend. A prior root must remain readable
 %% after truncate (compaction reads peer/prior roots via diff_to_list), because

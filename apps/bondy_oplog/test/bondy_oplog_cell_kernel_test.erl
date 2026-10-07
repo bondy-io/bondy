@@ -17,7 +17,7 @@
 
 -define(K, bondy_oplog_cell_kernel).
 -define(LWW, bondy_oplog_crdt_lww_register).
--define(BC, bondy_oplog_crdt_bounded_counter).
+-define(NC, bondy_oplog_crdt_tier2_bad).
 
 ek(H, O, S) ->
     bondy_oplog_event:key(H, O, S).
@@ -141,10 +141,10 @@ crdt_apply_threads_old_state_test() ->
 %% =============================================================================
 
 non_commutative_crdt_is_refused_test() ->
-    Kernel = {crdt, ?BC},
+    Kernel = {crdt, ?NC},
     ?assertError(
-        {non_commutative_crdt_eager_unsupported, ?BC},
-        ?K:apply(Kernel, ?BC:init(), undefined, {inc, 1}, ek(10, <<"n1">>, 1))
+        {non_commutative_crdt_eager_unsupported, ?NC},
+        ?K:apply(Kernel, undefined, undefined, {inc, 1}, ek(10, <<"n1">>, 1))
     ).
 
 %% =============================================================================

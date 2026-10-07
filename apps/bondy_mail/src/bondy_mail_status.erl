@@ -593,7 +593,7 @@ unknown(Id) ->
 %% `unknown` says.
 remote_get(Node, RealmUri, Id) ->
     Args = [RealmUri, Id],
-    try partisan_rpc:call(Node, ?MODULE, local_get, Args, ?NODE_TIMEOUT) of
+    try bondy_cluster:call(Node, ?MODULE, local_get, Args, ?NODE_TIMEOUT) of
         #{status := _} = Info ->
             Info;
         _ ->

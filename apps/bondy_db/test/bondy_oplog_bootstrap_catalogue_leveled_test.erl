@@ -18,6 +18,9 @@
 %%     session-start watermark.
 %%   - Local frames are byte-identical to the peer frames (proof that
 %%     the V2 frame round-trip through leveled is lossless).
+%%   - A local cell the peer's snapshot lacks is deleted, below, between and
+%%     more than a prune page above the shipped keys, through leveled's
+%%     half-open `range/5` and `delete/3`.
 %% =============================================================================
 -module(bondy_oplog_bootstrap_catalogue_leveled_test).
 
@@ -41,25 +44,12 @@ cleanup(_) ->
 
 leveled_bootstrap_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
-        {timeout, 30, fun fresh_replica_bootstraps_via_leveled/0}
+        {timeout, 30, fun fresh_replica_bootstraps_via_leveled/0},
+        {timeout, 30, fun cell_the_snapshot_lacks_is_pruned_via_leveled/0}
     ]}.
 
 fresh_replica_bootstraps_via_leveled() ->
-    Dir1 = make_tempdir(),
-    Dir2 = make_tempdir(),
-    %% head_only=with_lookup is required by bondy_db_projection_leveled.
-    BookOpts = fun(D) ->
-        [
-            {root_path, D},
-            {cache_size, 2000},
-            {max_journalsize, 100_000_000},
-            {sync_strategy, none},
-            {head_only, with_lookup}
-        ]
-    end,
-    {ok, B1} = leveled_bookie:book_start(BookOpts(Dir1)),
-    {ok, B2} = leveled_bookie:book_start(BookOpts(Dir2)),
-    try
+    with_bookies(fun(B1, B2) ->
         {Peer, PeerEntry} = setup_instance_with_leveled(B1),
         {Local, LocalEntry} = setup_instance_with_leveled(B2),
 
@@ -103,16 +93,62 @@ fresh_replica_bootstraps_via_leveled() ->
             end
          || {K, _, _} <- Cells
         ]
+    end).
+
+cell_the_snapshot_lacks_is_pruned_via_leveled() ->
+    with_bookies(fun(B1, B2) ->
+        {Peer, PeerEntry} = setup_instance_with_leveled(B1),
+        {Local, LocalEntry} = setup_instance_with_leveled(B2),
+        [
+            bondy_oplog:append(Peer, {cell_apply, ?B, K, {set, 10, K}})
+         || K <- [<<"k10">>, <<"k20">>]
+        ],
+        ok = bondy_oplog_test_projection:drain(Peer),
+        PeerH = bondy_oplog_core_registry:entry_projection_handle(PeerEntry),
+        LocalH = bondy_oplog_core_registry:entry_projection_handle(LocalEntry),
+        {ok, Frame} = ?PA:get(PeerH, ?B, <<"k10">>),
+        Above = [
+            <<"k3", (integer_to_binary(N))/binary>>
+         || N <- lists:seq(1, 300)
+        ],
+        ok = ?PA:put_batch(
+            LocalH, [{?B, K, Frame} || K <- [<<"k05">>, <<"k15">> | Above]]
+        ),
+        ?assertMatch(
+            {ok, _},
+            bondy_oplog_sync_session:bootstrap_catalogue(Local, Peer, #{})
+        ),
+        {ok, Rows} = ?PA:range(LocalH, ?B, <<>>, infinity, #{limit => 1000}),
+        ?assertEqual([<<"k10">>, <<"k20">>], [K || {K, _} <- Rows])
+    end).
+
+%% =============================================================================
+%% Helpers
+%% =============================================================================
+
+%% Runs `Fun` over two fresh Bookies, each in a directory of its own.
+with_bookies(Fun) ->
+    Dir1 = make_tempdir(),
+    Dir2 = make_tempdir(),
+    Opts = fun(D) ->
+        [
+            {root_path, D},
+            {cache_size, 2000},
+            {max_journalsize, 100_000_000},
+            {sync_strategy, none},
+            {head_only, with_lookup}
+        ]
+    end,
+    {ok, B1} = leveled_bookie:book_start(Opts(Dir1)),
+    {ok, B2} = leveled_bookie:book_start(Opts(Dir2)),
+    try
+        Fun(B1, B2)
     after
         ok = leveled_bookie:book_close(B1),
         ok = leveled_bookie:book_close(B2),
         rmrf(Dir1),
         rmrf(Dir2)
     end.
-
-%% =============================================================================
-%% Helpers
-%% =============================================================================
 
 setup_instance_with_leveled(BookiePid) ->
     Id = mk_id(),

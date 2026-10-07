@@ -10,7 +10,7 @@ structure is [the state plane](view_state_plane.md).
 
 ```mermaid
 flowchart LR
-    C[Client] -->|WebSocket / TCP| T[Transport &<br/>protocol handler]
+    C[Client] -->|WebSocket / raw socket /<br/>SSE / long-poll| T[Connection process<br/>and protocol handler]
     T --> S[Session]
     subgraph Node A
         T
@@ -20,7 +20,7 @@ flowchart LR
         S --> R[bondy_router dispatch<br/>inline in the connection process]
         R --> BR[Broker<br/>events]
         R --> DL[Dealer<br/>calls]
-        BR --> RIB[("RIB —<br/>registry tables")]
+        BR --> RIB[("RIB —<br/>local entries + stubs")]
         DL --> RIB
     end
     subgraph Node B
@@ -37,26 +37,29 @@ flowchart LR
 
 | Element | Responsibility |
 | --- | --- |
-| Transport & protocol handler | One process per connection. Owns the socket, decodes frames via `bondy_wamp`, and writes replies. Idle connections hibernate; writes coalesce into single writev calls. |
-| Session | The WAMP session state machine: establishment (HELLO/CHALLENGE/WELCOME), authentication against the realm's security tables, role negotiation, and teardown. Managed under `bondy_session_manager`. |
-| Admission (`bondy_regulator`) | Consulted before session establishment commits resources. Under overload it refuses HELLO cheaply and explicitly (a busy ABORT the client can retry) rather than admitting work the node cannot finish — refusal is orders of magnitude cheaper than a half-served session. |
-| `bondy_router` dispatch | Receives every in-session message and forwards it to the role that owns it. Client-submitted messages are dispatched **synchronously in the connection process that received them**: a source's messages are routed in submission order, and a loaded router exerts backpressure on that connection instead of queueing unbounded work. Only meta-API calls (`wamp.*`, `bondy.*` procedures) go through the regulated `router_pool`, which falls back to inline execution when the pool is overloaded rather than shedding. |
-| Broker | The Publish/Subscribe role: matches a PUBLISH against subscriptions (exact, prefix, wildcard) in the RIB and emits an EVENT per local subscriber and one forward per remote node with matches. |
-| Dealer | The routed-RPC role: matches a CALL against registrations in the RIB, applies the invocation policy (single, round-robin, ...), and threads CALL → INVOCATION → YIELD → RESULT, including progressive calls and progressive results. |
-| RIB (registry tables) | The Routing Information Base: subscriptions and registrations as replicated tables in the `registry` database. Written on SUBSCRIBE/REGISTER, read on every PUBLISH/CALL. Each node holds the full RIB, so matching is always a local read — no network on the read path. See [Registry routing](../router/registry_routing.md). |
-| Flow workers (`bondy_router_worker`) | A pool of ordered lanes on the **receiving** side of the wire. Messages relayed from another node — and bridge-relay ingress — are keyed by the source/destination pair, so a flow lands on one worker and keeps its wire order through local delivery, while unrelated flows proceed in parallel. Locally connected clients need no pool: their own connection process already serialises them. |
-| Relay (`bondy_relay`) | Node-to-node WAMP forwarding over a dedicated Partisan channel. Egress is plain functions in the calling process, not a relay process: the message is addressed to `{via, bondy_router_worker, PartitionKey}` and the key pins the flow to one channel connection. On the receiving node the connection process resolves that key straight to the owning worker — no intermediate singleton to queue behind. |
+| Connection process and protocol handler | One process per connection (`bondy_wamp_ws_connection_handler`, `bondy_wamp_tcp_connection_handler`, and the SSE and long-poll handlers). It owns the socket, decodes frames with `bondy_wamp`, and writes replies. The raw-socket handler sends a batch of outgoing messages in one `send` call. A WebSocket connection hibernates when idle, as its configuration allows. |
+| Session | The WAMP session state machine (`bondy_wamp_protocol`): establishment (HELLO, CHALLENGE, WELCOME), authentication against the realm's security tables, role negotiation, and teardown. `bondy_session_manager` workers store sessions and monitor each owning connection process, so a crashed connection's session is cleaned up. |
+| Admission (`bondy_regulator`) | Read at HELLO, before any realm lookup or authentication. When `bondy_regulator_load` reports the node busy, or `bondy_regulator_memory` reports memory high, the protocol handler refuses the HELLO with an ABORT the client can retry (`load_regulation.hello.enabled`, on by default). A per-source-IP handshake throttle (`bondy_rate_limit`, off by default) follows for admitted HELLOs. |
+| `bondy_router` dispatch | Receives every in-session message and forwards it to the role that owns it. Client-submitted messages are handled **synchronously in the connection process that received them**, so a source's messages are routed in submission order and a loaded router slows that connection instead of queueing work. Only CALLs to `wamp.*` and `bondy.*` procedures go to the regulated `router_pool`; when that pool is at capacity, the call runs synchronously instead. |
+| Broker | The Publish/Subscribe role (`bondy_broker`): matches a PUBLISH against subscriptions (exact, prefix, wildcard), emits an EVENT per local subscriber, and forwards one copy to each remote node that has a matching subscription. |
+| Dealer | The routed-RPC role (`bondy_dealer`): matches a CALL against registrations, applies the invocation policy (single, round-robin, ...), and threads CALL → INVOCATION → YIELD → RESULT, including progressive calls and progressive results. |
+| RIB | The Routing Information Base, in two parts. A node's own subscriptions and registrations live in node-local tables (`bondy_registry_store`, with a trie for matching). For each `(realm, match policy, URI)` it serves, the node also writes one summary cell into the replicated `registry` database (`bondy_registry_rib`). Peers turn the cells they receive into **stubs** that name the nodes able to serve a URI. Matching reads only local tables and stubs, so the read path makes no network call. See [Registry routing](../router/registry_routing.md). |
+| Flow workers (`bondy_router_worker`) | A pool of ordered lanes on the **receiving** side of the wire. Messages relayed from another node, and bridge-relay ingress, are keyed by the source and destination pair, so a flow lands on one worker and keeps its wire order through local delivery while unrelated flows proceed in parallel. When a worker's share of the pool's capacity is in use, the message is shed and counted (`bondy_wamp_dropped_total{reason="shed"}`). |
+| Relay (`bondy_relay`) | Node-to-node WAMP forwarding over the `wamp_relay` Partisan channel. Egress is plain functions in the calling process: the message is addressed to `{via, bondy_router_worker, PartitionKey}`, and the key pins the flow to one channel connection. On the receiving node the channel's connection process resolves the key to the owning worker and delivers into its mailbox; no relay process sits on ingress. |
 
 ## Connectors
 
-- **Client ↔ node**: WebSocket or raw TCP, any negotiated WAMP serialiser.
-- **Within a node**: process messages; client-submitted work runs in the
-  connection process, peer-relayed work in the flow pool's ordered lanes,
-  replies written directly by the owning transport process.
+- **Client ↔ node**: WAMP over WebSocket, raw socket (TCP, TLS or a Unix
+  domain socket), Server-Sent Events or HTTP long-poll, with any negotiated
+  WAMP serialiser. Co-located clients built on `bondy_connect_sdk` can also use
+  an in-VM transport.
+- **Within a node**: process messages. Client-submitted work runs in the
+  connection process, peer-relayed work in the flow pool's ordered lanes, and
+  the owning connection process writes replies.
 - **Between nodes**: Partisan channels — TCP connections outside Erlang's
-  built-in distribution, with a dedicated channel and configurable
-  parallelism for relay traffic (`cluster.channels.*`), so bulk data never
-  queues behind cluster control messages.
+  built-in distribution. Relay traffic has its own channel with configurable
+  parallelism (`cluster.channels.wamp_relay.*`), so it does not queue behind
+  cluster control messages.
 
 ## A publish, end to end
 
@@ -69,8 +72,8 @@ sequenceDiagram
     participant B2 as Broker (B)
     participant S as Subscriber (Node B)
     P->>B: PUBLISH topic
-    B->>RIB: match(topic)  — local read
-    RIB-->>B: local subs + remote nodes
+    B->>RIB: match(topic) — local read
+    RIB-->>B: local subscribers + remote nodes
     B->>P: PUBLISHED (if acknowledged)
     B-->>B: EVENT to each local subscriber
     B->>RL: forward — flow pinned to one connection
@@ -78,33 +81,30 @@ sequenceDiagram
     B2-->>S: EVENT
 ```
 
-The publisher's acknowledgement never waits for remote delivery. Ordering
-between a publisher and a subscriber is preserved by three mechanisms in
-series, none of them a global serialisation point: the publisher's own
-connection process submits in order, the partition key pins that
-publisher's relayed publications to a single channel connection so the
-wire cannot reorder them, and the receiving node replays them through one
-flow worker. For a PUBLISH the destination is a node rather than a
-session, so the key degrades to per-publisher — which is what the
-guarantee needs, since the receiving node mints the EVENTs for all its
-local subscribers from the one relayed PUBLISH.
+The publisher's acknowledgement does not wait for remote delivery. Three
+stages, each already serial, carry the order between a publisher and a
+subscriber: the publisher's connection process submits in order, the
+partition key pins that publisher's relayed publications to one channel
+connection, and the receiving node replays them through one flow worker. For
+a PUBLISH the destination is a node rather than a session, so the key is per
+publisher. That is enough, because the receiving node creates the EVENTs for
+all its local subscribers from the one relayed PUBLISH.
 
 ## Rationale
 
-Three decisions shape this plane. *Full RIB on every node* buys a local,
-lock-free read on the hottest path (every call and publish) at the price of
-replicating registrations and subscriptions — a price the state plane is
-built to pay. *Order carried by the pipeline rather than imposed by a
-serialising process* preserves exactly what WAMP promises (per pair) and
-nothing more: the connection process, the pinned channel connection and
-the keyed flow worker are each already serial, so no extra coordination is
-needed and throughput scales with unrelated traffic. *Refusal at admission*
-keeps overload
-behaviour honest: the node sheds sessions it cannot serve at the cheapest
-possible point, protecting sessions already admitted — see [rationale:
+Three decisions shape this plane. *Every node holds the routing view*: local
+entries plus a stub for each URI a peer serves. That gives a local read on the
+hottest path (every call and publish), at the price of replicating one
+summary cell per node and URI — a price the state plane is built to pay.
+*Order carried by the pipeline rather than by a serialising process* gives
+exactly what WAMP promises (order per pair) and nothing more: the connection
+process, the pinned channel connection and the keyed flow worker are each
+serial already, so no extra coordination is needed and unrelated traffic runs
+in parallel. *Refusal at admission* sheds sessions the node cannot serve at
+the cheapest point, which protects sessions already admitted — see [rationale:
 robustness](architecture_rationale.md).
 
 ## Related views
 
-- Where the RIB's tables live and how they replicate: [the state plane](view_state_plane.md), [convergence and repair](view_convergence.md).
+- Where the RIB's cells live and how they replicate: [the state plane](view_state_plane.md), [convergence and repair](view_convergence.md).
 - Sockets, channels, and their configuration: [deployment](view_deployment.md).

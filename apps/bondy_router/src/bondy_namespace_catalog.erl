@@ -543,12 +543,9 @@ registry_db_spec() ->
                 wal_backend => mem,
                 durability => ephemeral,
                 %% Retention-bounded MST history (`db.registry.retention.*`,
-                %% defaults 30s / 50K events per shard). The registry's
-                %% event history is pure RAM (memory topology) and the
-                %% all-peer-confirmed compaction frontier cannot keep pace
-                %% under sustained subscribe/register load, so each shard
-                %% bounds its own history locally; a peer that misses
-                %% truncated history recovers via catalogue bootstrap.
+                %% off by default): each shard may bound its in-RAM history
+                %% locally; a peer that misses truncated history recovers
+                %% via catalogue bootstrap.
                 mst_retention => bondy_db_config:oplog_mst_retention(registry)
             },
             fused => true
@@ -1125,8 +1122,17 @@ table_opts(#{fold := Class} = Spec, Override) ->
 %% Registry (ephemeral, memory-topology) tables carry the in-RAM projection /
 %% WAL knobs at the DB-spec level (registry_db_spec/0); merge them under the
 %% fold + index opts (the key sets are disjoint). Main tables pass through.
+%% The registry's WAL is in memory; its directory holds only a catalogue
+%% install's spool, which is scratch, so it is rooted under `platform_tmp_dir`.
 maybe_ephemeral_opts(#{db := registry}, Opts) ->
-    maps:merge(maps:get(table_opts, registry_db_spec()), Opts);
+    #{oplog_instance_opts := InstanceOpts} =
+        TableOpts = maps:get(table_opts, registry_db_spec()),
+    maps:merge(
+        TableOpts#{
+            oplog_instance_opts := InstanceOpts#{wal_dir => registry_wal_dir()}
+        },
+        Opts
+    );
 maybe_ephemeral_opts(#{db := main, durability := durable}, Opts) ->
     %% Make each durable main table's per-shard WAL + MST pack durable, rooted
     %% under the data dir (collocated with the leveled projection) instead of
@@ -1230,6 +1236,13 @@ table_info(Name) ->
 bondy_db_dir() ->
     DataDir = application:get_env(bondy_router, platform_data_dir, "data"),
     filename:join([DataDir, "bondy_db"]).
+
+%% @private
+registry_wal_dir() ->
+    TmpDir = application:get_env(bondy_router, platform_tmp_dir, "tmp"),
+    unicode:characters_to_binary(
+        filename:join([TmpDir, "bondy_db", "registry", "wal"])
+    ).
 
 %% @private
 main_dir() ->

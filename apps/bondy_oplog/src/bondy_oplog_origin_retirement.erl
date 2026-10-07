@@ -21,7 +21,7 @@ membership removal, and the replication of the operator's retirement set.
 **Partisan membership is the replicated authority.** A node leaves the
 stability set the moment it is removed from the membership, and
 `bondy_oplog_instance:reclamation_members/0` observes that directly. A
-removal is an explicit `partisan_peer_service:leave/0,1` — the operator's
+removal is an explicit `bondy_cluster:leave/0,1` — the operator's
 `bondy.cluster.leave` (`bondy_cluster_api`) or the node's own shutdown
 under `cluster.automatic_leave` — never a timeout: peer discovery only ever
 JOINS (Partisan >= 6.3.0, `partisan_peer_service:add_members/1`, pinned
@@ -126,7 +126,8 @@ Level-ness is therefore reported, not required — reaping over unequal claims
 means the origin was retired before the cluster had converged on its events,
 and the ban has frozen the difference permanently.
 
-Solo (`reclamation_members/0` = `{ok, []}`) licenses NOTHING here, unlike
+No other member (`reclamation_members/0` = `{ok, []}`, clustering disabled)
+licenses NOTHING here, unlike
 projection-cell reclamation: a frontier entry is a claim compared against
 peers, and a one-node cluster that later grows meets a peer still
 advertising the entry and reads its own reaped 0 as a deficit
@@ -278,8 +279,8 @@ projection, for the life of the node, to find nothing.
 
 run(Swept) ->
     case bondy_oplog_instance:reclamation_members() of
-        error ->
-            retirement_skipped(membership_unavailable);
+        {error, Reason} ->
+            retirement_skipped(Reason);
         {ok, Members} ->
             Forgotten = forget_departed(Members),
             %% Replication runs FIRST and independently of the complement.
@@ -313,9 +314,11 @@ monotone and idempotent, so repeating it is free.
 **Call this only after the departed node has been removed from the Partisan
 membership, and only once every member has applied and checkpointed that
 node's events** (each member's durable frontier, `get_frontier`, covers them):
-applied alone is not enough, since a member that crashes before its checkpoint
-loses the effect, and retirement then stops the events reaching it again
-(`proofs/tla/JoinInstall.tla`, `Retire`).
+a member that has applied them but crashes before its checkpoint loses the
+effect, and retirement would stop the events reaching it again.
+`proofs/tla/JoinInstall_Truncation_CompactMembers_Reap.cfg` checks
+retirement on checkpointed claims, to a bound; no ablation checks it on
+applied claims.
 Retiring bans the origin cluster-wide, so any of its events a replica has
 not yet applied become permanently unreachable to it. The complement is
 computed fail-closed — every current member must answer, or nothing is
@@ -422,7 +425,7 @@ init([]) ->
     Enabled = bondy_oplog_config:origin_retirement_enabled(),
     Enabled andalso
         begin
-            ok = subscribe_membership(),
+            ok = bondy_cluster:subscribe(),
             %% Boot-time reconcile: a membership removal that happened while
             %% this node was down produces no event, so catch up now.
             gen_server:cast(?MODULE, membership_update),
@@ -474,10 +477,9 @@ handle_info({partisan_membership, _Members}, State0) ->
     %% membership event is rare enough that one full pass is the right
     %% price for not having to reason about that.
     State = State0#state{swept = []},
-    %% A membership change pushed by Partisan. The payload is ignored (see
-    %% subscribe_membership/0); the single-flight worker re-reads the current
-    %% member set itself. The periodic tick is the safety net if a push is ever
-    %% missed (e.g. the subscription is dropped without this process dying).
+    %% The payload is ignored: the single-flight worker re-reads the member
+    %% set, so a stale payload never drives a cleanup. The periodic tick is
+    %% the safety net if a push is ever missed.
     State#state.enabled andalso gen_server:cast(?MODULE, membership_update),
     {noreply, State};
 handle_info(retirement_tick, State) ->
@@ -531,15 +533,6 @@ schedule_periodic() ->
         retirement_tick
     ),
     ok.
-
-%% @private
-%% Subscribe this process to Partisan membership-change notifications; each
-%% change is delivered as a `{partisan_membership, Members}` message (handled in
-%% handle_info/2). The payload is ignored on purpose: the worker re-reads the
-%% member set from `bondy_oplog_instance:reclamation_members/0` itself, so a
-%% stale or representation-specific payload can never drive a cleanup.
-subscribe_membership() ->
-    partisan_membership:subscribe().
 
 %% @private
 %% Forget every recorded peer that is no longer a member. Node-keyed and

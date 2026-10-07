@@ -1,71 +1,82 @@
-# Backup & restore — operator runbook
+# Backup and restore: operator runbook
 
-This page is the **operator's runbook** for backing up and restoring an oplog
-instance's on-disk store — the WAL, the MST pack-store, and the compaction
-checkpoint that live together under one `storage_path`. For what each of those
-stores contains, see the storage-stack architecture chapters 00 (the layered
-storage model) and 01 (the WAL and recovery).
-
-The Erlang API for these operations is in `bondy_mst_admin`; it copies the tree
-generically, so it backs up whatever a shard owns under `storage_path`.
+This runbook backs up and restores the on-disk state of `bondy_oplog`
+instances with `bondy_mst_admin`. `bondy_mst_admin` copies a directory tree
+file by file. It does not interpret the files, so it backs up whatever lies
+under the source directory.
 
 ## What gets backed up
 
-A Bondy node persists three things under `storage_path`:
+An instance started with `storage_path` keeps its files in one instance
+directory. With the default `sharded` path layout, that directory is
+`<storage_path>/<h2>/<h4>/<InstanceId>/`, where `<h2>` and `<h4>` are the
+first 2 and 4 hex characters of `sha256(InstanceId)`. With the `flat` layout,
+it is `<storage_path>/<InstanceId>/`.
 
 ```
-<storage_path>/
-└── <shard1>/<shard2>/<InstanceId>/
-    ├── wal/<InstanceId>/...           ← WAL segments + manifest + consumer offset
-    ├── <pack store files>             ← MST packfiles, .idx files, manifest
-    └── checkpoint.etf                 ← compaction checkpoint
+<instance dir>/
+├── manifest, tombstones, incoming.pack,
+│   pack-NNNN.pack, pack-NNNN.idx        ← MST pack store
+├── wal/<InstanceId>/...                 ← WAL segments, manifest, consumer offset
+├── origin/                              ← persisted origin of the instance
+└── checkpoint.etf                       ← compaction checkpoint
 ```
 
-`bondy_mst_admin:backup/2` copies this entire tree byte-for-byte and writes
-a `manifest.etf` recording every file's SHA-256.
+`bondy_mst_admin:backup/2` copies every regular file under the source
+directory and writes `manifest.etf` into the backup directory. The manifest
+records the relative path, size and SHA-256 of each file.
 
-**Leveled (the projection store) is NOT backed up by this tool.** Bondy
-runs Leveled in head-only mode (PR-PS-15b); on disk loss the projection
-is rebuilt from a peer (`bondy_oplog_catalogue_snapshot` — see chapter
-06) or from a Leveled-specific backup. The tools here cover the **WAL +
-MST + checkpoint** triple, which is what the oplog itself owns.
+The backup covers only the files under the source directory:
+
+- An instance configured with an explicit `wal_dir` keeps its WAL there, not
+  under `storage_path`. Back up that directory as well.
+- The Leveled projection store of `bondy_db` has its own directory. A backup
+  of `storage_path` includes it only when that directory lies under
+  `storage_path`.
 
 ## Cold backup
 
-The supported flow assumes the writer is stopped. The library does **not**
-provide a hot-backup write-barrier in this release; for zero-downtime
-backups use a filesystem-level snapshot (LVM, ZFS, btrfs, AWS EBS) of
-`storage_path`, then point `backup/2` at the snapshot mount.
+`bondy_mst_admin` has no write barrier. Stop every writer on the source
+directory before the backup. For a backup without downtime, take a
+filesystem snapshot (LVM, ZFS, btrfs, AWS EBS) of `storage_path` and back up
+the snapshot mount.
 
-### Recommended sequence
+### Procedure
 
 ```erlang
-%% 1. Stop the instance(s) you want to back up.
+%% 1. Stop the instance.
 ok = bondy_oplog:stop_instance(InstanceId),
 
-%% 2. Run the backup.
+%% 2. Back up.
 {ok, Manifest} = bondy_mst_admin:backup(StoragePath, BackupDir),
 
-%% 3. Optionally re-verify the destination.
-{ok, _} = bondy_mst_admin:verify(BackupDir),
+%% 3. Verify the copy.
+{ok, Manifest} = bondy_mst_admin:verify(BackupDir),
 
 %% 4. Restart.
-{ok, _} = bondy_oplog:start_instance(InstanceId, Opts).
+{ok, _Pid} = bondy_oplog:start_instance(InstanceId, Opts).
 ```
 
-`backup/2` refuses a non-empty target by default. Pass
-`#{allow_nonempty_target => true}` to bypass that guard (e.g. if you are
-re-writing into a snapshot directory that already has metadata).
+`backup/2` creates `BackupDir` when it does not exist. When `BackupDir`
+exists and is not empty, `backup/2` returns `{error, {target, not_empty,
+BackupDir}}`. To back up into a non-empty directory, call `backup/3` with
+`#{allow_nonempty_target => true}`.
 
 ### Telemetry
 
-| Event | When |
-|---|---|
-| `[bondy_mst, admin, backup, start]` | A backup call begins. |
-| `[bondy_mst, admin, backup, complete]` | Backup succeeded. Measurements include `file_count`, `total_bytes`, `duration_us`. |
-| `[bondy_mst, admin, backup, failed]` | Backup raised. Metadata carries `reason`. |
+Each call emits a `start` event and then a `complete` or a `failed` event.
 
-(`verify` and `restore` emit the same shapes under their own suffixes.)
+| Event | Measurements | Metadata |
+|---|---|---|
+| `[bondy_mst, admin, backup, start]` | none | `source`, `target` |
+| `[bondy_mst, admin, backup, complete]` | `file_count`, `total_bytes`, `duration_us` | `source`, `target` |
+| `[bondy_mst, admin, backup, failed]` | `duration_us` | `source`, `target`, `reason` |
+| `[bondy_mst, admin, verify, start]` | none | `target` |
+| `[bondy_mst, admin, verify, complete]` | `file_count`, `total_bytes`, `duration_us` | `target` |
+| `[bondy_mst, admin, verify, failed]` | `duration_us` | `target`, `reason` |
+| `[bondy_mst, admin, restore, start]` | none | `source`, `target` |
+| `[bondy_mst, admin, restore, complete]` | `file_count`, `total_bytes`, `duration_us` | `source`, `target` |
+| `[bondy_mst, admin, restore, failed]` | `duration_us` | `source`, `target`, `reason` |
 
 ## Verifying a backup
 
@@ -73,78 +84,66 @@ re-writing into a snapshot directory that already has metadata).
 {ok, Manifest} = bondy_mst_admin:verify(BackupDir).
 ```
 
-`verify/1` reads `manifest.etf`, then for each entry confirms the file
-exists, has the recorded size, and hashes to the recorded SHA-256.
-
-Error variants:
+`verify/1` reads `manifest.etf`. For each entry, it checks that the file
+exists, that its size matches, and that its SHA-256 matches. It does not
+report files that are on disk but not in the manifest.
 
 | Error | Meaning |
 |---|---|
-| `{manifest, not_found}` | `manifest.etf` is missing in `BackupDir`. |
-| `{manifest, {corrupted, _}}` | `manifest.etf` could not be decoded. |
-| `{manifest, {unexpected_term, _}}` | Decoded fine but wasn't the expected `backup_v1` shape. |
-| `{file, RelPath, missing}` | A manifest-listed file isn't on disk. |
-| `{file, RelPath, size_mismatch}` | File size differs from manifest. |
-| `{file, RelPath, hash_mismatch}` | File content differs from manifest. |
+| `{manifest, not_found}` | `BackupDir` has no `manifest.etf`. |
+| `{manifest, {corrupted, _}}` | `manifest.etf` does not decode. |
+| `{manifest, {unexpected_term, _}}` | `manifest.etf` decodes, but not to a `backup_v1` term. |
+| `{manifest, Reason}` | `manifest.etf` cannot be read. |
+| `{file, RelPath, missing}` | A file in the manifest is not on disk. |
+| `{file, RelPath, size_mismatch}` | The size of a file differs from the manifest. |
+| `{file, RelPath, hash_mismatch}` | The content of a file differs from the manifest. |
+| `{read, Reason}` | A file cannot be read. |
 
-You should `verify` any backup that has been transported (copied to S3,
-moved between hosts, restored from tape) before you trust it.
+Verify every backup that has been moved (to object storage, to another host,
+or to tape) before you rely on it.
 
 ## Restoring
 
 ```erlang
-%% 1. Stop the instance if it is running.
+%% 1. Stop the instance if it runs.
 ok = bondy_oplog:stop_instance(InstanceId),
 
-%% 2. Make sure the target storage_path is empty (or allow non-empty).
-%% 3. Run the restore — verify happens first.
-{ok, _} = bondy_mst_admin:restore(BackupDir, StoragePath),
+%% 2. Restore. restore/2 verifies the backup first.
+{ok, _Manifest} = bondy_mst_admin:restore(BackupDir, StoragePath),
 
-%% 4. Restart with the same opts you used before the backup.
-{ok, _} = bondy_oplog:start_instance(InstanceId, Opts).
+%% 3. Restart with the options used before the backup.
+{ok, _Pid} = bondy_oplog:start_instance(InstanceId, Opts).
 ```
 
-`restore/2` calls `verify/1` first, so it never copies a tampered or
-truncated backup into a live data dir.
+`restore/2` calls `verify/1` on `BackupDir`. When verification fails,
+`restore/2` returns the error and copies nothing. It then applies the same
+target check as `backup/2`: the target has to be absent or empty, unless you
+call `restore/3` with `#{allow_nonempty_target => true}`. `restore/2`
+datasyncs every file it writes and fsyncs the top-level target directory.
 
-On restart the instance:
+When the instance restarts, its pack store opens from the restored files. A
+backup taken while an asynchronous seal was in flight holds an
+`incoming-sealing-NNNN.pack` file. The pack store finishes that seal when it
+opens, before it serves reads. The `recovery_*` tests in
+`bondy_mst_pack_writer_async_seal_test` cover this path. The instance then
+recovers its WAL and replays the events past its resume position, as
+`apps/bondy_db/doc_extras/architecture/01_bondy_oplog.md` describes under
+"Recovery on boot".
 
-1. Opens the MST pack-store from the restored files — re-sealing any
-   `incoming-sealing-*` file left behind by an async seal that was in
-   flight when the node stopped. That roll-aside file is part of the
-   byte-for-byte tree, so the reopen completes the seal deterministically;
-   no manifest change is involved, so a backup taken mid-seal is still
-   consistent.
-2. Reads `checkpoint.etf` for the watermark + folded CRDT state.
-3. Replays the WAL tail past the watermark.
-4. Seeds the HLC from the restored watermark so further appends are
-   strictly newer than the pre-backup events.
+## Backups in a cluster
 
-## When to take a backup
+In a cluster, a replica that loses its disk can bootstrap from a peer.
+`apps/bondy_db/doc_extras/architecture/06_compaction_and_bootstrap.md`
+describes bootstrap. A backup is then the recovery path for the loss of
+every replica.
 
-| Deployment | Suggested cadence |
-|---|---|
-| Single-node, security-critical | Hourly cold copy + filesystem snapshot for sub-hour RPO |
-| Single-node, routing-only | Daily |
-| Multi-node (≥ 3 peers) | Weekly snapshot for DR; routine recovery is peer bootstrap |
+## Limits
 
-For multi-node clusters the catalogue-snapshot bootstrap protocol
-(chapter 06) is the *primary* recovery mechanism — backups are a
-secondary safety net for the case where the whole cluster is lost.
-
-## Limits in this release
-
-- **Cold only.** No write-barrier primitive (`freeze/unfreeze`) in this
-  release. Use filesystem snapshots for hot backups.
-- **Single-tree only.** Each `backup/2` call covers one source tree. If
-  your deployment has `storage_path` and Leveled at different roots,
-  invoke `backup/2` once per tree.
-- **Full only.** No incremental / streaming format yet — every backup
-  is a complete copy.
-- **No compression or encryption.** Both are out of scope. Pipe the
-  backup directory through `tar | zstd | age` (or your tool of choice)
-  if you need either.
-
-These constraints exist because the cold-copy primitive is enough for
-the documented recovery flows. Streaming and write-barrier support can
-be added without breaking the manifest format (`backup_v1`).
+- **Cold only.** There is no write barrier. Use a filesystem snapshot to back
+  up without stopping the writer.
+- **One tree per call.** Each `backup/2` call covers one source directory.
+  Call it once for each directory that holds state.
+- **Full copies only.** Every backup is a complete copy. There is no
+  incremental format.
+- **No compression or encryption.** Process the backup directory with your
+  own tools (for example `tar | zstd | age`) when you need either.

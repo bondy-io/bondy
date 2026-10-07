@@ -375,14 +375,17 @@ do_add_bridge(Data, Opts, State0) ->
             {{error, Reason}, State0}
     end.
 
+%% `supervisor:delete_child/2` refuses a running child, so it is stopped first.
 do_remove_bridge(Name, State0) when is_binary(Name) ->
+    _ = bondy_bridge_relay_client_sup:terminate_child(Name),
+    State = State0#state{started = lists:delete(Name, State0#state.started)},
     case bondy_bridge_relay_client_sup:delete_child(Name) of
         ok ->
-            remove_from_state(Name, State0);
+            remove_from_state(Name, State);
         {error, not_found} ->
-            remove_from_state(Name, State0);
+            remove_from_state(Name, State);
         {error, _} = Error ->
-            {Error, State0}
+            {Error, State}
     end.
 
 remove_from_state(Name, State) ->

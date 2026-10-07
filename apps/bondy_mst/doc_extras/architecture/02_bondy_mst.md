@@ -1,152 +1,162 @@
 # bondy_mst: the Merkle Search Tree
 
-> Audience: anyone who wants to know what a Merkle Search Tree is, why
-> it's at the heart of this library, and how peers converge without
-> consensus.
-> Time to read: ~20 min.
+> Audience: anyone who wants to know what a Merkle Search Tree is, how this
+> library stores one, and how peers use it to find what they lack.
 
-`bondy_mst` is the package name *and* the name of the data structure
-at its centre. The name is overloaded on purpose — the MST is the
-single idea that makes everything else worth building. This chapter
-introduces the structure, the page-store backend, and the anti-entropy
-protocol peers use to converge.
+`bondy_mst` is the name of the library and of the data structure at its
+centre. This chapter explains the structure, the page-store backends, the
+durable pack store, and the anti-entropy exchange that peers use to converge.
 
 ## What problem does the MST solve?
 
-Suppose two peers each have ~10⁶ events. They want to know which
-events the other one is missing, without shipping all 10⁶ over the
-network. With a flat data structure you'd ship a Bloom filter at best;
-with a key-value store you'd run a diff per key.
+Two peers each hold a large set of items. Each one wants to learn which items
+the other holds and it lacks, without sending the whole set over the network.
 
-A **Merkle Search Tree** turns this into log-N comparisons:
+A **Merkle Search Tree** makes that a comparison of hashes:
 
-- The tree is **balanced by hash**, not by insertion order — two
-  peers that hold the same set of items build the **same tree**
-  deterministically.
-- Each internal node holds a hash of its subtree (Merkle).
-- To compare two trees, peers exchange root hashes. Equal? Done.
-  Different? Recurse only into the children that disagree.
+- The hash of each key decides the shape of the tree, so two peers that hold
+  the same set build the same tree.
+- Each page carries the hashes of its children, so the root hash summarises
+  the whole tree.
+- To compare two trees, peers compare root hashes. When the hashes are equal,
+  the trees are equal. When they differ, a peer requests the pages under the
+  other root that it does not hold.
 
-The result: peers find their disagreement in **O(diff)**, not
-O(set size).
+The pages that cross the network are the pages that differ, not the whole
+tree.
 
-A caveat on "equal roots? done": root equality means the two *trees*
-are identical, which lets a peer skip page exchange. It is not, on its
-own, a test for "the two peers hold the same application data" once a
-consumer **truncates** the tree. A consumer that compacts stable items
-out of its MST leaves a converged tree empty, with an `undefined`
-root, so two peers in different compaction states carry different
-roots over identical data. A consumer that needs a data-convergence
-oracle maintains it over its materialised state, not over the MST
-root.
+Equal roots mean equal *trees*. They do not mean equal application data once
+a consumer truncates the tree. Two replicas that hold the same data but
+truncated at different watermarks carry different trees and different roots.
+A consumer that needs a test for data convergence keeps that test over its
+own materialised state, not over the MST root.
 
-> The construction is from Auvolat & Taïani, *Merkle Search Trees:
-> Efficient State-Based CRDTs in Open Networks*, SRDS 2019. The
-> Erlang implementation in `bondy_mst.erl` is ported from the
-> authors' reference Elixir prototype and extended with multiple
-> backends and GC.
+> The construction is from Auvolat and Taïani, *Merkle Search Trees:
+> Efficient State-Based CRDTs in Open Networks*, SRDS 2019. `bondy_mst.erl`
+> is ported from the authors' reference Elixir prototype.
 
 ## Anatomy of an MST
 
 ```mermaid
 flowchart TB
-    R["Root<br/>hash=H<sub>0</sub>"]
-    L1A["Layer-1 page<br/>keys: a..f"]
-    L1B["Layer-1 page<br/>keys: g..k"]
-    L1C["Layer-1 page<br/>keys: l..z"]
-    L0A["Layer-0 leaf<br/>a, b, c"]
-    L0B["Layer-0 leaf<br/>d, e, f"]
-    L0C["Layer-0 leaf<br/>g, h, i"]
-    L0D["Layer-0 leaf<br/>j, k"]
-    L0E["Layer-0 leaf<br/>l..z"]
+    R["Root page<br/>layer 2"]
+    L1A["Layer-1 page"]
+    L1B["Layer-1 page"]
+    L0A["Layer-0 page"]
+    L0B["Layer-0 page"]
+    L0C["Layer-0 page"]
+    L0D["Layer-0 page"]
 
     R --> L1A
     R --> L1B
-    R --> L1C
     L1A --> L0A
     L1A --> L0B
     L1B --> L0C
     L1B --> L0D
-    L1C --> L0E
 ```
 
-A few things to note:
+- **The hash of the key decides the layer.** The layer of a key is the number
+  of leading zero 4-bit nibbles in the hash of the key. Leaves are layer `0`.
+  Two peers that insert the same key put it in the same layer.
+- **A page is a run of keys in one layer.** A page holds its layer, `low` (the
+  hash of the subtree before its first key), and a sorted list of entries.
+  Each entry is a key, a value, and the hash of the subtree that follows the
+  key.
+- **Pages are content-addressed.** The hash of a page covers its layer, `low`
+  and entries. The store keys each page by that hash. Per-replica metadata on
+  a page, such as the time `free/3` marked it, is outside the hash.
 
-- **Pages are the unit of content.** A page holds keys, hashes of
-  child pages, and an optional value list.
-- **A key's layer is decided by hashing the key.** This is the
-  trick. Two peers inserting the same key end up with the key in the
-  same layer — so the trees they build agree by construction.
-- **Pages are content-addressed.** A page's address *is* its hash.
-  Two equal pages are the same page; there is no concept of "this
-  page on node A vs this page on node B".
+The tree does not depend on the order of insertion.
+`truncate_matches_delete_and_fresh_test_` in `bondy_mst_truncate_test` builds
+trees from shuffled insertions and from ordered insertions of the same keys,
+and checks that the roots are equal.
 
 ## The store interface
 
-`bondy_mst_store` is the behaviour every backend implements. Three
+`bondy_mst_store` is the behaviour that every backend implements. Three
 backends ship:
 
-| Backend | Persistent? | Use it for |
+| Backend | Durable | Use it for |
 |---|---|---|
-| `bondy_mst_ets_store` | No (RAM) | Tests, ephemeral instances |
-| `bondy_mst_map_store` | No (process state) | Tiny embedded use |
-| `bondy_mst_pack_store` | **Yes** | Production |
+| `bondy_mst_map_store` | No (a term held by the owner) | Small trees owned by one process. The default. |
+| `bondy_mst_ets_store` | No (an ETS table) | Tests and ephemeral trees. |
+| `bondy_mst_pack_store` | **Yes** | Durable trees. |
 
-The behaviour is intentionally small:
+The behaviour works on pages and hashes:
 
 ```mermaid
 classDiagram
     class bondy_mst_store {
       <<behaviour>>
-      +open(HashAlgorithm, Opts) Store
-      +close(Store) ok
-      +get_root(Store) Hash
-      +set_root(Store, Hash) Store
-      +get(Store, Hash) Page
-      +has(Store, Hash) bool
-      +put(Store, Page) {Hash, Store}
-      +delete(Store, Hash) Store
-      +copy(Store, Store2, Hash) Store
-      +free(Store, Hash, Page) Store
-      +gc(Store, KeepRoots) {Store, Metadata}
-      +list(Store) [Page]
-      +missing_set(Store, Root) set(Hash)
+      +open(HashAlgorithm, Opts) Backend
+      +close(Backend) ok
+      +get_root(Backend) Hash
+      +set_root(Backend, Hash) Backend
+      +get(Backend, Hash) Page
+      +has(Backend, Hash) bool
+      +put(Backend, Page) {Hash, Backend}
+      +delete(Backend, Hash) Backend
+      +copy(Backend, Store, Hash) Backend
+      +free(Backend, Hash, Page) Backend
+      +gc(Backend, KeepRoots) {Backend, Metadata}
+      +list(Backend) [Page]
+      +missing_set(Backend, Root) set(Hash)
       +page_refs(Page) [Hash]
-      +destroy(Store) ok
-      +transaction(Store, Fun) Result
-      +capabilities(Store) Caps
+      +destroy(Backend) ok
+      +flush(Backend) optional
+      +transaction(Backend, Fun) optional
+      +capabilities(Backend) optional
+      +name(Backend) optional
+      +page_state(Backend, Hash) optional
+      +maybe_roll_for_seal(Backend) optional
+      +complete_seal(Backend, PackId) optional
+      +seal_in_flight(Backend) optional
     }
-    bondy_mst_store <|-- bondy_mst_ets_store
     bondy_mst_store <|-- bondy_mst_map_store
+    bondy_mst_store <|-- bondy_mst_ets_store
     bondy_mst_store <|-- bondy_mst_pack_store
 ```
 
-`missing_set` and `gc` walk the tree from a root via `page_refs/1` (so
-does `list/2`, given a root); plain `list/1` enumerates every stored
-page. **GC is mark-from-root**: keep only pages reachable
-from the live root set, drop everything else. `free/3` is the
-soft-delete used during truncation — the backend records the hash as
-tombstoned and the next `gc/2` (pack-rewrite for `pack_store`)
-reclaims the disk.
+Every tree operation that rewrites a page calls `free/3` on the old page. The
+three backends treat `free/3` differently:
+
+- `bondy_mst_map_store` removes the page at once.
+- `bondy_mst_ets_store` marks the page and leaves it in the table.
+- `bondy_mst_pack_store` records the hash in its tombstone set.
+
+An older root, a peer root under transfer, or an identical page elsewhere in
+the tree can still reference a page that `free/3` marked. The ETS and pack
+backends therefore leave reclamation to `gc/2`, which decides by reachability
+alone (see [Garbage collection](#garbage-collection)).
+
+`capabilities/1` describes a backend to its consumer. It reports these keys:
+
+- `durable`: the pages survive a restart.
+- `async_seal`: the backend supports the asynchronous seal.
+- `concurrent_writes`: other processes can write through the same handle.
+- `process_bound_reads`: reads work only in the process that opened the
+  store.
 
 ## The pack store on disk
 
-The production backend is a **content-addressed packfile** — git's
-object database, adapted for MST pages.
+`bondy_mst_pack_store` stores pages in content-addressed packfiles, in the
+manner of the git object database. The store owns the directory given by its
+`dir` option:
 
 ```
-{mst_dir}/{instance_id}/
-    manifest           # current packs, root pointer (atomic swap)
-    tombstones         # logically deleted hashes
-    incoming.pack      # mutable, in-progress (index kept in memory, not on disk)
-    pack-NNNN.pack     # sealed, immutable (NNNN = zero-padded id, e.g. 0001)
-    pack-NNNN.idx      # companion sorted-hash index with fanout + bloom
-    ...
+{dir}/
+    manifest                     # sealed packs, current root (atomic replace)
+    tombstones                   # hashes that free/3 marked
+    incoming.pack                # mutable; its index lives in memory
+    incoming-sealing-NNNN.pack   # rolled aside during an asynchronous seal
+    pack-NNNN.pack               # sealed, immutable (NNNN = zero-padded id)
+    pack-NNNN.idx                # index for the sealed pack
 ```
 
-The pack store has four pieces; each one earns its keep.
+The `instance_id` option is recorded in the manifest. Opening a directory
+whose manifest names another instance fails.
 
-### 1. The pack file — sorted by hash, write-once
+### The pack file
 
 ```mermaid
 flowchart LR
@@ -155,29 +165,29 @@ flowchart LR
     R1[Record 1]
     R2[...]
     RN[Record N]
+    T["sha256 trailer<br/>32 bytes"]
 
-    H --> R0 --> R1 --> R2 --> RN
+    H --> R0 --> R1 --> R2 --> RN --> T
 ```
 
-Each record is:
+Each record is a 40-byte header followed by the page bytes:
 
 ```
-Hash (32 B) | PageLen (4) | PageCrc32 (4) | Page bytes
+Hash (32 B) | PageLen (4 B) | PageCrc32 (4 B) | Page bytes
 ```
 
-Sorted by hash so binary search is possible. Sealed packs are
-**immutable** — that is what makes mmap'd reads and concurrent GC
-safe.
+A seal writes the records of a sealed pack in hash order and never changes
+them afterwards. `incoming.pack` has the same record format in append order.
 
-### 2. The index — fanout + bloom + sorted hashes
+### The index
 
-A companion `.idx` per pack:
+Each sealed pack has a `.idx` file:
 
 ```mermaid
 flowchart TB
     H["Index header · 16 B"]
-    BL["Bloom section · variable<br/>partitioned, k slices"]
-    FT["Fanout table · 256 × 4 B<br/>fanout[i] = count of hashes ≤ first-byte i"]
+    BL["Bloom section · optional<br/>partitioned bloom filter"]
+    FT["Fanout table · 256 × 4 B<br/>fanout[i] = count of hashes with first byte ≤ i"]
     HA["Sorted hash array<br/>RecordCount × 32 B"]
     OA["Offset array<br/>RecordCount × 8 B"]
     TR["sha256 trailer · 32 B"]
@@ -185,16 +195,18 @@ flowchart TB
     H --> BL --> FT --> HA --> OA --> TR
 ```
 
-The fanout table is the same trick git uses: take the hash's first
-byte, look up `fanout[H[0]-1]` and `fanout[H[0]]`, and you've narrowed
-binary search to ~`N/256` candidates. The bloom filter is a recent
-addition that closes the multi-pack negative-lookup gap (28–42×
-hit-path speedup, 2–4× miss-path).
+The store parses each `.idx` into memory when it opens the pack. A lookup
+probes the bloom filter. A negative answer from the bloom filter is final. A
+positive answer continues to the fanout table, which bounds a binary search
+over the hashes that share the first byte. When a `.idx` is missing or fails
+fails to parse, `bondy_mst_pack_sealed_view` rebuilds it from the pack and
+emits `[bondy_mst, page_store, idx_rebuild]`.
 
-### 3. The manifest — the atomic swap point
+### The manifest
 
-The manifest names the current packs and the current MST root. It is
-written tmp + rename + fsync — the standard atomic-file trick.
+The manifest names the sealed packs, records whether `incoming.pack` holds
+data, and carries the current MST root. `bondy_mst_io:write_file_atomic/2`
+replaces it in four steps:
 
 ```mermaid
 sequenceDiagram
@@ -203,29 +215,28 @@ sequenceDiagram
     participant Manifest as manifest
 
     Writer->>ManifestTmp: write new contents
-    Writer->>ManifestTmp: fsync
+    Writer->>ManifestTmp: datasync
     Writer->>Manifest: rename tmp → manifest
-    Writer->>Writer: fsync dir
+    Writer->>Writer: fsync directory
 ```
 
-If the process crashes mid-rename, either the old manifest is intact
-or the new manifest is intact — never a half-written one.
+After a crash, the directory holds either the old manifest or the new one.
 
-The manifest also carries the **MST root pointer**, and a root is only
-ever as durable as the pages it reaches. The store therefore never
-advances the on-disk root until the pages under it are on disk —
-**pages before the pointer**. Persisting the root first would let a
-crash truncate the unsynced pages while the root survives, leaving a
-*dangling root* that points at bytes that were never written (and that,
-once replicated, would corrupt a peer). The flush that enforces this
-ordering is [The root-flush commit
-barrier](#the-root-flush-commit-barrier) below.
+A root is only as durable as the pages it references. The pack writer
+therefore makes `incoming.pack` durable before it writes a manifest that
+carries a new root: **pages before the pointer**. A root written first could
+survive a crash that loses the pages under it, and the replica would then
+advertise a root that it cannot serve. `bondy_mst_pack_root_durability_test`
+checks that no page stays unsynced once the root is durable, and that the
+root stays readable after a simulated crash.
 
-### 4. Tombstones — for the "I deleted this page" case
+### Tombstones
 
-The map/ETS backends have an in-memory free set. The pack store
-persists it to a `tombstones` file (same atomic-write shape as the
-manifest) so reopening doesn't re-expose deleted pages.
+The pack store keeps the hashes that `free/3` marked in a `tombstones` file,
+written with the same atomic replace. A tombstone does not hide a page:
+`get/2` and `has/2` serve every page that is physically present. A tombstone
+only removes the page from `list/1`. Garbage collection ignores tombstones and
+drops a page only when no kept root reaches it.
 
 ## A read inside the pack store
 
@@ -233,268 +244,232 @@ manifest) so reopening doesn't re-expose deleted pages.
 sequenceDiagram
     autonumber
     participant Caller
-    participant Reader as pack_reader
-    participant Bloom
-    participant Idx as idx pread
-    participant Pack as pack pread
+    participant Store as pack_store
+    participant Mem as incoming + sealing (memory)
+    participant Idx as .idx (memory)
+    participant Pack as .pack file
 
-    Caller->>Reader: get(Hash)
-    Reader->>Bloom: probe(Hash)
-    alt bloom says no
-        Bloom-->>Reader: false
-        Reader-->>Caller: undefined
-    else bloom says maybe
-        Reader->>Idx: fanout[H[0]-1..H[0]]
-        Idx-->>Reader: [Lo, Hi)
-        Reader->>Idx: binary search hash array
-        alt not found
-            Idx-->>Reader: not found
-            Reader-->>Caller: undefined
-        else found
-            Idx-->>Reader: Offset
-            Reader->>Pack: pread(Offset, 40)
-            Pack-->>Reader: record header
-            Reader->>Pack: pread(Offset+40, PageLen)
-            Pack-->>Reader: page bytes
-            Reader-->>Caller: Page
+    Caller->>Store: get(Hash)
+    Store->>Mem: pending_read(Hash)
+    alt in incoming or in-flight seal
+        Mem-->>Store: page bytes
+        Store-->>Caller: Page
+    else not pending
+        loop each sealed pack, newest first
+            Store->>Idx: bloom, fanout, binary search
+            alt found
+                Idx-->>Store: Offset
+                Store->>Pack: pread(Offset, 40)
+                Store->>Pack: pread(Offset + 40, PageLen)
+                Pack-->>Store: page bytes (CRC checked)
+                Store-->>Caller: Page
+            end
         end
+        Store-->>Caller: undefined (no pack holds it)
     end
 ```
 
-For a hot read, the bloom and fanout are in OS page cache; cost is
-~2–3 `pread` calls.
+A page in `incoming.pack`, or in a pack that is being sealed, is served from
+memory. A page in a sealed pack costs an in-memory index lookup and two
+`pread` calls.
 
 ## Sealing the incoming pack
 
-`incoming.pack` is the mutable write buffer — new pages append to it and
-a read merges it with the sealed packs. It cannot grow without bound, so
-once it passes `auto_seal_bytes` (the store's own default is `16_000_000`,
-16 MB) the store **seals** it: rewrites it into an immutable `pack-NNNN`
-with its companion `.idx`, then starts a fresh empty `incoming.pack`.
+`incoming.pack` takes every new page. The store seals it when it reaches
+either threshold:
 
-The seal is one datasync'd rewrite of the whole buffer, and its duration
-is a freeze of *write visibility* — read-after-write freshness lag — not
-of throughput (reads serve from the projection and caches, never the MST;
-see chapter 03 in the bondy umbrella docs). The threshold sizes that
-freeze: the 16 MB default produced 600 ms-plus freezes, large enough to
-push freshness lag toward the authentication fence's 1 s bound and cause
-spurious `temporarily_unavailable` refusals — which is why the `bondy_oplog`
-consumer lowers its own `auto_seal_bytes` to 2 MB (through
-`bondy_oplog_config:pack_auto_seal_bytes`), keeping each freeze to tens of ms.
+- `auto_seal_records`, default `10_000`;
+- `auto_seal_bytes`, default `16_000_000`.
 
-**Two seal modes** (the store's `seal_mode` option — default `sync`; the
-`bondy_oplog` consumer selects `async`):
+A seal rewrites the pages into a new `pack-NNNN.pack` with its `.idx`, and
+the store then starts an empty `incoming.pack`. `infinity` disables a
+threshold.
 
-- **`sync`** — the historical inline seal. The rewrite runs on the `put`
-  that crosses the threshold, on the instance's apply pipeline, so the
-  freeze sits on the critical path.
-- **`async`** — the seal runs off the apply pipeline. At a commit barrier
-  the store *rolls* the full `incoming.pack` aside and hands back a
-  self-contained job: `maybe_roll_for_seal/1` returns `{rolled, Job, Store}`.
-  A monitored worker runs `run_seal_job/1` (the rewrite); the instance then
-  finalises with `complete_seal/2`, which mounts the new sealed pack. An
-  **in-flight = 1 cap** bounds this: while a seal is in flight, a crossed
-  threshold returns `{defer, Store}` and the caller applies backpressure
-  rather than starting a second concurrent rewrite. This removes the inline
-  freeze entirely (measured ≈44 % lower `mst_install` p99; the 84–188 ms —
-  up to ~750 ms under disk contention — freezes gone) with no throughput
-  change: the per-writer ceiling is disk fsync bandwidth, independent of
-  *where* the seal runs.
+The `seal_mode` option selects where the rewrite runs. The default is `sync`.
+
+- **`sync`**: the `put` that crosses the threshold runs the seal itself.
+- **`async`**: `put` never seals. The owner of the store calls
+  `bondy_mst:maybe_roll_for_seal/1`, which returns one of three results:
+  - `{rolled, Job, Tree}`: the store renamed `incoming.pack` to
+    `incoming-sealing-NNNN.pack`, recorded the roll in the manifest, and
+    started a new incoming pack. A worker process runs
+    `bondy_mst:run_seal_job/1`. The owner then calls
+    `bondy_mst:complete_seal/2` with `bondy_mst:seal_job_pack_id(Job)`,
+    which adds the pack to the manifest.
+  - `{defer, Tree}`: a seal is in flight. One seal at a time is the limit.
+  - `{noop, Tree}`: no threshold is crossed.
+
+The store serves the rolled pages from memory until `complete_seal/2` runs.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Inst as instance (commit barrier)
+    participant Owner as store owner
     participant Store as pack_store
     participant Worker as seal worker
 
-    Inst->>Store: maybe_roll_for_seal/1
+    Owner->>Store: maybe_roll_for_seal/1
     alt threshold crossed, no seal in flight
-        Store-->>Inst: {rolled, Job, Store1}
-        Inst->>Worker: spawn · run_seal_job(Job)
-        Worker-->>Inst: seal_done(PackId, ok)
-        Inst->>Store: complete_seal(Store1, PackId)
-    else seal already in flight
-        Store-->>Inst: {defer, Store1}
-        Note over Inst: backpressure — retry next barrier
+        Store-->>Owner: {rolled, Job, Tree1}
+        Owner->>Worker: run_seal_job(Job)
+        Worker-->>Owner: done
+        Owner->>Store: complete_seal(Tree1, PackId)
+    else seal in flight
+        Store-->>Owner: {defer, Tree1}
     end
 ```
 
-**Recovery is built in.** The roll-aside file (`incoming-sealing-*`) is on
-disk before the worker starts, so a crash mid-seal loses nothing: reopening
-the store re-seals any leftover rolled file before serving reads. No
-manifest change is involved, so async sealing adds no new failure mode to
-the atomic swap.
+**Recovery.** When the store opens, it inspects every
+`incoming-sealing-NNNN.pack` before it serves reads:
+
+- When the manifest already names pack `NNNN`, the seal committed and the
+  store deletes the file.
+- Otherwise the store seals the file into `pack-NNNN` and adds the pack to
+  the manifest.
+- When the file cannot be read, the open fails and the file stays on disk,
+  because the manifest root can reference its pages.
+
+The `recovery_*` tests in `bondy_mst_pack_writer_async_seal_test` cover each
+case.
+
+`bondy_oplog` opens its pack stores in `async` mode with `auto_seal_bytes`
+set to 2 MiB. The `pack_seal_mode` and `pack_auto_seal_bytes` settings of
+`bondy_oplog` control both values.
 
 ## The root-flush commit barrier
 
-`bondy_mst_store:set_root/2` only *stages* the new root in memory and
-rewrites the manifest lazily (debounced). That is the right default for
-throughput, but it means the on-disk root can lag the writes behind it. A
-durable instance needs the on-disk root to be current at its commit
-boundaries, for two reasons: a stale on-disk root read on restart sends
-the applier back to re-read the whole WAL (the resume livelock — see
-chapter 04 in the bondy umbrella docs), and the compaction watermark
-cannot advance past an unflushed root, so the WAL never truncates.
+`set_root/2` on the pack store updates the root in memory. The call also
+writes the manifest when 32 root changes are unwritten, or when 200 ms have
+passed since the last manifest write. The `root_flush_every_records` and
+`root_flush_every_ms` options set those limits. Between writes, the root on
+disk can lag the root in memory.
 
-`bondy_mst:flush/1` is the barrier that closes this. It persists the staged
-root to the store, **pages before the pointer** (the ordering the manifest
-section above relies on), and returns `{ok, Tree}`. `bondy_oplog` calls it
-at the applier's commit barrier — in lockstep with the WAL `consumer.offset`
-commit — so the on-disk root and the WAL retention cursor advance together
-and crash replay is bounded to one commit window. In `async` seal mode this
-same barrier is where the roll-and-spawn happens, so the rolled pages are
-already durable before the seal commits. `flush/1` is a no-op for the
-ets/map backends, whose only root is the in-memory one.
+`bondy_mst:flush/1` closes that gap. It makes the pending pages durable, then
+writes the manifest with the current root, and returns `{ok, Tree}`. On the
+in-memory backends it does nothing. `bondy_oplog` calls it at the commit
+barrier of each instance, so that the root on disk keeps pace with the WAL
+offset it commits. `apps/bondy_db/doc_extras/architecture/01_bondy_oplog.md`
+in the Bondy umbrella describes that barrier.
 
-## Anti-entropy: the protocol that earns its keep
+## Anti-entropy
 
-Now the payoff. Two peers want to converge. They each have an MST
-root hash. The session goes like this:
+Two peers converge by pulling pages from each other:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as Peer A (sync_session)
-    participant B as Peer B (responder)
+    participant A as Peer A
+    participant B as Peer B
 
-    A->>B: request(get_root)
-    B-->>A: PeerRoot = H<sub>B</sub>
+    A->>B: request root
+    B-->>A: H<sub>B</sub>
     alt H<sub>A</sub> == H<sub>B</sub>
-        Note over A,B: in sync — done
-    else divergent
-        A->>A: missing = bondy_oplog_instance:missing_set(I, H<sub>B</sub>)
-        A->>B: request(get_pages, missing)
-        B-->>A: Pages
-        A->>A: bondy_oplog_instance:integrate_peer_root(H<sub>B</sub>)
-        Note over A: integrate_peer_root merges<br/>and re-truncates ≤ watermark
+        Note over A,B: equal trees
+    else different
+        loop until nothing is missing
+            A->>A: missing_set(H<sub>B</sub>)
+            A->>B: request pages
+            B-->>A: pages
+            A->>A: put_page each page
+        end
+        A->>A: merge(T, T, H<sub>B</sub>)
     end
 ```
 
-The crucial property: **`missing_set` walks the trees in parallel and
-prunes whole subtrees whose hashes match**. If A and B disagree on a
-small region of the keyspace, only the pages in that region get
-shipped. The transport carries opaque request/response frames; the
-verb names above are illustrative (`bondy_oplog_transport:request/4`
-in code).
+`bondy_mst:missing_set/2` walks the pages under the peer root that the local
+store holds, and returns the hashes it cannot find. It cannot descend below
+an absent page, because the children of that page are unknown until the page
+arrives. Each round therefore uncovers the next layer of absent pages, and
+the loop ends when the set is empty. Only absent pages cross the network.
 
-The library carries its own anti-entropy engine, `bondy_mst_exchange`,
-which orchestrates the compare-and-pull above — non-blocking merges,
-reciprocity, and bounded concurrency — over a pluggable transport. The
-exchange shown here is driven by the `bondy_oplog` consumer:
-`bondy_oplog_sync_session` runs the session and `bondy_oplog_responder`
-answers on the peer side.
+`bondy_mst_exchange` runs this exchange inside the library. It holds the peer
+root in a merge buffer, requests the absent pages, and merges only when every
+page is local, so the tree does not change while pages are in flight. Its
+`max_merges` and `max_merges_per_root` options bound the merges in flight. A
+request carries the requester's root, so the responder can start an exchange
+in the other direction. `bondy_mst_crdt` embeds the exchange and adds gossip
+and version history.
 
-## Where do MST pages come from?
+`bondy_oplog` runs its own exchange over the same functions:
+`bondy_oplog_sync_session` pulls pages and `bondy_oplog_responder` serves
+them. `apps/bondy_db/doc_extras/architecture/01_bondy_oplog.md` describes it.
 
-The MST is **derived from events**. The applier (chapter 04 (in the bondy umbrella docs)) is the
-process that:
+## Deletion and truncation
 
-1. Takes events from the WAL drain (or from peer integration).
-2. Calls the bondy_mst library to compute the page-level deltas.
-3. Calls `bondy_mst_store:put(Page)` for each new page.
-4. Calls `bondy_mst_store:set_root(NewRoot)` at the end.
+`bondy_mst:delete/2` removes a key from the tree structurally. It does not
+write a tombstone entry. It rewrites the pages on the path to the key, merges
+the two subtrees on either side of the removed entry, and calls `free/3` on
+each page it replaces.
 
-```mermaid
-flowchart LR
-    EV[Event] --> ENC[encode key/value]
-    ENC --> INS["mst:put(K, V)"]
-    INS --> PAGES[new + modified pages]
-    PAGES --> STORE[(pack_store)]
-    PAGES --> ROOT[new root hash]
-    ROOT --> SR[set_root]
-```
+`bondy_mst:truncate/2` removes every key that is less than or equal to a
+watermark. It walks the left edge of the tree once, rewrites the pages there,
+and leaves the dropped subtrees unreferenced. `gc/2` reclaims them later.
+`truncate_matches_delete_and_fresh_test_` in `bondy_mst_truncate_test` checks
+two properties for its inputs:
 
-Compaction snapshots the **stable prefix** of events into a single
-file, then truncates the MST. The frontier between "snapshotted" and
-"live" is the **compaction watermark**, advanced by
-`bondy_oplog_compaction` (not by the applier) — see chapter 06 (in the bondy umbrella docs).
+- the truncated root equals the root after one `delete/2` per removed key;
+- the truncated root equals the root of a tree built only from the kept keys.
 
-## Truncation is physical page deletion
-
-`bondy_mst:delete/2` is not a tombstone. The implementation in
-`bondy_mst.erl` (`delete_at/5` → `delete_below_level/5` →
-`delete_from_level/4` → `merge_subtrees/4`) locates the page that
-holds the key, calls `bondy_mst_store:free/3` on it (tombstone the
-hash + drop in-memory entry), rewrites the parent without the entry,
-and merges the orphaned sibling subtree back into the previous
-entry's subtree:
-
-```mermaid
-flowchart LR
-    DEL["delete(Key)"]
-    LOC["locate page · delete_at/5"]
-    FREE["bondy_mst_store:free/3<br/>tombstone hash"]
-    REW["rewrite parent page<br/>without entry"]
-    MRG["merge_subtrees/4"]
-    NEW[new root hash]
-
-    DEL --> LOC --> FREE
-    LOC --> REW --> MRG --> NEW
-```
-
-The freed pages enter the store's tombstone set; the **pack-rewrite
-GC** (next section) reclaims their disk space.
-
-This matters because:
-
-- Truncated keys don't appear in `missing_set/2` results, so AE
-  never offers them back to a peer that has already truncated them.
-- Compaction is deterministic — every replica that truncates the
-  same prefix arrives at bit-identical pages and the same root hash.
-- The disk footprint of a fully-converged instance is bounded by
-  snapshot size, not by write history.
+Two replicas that truncate the same key set at the same watermark therefore
+reach the same root.
 
 ## Garbage collection
 
 ```mermaid
 flowchart LR
-    R[live root] --> WALK[walk via page_refs]
+    R["current root + KeepRoots"] --> WALK[walk via page_refs]
     WALK --> REACH[reachable set]
-    REACH --> KEEP[keep in new pack]
-    OLD[all packs] --> KEEP
+    REACH --> KEEP[write to new sealed pack]
+    OLD[sealed packs] --> KEEP
     OLD --> DROP[drop unreachable]
 ```
 
-The pack-rewrite GC reads every reachable page, writes a new pack,
-swaps the manifest, and unlinks the old packs. It is the same code
-path as compaction — "rewrite packs omitting hashes unreachable from
-current MST root".
+`bondy_mst:gc/2` keeps every page reachable from the current root and from
+the roots that the caller passes. The caller has to serialise `gc/2` with
+every writer, or pass every root a writer can publish. A root that a writer
+publishes after the walk is not in the reachable set.
+
+When a page under the current root is absent, `gc/2` sweeps nothing. The walk
+skips absent pages, so a sweep would drop the live pages below the hole.
+`gc/2` logs an error, emits `[bondy_mst, gc, aborted]`, and keeps a
+classified report that `bondy_mst:gc_aborts/0` returns.
+`gc_aborts_on_unservable_root_test` in `bondy_mst_gc_guard_test` covers this
+case.
+
+On the pack store, GC writes the reachable pages of all sealed packs into one
+new sealed pack, replaces the manifest, and deletes the old packs. Pages in
+`incoming.pack` are left for the next seal. With one sealed pack, the rewrite
+runs only when GC drops at least one page and the fraction of dropped pages
+reaches the `gc_threshold_dead_fraction` option (default `0.0`). With two or
+more sealed packs, GC always merges them.
 
 ## Things to keep in mind
 
-- **The MST is deterministic.** Two peers with the same set of events
-  build bit-identical trees.
-- **Pages are content-addressed and immutable.** This is what makes
-  AE, GC, and replication safe.
-- **The pack store is git's object database, scoped down.** If you
-  know git internals, you already know most of `bondy_mst_pack_*`.
-- **AE finds disagreement in O(diff), not O(N).** This is the
-  unique property — without it, the whole stack doesn't work at
-  cluster scale.
+- **The tree does not depend on insertion order.** A set of keys has one
+  tree; `bondy_mst_truncate_test` checks this for its inputs.
+- **Pages are content-addressed.** The page hash names the content and the
+  subtree below it.
+- **Reachability is the only liveness rule.** A tombstone does not hide a
+  page and does not make GC drop one.
+- **The pack store has one owner.** Its sealed-pack reads use file
+  descriptors that belong to the opening process.
 
 ## Pointers
 
-- Paper: Auvolat & Taïani, *Merkle Search Trees*, SRDS 2019,
-  Inria HAL-02303490.
-- Core: `bondy_mst.erl` (put/put_batch with bulk canonical
-  construction, merge, truncate/2, read-only diff_to_list, `flush/1`
-  for the root commit barrier, and the async-seal surface
-  `maybe_roll_for_seal/1` · `run_seal_job/1` · `complete_seal/2`),
-  `bondy_mst_store.erl` (the behaviour), `bondy_mst_page.erl`.
-- Backends: `bondy_mst_ets_store.erl`, `bondy_mst_map_store.erl`,
-  `bondy_mst_pack_store.erl`.
-- Pack-store internals (each module's doc carries the on-disk
-  format detail): `bondy_mst_pack_writer.erl` (live pack + seal
-  trigger), `bondy_mst_pack_seal.erl` (the seal pipeline),
-  `bondy_mst_pack_reader.erl` + `bondy_mst_pack_sealed_view.erl`
-  (sealed reads), `bondy_mst_pack_index.erl` +
-  `bondy_mst_pack_bloom.erl` (lookups), `bondy_mst_pack_codec.erl`
-  (record format), `bondy_mst_pack_manifest.erl`,
-  `bondy_mst_pack_tombstones.erl`, `bondy_mst_pack_recovery.erl`
-  (crash recovery), `bondy_mst_pack_idx_rebuild.erl` (self-healing
-  `.idx` rebuild).
-- Anti-entropy: `bondy_mst_exchange.erl` — the library's own exchange
-  engine (compare-and-pull orchestration).
-- Consumers (in `bondy_oplog`, which drives the exchange):
-  `bondy_oplog_sync_session.erl`, `bondy_oplog_responder.erl`.
+- Paper: Auvolat and Taïani, *Merkle Search Trees*, SRDS 2019, Inria
+  HAL-02303490.
+- The tree: `bondy_mst`, `bondy_mst_page`.
+- The behaviour and backends: `bondy_mst_store`, `bondy_mst_map_store`,
+  `bondy_mst_ets_store`, `bondy_mst_pack_store`.
+- Pack-store internals, each with the on-disk detail in its module doc:
+  - `bondy_mst_pack_writer`: incoming pack, seal trigger, async roll;
+  - `bondy_mst_pack_seal`: writing a sealed pack;
+  - `bondy_mst_pack_reader`, `bondy_mst_pack_sealed_view`: sealed reads;
+  - `bondy_mst_pack_index`, `bondy_mst_pack_bloom`: lookups;
+  - `bondy_mst_pack_codec`: record format;
+  - `bondy_mst_pack_manifest`, `bondy_mst_pack_tombstones`;
+  - `bondy_mst_pack_recovery`: crash recovery of `incoming.pack`;
+  - `bondy_mst_pack_idx_rebuild`: `.idx` rebuild.
+- Anti-entropy: `bondy_mst_exchange`, `bondy_mst_crdt`.
+- Consumers in the Bondy umbrella: `bondy_oplog_sync_session`,
+  `bondy_oplog_responder`.

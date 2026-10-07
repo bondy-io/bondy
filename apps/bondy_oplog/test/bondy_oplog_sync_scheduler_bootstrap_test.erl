@@ -87,8 +87,8 @@ pre_bootstrap_catalogue_auto_bootstraps_from_first_peer() ->
 
 %% Until the catalogue has registered every table the shard DECLARES, the
 %% routing directory is incomplete: a bootstrap install skips the buckets it
-%% cannot route while `finalize_catalogue_bootstrap/5` adopts the peer's whole
-%% frontier and claims them. Both ends must therefore refuse, and both read
+%% cannot route while the rederive adopts the peer's whole frontier and claims
+%% them. Both ends must therefore refuse, and both read
 %% `bondy_oplog_registry:tables_registered/1`. This drives the initiator
 %% through the scheduler and calls the responder directly.
 %%

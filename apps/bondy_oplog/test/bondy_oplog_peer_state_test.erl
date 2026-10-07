@@ -19,7 +19,6 @@ peer_state_test_() ->
         fun record_and_read/0,
         fun forget_peer/0,
         fun forget_instance/0,
-        fun stale_peer_excluded/0,
         fun stale_peer_included_when_since_is_old/0,
         fun get_known_peers_unique/0,
         fun touch_peer_refreshes_last_seen/0,
@@ -27,32 +26,32 @@ peer_state_test_() ->
         fun strict_read_names_unconfirmed_members/0,
         fun empty_report_refreshes_without_confirming/0,
         fun strict_read_solo_instance_is_stable/0,
-        fun reclamation_members_solo/0,
-        fun reclamation_members_error_is_not_solo/0
+        fun reclamation_members_clustering_disabled/0,
+        fun reclamation_members_no_other_member/0,
+        fun reclamation_members_unavailable/0
     ]}.
 
 %% -----------------------------------------------------------------------------
 %% Strict reading — for callers that reclaim irreversibly
 %% -----------------------------------------------------------------------------
 %%
-%% `get_instance_peer_states/1` drops peers unheard-from within
-%% `peer_timeout_ms`. That is correct for MST compaction, where a dropped peer
-%% resyncs via bootstrap, and unsound for projection-cell reclamation, where it
-%% silently resurrects deleted data. `confirmed_peer_states/2` is the reading
-%% reclamation must use.
+%% A reading that drops peers unheard-from for a while is unsound for MST
+%% compaction and projection-cell reclamation alike: a dropped member may hold
+%% writes no other member has. `confirmed_peer_states/2` is the reading both
+%% use.
 
 strict_read_ignores_recency() ->
     P = mk_peer(),
     I = mk_inst(),
     H = vv(1),
-    %% Record with a last_seen far enough in the past that the recency read
-    %% excludes it.
     Stale = os:system_time(millisecond) - (10 * 60 * 1000),
     ok = bondy_oplog_peer_state:record_sync_complete(P, I, H, Stale),
     sync(),
 
-    %% Recency read drops it...
-    ?assertEqual([], bondy_oplog_peer_state:get_instance_peer_states(I)),
+    %% A cutoff after its last sync drops it...
+    ?assertEqual(
+        [], bondy_oplog_peer_state:get_instance_peer_states(I, Stale + 1)
+    ),
 
     %% ...the strict read does not. A silent member must hold stability down,
     %% not vanish from the computation.
@@ -90,35 +89,35 @@ strict_read_solo_instance_is_stable() ->
 %% Reclamation membership — the ONLY member source reclamation may use
 %% -----------------------------------------------------------------------------
 %%
-%% `error` ≠ `[]` is the load-bearing contract: `[]` means genuinely solo
-%% (maximal reclamation is licensed), `error` means the membership service is
-%% unavailable and MUST propagate as "no stability, reclaim nothing".
-%% Conflating them would let a node that merely cannot see its membership
-%% service reclaim as though nothing could contradict it.
+%% `{ok, []}`, which licenses maximal reclamation, must come only from
+%% clustering disabled. With clustering enabled, a membership listing no other
+%% member (a member that has just restarted) and an unreadable one are errors.
 
-reclamation_members_solo() ->
-    %% Single-node eunit VM: the known membership is exactly this node, so
-    %% reclamation members = [] — the solo case, distinct from `error`.
+reclamation_members_clustering_disabled() ->
+    %% The eunit VM leaves `bondy_cluster` `enabled` unset, which is disabled.
     ?assertEqual({ok, []}, bondy_oplog_instance:reclamation_members()).
 
-reclamation_members_error_is_not_solo() ->
-    ok = meck:new(partisan_peer_service, [passthrough]),
-    try
-        %% A dead/hung peer service exits the call rather than returning a
-        %% tuple — that must surface as `error`, never as solo.
-        ok = meck:expect(partisan_peer_service, members, fun() ->
-            exit({noproc, {gen_server, call, [partisan_peer_service]}})
-        end),
-        ?assertEqual(error, bondy_oplog_instance:reclamation_members()),
+reclamation_members_no_other_member() ->
+    bondy_oplog_test_helpers:with_members(
+        fun() -> [partisan:node()] end,
+        fun() ->
+            ?assertEqual(
+                {error, no_members},
+                bondy_oplog_instance:reclamation_members()
+            )
+        end
+    ).
 
-        %% A malformed reply is equally `error`.
-        ok = meck:expect(partisan_peer_service, members, fun() ->
-            {ok, not_a_list}
-        end),
-        ?assertEqual(error, bondy_oplog_instance:reclamation_members())
-    after
-        meck:unload(partisan_peer_service)
-    end.
+reclamation_members_unavailable() ->
+    bondy_oplog_test_helpers:with_members(
+        fun() -> error(badarg) end,
+        fun() ->
+            ?assertEqual(
+                {error, membership_unavailable},
+                bondy_oplog_instance:reclamation_members()
+            )
+        end
+    ).
 
 record_and_read() ->
     P = mk_peer(),
@@ -130,7 +129,7 @@ record_and_read() ->
     ?assertEqual({ok, H}, frontier_of(P, I)),
     ?assertMatch(
         [#{peer := P, frontier := H}],
-        bondy_oplog_peer_state:get_instance_peer_states(I)
+        bondy_oplog_peer_state:get_instance_peer_states(I, 0)
     ).
 
 forget_peer() ->
@@ -156,24 +155,7 @@ forget_instance() ->
     sync(),
     ?assertEqual(
         [],
-        bondy_oplog_peer_state:get_known_peers(I)
-    ).
-
-stale_peer_excluded() ->
-    P = mk_peer(),
-    I = mk_inst(),
-    %% Record at a timestamp 10 minutes in the past.
-    Old = os:system_time(millisecond) - 10 * 60 * 1000,
-    bondy_oplog_peer_state:record_sync_complete(P, I, vv(3), Old),
-    sync(),
-    %% Default peer_timeout_ms is 30s, so 10min-old is excluded.
-    ?assertEqual(
-        [],
-        bondy_oplog_peer_state:get_known_peers(I)
-    ),
-    ?assertEqual(
-        [],
-        bondy_oplog_peer_state:get_instance_peer_states(I)
+        bondy_oplog_peer_state:get_known_peers(I, 0)
     ).
 
 stale_peer_included_when_since_is_old() ->
@@ -197,7 +179,7 @@ get_known_peers_unique() ->
     sync(),
     ?assertEqual(
         [P],
-        bondy_oplog_peer_state:get_known_peers(I)
+        bondy_oplog_peer_state:get_known_peers(I, 0)
     ),
     ?assertEqual({ok, vv(6)}, frontier_of(P, I)).
 
@@ -207,12 +189,11 @@ touch_peer_refreshes_last_seen() ->
     Old = os:system_time(millisecond) - 10 * 60 * 1000,
     bondy_oplog_peer_state:record_sync_complete(P, I, vv(7), Old),
     sync(),
-    %% Stale before touch.
-    ?assertEqual([], bondy_oplog_peer_state:get_known_peers(I)),
+    Cutoff = Old + 1,
+    ?assertEqual([], bondy_oplog_peer_state:get_known_peers(I, Cutoff)),
     bondy_oplog_peer_state:touch_peer(P),
     sync(),
-    %% Fresh after touch.
-    ?assertEqual([P], bondy_oplog_peer_state:get_known_peers(I)).
+    ?assertEqual([P], bondy_oplog_peer_state:get_known_peers(I, Cutoff)).
 
 %% Helpers
 

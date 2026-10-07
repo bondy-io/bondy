@@ -82,6 +82,7 @@ listeners.api_gateway_https.nodelay = on
 # broker_bridge.kafka.enabled = off
 # broker_bridge.kafka.topics.wamp_events = com.leapsight.wamp.events
 
+cluster.enabled = off
 cluster.parallelism = 1
 cluster.peer_port = 19086
 cluster.peer_discovery.enabled = off

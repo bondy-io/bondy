@@ -44,7 +44,7 @@ transport delivers them to the peer's responder which calls back into
 | `get_origins`                          | `{ok, [origin()]}`                                                     |
 | `get_retired`                          | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                     | `{ok, #{hash() => page()}}`                                            |
-| `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor()}}}` \| `{ok, no_snapshot}` \| `{error, {tables_not_registered, instance_id()}}` \| `{error, {refold_owed, instance_id()}}` |
+| `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor(), [bucket()]}}}` \| `{ok, no_snapshot}` \| `{error, {tables_not_registered, instance_id()}}` \| `{error, {refold_owed, instance_id()}}` |
 | `{get_catalogue_snapshot_next, Cursor}`| `{ok, {batch, {cursor(), [cell()]}}}` \| `{ok, {chunked_batch, {cursor(), [cell()], [cell_chunk()]}}}` \| `{ok, {done, [cell()]}}` \| `{error, cursor_expired}` |
 | `{release_catalogue_snapshot, Cursor}` | `{ok, ok}` |
 
@@ -62,7 +62,7 @@ and the next round retries.
   claims the frontier its source reported once the stream ended
   (`bondy_oplog_instance:serving/1`): its cells may until then reflect events
   its frontier does not claim. It does not start re-bootstrapping while a
-  snapshot cursor of its own is open (`bondy_oplog_instance:begin_install/1`).
+  snapshot cursor of its own is open (`bondy_oplog_instance:begin_install/3`).
 
 `watermark()` is the peer-observed max HLC across the catalogue
 projection at session start (per-shard high-water atomic from
@@ -70,6 +70,10 @@ projection at session start (per-shard high-water atomic from
 
 `cursor()` is an opaque binary token minted by the peer; the initiator
 echoes it back unchanged on every `get_catalogue_snapshot_next` call.
+
+`[bucket()]` names every bucket (binary) the session scans, including one
+that ships no cell: the initiator deletes its cells of those buckets that the
+stream does not ship (`bondy_oplog_applier:commit_stage/4`).
 
 `cell()` is `{Bucket :: binary(), Key :: binary(), Frame :: binary()}`
 where Frame is the on-disk V2 cell frame as stored by the projection
@@ -131,6 +135,10 @@ the `Opts` argument.
 -type response() ::
     {ok, bondy_mst:hash() | undefined}
     | {ok, #{binary() => non_neg_integer()}}
+    %% `get_frontier`: applied frontier, topology fingerprint, durable frontier
+    | {ok, #{binary() => non_neg_integer()}, binary() | undefined, #{
+        binary() => non_neg_integer()
+    }}
     %% `get_origins` / `get_retired`
     | {ok, [binary()]}
     | {ok, #{bondy_mst:hash() => bondy_mst_page:t()}}
@@ -141,7 +149,11 @@ the `Opts` argument.
     | {ok, {unavailable, [bondy_mst:hash()]}}
     | {ok, no_snapshot}
     | {ok, bondy_oplog_event:event_key(), term()}
-    | {ok, {init, {non_neg_integer(), bondy_oplog_catalogue_cursor:cursor()}}}
+    | {ok,
+        {init,
+            {non_neg_integer(), bondy_oplog_catalogue_cursor:cursor(), [
+                binary()
+            ]}}}
     | {ok, {batch, {bondy_oplog_catalogue_cursor:cursor(), [cell()]}}}
     %% Emitted ONLY when a cell is too large to frame whole. A peer built
     %% before part-shipping existed has no clause for this and fails the
@@ -162,12 +174,14 @@ the `Opts` argument.
 -export_type([request/0]).
 -export_type([response/0]).
 
+-export([response/1]).
+
 -callback request(
     Peer :: peer_id(),
     InstanceId :: instance_id(),
     Request :: request(),
     Opts :: map()
-) -> {ok, term()} | {error, term()}.
+) -> response() | {error, term()}.
 
 -doc """
 Returns this node's own `peer_id()` — the value a remote peer would use to
@@ -177,3 +191,17 @@ Transport-specific: the inline transport addresses peers by instance id, so
 self is `InstanceId`; network transports address by node.
 """.
 -callback self_id(InstanceId :: instance_id()) -> peer_id().
+
+-doc """
+Admits a reply a network transport received from a peer's responder: every
+shape `response()` allows passes unchanged, and anything else becomes
+`{error, {unexpected_response, Reply}}`. One home for the shapes, so a new
+reply cannot be admitted by one transport and dropped by another.
+""".
+-spec response(term()) -> response() | {error, term()}.
+
+response({ok, _} = Reply) -> Reply;
+response({ok, _, _} = Reply) -> Reply;
+response({ok, _, _, _} = Reply) -> Reply;
+response({error, _} = Error) -> Error;
+response(Other) -> {error, {unexpected_response, Other}}.
