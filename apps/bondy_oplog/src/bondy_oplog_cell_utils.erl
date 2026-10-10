@@ -46,7 +46,7 @@ with the wrong kernel.
 -export([with_cell_state/10]).
 -export([reap/4]).
 -export([sweep/6]).
--export([reindex/3]).
+-export([reindex_table/3]).
 
 -export_type([reap_report/0]).
 
@@ -871,28 +871,47 @@ forget_cell(#{ctx_guard := Guard} = Acc, Bucket, Key) ->
 %% naive event replay would double-count or miss concurrent siblings;
 %% combined with the rebuild orchestrator first clearing the stale index
 %% shard, a `put` for every current term fully restores it.
-%%
-%% Scoped to the FOUNDING primary only (`Ctx`, not every table registered
-%% on a multiplexed shard) — unlike REAP/STABILIZE above, which generalize
-%% to every mux member — kept as-is here since index rebuild is already
-%% dispatched per registered table (one `{register_table, ...}`/founding
-%% ctx per rebuild target), not per-shard.
 
 -doc """
-Re-indexes every primary cell reachable from `Ctx` (an
-`#{adapter, handle, kernel, ...}` cell-apply context — the applier's
-founding `cell_apply_ctx`, or a fused instance's
-`#fused_drain.cell_apply_ctx`) into `SecIdx` (a
-`bondy_oplog_cell_apply:sec_idx()` — the primary's secondary-index
-descriptors). A no-op when `SecIdx` names no indexes (callers should check
-this themselves via `bondy_oplog_cell_apply:sec_idx/1` before calling, to
-skip the cell-directory walk entirely when there is nothing to rebuild).
+Re-indexes every primary cell of the table whose primary shard is `Key`,
+through the cell-apply context `Source` holds for that table: the instance's
+founding table or any table registered on it since. Re-folding another table's
+context instead would leave this table's index without the terms its wipe
+removed (`proofs/tla/IndexIntents_Dispatched_Saturation_NoRefold.cfg`
+violates `IndexMatchesPrimary`). Returns `{error, {table_not_served, Key}}`
+when `Source` has no context for `Key`, so the rebuild fails rather than
+trusting an index it did not re-fold.
+
+Every op of one call carries one index version, taken from the shard's counter
+when the call starts. The caller runs it in the process that applies the
+shard's batches (the applier, or the fused instance), so the version orders
+after every op of a batch applied before and below every op of a batch
+applied after.
 """.
--spec reindex(
+-spec reindex_table(
     InstanceId :: term(),
-    Ctx :: map(),
-    SecIdx :: bondy_oplog_cell_apply:sec_idx()
-) -> ok.
+    Source :: bondy_oplog_cell_apply:ctx_source(),
+    Key :: {atom(), atom(), non_neg_integer()}
+) -> ok | {error, {table_not_served, term()}}.
+
+reindex_table(InstanceId, Source, Key) ->
+    case
+        [
+            Ctx
+         || {_, #{shard_key := K} = Ctx} <- bondy_oplog_mux:entries(Source),
+            K =:= Key
+        ]
+    of
+        [Ctx | _] ->
+            case bondy_oplog_cell_apply:sec_idx(Ctx) of
+                {_NS, _Counter, []} -> ok;
+                SecIdx -> reindex(InstanceId, Ctx, SecIdx)
+            end;
+        [] ->
+            {error, {table_not_served, Key}}
+    end.
+
+%% @private
 
 reindex(
     InstanceId,
@@ -901,26 +920,31 @@ reindex(
 ) ->
     Scope = maps:get(primary_cell_scope, Ctx, undefined),
     CellKeys = primary_cell_directory(Adapter, Handle, InstanceId, Scope),
-    {IdxAcc, MaxHlc} = lists:foldl(
-        fun({Bucket, Key}, {IAcc, HAcc}) ->
+    Version = bondy_oplog_cell_apply:next_index_version(SecIdx),
+    IdxAcc = lists:foldl(
+        fun({Bucket, Key}, Acc) ->
             case
                 reindex_one_cell(
-                    Adapter, Handle, Kernel, SecIdx, InstanceId, Bucket, Key
+                    Adapter,
+                    Handle,
+                    Kernel,
+                    SecIdx,
+                    InstanceId,
+                    Bucket,
+                    Key,
+                    Version
                 )
             of
-                {ok, IdxOps, Hlc} ->
-                    {
-                        bondy_oplog_cell_apply:merge_idx_ops(IAcc, IdxOps),
-                        bondy_oplog_cell_apply:max_hlc(HAcc, Hlc)
-                    };
+                {ok, IdxOps} ->
+                    bondy_oplog_cell_apply:merge_idx_ops(Acc, IdxOps);
                 skip ->
-                    {IAcc, HAcc}
+                    Acc
             end
         end,
-        {#{}, undefined},
+        #{},
         CellKeys
     ),
-    bondy_oplog_cell_apply:dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, true),
+    bondy_oplog_cell_apply:dispatch_index_ops(SecIdx, IdxAcc, true),
     ok.
 
 %% @private
@@ -928,7 +952,7 @@ reindex(
 %% index `put` ops. Returns `skip` when the cell has no projection value
 %% yet (a not-yet-replayed peer cell) or the read/decode/projection raises
 %% (`with_cell_state/10` owns the protection).
-reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) ->
+reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key, Version) ->
     with_cell_state(
         Adapter,
         Handle,
@@ -941,65 +965,10 @@ reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) ->
         "shard stays marked and a later trigger retries).",
         skip,
         skip,
-        fun(Hlc, State, _ValueBytes) ->
-            IdxOps = index_puts_for_cell(
-                SecIdx, Id, Kernel, Bucket, Key, State, Hlc
-            ),
-            {ok, IdxOps, Hlc}
+        fun(_Hlc, State, _ValueBytes) ->
+            {ok,
+                bondy_oplog_cell_apply:index_ops_for_cell(
+                    SecIdx, Id, Kernel, Bucket, Key, none, State, Version
+                )}
         end
     ).
-
-%% @private
-%% Puts-only term projection of one cell's CURRENT value across every
-%% secondary index — the rebuild variant of the incremental apply path's
-%% diff-based index ops. No old/new diff: the rebuild orchestrator wipes
-%% the target shard first, so a `put` for every current term fully
-%% restores it, and the idempotent re-puts that reach sibling indexes only
-%% refresh them. Own try/catch so a malformed spec degrades only the
-%% index, never the rebuild as a whole.
-index_puts_for_cell({_NS, []}, _Id, _Kernel, _Bucket, _Key, _State, _Hlc) ->
-    [];
-index_puts_for_cell({_NS, SecIndexes}, Id, Kernel, Bucket, Key, State, Hlc) ->
-    try
-        Value = bondy_oplog_cell_kernel:to_value(Kernel, State),
-        lists:flatmap(
-            fun(Desc) ->
-                index_puts_for_one(Desc, Bucket, Key, Value, Hlc)
-            end,
-            SecIndexes
-        )
-    catch
-        C:R:S ->
-            ?LOG_ERROR(#{
-                description =>
-                    "bondy_oplog_cell_utils rebuild index op computation "
-                    "raised; the index is degraded for this cell "
-                    "(rebuildable). The primary is unaffected.",
-                instance_id => Id,
-                bucket => Bucket,
-                cell_key => Key,
-                class => C,
-                reason => R,
-                stacktrace => S
-            }),
-            []
-    end.
-
-%% @private
-index_puts_for_one(
-    #{index_name := IName, spec := Spec, sec_shard_count := SCount} = Desc,
-    Bucket,
-    Key,
-    Value,
-    Hlc
-) ->
-    RealmFolded = maps:get(realm_folded, Desc, false),
-    Terms = lists:usort(bondy_oplog_index_spec:terms(Spec, Value)),
-    SecBucket = bondy_oplog_index_key:bucket(Bucket, IName),
-    Cols = bondy_oplog_index_spec:project(Spec, Value),
-    [
-        bondy_oplog_cell_apply:index_op(
-            IName, SecBucket, SCount, T, Key, {put, Cols, Hlc}, RealmFolded
-        )
-     || T <- Terms
-    ].

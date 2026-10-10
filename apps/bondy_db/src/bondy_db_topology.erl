@@ -169,8 +169,7 @@ Examples:
 
 -doc """
 The `bondy_oplog_projection_adapter:clear_scope()` the secondary-index rebuild
-must use when wiping an index of the table represented by `TableState` before a
-re-fold. The topology owns this because the right scope is a property of its
+must use when wiping an index of the table `EntityType` before a re-fold. The topology owns this because the right scope is a property of its
 **Bookie/handle layout**, not of the index:
 
 - A topology whose handle co-locates several entity types in one keyspace
@@ -187,7 +186,7 @@ the `{entity, _, _}` scope MUST equal `bucket_for/3`'s `EntityType` component
 """.
 -callback index_clear_scope(
     IndexName :: atom(),
-    TableState :: table_state()
+    EntityType :: entity_type()
 ) -> bondy_oplog_projection_adapter:clear_scope().
 
 -doc """

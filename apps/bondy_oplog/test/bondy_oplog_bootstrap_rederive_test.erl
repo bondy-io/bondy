@@ -132,12 +132,18 @@ rederive_test_() ->
             {timeout, 60, fun restart_under_the_mark_keeps_truncated_claim/0}}
     ]}.
 
+%% The tests compact explicitly. A periodic cycle would truncate a single-node
+%% instance's ops at any moment, so a pull meets a frontier gap or an install
+%% is refused as behind the truncation.
 setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
-    ok.
+    #{interval_ms := Interval} = bondy_oplog_gc_scheduler:info(),
+    ok = bondy_oplog_gc_scheduler:set_interval_ms(0),
+    Interval.
 
-cleanup(_) ->
+cleanup(Interval) ->
+    ok = bondy_oplog_gc_scheduler:set_interval_ms(Interval),
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     [
         bondy_oplog_core_registry:unregister(N, I, S)

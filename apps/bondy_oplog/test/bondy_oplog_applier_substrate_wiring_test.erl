@@ -9,12 +9,10 @@
 %%     wedging the applier.
 %%   - `publish_fun` raising is tolerated (event not published, applier
 %%     continues).
-%%   - `ae_targets` causes registered shards' AE counters to advance on
-%%     every successful commit, with a shared `Now` for every target in
-%%     one commit.
-%%   - Missing registry entries (`not_found`) are tolerated and
-%%     surfaced via telemetry.
-%%   - Defaults (no opts) leave both wires as strict no-ops.
+%%   - A commit leaves the AE counters of the instance's `ae_targets` at
+%%     the "infinitely stale" sentinel: only an anti-entropy round confirms
+%%     freshness (`bondy_oplog_sync_ae_bump_test`, `proofs/tla/AuthFence.tla`).
+%%   - Defaults (no opts) leave the publish wire a strict no-op.
 %% =============================================================================
 
 -module(bondy_oplog_applier_substrate_wiring_test).
@@ -40,10 +38,7 @@ wiring_test_() ->
         fun publish_skip_suppresses_delivery/0,
         fun publish_fun_raise_is_tolerated/0,
         fun publish_partial_opts_are_rejected/0,
-        fun ae_default_is_noop/0,
-        fun ae_targets_bump_after_commit/0,
-        fun ae_targets_share_now_across_one_commit/0,
-        fun ae_targets_not_found_is_tolerated/0
+        fun commit_does_not_bump_ae_targets/0
     ]}.
 
 %% =============================================================================
@@ -168,95 +163,19 @@ publish_partial_opts_are_rejected() ->
 %% AE wiring
 %% =============================================================================
 
-ae_default_is_noop() ->
-    %% Without `ae_targets` the AE counter for the namespace stays at
-    %% the "infinitely stale" sentinel.
+commit_does_not_bump_ae_targets() ->
     Id = mk_id(),
     NS = ns_of(Id),
     ok = register_shard(NS, 0),
-    Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
-    {ok, _} = bondy_oplog_test_projection:start_instance(Id),
-    _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
-    ok = bondy_oplog_test_projection:drain(Id),
-    %% Allow a commit boundary; default `commit_every = 64` means a
-    %% single append doesn't auto-commit, but `stop_instance` drains
-    %% via `end_of_log` → `commit_now`.
-    ok = bondy_oplog:stop_instance(Id),
-    After = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
-    ?assertEqual(Before, After),
-    ok = bondy_oplog_core_registry:unregister(NS, primary, 0).
-
-ae_targets_bump_after_commit() ->
-    Id = mk_id(),
-    NS = ns_of(Id),
-    ok = register_shard(NS, 0),
-    Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
-        applier => #{
-            ae_targets => [{NS, primary, 0}],
-            %% Force a commit per event so the bump fires inside the
-            %% test rather than only on shutdown.
-            commit_every => 1
-        }
+        applier => #{ae_targets => [{NS, primary, 0}], commit_every => 1}
     }),
     _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
     ok = bondy_oplog_test_projection:drain(Id),
-    After = wait_for_ae_advance(NS, primary, 0, Before, 1000),
-    ?assert(After > Before),
     ok = bondy_oplog:stop_instance(Id),
-    ok = bondy_oplog_core_registry:unregister(NS, primary, 0).
-
-ae_targets_share_now_across_one_commit() ->
-    %% Two shards under different indices but same NS — a single commit
-    %% should bump both to the same `Now`.
-    Id = mk_id(),
-    NS = ns_of(Id),
-    ok = register_shard(NS, primary, 0),
-    ok = register_shard(NS, by_name, 0),
-    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
-        applier => #{
-            ae_targets => [{NS, primary, 0}, {NS, by_name, 0}],
-            commit_every => 1
-        }
-    }),
-    _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
-    ok = bondy_oplog_test_projection:drain(Id),
-    _ = wait_for_ae_advance(NS, primary, 0, sentinel(), 1000),
-    A = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
-    B = bondy_oplog_core_registry:last_ae_at(NS, by_name, 0),
-    %% Both bumps share the same `Now` argument inside `bump_ae_targets/1`,
-    %% so the atomics reads must be identical.
-    ?assertEqual(A, B),
-    ok = bondy_oplog:stop_instance(Id),
-    ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
-    ok = bondy_oplog_core_registry:unregister(NS, by_name, 0).
-
-ae_targets_not_found_is_tolerated() ->
-    Id = mk_id(),
-    NS = ns_of(Id),
-    %% Register only one of the two targets; the other should be
-    %% counted as `not_found` in telemetry but otherwise leave the
-    %% commit path intact.
-    ok = register_shard(NS, primary, 0),
-    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
-        applier => #{
-            ae_targets =>
-                [
-                    {NS, primary, 0},
-                    {missing_ns, primary, 0}
-                ],
-            commit_every => 1
-        }
-    }),
-    _ = bondy_oplog:append(Id, {set, 1, <<"v">>}),
-    ok = bondy_oplog_test_projection:drain(Id),
-    _ = wait_for_ae_advance(NS, primary, 0, sentinel(), 1000),
-    ?assert(bondy_oplog_core_registry:last_ae_at(NS, primary, 0) > sentinel()),
     ?assertEqual(
-        not_found,
-        bondy_oplog_core_registry:last_ae_at(missing_ns, primary, 0)
+        sentinel(), bondy_oplog_core_registry:last_ae_at(NS, primary, 0)
     ),
-    ok = bondy_oplog:stop_instance(Id),
     ok = bondy_oplog_core_registry:unregister(NS, primary, 0).
 
 %% =============================================================================
@@ -289,29 +208,6 @@ register_shard(NS, Index, Shard) ->
 sentinel() ->
     %% Matches `bondy_oplog_core_registry`'s "infinitely stale" sentinel.
     -(1 bsl 62).
-
-wait_for_ae_advance(NS, Index, Shard, Baseline, TimeoutMs) ->
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    wait_for_ae_advance_loop(NS, Index, Shard, Baseline, Deadline).
-
-wait_for_ae_advance_loop(NS, Index, Shard, Baseline, Deadline) ->
-    case bondy_oplog_core_registry:last_ae_at(NS, Index, Shard) of
-        V when V > Baseline -> V;
-        _ ->
-            case erlang:monotonic_time(millisecond) >= Deadline of
-                true ->
-                    erlang:error({ae_did_not_advance, NS, Index, Shard});
-                false ->
-                    timer:sleep(5),
-                    wait_for_ae_advance_loop(
-                        NS,
-                        Index,
-                        Shard,
-                        Baseline,
-                        Deadline
-                    )
-            end
-    end.
 
 derived_key_of({set, H, _V}) ->
     iolist_to_binary(["key:", integer_to_list(H)]);

@@ -675,14 +675,10 @@ Runs one compaction cycle on `InstanceId`. See
     | {error, term()}.
 
 compact(InstanceId) ->
-    %% No `await_apply` overlay-drain barrier here, unlike `truncate_prefix/2`,
-    %% which truncates at a CALLER-supplied watermark that may sit above
-    %% overlay-pending events. Compaction derives its frontier from peer-synced
-    %% roots, and a peer can only have synced events this node has already
-    %% INSTALLED and PUBLISHED, so that frontier never exceeds the installed
-    %% watermark and a non-empty overlay cannot affect what is truncated.
-    %% Adding the barrier stalls compaction outright: under sustained writes
-    %% the overlay never reaches zero, so the wait times out every cycle.
+    %% No `await_apply` drain, unlike `truncate_prefix/2`, whose watermark the
+    %% caller supplies: the instance picks its own truncation point from the
+    %% members' durable frontiers and its own, capped below its first
+    %% never-applied key (`bondy_oplog_instance:compact/2`).
     bondy_oplog_compaction:compact(InstanceId).
 
 -spec current_watermark(instance_id()) ->

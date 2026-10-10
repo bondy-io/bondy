@@ -82,7 +82,7 @@ drain relies on a second install of an event leaving the tree as it was.
 |---|---|---|
 | `commit_every`      | `64`    | Apply this many events between `consumer.offset` flushes. |
 | `poll_interval_ms`  | `5`     | Backstop sleep when `await_durable/3` returns sooner than expected. The hot path long-polls rather than sleeping; this only affects the rare error fallback. |
-| `ae_targets`        | `[]`    | List of `{Namespace, Index, Shard}` tuples whose AE-freshness counters are bumped via `bondy_oplog_core_registry:bump_ae/4` after every successful commit. Empty list disables the wiring. |
+| `ae_targets`        | `[]`    | List of `{Namespace, Index, Shard}` tuples whose AE-freshness counters the instance's anti-entropy rounds bump (`bondy_oplog_sync_session`). The applier only adds a table that `register_table/4` joins to the instance and publishes the list to the registry. |
 | `publish_ns`        | `undefined` | Namespace under which post-apply events are published via `bondy_oplog_core:publish/4`. `undefined` disables publishing. Requires `publish_fun`. A multiplexing (`per_shard`) instance ignores both and resolves the namespace per event from the bucket's own ctx — see `publish_batch_dir/2`. |
 | `publish_fun`       | `undefined` | `fun((bondy_oplog_event:t()) -> {Key, Op} \| skip)` invoked per verified event to derive the `(Key, Op)` pair forwarded to subscribers. `skip` suppresses publish for that event. Required when `publish_ns` is set. |
 
@@ -92,15 +92,11 @@ The applier optionally drives the read-side substrate. Both hooks are
 opt-in and consumer-configured; defaults are no-ops so existing
 instances are unaffected.
 
-- **Freshness (`bump_ae`)** — after every successful commit
-  (`commit_now/1` flushed `consumer.offset` and advanced the WAL
-  committed-segment marker) the applier walks `ae_targets` and bumps
-  each shard's AE atomic counter with a single shared
-  `monotonic_time(millisecond)` so a batch of shards observes the same
-  "now". Missing registry entries are tolerated and surfaced via a
-  `not_found` counter in telemetry; they typically indicate a
-  registration race during startup. The AE-side bump path for long-quiet
-  shards is a separate concern handled outside this module.
+- **Freshness** — a commit does not bump a shard's AE counter. Only an
+  anti-entropy round confirms freshness: local writes say nothing about
+  changes made on other nodes, and a cut-off node that keeps writing would
+  otherwise pass the authentication fence
+  (`proofs/tla/AuthFence_Refuse_CommitBumps.cfg` violates `FenceSafe`).
 - **Subscriptions (`publish`)** — after `apply_batch/2` produces a
   non-empty verified set the applier walks the set in order and calls
   `publish_fun` per event. The applier passes `(Namespace, Key, Hlc,
@@ -153,8 +149,8 @@ events satisfy I1 by construction), or peer-merged by `integrate_peer_root`
 
 **I2 (containment stability).** The reclamation frontier `StableHlc`
 (`bondy_oplog_instance:stability_point/1`) certifies, against every member's
-durable frontier, this replica's included, that every replica holds every event
-with HLC =< `StableHlc`.
+durable frontier, this replica's included, that every member holds every
+event this replica's tree holds with HLC < `StableHlc`.
 
 **Theorem (causal stability without causal broadcast).** Given I1 and I2, any
 event generated anywhere after `StableHlc` was certified carries a causal
@@ -409,7 +405,7 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     oldstate_cache => boolean(),
     oldstate_cache_max => pos_integer(),
     poll_interval_ms => pos_integer(),
-    %% Substrate read-side wiring: shards bumped after each commit.
+    %% The shards the instance's anti-entropy rounds keep fresh.
     ae_targets => [shard_key()],
     %% Substrate subscription wiring: namespace for post-apply publish.
     publish_ns => atom(),
@@ -455,8 +451,7 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
 -export([last_replayed_root/1]).
 -export([advance_replayed_root/2]).
 -export([rederive_projection_sync/2]).
--export([rebuild_indexes/1]).
--export([rebuild_indexes_sync/1]).
+-export([rebuild_indexes_sync/2]).
 -export([await_drain/1]).
 -export([reap_origins_sync/2]).
 -export([barrier/1]).
@@ -721,34 +716,27 @@ adopt_frontier(Id, {ok, #{unclaimable := []}}, PeerFrontier) ->
 adopt_frontier(Id, _Installed, _PeerFrontier) ->
     bondy_oplog_registry:replace_frontier(Id, #{}).
 
--spec rebuild_indexes(pid()) -> ok.
+-spec rebuild_indexes_sync(pid(), {atom(), atom(), non_neg_integer()}) ->
+    ok | {error, {table_not_served, term()}}.
 
 -doc """
-Force a full secondary-index rebuild from this primary shard: re-derives
-the index from each live cell's CURRENT projection value, re-dispatching a
-`put` for every live term of every cell to the secondary writers. The
-dispatch **bypasses the writer back-pressure cap** so the rebuild can load
-the full working set in one pass even when the cap was exceeded. Combined
-with the rebuild orchestrator first clearing the stale index shard, this
-restores the index exactly. Unlike replaying the MST's events, reading the
-converged value is correct for context-carrying (tier_2) CRDTs (see
-`do_rebuild_indexes/1`).
+Re-derives the secondary indexes of the table whose primary shard is `Key`
+from each live cell's CURRENT projection value, re-dispatching a `put` for
+every live term to the secondary writers
+(`bondy_oplog_cell_utils:reindex_table/3`). The dispatch **bypasses the writer
+back-pressure cap** so the rebuild can load the full working set in one pass
+even when the cap was exceeded. Combined with the rebuild orchestrator first
+clearing the stale index shard, this restores the index exactly.
 """.
-rebuild_indexes(ApplierPid) when is_pid(ApplierPid) ->
-    gen_server:cast(ApplierPid, rebuild_indexes).
-
--spec rebuild_indexes_sync(pid()) -> ok.
-
--doc "Synchronous variant of `rebuild_indexes/1` (the rebuild barrier).".
-rebuild_indexes_sync(ApplierPid) when is_pid(ApplierPid) ->
-    gen_server:call(ApplierPid, rebuild_indexes, infinity).
+rebuild_indexes_sync(ApplierPid, Key) when is_pid(ApplierPid) ->
+    gen_server:call(ApplierPid, {rebuild_indexes, Key}, infinity).
 
 -spec await_drain(pid()) -> ok.
 
 -doc """
 Block until the applier has drained its WAL to end-of-log — the cold-start
 rebuild barrier. Queues the caller and triggers a drain; replies `ok` the moment
-the drain next reaches end-of-log, so a `rebuild_indexes_sync/1` (or a freshen on
+the drain next reaches end-of-log, so a `rebuild_indexes_sync/2` (or a freshen on
 the trust path) issued afterwards observes a fully-replayed MST/projection rather
 than racing the not-yet-applied tail.
 """.
@@ -1158,7 +1146,7 @@ install_staged(Id, Source, Buckets, Spool) ->
     maybe
         {ok, Acc} ?= install_spool(Id, Source, Spool),
         {ok, Counts} ?= prune_tails(Id, Source, Buckets, Acc),
-        {ok, maps:remove(last, Counts)}
+        {ok, maps:without([last, idx], Counts)}
     end.
 
 %% @private
@@ -1453,6 +1441,14 @@ resolve_cell_apply_ctx(
                     bondy_oplog_core_registry:entry_high_water_ref(
                         Entry
                     ),
+                version_ref =>
+                    bondy_oplog_core_registry:entry_version_ref(Entry),
+                index_intents =>
+                    bondy_oplog_projection_adapter:is_durable(
+                        bondy_oplog_core_registry:entry_projection_adapter(
+                            Entry
+                        )
+                    ),
                 %% Read from the registry ENTRY so a restart-rebuilt ctx
                 %% keeps indexing; `undefined` (a raw registration that
                 %% did not stamp it) falls back to the opts. `[]` in the
@@ -1732,11 +1728,9 @@ handle_call(
             ),
             {reply, rederive_result(Installed, Replayed), State}
     end;
-handle_call(rebuild_indexes, _From, State) ->
-    %% Full secondary-index rebuild: re-derive every live term from each
-    %% cell's current projection value with the back-pressure cap bypassed,
-    %% re-dispatching to the secondary writers.
-    {reply, ok, do_rebuild_indexes(State)};
+handle_call({rebuild_indexes, Key}, _From, State) ->
+    #state{cell_apply_source = Source, instance_id = Id} = State,
+    {reply, bondy_oplog_cell_utils:reindex_table(Id, Source, Key), State};
 handle_call(await_drain, From, State) ->
     %% Cold-start rebuild barrier: queue the caller and ensure a drain runs.
     %% The waiter is replied `ok` once the drain reaches end-of-log (the
@@ -1842,8 +1836,6 @@ handle_cast({refresh_validator, Reason}, State) ->
     {noreply, do_refresh_validator(Reason, State)};
 handle_cast(replay_cell_events, State) ->
     {noreply, do_replay_cell_events(State)};
-handle_cast(rebuild_indexes, State) ->
-    {noreply, do_rebuild_indexes(State)};
 handle_cast(drain_resume, #state{drain_deferred = false} = State) ->
     %% Already draining (or about to); the next `self() ! drain` will
     %% pick up the freed slot anyway. Drop the redundant signal.
@@ -2517,46 +2509,6 @@ stamp_ctx_guard(
 %% peer-authored events present in the MST at boot time are observed;
 %% subsequent replays use the diff.
 
-%% @private
-%% Full secondary-index rebuild.
-%%
-%% Re-materialises every secondary index from the CURRENT projection value of
-%% each live cell. It does NOT replay the cell's historical events.
-%%
-%% Why read the projection instead of re-folding the MST: the live projection
-%% is already the converged value. Re-applying a cell's historical events on
-%% top of that advanced state is only idempotent for a context-free (tier_0)
-%% CRDT. A context-carrying (tier_2) CRDT re-mints each replayed event's dot
-%% and, because the advanced cell holds newer dots the historical event never
-%% observed, the per-event intermediate states transiently re-introduce
-%% superseded dots as spurious MV-leaf siblings. The PRIMARY projection
-%% reconverges (a complete causal suffix re-collapses them — see
-%% `commit_now/1`), but the index captures a per-event term-diff and would
-%% latch one of those divergent intermediates. Reading the single converged
-%% value sidesteps the hazard, is correct for tier_0 too, and is cheaper: one
-%% read + one term-diff per distinct cell, vs one kernel re-apply per event.
-%%
-%% Cell directory: read from the PROJECTION, not the MST. The MST is a
-%% truncatable recent-events structure — compaction drops events `<=` the
-%% watermark and a no-checkpoint crash loses its in-memory tail — so its cell
-%% set is generally INCOMPLETE relative to the durable projection. Deriving
-%% the directory from `distinct_cell_keys(MST)` would silently miss every
-%% already-compacted (or crash-lost) cell, leaving a half-built index that is
-%% nonetheless marked trusted. So for a durable table the rebuild enumerates
-%% the primary's own cells in the projection and reads each value from there.
-%% The MST walk remains the fallback for an adapter that cannot enumerate —
-%% the ephemeral ETS projection; see
-%% `bondy_oplog_cell_utils:primary_cell_directory/4`.
-do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
-    case bondy_oplog_cell_apply:sec_idx(Ctx) of
-        {_NS, []} ->
-            %% No secondary indexes on this primary — nothing to rebuild.
-            State;
-        SecIdx ->
-            bondy_oplog_cell_utils:reindex(Id, Ctx, SecIdx),
-            State
-    end.
-
 do_replay_cell_events(State0) ->
     {_, State} = do_replay_cell_events_r(State0),
     State.
@@ -2748,7 +2700,8 @@ acc0() ->
         skipped => 0,
         unclaimable => [],
         max_hlc => 0,
-        last => #{}
+        last => #{},
+        idx => #{}
     }.
 
 %% @private
@@ -2803,15 +2756,21 @@ rederive_result({error, _} = Error, _Replayed) ->
 
 %% @private
 %% Install one bucket's cells through its table's ctx, accumulating into the
-%% shared counts, then clear that ctx's old-state cache and notify reactors.
-%% Both run after a failed write too: the cells before it were replaced.
+%% shared counts, then settle their index ops, clear that ctx's old-state cache
+%% and notify reactors. All three run after a failed write too: the cells
+%% before it were replaced.
 install_catalogue_group(Id, Ctx, Bucket, Cells, Acc0) ->
-    {Acc1, Status} = install_cells(Id, Ctx, Cells, Acc0),
-    settle_group(Ctx, Bucket, Acc0, Acc1, Status).
+    maybe
+        ok ?= bondy_oplog_cell_apply:begin_install(Ctx),
+        {Acc1, Status} = install_cells(Id, Ctx, Cells, Acc0),
+        settle_group(Ctx, Bucket, Acc0, Acc1, Status)
+    end.
 
 %% @private
-settle_group(Ctx, Bucket, Acc0, Acc1, Status) ->
-    %% The install path (`install_cell/5`) writes the
+settle_group(Ctx, Bucket, Acc0, #{idx := IdxAcc} = Acc, Status) ->
+    Settled = bondy_oplog_cell_apply:settle_install(Ctx, IdxAcc, Status),
+    Acc1 = Acc#{idx := #{}},
+    %% The install path (`install_cell/6`) writes the
     %% projection WITHOUT write-through (it installs a frame directly,
     %% with no fold result to cache). A catalogue bootstrap can run on a
     %% LIVE instance (a live re-bootstrap), so any installed key may
@@ -2825,7 +2784,7 @@ settle_group(Ctx, Bucket, Acc0, Acc1, Status) ->
         maps:get(oldstate_cache, Ctx, undefined)
     ),
     %% Honour the table's `publish => true` declaration on THIS write path
-    %% too. `install_cell/5` writes frames directly and emits no
+    %% too. `install_cell/6` writes frames directly and emits no
     %% per-cell merge event, so without this a table whose reactor DERIVES
     %% state from the projection (rather than merely invalidating on change)
     %% is never told its projection exists. One event per bucket per batch,
@@ -2838,7 +2797,7 @@ settle_group(Ctx, Bucket, Acc0, Acc1, Status) ->
     %% Only when this batch actually installed something: a batch whose cells
     %% all failed to decode changed nothing to rebuild from.
     ok = maybe_publish_bootstrap(Ctx, Bucket, Acc0, Acc1),
-    case Status of
+    case Settled of
         ok -> {ok, Acc1};
         {error, _} = Error -> Error
     end.
@@ -2897,7 +2856,7 @@ changed(Acc) ->
 %% @private
 install_one_cell(Id, Ctx, {Bucket, Key, Frame}, Acc0) ->
     maybe
-        {ok, Acc} ?= prune(Ctx, Bucket, Key, Acc0),
+        {ok, Acc} ?= prune(Id, Ctx, Bucket, Key, Acc0),
         install_decoded(Id, Ctx, {Bucket, Key, Frame}, Acc)
     end.
 
@@ -2906,14 +2865,17 @@ install_decoded(Id, Ctx, {Bucket, Key, Frame}, Acc) ->
     case decode_cell_hlc(Id, Bucket, Key, Frame) of
         {ok, Hlc} ->
             maybe
-                ok ?= install_cell(Ctx, Bucket, Key, Frame, Hlc),
+                {ok, Ops} ?= install_cell(Id, Ctx, Bucket, Key, Frame, Hlc),
                 %% The instance absorbs the batch maximum into its clock at
                 %% finalize, or it could mint below a stability point computed
                 %% from these cells (BONDY_DB_RECLAMATION_PROOF.md §7.1).
                 {ok,
-                    bump(installed, Acc#{
-                        max_hlc => max(maps:get(max_hlc, Acc, 0), Hlc)
-                    })}
+                    bump(
+                        installed,
+                        add_index_ops(Ops, Acc#{
+                            max_hlc => max(maps:get(max_hlc, Acc, 0), Hlc)
+                        })
+                    )}
             end;
         error ->
             {ok, bump(skipped, unclaimable(Bucket, Acc))}
@@ -2957,44 +2919,34 @@ bump_n(Key, N, Acc) ->
     maps:update_with(Key, fun(X) -> X + N end, Acc).
 
 %% @private
-install_cell(Ctx, Bucket, Key, Frame, Hlc) ->
-    #{
-        adapter := Adapter,
-        handle := Handle,
-        cache_adapter := CacheAdapter,
-        cache_handle := CacheHandle,
-        high_water_ref := HighWaterRef
-    } = Ctx,
-    case Adapter:put_batch(Handle, [{Bucket, Key, Frame}]) of
-        ok ->
-            bondy_oplog_cell_apply:invalidate_cache(
-                CacheAdapter, CacheHandle, Bucket, Key
-            ),
-            bondy_oplog_cell_apply:advance_high_water(HighWaterRef, Hlc),
-            ok;
-        {error, Reason} ->
-            ?LOG_WARNING(#{
-                description =>
-                    "catalogue install: projection write failed",
-                bucket => Bucket,
-                cell_key => Key,
-                reason => Reason
-            }),
-            {error, {projection_write_failed, Reason}}
+add_index_ops(Ops, #{idx := IdxAcc} = Acc) ->
+    Acc#{idx := bondy_oplog_cell_apply:merge_idx_ops(IdxAcc, Ops)}.
+
+%% @private
+install_cell(Id, Ctx, Bucket, Key, Frame, Hlc) ->
+    #{high_water_ref := HighWaterRef} = Ctx,
+    {Intents, Ops} = bondy_oplog_cell_apply:install_index(
+        Id, Ctx, Bucket, Key, Frame
+    ),
+    maybe
+        ok ?=
+            write_cell(Ctx, Bucket, Key, [{Bucket, Key, Frame} | Intents], []),
+        bondy_oplog_cell_apply:advance_high_water(HighWaterRef, Hlc),
+        {ok, Ops}
     end.
 
 %% @private
 %% Deletes the local cells of `Bucket` between the greatest key the stream has
 %% reached and `High`, exclusive; the stream ships each bucket in ascending key
 %% order (`bondy_oplog_catalogue_snapshot:next/2`).
-prune(Ctx, Bucket, High, #{last := Last} = Acc0) ->
+prune(Id, Ctx, Bucket, High, #{last := Last} = Acc0) ->
     Low =
         case Last of
             #{Bucket := Key} -> <<Key/binary, 0>>;
             #{} -> <<>>
         end,
     maybe
-        {ok, Acc} ?= prune_range(Ctx, Bucket, Low, High, Acc0),
+        {ok, Acc} ?= prune_range(Id, Ctx, Bucket, Low, High, Acc0),
         {ok, reached(Bucket, High, Acc)}
     end.
 
@@ -3008,39 +2960,82 @@ reached(Bucket, Key, #{last := Last} = Acc) ->
     end.
 
 %% @private
-prune_range(Ctx, Bucket, Low, High, Acc) ->
+prune_range(Id, Ctx, Bucket, Low, High, Acc0) ->
     #{adapter := Adapter, handle := Handle} = Ctx,
     case Adapter:range(Handle, Bucket, Low, High, #{limit => ?PRUNE_PAGE}) of
         {ok, []} ->
-            {ok, Acc};
+            {ok, Acc0};
         {ok, Rows} ->
-            ok = lists:foreach(
-                fun({Key, _Frame}) -> delete_cell(Ctx, Bucket, Key) end, Rows
-            ),
-            {Last, _} = lists:last(Rows),
-            prune_range(
-                Ctx,
-                Bucket,
-                <<Last/binary, 0>>,
-                High,
-                bump_n(pruned, length(Rows), Acc)
-            );
+            maybe
+                {ok, Acc} ?= delete_cells(Id, Ctx, Bucket, Rows, Acc0),
+                {Last, _} = lists:last(Rows),
+                prune_range(
+                    Id,
+                    Ctx,
+                    Bucket,
+                    <<Last/binary, 0>>,
+                    High,
+                    bump_n(pruned, length(Rows), Acc)
+                )
+            end;
         {error, Reason} ->
             {error, {projection_read_failed, Reason}}
     end.
 
 %% @private
-delete_cell(Ctx, Bucket, Key) ->
+delete_cells(_Id, _Ctx, _Bucket, [], Acc) ->
+    {ok, Acc};
+delete_cells(Id, Ctx, Bucket, [{Key, _Frame} | Rest], Acc0) ->
+    maybe
+        {ok, Acc} ?= delete_cell(Id, Ctx, Bucket, Key, Acc0),
+        delete_cells(Id, Ctx, Bucket, Rest, Acc)
+    end.
+
+%% @private
+%% The intent goes in the same write as the delete, so a crash keeps both or
+%% neither.
+delete_cell(Id, Ctx, Bucket, Key, Acc) ->
+    {Intents, Ops} = bondy_oplog_cell_apply:install_index(
+        Id, Ctx, Bucket, Key, none
+    ),
+    maybe
+        ok ?= write_cell(Ctx, Bucket, Key, Intents, [{Bucket, Key}]),
+        {ok, add_index_ops(Ops, Acc)}
+    end.
+
+%% @private
+%% An install's one write for cell `{Bucket, Key}`, with its intent. A Bookie
+%% that died exits the call; that ends the group as a failed write, which
+%% `bondy_oplog_cell_apply:settle_install/3` answers by marking the indexes.
+write_cell(Ctx, Bucket, Key, Puts, Deletes) ->
     #{
         adapter := Adapter,
         handle := Handle,
         cache_adapter := CacheAdapter,
         cache_handle := CacheHandle
     } = Ctx,
-    ok = Adapter:delete(Handle, Bucket, Key),
-    bondy_oplog_cell_apply:invalidate_cache(
-        CacheAdapter, CacheHandle, Bucket, Key
-    ).
+    Result =
+        try
+            bondy_oplog_projection_adapter:write_batch(
+                Adapter, Handle, Puts, Deletes
+            )
+        catch
+            exit:Exit -> {error, Exit}
+        end,
+    case Result of
+        ok ->
+            bondy_oplog_cell_apply:invalidate_cache(
+                CacheAdapter, CacheHandle, Bucket, Key
+            );
+        {error, Reason} ->
+            ?LOG_WARNING(#{
+                description => "catalogue install: projection write failed",
+                bucket => Bucket,
+                cell_key => Key,
+                reason => Reason
+            }),
+            {error, {projection_write_failed, Reason}}
+    end.
 
 %% @private
 %% A bucket of the snapshot that routes here loses every local cell above the
@@ -3053,7 +3048,7 @@ prune_tails(Id, Source, [Bucket | Rest], Acc0) ->
             prune_tails(Id, Source, Rest, Acc0);
         Ctx ->
             {Acc1, Status} =
-                case prune(Ctx, Bucket, infinity, Acc0) of
+                case prune(Id, Ctx, Bucket, infinity, Acc0) of
                     {ok, Acc} -> {Acc, ok};
                     {error, _} = Error -> {Acc0, Error}
                 end,
@@ -3221,7 +3216,6 @@ commit_now(
         ok ->
             Seg = bondy_log_state:committed_segment(CO),
             ok = notify_committed_segment(InstanceId, WalPid, Seg),
-            ok = bump_ae_targets(State),
             note_drain_progress(State#state{uncommitted = 0});
         {error, Reason} ->
             ?LOG_WARNING(#{
@@ -3544,24 +3538,3 @@ log_publish_fun_raised(InstanceId, Event, C, R, S) ->
         reason => R,
         stacktrace => S
     }).
-
-%% @private
-%% Bump the AE atomic counter for every shard in `ae_targets` with a
-%% shared `monotonic_time(millisecond)` so the batch observes the same
-%% "now". `not_found` is treated as benign (the registry entry may be
-%% torn down concurrently during shutdown) and counted in telemetry.
-%% Delegates the per-shard write to
-%% `bondy_oplog_core_registry:bump_ae_targets/2` so the applier-side and
-%% AE-side wirings share one primitive.
-bump_ae_targets(#state{ae_targets = []}) ->
-    ok;
-bump_ae_targets(#state{instance_id = Id, ae_targets = Targets}) ->
-    Now = erlang:monotonic_time(millisecond),
-    {Bumped, NotFound} =
-        bondy_oplog_core_registry:bump_ae_targets(Targets, Now),
-    telemetry:execute(
-        [bondy_oplog, applier, ae_bumped],
-        #{count => Bumped, not_found => NotFound},
-        #{instance_id => Id, now_ms => Now}
-    ),
-    ok.

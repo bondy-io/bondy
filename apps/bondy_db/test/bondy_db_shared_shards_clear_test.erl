@@ -50,6 +50,10 @@
 
 shared_shards_clear_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
+        gen(
+            "a rebuild restores a stale index of the founding and a sibling table",
+            fun rebuild_restores_stale_index/1
+        ),
         gen("primary_fan_out_smoke", fun primary_fan_out_smoke/1),
         gen(
             "rebuild_users_isolates_items_across_all_bookies",
@@ -61,6 +65,16 @@ shared_shards_clear_test_() ->
         )
     ]}.
 
+single_bookie_clear_test_() ->
+    {foreach, fun() -> setup(bondy_db_topology_single_bookie, 1) end,
+        fun cleanup/1, [
+            gen(
+                "single_bookie: a rebuild restores a stale index of the "
+                "founding and a sibling table",
+                fun rebuild_restores_stale_index/1
+            )
+        ]}.
+
 gen(Title, Fn) ->
     fun(Ctx) -> {Title, {timeout, 60, fun() -> Fn(Ctx) end}} end.
 
@@ -69,6 +83,9 @@ gen(Title, Fn) ->
 %% =============================================================================
 
 setup() ->
+    setup(bondy_db_topology_shared_shards, ?SHARDS).
+
+setup(Topology, ShardCount) ->
     process_flag(trap_exit, true),
     {ok, _} = application:ensure_all_started(bondy_db),
     %% Deterministic timing — no AE/GC scheduler racing the rebuild.
@@ -77,9 +94,9 @@ setup() ->
     Dir = make_tempdir(),
     {ok, Sup} = bondy_db_leveled_sup:start_link(),
     {ok, Db} = bondy_db:open(?DB, #{
-        topology => bondy_db_topology_shared_shards,
+        topology => Topology,
         topology_opts => #{sup => Sup, dir => Dir},
-        shard_count => ?SHARDS,
+        shard_count => ShardCount,
         fold_module => ?FOLD
     }),
     {Db, Sup, Dir}.
@@ -177,6 +194,34 @@ rebuild_items_isolates_users({Db, _Sup, _Dir}) ->
     ok = bondy_db:close_table(Users),
     ok = bondy_db:close_table(Items).
 
+%% Each table's index holds `a` for `k` while its primary holds `b`: the writer's
+%% buffered remove of `a` and put of `b` are discarded before they flush. A
+%% rebuild must remove `a` (its wipe is scoped to the table's entity type,
+%% `IndexIntents_Dispatched_Saturation_NoWipe.cfg`) and put `b` (it re-folds this
+%% table, not the one that founded the shared instance,
+%% `IndexIntents_Dispatched_Saturation_NoRefold.cfg`).
+rebuild_restores_stale_index({Db, _Sup, _Dir}) ->
+    {ok, Users} = open_unflushed(Db, users),
+    {ok, Items} = open_unflushed(Db, items),
+    lists:foreach(
+        fun(T) ->
+            ok = bondy_db:apply(T, ?R, <<"k">>, {set, bondy_db:tick(T), ~"a"}),
+            flush_index(T, ?IDX),
+            ok = bondy_db:apply(T, ?R, <<"k">>, {set, bondy_db:tick(T), ~"b"}),
+            reset_index(T, ?IDX),
+            ?assertEqual(
+                #{~"a" => [<<"k">>], ~"b" => []}, snapshot(T, [~"a", ~"b"])
+            ),
+            ok = bondy_db:rebuild_index(T, ?IDX),
+            ?assertEqual(
+                #{~"a" => [], ~"b" => [<<"k">>]}, snapshot(T, [~"a", ~"b"])
+            )
+        end,
+        [Users, Items]
+    ),
+    ok = bondy_db:close_table(Users),
+    ok = bondy_db:close_table(Items).
+
 %% =============================================================================
 %% Co-located fixture
 %% =============================================================================
@@ -217,6 +262,13 @@ open_indexed(Db, ET) ->
     bondy_db:open_table(Db, ET, #{
         fold_module => ?FOLD,
         indexes => [#{name => ?IDX, extract => []}]
+    }).
+
+%% As `open_indexed/2`, with the writer flushing only on `flush_sync/1`.
+open_unflushed(Db, ET) ->
+    bondy_db:open_table(Db, ET, #{
+        fold_module => ?FOLD,
+        indexes => [#{name => ?IDX, extract => [], coalesce_ms => 600000}]
     }).
 
 %% Two keys per term; the lww value IS the indexed term (`extract => []`).
@@ -296,6 +348,21 @@ flush_index(Table, IndexName) ->
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
             ok = bondy_oplog_secondary_writer:flush_sync(Pid)
+        end,
+        lists:seq(0, N - 1)
+    ).
+
+%% Discards each index shard's buffered ops, as a lost writer would.
+reset_index(Table, IndexName) ->
+    Info = bondy_db:info(Table),
+    NS = maps:get(namespace, Info),
+    #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
+    lists:foreach(
+        fun(Shard) ->
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
+            ok = bondy_oplog_secondary_writer:reset(Entry)
         end,
         lists:seq(0, N - 1)
     ).

@@ -376,14 +376,10 @@ for each declared index. The index answers "which primary keys have term
 
 **Storage follows the table.** The index shards route through the table's
 topology, so index cells live in the same projection backend as the table's
-cells. When a table opens, `bondy_db` checks a trust marker and a
-clean-shutdown flag on each index shard. An index whose every shard has both
-is trusted and only freshened. Otherwise `bondy_oplog_index_rebuild`
-rebuilds it from the primary cells before the open returns. The index is a
-deterministic function of the primary cells, so the primary is always the
-authoritative copy. Bondy builds these index cells itself rather than using
-leveled's native secondary indexes, because the durable projection runs
-leveled in `head_only` mode.
+cells. The index is a deterministic function of the primary cells, so the
+primary is always the authoritative copy. Bondy builds these index cells
+itself rather than using leveled's native secondary indexes, because the
+durable projection runs leveled in `head_only` mode.
 
 **Term-sharded.** Each index has its own shard set under
 `(NS, IndexName, SecShard)`. A term's shard is
@@ -396,8 +392,10 @@ old and new terms of each changed cell, because it already decoded both
 values. After the primary write commits, it sends the index operations to a
 `bondy_oplog_secondary_writer` per index shard. The writer batches and
 coalesces them, and applies each one to the index cell through the
-`index_entry` CRDT, which keeps the entry with the highest primary HLC. An
-index can therefore lag the primary, and reads can fence on that lag:
+`index_entry` CRDT. Each operation carries an index version, the next value
+of its primary shard's counter, and the CRDT keeps the entry with the highest
+version. An index can therefore lag the primary, and reads can fence on that
+lag:
 
 - `index_get(.., #{max_lag => Ms})` refuses with
   `{error, {stale_secondary, IndexName, Lag}}` when the shard was not
@@ -406,13 +404,40 @@ index can therefore lag the primary, and reads can fence on that lag:
 - `#{fallback => primary}` scans the primary cells instead and recomputes
   the matching keys. It is slower and bounded by an internal cell cap.
 
+**Index intents.** On a durable table, a batch that yields index operations
+stores them as an intent in the same primary write as its cells. An
+operation the writer had not yet written when a node or a writer stopped is
+therefore still in the primary. A restarted writer registers for dispatch,
+then replays the leftover intents of every durable primary shard of its
+namespace. The compaction barrier flushes the writer, syncs the index, and
+then clears each shard's intents up to the version that shard had
+dispatched. `proofs/tla/IndexIntents.tla` models the mechanism; its README
+lists the configs that check it.
+
+**Opening a table.** As each primary shard registers, it replays its
+leftover intents to the index writers, before its applier starts. The open
+then waits for the primary shards to apply their WAL tail and checks a trust
+marker on each index shard. An index whose every shard has one is trusted:
+the open freshens each shard once its writer has written the replayed
+operations. Otherwise `bondy_oplog_index_rebuild` rebuilds the index from the
+primary cells before the open returns.
+
+**Catalogue installs.** A catalogue install writes primary cells outside the
+WAL. It computes their index operations and writes them as intents with the
+cells. Each group of cells syncs the primary before its first cell and, when
+the group has index operations, syncs again before it dispatches them. A
+failed group marks the table's indexes for rebuild.
+
 **Back-pressure and self-healing.** Each index shard carries an in-flight
 counter. When a batch would push the backlog of a shard past its
 `max_inflight` cap, the applier drops the batch, flags the shard
 `needs_rebuild` and requests a rebuild from `bondy_oplog_index_rebuild`. A
-writer crash also triggers a rebuild. Until the rebuild finishes, fenced
-reads refuse. `bondy_db:rebuild_index/2` runs a rebuild on demand and
-returns when it is complete. `bondy_db:index_lag/2` reports
+restarted writer replays the intents of a durable index; an index held in RAM
+has none, so a writer crash marks it for rebuild. A rebuild removes the index's trust marker, syncs the
+index, wipes it, re-folds every primary cell, and writes the marker again
+once the writer that took the re-fold has flushed it. Until the rebuild
+finishes, fenced reads refuse. `bondy_db:rebuild_index/2` runs a rebuild on
+demand and returns when it is complete. `bondy_db:index_lag/2` reports
 `#{lag, inflight, needs_rebuild}` for each index shard.
 
 ## Range scans

@@ -27,9 +27,11 @@
 %%   - the derived stub row the routing read paths actually consult.
 %%
 %% Its own cluster (not `bondy_reclamation_cluster_SUITE`'s) because retiring
-%% the only peer is exclusive: two tests cannot both spend it.
+%% a member is exclusive: two tests cannot both spend it. The cluster has three
+%% nodes so the survivors stay a cluster: a sole member with clustering enabled
+%% confirms nothing.
 
--define(NODE_NAMES, [rribrec1, rribrec2]).
+-define(NODE_NAMES, [rribrec1, rribrec2, rribrec3]).
 -define(REALM, <<"com.bondy.rib_reclaim">>).
 -define(PROC, <<"com.example.rib_reclaim.proc">>).
 -define(TOPIC, <<"com.example.rib_reclaim.topic">>).
@@ -64,7 +66,7 @@ end_per_suite(Config) ->
 %% =============================================================================
 
 departed_node_rib_state_is_reclaimed(Config) ->
-    [N1, N2] = nodes_of(Config),
+    [N1, N2, _N3] = nodes_of(Config),
     {_, N2, Peer2} = lists:keyfind(N2, 2, ?config(cluster, Config)),
 
     ok = erpc:call(N1, ?MODULE, do_create_realm, [?REALM]),
@@ -85,6 +87,10 @@ departed_node_rib_state_is_reclaimed(Config) ->
         sub_stub => true
     }),
     ct:pal("seeded: ~p", [rib_state(N1, N2Str)]),
+    [
+        ?assert(count_of(cell_value(N1, T, U, N2Str)) > 0)
+     || {T, U} <- rib_cells()
+    ],
 
     %% N2 departs for good and is retired — the deliberate, replicated
     %% membership act that licenses reclamation.
@@ -138,6 +144,20 @@ push_module(Node, Mod) ->
     {Mod, Bin, File} = code:get_object_code(Mod),
     {module, Mod} = erpc:call(Node, code, load_binary, [Mod, File, Bin]),
     ok.
+
+%% @private
+rib_cells() ->
+    [{bondy_rib_registrations, ?PROC}, {bondy_rib_subscriptions, ?TOPIC}].
+
+%% @private
+cell_value(Node, Table, Uri, Owner) ->
+    erpc:call(Node, ?MODULE, do_read_cell, [Table, Uri, Owner]).
+
+%% @private
+%% A registration cell's value is a struct with a `count` field; a
+%% subscription cell's value is the count itself.
+count_of({ok, {#{count := C}, _}}) when is_integer(C) -> C;
+count_of({ok, {C, _}}) when is_integer(C) -> C.
 
 %% @private
 rib_state(Node, Owner) ->
@@ -244,13 +264,16 @@ do_rib_state(Owner) ->
     }.
 
 %% @private
-has_cell(Table0, Uri, Owner) ->
-    Table = bondy_namespace_catalog:table(Table0),
-    Key = term_to_binary({?REALM, ?POLICY, Uri, Owner}),
-    case bondy_db:read(Table, ?REALM, Key) of
+has_cell(Table, Uri, Owner) ->
+    case do_read_cell(Table, Uri, Owner) of
         {ok, _} -> true;
         _ -> false
     end.
+
+%% @private
+do_read_cell(Table, Uri, Owner) ->
+    Key = term_to_binary({?REALM, ?POLICY, Uri, Owner}),
+    bondy_db:read(bondy_namespace_catalog:table(Table), ?REALM, Key).
 
 %% @private
 has_stub(Type, Uri, Owner) ->
@@ -301,11 +324,9 @@ do_reclaim_all() ->
 %% `supported` and `cells_scanned`, both of which `reap_instance/2` discards).
 do_diagnose(Owner) ->
     Dead = dead_origins(),
-    Table = bondy_namespace_catalog:table(bondy_rib_registrations),
-    Key = term_to_binary({?REALM, ?POLICY, ?PROC, Owner}),
     Cell =
         try
-            bondy_db:read(Table, ?REALM, Key)
+            do_read_cell(bondy_rib_registrations, ?PROC, Owner)
         catch
             C0:R0 -> {'EXIT', {C0, R0}}
         end,

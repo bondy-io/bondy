@@ -396,6 +396,15 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
         binary:match(K, Tag) =/= nomatch
     ],
     ok = stale_converge_all(Nodes, Seed),
+    %% A member confirms what it has checkpointed, which frozen GC never does.
+    _ = [
+        ok = erpc:call(N, ?MODULE, do_stale_checkpoint_main, [])
+     || N <- Nodes
+    ],
+    _ = [
+        erpc:call(N, ?MODULE, do_stale_sync_main, [P])
+     || N <- Nodes, P <- Nodes, P =/= N
+    ],
 
     %% ---------------------------------------------------------------------
     %% 2. SILENCE. N3 stops syncing entirely (its dispatch is already off and
@@ -1145,6 +1154,25 @@ do_stale_sync_and_truncate_main(Peer) ->
             P =:= Peer
         ])
     end).
+
+%% @private
+do_stale_sync_main(Peer) ->
+    sync_then_main(Peer, fun(_) -> ok end).
+
+%% @private
+%% Per settled `main/*` instance: the checkpoint a compaction cycle writes.
+do_stale_checkpoint_main() ->
+    lists:foreach(
+        fun(I) ->
+            ok = settle_applier(I),
+            ok = bondy_oplog_instance:persist_frontier(I)
+        end,
+        [
+            I
+         || I <- bondy_oplog:list_instances(),
+            binary:match(I, <<"main-">>) =/= nomatch
+        ]
+    ).
 
 %% @private
 sync_then_main(Peer, Compact) ->

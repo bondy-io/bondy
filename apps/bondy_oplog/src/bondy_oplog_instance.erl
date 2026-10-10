@@ -177,11 +177,9 @@ behind that barrier.
     owed = false :: boolean(),
     %% The staged catalogue install (`install_catalogue_batch/3`).
     install_stage :: bondy_oplog_applier:install_stage(),
-    %% AE-freshness shard keys bumped on every fused commit and after a
-    %% remote replay, so secondary-index reads on those shards observe the
-    %% fused writer's progress. Mirrors the applier's `ae_targets` (the
-    %% applier bumps them in `commit_now`; the fused instance has no
-    %% applier so it bumps them itself). Validated at `init/1`.
+    %% The shards the instance's anti-entropy rounds keep fresh; a table
+    %% that `register_table/4` joins is added and published to the registry.
+    %% Validated at `init/1`.
     ae_targets = [] :: list(),
     %% WAL storage backend for the drain READER (ephemeral ETS WAL).
     %% `disk` reads segment files via `bondy_log_reader`; `mem`
@@ -497,7 +495,7 @@ behind that barrier.
 -export([cell_context/3]).
 -export([sweep_stable_cells/3]).
 -export([cell_apply_target/1]).
--export([rebuild_indexes_sync/1]).
+-export([rebuild_indexes_sync/2]).
 
 %% Page-level API (sync protocol)
 -export([get_pages/2]).
@@ -1727,15 +1725,17 @@ cell_apply_target(InstancePid) when is_pid(InstancePid) ->
     gen_server:call(InstancePid, cell_apply_target, infinity).
 
 -doc """
-Full secondary-index rebuild on a **fused** instance (which has no
-separate applier process to hold
-`bondy_oplog_applier:rebuild_indexes_sync/1`'s equivalent). Synchronous —
-the rebuild barrier. A no-op when the instance is not fused.
+`bondy_oplog_applier:rebuild_indexes_sync/2` on a **fused** instance, which
+has no separate applier: re-derives the secondary indexes of the table whose
+primary shard is `Key`. Synchronous — the rebuild barrier. A no-op when the
+instance is not fused.
 """.
--spec rebuild_indexes_sync(InstancePid :: pid()) -> ok.
+-spec rebuild_indexes_sync(
+    InstancePid :: pid(), Key :: {atom(), atom(), non_neg_integer()}
+) -> ok | {error, {table_not_served, term()}}.
 
-rebuild_indexes_sync(InstancePid) when is_pid(InstancePid) ->
-    gen_server:call(InstancePid, rebuild_indexes, infinity).
+rebuild_indexes_sync(InstancePid, Key) when is_pid(InstancePid) ->
+    gen_server:call(InstancePid, {rebuild_indexes, Key}, infinity).
 
 %% =============================================================================
 %% PAGE-LEVEL API (sync protocol)
@@ -3624,26 +3624,20 @@ do_handle_call(
 ) ->
     {reply, {ok, ShardKey}, State};
 do_handle_call(
-    rebuild_indexes,
+    {rebuild_indexes, _Key},
     _From,
     #state{fused_drain = undefined} = State
 ) ->
     {reply, ok, State};
 do_handle_call(
-    rebuild_indexes,
+    {rebuild_indexes, Key},
     _From,
     #state{
         instance_id = Id,
-        fused_drain = #fused_drain{cell_apply_ctx = Ctx}
+        fused_drain = #fused_drain{cell_apply_source = Source}
     } = State
 ) ->
-    case bondy_oplog_cell_apply:sec_idx(Ctx) of
-        {_NS, []} ->
-            ok;
-        SecIdx ->
-            bondy_oplog_cell_utils:reindex(Id, Ctx, SecIdx)
-    end,
-    {reply, ok, State};
+    {reply, bondy_oplog_cell_utils:reindex_table(Id, Source, Key), State};
 do_handle_call(_Req, _From, State) ->
     {reply, {error, badcall}, State}.
 
@@ -4130,10 +4124,9 @@ fused_commit_now(
 ) ->
     %% Mem WAL has no on-disk consumer offset. GC the WAL up to the reader
     %% cursor (everything read + installed before the cursor advanced) so the
-    %% ETS table — and the `ets:next` reader walk — stay bounded; then mirror
-    %% the applier's AE-freshness bump and clear the uncommitted count.
+    %% ETS table — and the `ets:next` reader walk — stay bounded; then clear
+    %% the uncommitted count.
     ok = fused_mem_gc(State0, FD),
-    ok = fused_bump_ae_targets(FD#fused_drain.ae_targets),
     State0#state{fused_drain = FD#fused_drain{uncommitted = 0}};
 fused_commit_now(#state{fused_drain = FD} = State0) ->
     case ensure_wal_pid(State0) of
@@ -4147,10 +4140,6 @@ fused_commit_now(#state{fused_drain = FD} = State0) ->
                 catch
                     _:_ -> ok
                 end,
-            %% AE-freshness: mirror the applier's `commit_now` so
-            %% secondary-index reads on the target shards see the fused
-            %% writer's committed progress.
-            ok = fused_bump_ae_targets(FD#fused_drain.ae_targets),
             State1#state{fused_drain = FD#fused_drain{uncommitted = 0}};
         {error, _} ->
             %% WAL mid-restart — keep `uncommitted` and retry the
@@ -4303,10 +4292,6 @@ fused_replay_diff(
         Origin,
         #{hold => true}
     ),
-    %% Reads of a peer-authored value just became answerable — bump
-    %% the AE-freshness shards so a secondary-index read does not
-    %% refuse as stale.
-    ok = fused_bump_ae_targets(FD#fused_drain.ae_targets),
     %% Causal hold: keep the cursor when events were held
     %% so the next replay re-presents them;
     %% see `bondy_oplog_cell_apply:apply_cell_pairs_mux/5`.
@@ -4738,20 +4723,6 @@ door_report(Id, Action, Pairs) ->
         count => length(Pairs),
         doored => Sample
     }),
-    ok.
-
-%% @private
-%% Bumps the AE-freshness atomic for every shard in the fused drain's
-%% `ae_targets` with a shared `monotonic_time(millisecond)` so a batch of
-%% shards observes the same "now". Mirrors
-%% `bondy_oplog_applier:bump_ae_targets/1`: the applier bumps on its
-%% `commit_now`; the fused instance has no applier, so it bumps on its own
-%% commit and after a remote replay. `[]` (the common case) is a no-op.
-fused_bump_ae_targets([]) ->
-    ok;
-fused_bump_ae_targets(Targets) ->
-    Now = erlang:monotonic_time(millisecond),
-    _ = bondy_oplog_core_registry:bump_ae_targets(Targets, Now),
     ok.
 
 terminate(
@@ -6374,7 +6345,9 @@ truncate_unmarked(#state{refold = none} = State, Started, PeerWitnesses) ->
     Witnesses = member_vvs(State, PeerWitnesses),
     Result = run_compaction(State, Witnesses),
     {Reply, State1} = commit_compaction(State, Started, Result),
-    trim_below_watermark(Reply, State1, Witnesses);
+    Out = trim_below_watermark(Reply, State1, Witnesses),
+    ok = clear_index_intents(State),
+    Out;
 truncate_unmarked(State, _Started, _PeerWitnesses) ->
     {{ok, no_change}, State}.
 
@@ -6392,7 +6365,7 @@ trim_below_watermark({ok, no_change} = Reply, State, Witnesses) ->
             {Reply, State};
         true ->
             Before = compute_live_size(MST0),
-            ok = drive_secondary_indexes(State),
+            _ = drive_secondary_indexes(State),
             {MST, State1} = trim_confirmed(State, MST0, Witnesses),
             LiveSize = compute_live_size(MST),
             Reply1 =
@@ -6644,41 +6617,44 @@ checkpoint(State) ->
     end.
 
 -doc """
-The causal-stability point for projection-cell reclamation: an HLC `h` such
-that no event with HLC `< h` can ever be delivered again (POLog Definition
-5.1).
+The stability point for projection-cell reclamation: the sweep discards a
+dead cell whose HLC is strictly below it.
 
 The chain runs inside the instance because it owns the MST: membership
 (`reclamation_members/0`) → strict all-member confirmation
-(`bondy_oplog_peer_state:confirmed_peer_states/2`) → frontier over every
-member's durable frontier, this replica's included (`compute_frontier_for/2`)
-→ the frontier key's HLC.
+(`bondy_oplog_peer_state:confirmed_peer_states/2`) → a walk of the tree in
+key order against every member's durable frontier, this replica's included
+(`member_vvs/2`) → the HLC of the first key some frontier does not cover.
+When every key the tree holds is covered, an empty tree included, the point
+is a fresh local tick, which exceeds every held key's HLC: the clock
+dominates them all (locally minted events by construction, remote deliveries
+by absorption, bootstrap installs by the finalize absorb).
+`proofs/tla/JoinInstall_Truncation_CompactMembers_FirstUnconfirmed.cfg`
+holds the shipped invariants under this point; `_LastConfirmed.cfg` shows
+that the key before the first uncovered one keeps a dead cell forever once
+the event that emptied it is the tree's newest.
 
 With clustering disabled (`bondy_cluster:enabled/0`) the chain short-circuits
-to a fresh local tick: with no replica that could contradict this node, every
-event it holds is stable, and —
-because the clock dominates every held event's HLC (locally minted events by
-construction, remote deliveries by absorption, bootstrap installs by the
-finalize absorb) — a fresh tick strictly exceeds them all. The tick also
-covers the two holes an MST-derived point has: an MST compacted empty, and the
-tail tombstone a strict `<` bound would otherwise never license.
+to the tick: no replica could contradict this node.
 
 Every negative outcome names its reason, and callers MUST reclaim nothing on
 any `{error, _}`:
 
 - `{error, no_members}`, `{error, membership_unavailable}` — as
   `reclamation_members/0`.
-- `{error, idle}` — this replica's MST holds no events (fully compacted or
-  never written): no frontier can exist and there is nothing whose
-  stability needs certifying. The steady state of a converged quiescent
-  shard in a cluster — NOT operator-actionable, and reported distinctly so
-  the actionable reasons below stay meaningful.
+- `{error, idle}` — this replica has applied nothing (`frontier/1` is
+  empty), so its projection holds no cell to reclaim. The steady state of a
+  shard nobody has written — NOT operator-actionable, and reported
+  distinctly so the actionable reasons below stay meaningful. A tree emptied
+  by compaction is not idle: its frontier stands, and the walk ticks.
 - `{error, {unconfirmed, Peers}}` — members with no recorded durable frontier;
   a silent member holds stability down instead of vanishing (A4).
-- `{error, no_frontier}` — no local key is confirmed by every member.
+- `{error, no_frontier}` — no witness, no tree to walk, or no held key
+  covered by every member (this replica's own checkpoint pending, say).
 - `{error, unservable}` — the tree walk met a page the store lacks, so it
   confirms nothing.
-- `{error, non_event_frontier}` — the frontier key is not an event key.
+- `{error, non_event_frontier}` — the first uncovered key is not an event
+  key.
 """.
 -spec stability_point(instance_id() | pid()) ->
     {ok, bondy_connect_hlc:hlc()} | {error, term()}.
@@ -6803,7 +6779,7 @@ reclamation_stalled(InstanceId, Reason) ->
 reclamation_stability_point(State) ->
     case bondy_cluster:enabled() of
         false ->
-            {ok, bondy_connect_hlc:now(State#state.hlc)};
+            {ok, fresh_tick(State)};
         true ->
             clustered_stability_point(State, reclamation_members())
     end.
@@ -6811,43 +6787,46 @@ reclamation_stability_point(State) ->
 %% @private
 clustered_stability_point(_State, {error, _} = Error) ->
     Error;
-clustered_stability_point(State, {ok, Members}) ->
-    case local_mst_empty(State) of
-        true ->
-            %% An empty tree has no local key to certify; `idle` clears on
-            %% the next local event.
+clustered_stability_point(#state{mst = undefined}, {ok, _Members}) ->
+    {error, no_frontier};
+clustered_stability_point(#state{instance_id = Id} = State, {ok, Members}) ->
+    case bondy_oplog_registry:frontier(Id) of
+        Empty when map_size(Empty) =:= 0 ->
             {error, idle};
-        false ->
+        _ ->
             confirmed_stability_point(State, Members)
     end.
 
 %% @private
-local_mst_empty(#state{mst = undefined}) ->
-    true;
-local_mst_empty(#state{mst = MST}) ->
-    bondy_mst:root(MST) =:= undefined.
-
-%% @private
-confirmed_stability_point(#state{mst = undefined}, _Members) ->
-    {error, no_frontier};
-confirmed_stability_point(#state{instance_id = Id, mst = MST} = State, Members) ->
+confirmed_stability_point(#state{instance_id = Id} = State, Members) ->
     case bondy_oplog_peer_state:confirmed_peer_states(Id, Members) of
         {unconfirmed, Missing} ->
             {error, {unconfirmed, Missing}};
         {ok, States} ->
-            frontier_stability_point(
-                compute_frontier_for(MST, member_vvs(State, peer_vvs(States)))
-            )
+            first_uncovered_point(State, member_vvs(State, peer_vvs(States)))
     end.
 
 %% @private
-%% Frontier key → stability point. Guarded with `is_key/1`: a non-event-keyed
-%% frontier must yield a named error, not a raise inside a GC worker — where
+%% A first key no witness covers licenses nothing: no held key lies below
+%% it, so there is no point rather than one that sweeps nothing
+%% (`bondy_oplog_frontier_provenance_test`).
+first_uncovered_point(#state{mst = MST} = State, VVs) ->
+    case first_hole(MST, VVs) of
+        no_witness -> {error, no_frontier};
+        unservable -> {error, unservable};
+        all_covered -> {ok, fresh_tick(State)};
+        {hole, _Hole, undefined} -> {error, no_frontier};
+        {hole, Hole, _Before} -> frontier_stability_point(Hole)
+    end.
+
+%% @private
+fresh_tick(State) ->
+    bondy_connect_hlc:now(State#state.hlc).
+
+%% @private
+%% Key → stability point. Guarded with `is_key/1`: a non-event key must yield
+%% a named error, not a raise inside a GC worker — where
 %% `bondy_oplog_gc_scheduler:run_trigger/2` would swallow it into a warning.
-frontier_stability_point(undefined) ->
-    {error, no_frontier};
-frontier_stability_point(unservable) ->
-    {error, unservable};
 frontier_stability_point(Key) ->
     case bondy_oplog_event:is_key(Key) of
         true -> {ok, bondy_oplog_event:key_hlc(Key)};
@@ -6877,22 +6856,38 @@ frontier_stability_point(Key) ->
 %% walk cannot tell whether the members hold the keys on that page, so it
 %% confirms nothing (`proofs/tla/ConfirmedCompaction_3R_Lost.cfg` holds
 %% `NoStrand`; `_3R_Lost_SkipWalk.cfg`, whose walk skips the page, violates it).
-compute_frontier_for(_MST, []) ->
-    undefined;
 compute_frontier_for(MST, VVs) ->
+    case first_hole(MST, VVs) of
+        no_witness ->
+            undefined;
+        unservable ->
+            unservable;
+        all_covered ->
+            case bondy_mst:last(MST) of
+                {K, _V} -> K;
+                undefined -> undefined
+            end;
+        {hole, _Hole, Before} ->
+            Before
+    end.
+
+%% @private
+%% The walk the compaction frontier and the reclamation point share: the
+%% first tree key some witness has not applied, with the key before it
+%% (`undefined` when it is the tree's first).
+first_hole(_MST, []) ->
+    no_witness;
+first_hole(MST, VVs) ->
     Retired = bondy_oplog_origin_bans:retired_set(),
     try
         first_unconfirmed(MST, [{VV, Retired} || VV <- VVs], undefined, throw)
     of
         undefined ->
-            case bondy_mst:last(MST) of
-                {K, _V} -> K;
-                undefined -> undefined
-            end;
+            all_covered;
         Hole ->
             case bondy_mst:last_n(MST, Hole, 1) of
-                [{K, _V}] -> K;
-                [] -> undefined
+                [{K, _V}] -> {hole, Hole, K};
+                [] -> {hole, Hole, undefined}
             end
     catch
         throw:{missing_page, _} -> unservable
@@ -7171,7 +7166,7 @@ do_finalize_catalogue_compaction(State, Started, Frontier, Licensed) ->
     %% writer-crash/drop `needs_rebuild` + background rebuild from the
     %% (un-truncated) projection; re-deriving the dropped window here would
     %% need the applier.
-    ok = drive_secondary_indexes(State),
+    _ = drive_secondary_indexes(State),
     {{MST1, StateT}, TruncateUs} = tc(fun() ->
         truncate_below_or_equal(State#state.mst, Frontier, Licensed, State)
     end),
@@ -7317,14 +7312,93 @@ fused_reanchor_cursor(#fused_drain{} = FD, _NewRoot) ->
     FD#fused_drain{last_replayed_root = undefined}.
 
 %% @private
-%% Compaction flush barrier. flush_sync every **durable** secondary-index writer
+%% Compaction flush barrier. Flush every **durable** secondary-index writer
 %% of every `bondy_db` table on this instance, so dispatched index ops are
 %% durable before the MST tail is truncated. A no-op for an instance with no
 %% `bondy_db` registry entry. An
 %% EPHEMERAL (ETS) index needs no flush (a crash drops the in-RAM MST and index
-%% together; it reconverges from peers), so it issues no round-trip.
+%% together; it reconverges from peers), so it issues no round-trip. Returns
+%% whether every writer flushed; a shard that did not is marked for rebuild.
 drive_secondary_indexes(#state{instance_id = Id}) ->
-    lists:foreach(fun flush_or_backstop/1, durable_index_shards(Id)).
+    flush_index_shards(durable_index_shards(Id)).
+
+%% @private
+%% Flushes every shard's writer, even after one fails, and returns whether
+%% all flushed.
+flush_index_shards(Shards) ->
+    lists:foldl(
+        fun(E, AllFlushed) -> flush_or_backstop(E) andalso AllFlushed end,
+        true,
+        Shards
+    ).
+
+%% @private
+%% Clears each durable primary shard's index intents up to the version it had
+%% dispatched or dropped when this began, once the writers of its table have
+%% flushed and the projection is synced (`ClearBound = "dispatched"` in
+%% `proofs/tla/IndexIntents.tla`). A table one of whose writers did not flush
+%% keeps its intents; a failed clear leaves them for the next cycle.
+clear_index_intents(#state{instance_id = Id}) ->
+    Pending = [
+        {E, D}
+     || E <- bondy_oplog_core_registry:primary_entries_for_instance(Id),
+        bondy_oplog_core_registry:entry_secondary_indexes(E) =/= [],
+        bondy_oplog_projection_adapter:is_durable(
+            bondy_oplog_core_registry:entry_projection_adapter(E)
+        ),
+        D <- [bondy_oplog_core_registry:index_dispatched_version(E)],
+        D > bondy_oplog_core_registry:index_intents_cleared(E)
+    ],
+    Flushed = maps:from_list([
+        {NS, flush_index_shards(durable_index_shards_of(NS))}
+     || NS <- lists:usort([entry_ns(E) || {E, _} <- Pending])
+    ]),
+    case Pending =/= [] andalso sync_projection(Id) of
+        false ->
+            ok;
+        ok ->
+            lists:foreach(
+                fun({E, D}) ->
+                    clear_intents(maps:get(entry_ns(E), Flushed), E, D)
+                end,
+                Pending
+            );
+        {error, Reason} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "bondy_oplog_instance could not sync the projection; "
+                    "the index intents are cleared on a later cycle.",
+                instance_id => Id,
+                reason => Reason
+            })
+    end.
+
+%% @private
+clear_intents(false, _Entry, _Version) ->
+    ok;
+clear_intents(true, Entry, Version) ->
+    Result =
+        try
+            bondy_oplog_core_registry:index_clear_intents(Entry, Version)
+        catch
+            Class:Reason -> {error, {Class, Reason}}
+        end,
+    case Result of
+        ok ->
+            ok;
+        {error, R} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "bondy_oplog_instance could not clear a primary shard's "
+                    "index intents; a later cycle retries.",
+                entry_key => bondy_oplog_core_registry:entry_key(Entry),
+                reason => R
+            })
+    end.
+
+%% @private
+entry_ns(Entry) ->
+    element(1, bondy_oplog_core_registry:entry_key(Entry)).
 
 %% @private
 %% The durable secondary-index shards of every table whose primary shard runs
@@ -7332,64 +7406,66 @@ drive_secondary_indexes(#state{instance_id = Id}) ->
 %% shard. Read from the registry on every call: sibling tables and index
 %% shards register after the instance starts (`bondy_oplog_projection_sync_test`).
 durable_index_shards(InstanceId) ->
-    Tables = lists:usort([
-        element(1, bondy_oplog_core_registry:entry_key(P))
-     || P <- bondy_oplog_core_registry:primary_entries_for_instance(InstanceId)
-    ]),
+    lists:append([
+        durable_index_shards_of(NS)
+     || NS <- lists:usort([
+            entry_ns(P)
+         || P <- bondy_oplog_core_registry:primary_entries_for_instance(
+                InstanceId
+            )
+        ])
+    ]).
+
+%% @private
+durable_index_shards_of(NS) ->
     [
         E
-     || NS <- Tables,
-        E <- bondy_oplog_core_registry:shards_for(NS),
+     || E <- bondy_oplog_core_registry:shards_for(NS),
         is_durable_index_shard(E)
     ].
 
 %% @private
-%% A secondary-index shard whose projection is durable (anything other than
-%% the in-RAM ETS adapter — the only ephemeral projection, in this app).
-%% Primaries and ETS-backed indexes return `false`: a primary has nothing to
-%% flush here, and an ETS index has no durability to protect.
+%% A secondary-index shard whose projection is durable. Primaries and
+%% in-RAM indexes return `false`: a primary has nothing to flush here, and an
+%% in-RAM index has no durability to protect.
 is_durable_index_shard(E) ->
     case bondy_oplog_core_registry:entry_key(E) of
         {_NS, ?PRIMARY_INDEX, _Shard} ->
             false;
         {_NS, _IndexName, _Shard} ->
-            bondy_oplog_core_registry:entry_projection_adapter(E) =/=
-                bondy_oplog_projection_ets
+            bondy_oplog_projection_adapter:is_durable(
+                bondy_oplog_core_registry:entry_projection_adapter(E)
+            )
     end.
 
 %% @private
 flush_or_backstop(Entry) ->
-    case bondy_oplog_core_registry:entry_writer_pid(Entry) of
-        Pid when is_pid(Pid) ->
-            try
-                ok = bondy_oplog_secondary_writer:flush_sync(
-                    Pid, ?IDX_FLUSH_TIMEOUT_MS
-                )
-            catch
-                Class:Reason ->
-                    ?LOG_WARNING(#{
-                        description =>
-                            "bondy_oplog_instance compaction flush barrier "
-                            "could not flush a secondary-index writer; "
-                            "marking the shard for rebuild and proceeding "
-                            "with the truncate.",
-                        entry_key => bondy_oplog_core_registry:entry_key(Entry),
-                        class => Class,
-                        reason => Reason
-                    }),
-                    backstop_index_rebuild(Entry)
-            end;
-        _ ->
+    case
+        bondy_oplog_secondary_writer:flush_entry(Entry, ?IDX_FLUSH_TIMEOUT_MS)
+    of
+        ok ->
+            not bondy_oplog_core_registry:index_needs_rebuild(Entry);
+        {error, no_writer} ->
             %% No live writer (restarting): its buffered ops are gone with
             %% it, so mark for rebuild rather than silently dropping them.
+            backstop_index_rebuild(Entry);
+        {error, Reason} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "bondy_oplog_instance compaction flush barrier "
+                    "could not flush a secondary-index writer; "
+                    "marking the shard for rebuild and proceeding "
+                    "with the truncate.",
+                entry_key => bondy_oplog_core_registry:entry_key(Entry),
+                reason => Reason
+            }),
             backstop_index_rebuild(Entry)
     end.
 
 %% @private
 backstop_index_rebuild(Entry) ->
-    bondy_oplog_core_registry:index_mark_rebuild(Entry),
-    {NS, IndexName, _Shard} = bondy_oplog_core_registry:entry_key(Entry),
-    bondy_oplog_index_rebuild:request(NS, IndexName).
+    ok = bondy_oplog_index_rebuild:mark(Entry),
+    false.
 
 %% @private
 tc(Fun) ->

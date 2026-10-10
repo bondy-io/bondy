@@ -23,7 +23,7 @@ byte-identical CRDT twin). An unknown label has no twin and is an error.
 
 ## Why a kernel
 
-The applier's per-cell compute (`compute_one_cell/13`) reads the old cell,
+The applier's per-cell compute (`bondy_oplog_cell_apply`) reads the old cell,
 applies one operation, and encodes a new frame. Routing every step through
 this module keeps the projection seam in one place.
 

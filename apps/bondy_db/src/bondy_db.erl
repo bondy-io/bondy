@@ -492,100 +492,100 @@ open_table_provision(
     SecIndexes = index_descriptors(
         maps:get(indexes, Merged, []), ShardCount, Topology
     ),
-    case Topology:open_table(EntityType, ShardCount, Merged, State) of
-        {ok, TableState, _NewState} ->
-            case
-                provision_shards(
+    %% The indexes come up before the primary shards and go down after them
+    %% (`close_table/1`): a primary shard's index version counter starts from
+    %% the index shards' version records (`register_primary_shard/4`), and its
+    %% applier dispatches to writers that already exist.
+    maybe
+        {ok, TableState, _NewState} ?=
+            Topology:open_table(EntityType, ShardCount, Merged, State),
+        {ok, IndexMap} ?=
+            close_on_error(
+                provision_indexes(
+                    Db, NS, EntityType, Merged, ShardCount, Backend
+                ),
+                Topology,
+                TableState,
+                State
+            ),
+        ok = assert_durable_rebuild_invariant(Backend, IndexMap),
+        {ok, InstanceIds, CacheHandles} ?=
+            close_on_error(
+                rollback_indexes_on_error(
+                    provision_shards(
+                        NS,
+                        DbName,
+                        EntityType,
+                        ShardCount,
+                        FoldModule,
+                        CrdtModule,
+                        CrdtOpts,
+                        OplogOpts,
+                        SecIndexes,
+                        Topology,
+                        TableState
+                    ),
                     NS,
-                    DbName,
-                    EntityType,
-                    ShardCount,
-                    FoldModule,
-                    CrdtModule,
-                    CrdtOpts,
-                    OplogOpts,
-                    SecIndexes,
-                    Topology,
-                    TableState
-                )
-            of
-                {ok, InstanceIds, CacheHandles} ->
-                    case
-                        provision_indexes(Db, NS, Merged, ShardCount, Backend)
-                    of
-                        {ok, IndexMap} ->
-                            ok = assert_durable_rebuild_invariant(
-                                Backend, IndexMap
-                            ),
-                            %% Defer the index cold-start barrier when the founding instance's WAL
-                            %% drain is GATED: the barrier `await_drain`s the primary, and a gated
-                            %% drain never reaches end-of-log, so running it here DEADLOCKS. The
-                            %% founding instance is also shared across tables, so draining before the
-                            %% siblings register replays the shared WAL with an incomplete routing
-                            %% directory and loses the unregistered tables' cells on the durable
-                            %% backend. `cold_start_table_indexes/1` runs it once every gate is
-                            %% released.
-                            ok =
-                                case is_drain_gated(OplogOpts) of
-                                    true ->
-                                        ok;
-                                    false ->
-                                        cold_start_indexes(
-                                            NS, InstanceIds, IndexMap
-                                        )
-                                end,
-                            {ok, #{
-                                db_name => DbName,
-                                db_topology => Topology,
-                                db_hlc => maps:get(hlc, Db),
-                                entity_type => EntityType,
-                                namespace => NS,
-                                shard_count => ShardCount,
-                                partition_strategy => PartitionStrategy,
-                                realm_prefix_depth => RealmPrefixDepth,
-                                aggregate_root => AggregateRoot,
-                                fold_module => FoldModule,
-                                crdt_module => CrdtModule,
-                                crdt_opts => CrdtOpts,
-                                causal_tier => causal_tier_of(CrdtModule),
-                                projection_backend => Backend,
-                                fused => Fused,
-                                table_state => TableState,
-                                instance_ids => InstanceIds,
-                                cache_handles => CacheHandles,
-                                indexes => IndexMap
-                            }};
-                        {error, _} = Err ->
-                            %% Indexes failed after the primary shards came
-                            %% up — roll the primary shards back too so the
-                            %% caller never inherits a half-built table.
-                            lists:foreach(
-                                fun(S) ->
-                                    teardown_shard(
-                                        NS,
-                                        S,
-                                        InstanceIds,
-                                        CacheHandles,
-                                        Topology,
-                                        TableState
-                                    )
-                                end,
-                                lists:seq(0, ShardCount - 1)
-                            ),
-                            _ = Topology:close_table(TableState, State),
-                            Err
-                    end;
-                {error, _} = Err ->
-                    %% The effective topology's open_table already
-                    %% provisioned adapter handles for this table — tear
-                    %% them down so a failed provisioning does not leak
-                    %% Bookies (leveled) or ETS tables (ets).
-                    _ = Topology:close_table(TableState, State),
-                    Err
-            end;
-        {error, _} = Err ->
-            Err
+                    IndexMap
+                ),
+                Topology,
+                TableState,
+                State
+            ),
+        %% Defer the index cold-start barrier when the founding instance's WAL
+        %% drain is GATED: the barrier `await_drain`s the primary, and a gated
+        %% drain never reaches end-of-log, so running it here DEADLOCKS. The
+        %% founding instance is also shared across tables, so draining before the
+        %% siblings register replays the shared WAL with an incomplete routing
+        %% directory and loses the unregistered tables' cells on the durable
+        %% backend. `cold_start_table_indexes/1` runs it once every gate is
+        %% released.
+        ok =
+            case is_drain_gated(OplogOpts) of
+                true -> ok;
+                false -> cold_start_indexes(NS, InstanceIds, IndexMap)
+            end,
+        {ok, #{
+            db_name => DbName,
+            db_topology => Topology,
+            db_hlc => maps:get(hlc, Db),
+            entity_type => EntityType,
+            namespace => NS,
+            shard_count => ShardCount,
+            partition_strategy => PartitionStrategy,
+            realm_prefix_depth => RealmPrefixDepth,
+            aggregate_root => AggregateRoot,
+            fold_module => FoldModule,
+            crdt_module => CrdtModule,
+            crdt_opts => CrdtOpts,
+            causal_tier => causal_tier_of(CrdtModule),
+            projection_backend => Backend,
+            fused => Fused,
+            table_state => TableState,
+            instance_ids => InstanceIds,
+            cache_handles => CacheHandles,
+            indexes => IndexMap
+        }}
     end.
+
+%% @private
+%% A failed provisioning step leaves the topology's adapter handles for the
+%% table open; close them so a failed open does not leak Bookies (leveled) or
+%% ETS tables (ets).
+close_on_error({error, _} = Err, Topology, TableState, State) ->
+    _ = Topology:close_table(TableState, State),
+    Err;
+close_on_error(Ok, _Topology, _TableState, _State) ->
+    Ok.
+
+%% @private
+%% The primary shards failed after the indexes came up: tear the indexes down
+%% too, so the caller never inherits a half-built table.
+rollback_indexes_on_error({error, _} = Err, NS, IndexMap) ->
+    teardown_indexes(NS, IndexMap),
+    Err;
+rollback_indexes_on_error(Ok, _NS, _IndexMap) ->
+    Ok.
 
 %% @private
 %% Resolve the table's projection backend, rejecting impossible combos.
@@ -2227,32 +2227,22 @@ entry would leak a dangling reference.
 
 Cost is `O(pending ops)`, not `O(table)` — it flushes buffers, it does not
 re-derive (that is `rebuild_index/2`). `{error, {unknown_index, IndexName}}`
-for an unknown index.
+for an unknown index, and the first shard's
+`bondy_oplog_secondary_writer:flush_entry/2` error when a writer is missing,
+died, or did not answer.
 """.
 -spec await_index(Table :: table(), IndexName :: atom()) ->
     ok | {error, term()}.
 
 await_index(Table, IndexName) when is_atom(IndexName) ->
     with_index(Table, IndexName, fun(_Spec, SecShardCount) ->
-        NS = maps:get(namespace, Table),
-        lists:foreach(
-            fun(Shard) ->
-                case bondy_oplog_core_registry:lookup(NS, IndexName, Shard) of
-                    {ok, Entry} ->
-                        case
-                            bondy_oplog_core_registry:entry_writer_pid(Entry)
-                        of
-                            Pid when is_pid(Pid) ->
-                                bondy_oplog_secondary_writer:flush_sync(Pid);
-                            _ ->
-                                ok
-                        end;
-                    not_found ->
-                        ok
-                end
-            end,
-            lists:seq(0, SecShardCount - 1)
-        )
+        Flushed = flush_index_shards(
+            maps:get(namespace, Table), IndexName, SecShardCount
+        ),
+        case [Err || {_Shard, {error, _} = Err} <- Flushed] of
+            [] -> ok;
+            [Err | _] -> Err
+        end
     end).
 
 -doc """
@@ -2359,11 +2349,12 @@ Each table maps to its oplog namespace (`t:table/0`'s `namespace`), so callers
 pass table handles (e.g. the `security_users` / grant tables for the auth path)
 rather than raw namespace atoms.
 
-IMPORTANT: with anti-entropy **disabled** (`bondy_oplog` `aae_enabled = false`,
-the default) the per-shard AE atomics are never advanced past their
-"infinitely stale" sentinel, so a finite `MaxLag` returns `{stale, _}` for every
-namespace. Callers MUST gate enforcement on AAE being enabled — the fence is a
-cross-node-staleness guard and there is no cross-node window with AAE off.
+Only an anti-entropy round confirms a shard: a round that reached a peer, or
+a round with no peer that `db.aae.fence.on_isolation` lets confirm (a node with
+clustering off always does). A local write does not, so a node cut off from
+its peers stops passing under `refuse` however much it writes
+(`proofs/tla/AuthFence_Refuse.cfg` holds `FenceSafe`;
+`AuthFence_Refuse_CommitBumps.cfg`, where commits confirm, violates it).
 """.
 -spec ensure_fresh(
     Tables :: [table()],
@@ -2647,9 +2638,7 @@ register_shard(
                         owner => Owner
                     },
                     case
-                        bondy_oplog_core_registry:register(
-                            NS, ?INDEX, Shard, Config
-                        )
+                        register_primary_shard(NS, Shard, SecIndexes, Config)
                     of
                         ok ->
                             Start = fun() ->
@@ -2675,6 +2664,42 @@ register_shard(
             end;
         {error, _} = Err ->
             Err
+    end.
+
+%% @private
+%% The primary row's index version counter starts at the highest version
+%% recorded for the shard: by the shards of the table's indexes, registered
+%% before it, and by the shard's own intents. Seeding from the intents alone
+%% fails (`proofs/tla/IndexIntents_IntentsVersion.cfg`). Once the row is
+%% registered, the shard's leftover intents are replayed to the index writers,
+%% before its applier starts. The row's dispatched version starts at the
+%% intents' clear record, so a compaction cycle of an instance already running
+%% clears none of them before the replay has dispatched them
+%% (`proofs/tla/IndexIntents_OpenSeed.cfg`).
+register_primary_shard(NS, Shard, SecIndexes, Config) ->
+    #{projection_adapter := Adapter, projection_handle := Handle} = Config,
+    maybe
+        {ok, IndexVersion} ?=
+            bondy_oplog_core_registry:index_version_recorded(
+                NS,
+                [
+                    {N, C}
+                 || #{index_name := N, sec_shard_count := C} <- SecIndexes
+                ],
+                Shard
+            ),
+        {ok, Cleared, Intents} ?=
+            bondy_oplog_core_registry:index_intents_leftover(
+                Adapter, Handle, NS, Shard
+            ),
+        ok ?=
+            bondy_oplog_core_registry:register(NS, ?INDEX, Shard, Config#{
+                index_version =>
+                    lists:max([IndexVersion, Cleared | [V || {V, _} <- Intents]]),
+                index_dispatched => Cleared
+            }),
+        {ok, Entry} = bondy_oplog_core_registry:lookup(NS, ?INDEX, Shard),
+        bondy_oplog_cell_apply:replay_intents(Entry, SecIndexes, Intents)
     end.
 
 %% @private
@@ -2849,10 +2874,8 @@ start_shard_instance(
             Bucket -> CallerApplier0#{cell_apply_bucket => Bucket}
         end,
     Pinned = #{
-        %% This shard's read-side AE freshness target: the applier bumps it on
-        %% each commit and the AE heartbeat (`bondy_oplog_sync_session`) on each
-        %% successful round, so an idle primary shard still stays fresh — which
-        %% the auth freshness fence (STORAGE_ARCHITECTURE §9.1/§9.2) depends on.
+        %% This shard's AE freshness target, bumped by the instance's
+        %% anti-entropy rounds (`ensure_fresh/2`).
         ae_targets => [{NS, ?INDEX, Shard}],
         applier => CallerApplier#{
             cell_apply_target => {NS, ?INDEX, Shard},
@@ -3044,11 +3067,13 @@ teardown_shared_shard(
 %% gen_server) drives these cells, not the primary applier subtree. Specs are
 %% validated up front (fail before any table is created); a mid-loop failure
 %% rolls back the indexes already built.
-provision_indexes(Db, NS, Merged, DefaultShardCount, Backend) ->
+provision_indexes(Db, NS, EntityType, Merged, DefaultShardCount, Backend) ->
     %% Specs were already validated in `open_table/7` before any shard was
     %% provisioned.
     Specs = maps:get(indexes, Merged, []),
-    provision_indexes_loop(Db, NS, Specs, DefaultShardCount, Backend, #{}).
+    provision_indexes_loop(
+        Db, {NS, EntityType}, Specs, DefaultShardCount, Backend, #{}
+    ).
 
 %% @private
 validate_index_specs(Specs) when is_list(Specs) ->
@@ -3098,13 +3123,15 @@ check_sec_shard_count(Spec) ->
     end.
 
 %% @private
-provision_indexes_loop(_Db, _NS, [], _DefaultShardCount, _Backend, Acc) ->
+provision_indexes_loop(_Db, _Owner, [], _DefaultShardCount, _Backend, Acc) ->
     {ok, Acc};
-provision_indexes_loop(Db, NS, [Spec | Rest], DefaultShardCount, Backend, Acc) ->
-    case provision_index(Db, NS, Spec, DefaultShardCount, Backend) of
+provision_indexes_loop(
+    Db, {NS, _} = Owner, [Spec | Rest], DefaultShardCount, Backend, Acc
+) ->
+    case provision_index(Db, Owner, Spec, DefaultShardCount, Backend) of
         {ok, Name, Provision} ->
             provision_indexes_loop(
-                Db, NS, Rest, DefaultShardCount, Backend, Acc#{
+                Db, Owner, Rest, DefaultShardCount, Backend, Acc#{
                     Name => Provision
                 }
             );
@@ -3121,7 +3148,7 @@ provision_indexes_loop(Db, NS, [Spec | Rest], DefaultShardCount, Backend, Acc) -
 %% shard-set in that topology, then registers a secondary shard per
 %% `SecShard` with the `index_entry` CRDT. The shard count defaults to the
 %% primary's but can be overridden per index via `sec_shard_count`.
-provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
+provision_index(Db, {NS, EntityType}, Spec, DefaultShardCount, Backend) ->
     Name = bondy_oplog_index_spec:name(Spec),
     SecShardCount = maps:get(sec_shard_count, Spec, DefaultShardCount),
     CoalesceMs = bondy_oplog_index_spec:coalesce_ms(Spec),
@@ -3138,6 +3165,7 @@ provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
                     CoalesceMs,
                     Topology,
                     TableState,
+                    Topology:index_clear_scope(Name, EntityType),
                     DbName,
                     Strategy
                 )
@@ -3160,7 +3188,15 @@ provision_index(Db, NS, Spec, DefaultShardCount, Backend) ->
 
 %% @private
 provision_index_shards(
-    NS, Name, SecShardCount, CoalesceMs, Topology, TableState, DbName, Strategy
+    NS,
+    Name,
+    SecShardCount,
+    CoalesceMs,
+    Topology,
+    TableState,
+    ClearScope,
+    DbName,
+    Strategy
 ) ->
     provision_seq(
         SecShardCount,
@@ -3172,6 +3208,7 @@ provision_index_shards(
                 CoalesceMs,
                 Topology,
                 TableState,
+                ClearScope,
                 DbName,
                 Strategy,
                 Shard
@@ -3196,6 +3233,7 @@ provision_index_shard(
     CoalesceMs,
     Topology,
     TableState,
+    ClearScope,
     DbName,
     Strategy,
     Shard
@@ -3219,13 +3257,7 @@ provision_index_shard(
                         crdt_module => bondy_oplog_crdt_index_entry,
                         overlay => disabled,
                         inflight_atomics => atomics:new(2, [{signed, true}]),
-                        %% The rebuild's wipe scope. The topology owns it (it
-                        %% knows whether its Bookie co-locates entity types):
-                        %% `{entity, ET, Name}` on a shared Bookie so a sibling
-                        %% table sharing this `IndexName` is not over-wiped;
-                        %% `{suffix, Name}` on a single-table handle.
-                        index_clear_scope =>
-                            Topology:index_clear_scope(Name, TableState),
+                        index_clear_scope => ClearScope,
                         %% The secondary-writer grouping key. A `per_shard`
                         %% backend shares one writer across every index of every
                         %% table on the shard; `per_table_shard` gives this index
@@ -3291,12 +3323,6 @@ teardown_indexes(NS, IndexMap) ->
 %% (`per_table_shard`) key the refcount degenerates to "stop now". Best-effort
 %% throughout (it is also the rollback path for a half-built index).
 teardown_index_shard(NS, Name, Shard, CacheHandles, Topology, TableState) ->
-    %% Clean-shutdown sequence: durably flush this shard's writer and stamp its
-    %% clean flag BEFORE the writer/registry row are torn down, so a graceful
-    %% close leaves the index complete-to-head and the next open trusts it
-    %% (`cold_start_indexes/2`). Must precede the unregister, which drops the
-    %% entry whose projection handle the flag is written through.
-    ok = flush_and_mark_clean(NS, Name, Shard),
     ok = leave_index_writer(NS, Name, Shard),
     case maps:get(Shard, CacheHandles, undefined) of
         undefined ->
@@ -3337,14 +3363,17 @@ start_index_writer(NS, Name, Shard, Args) ->
     end.
 
 %% @private
-%% Unregister an index shard, and stop its writer once no registered shard
-%% references the `writer_key`, under the key's lock. A row already gone (an
-%% idempotent re-teardown) had its writer handled when it went.
+%% Discard the shard's buffered ops on its writer
+%% (`bondy_oplog_secondary_writer:reset/1`), unregister the shard, and stop its
+%% writer once no registered shard references the `writer_key`, under the
+%% key's lock. A row already gone (an idempotent re-teardown) had its writer
+%% handled when it went.
 leave_index_writer(NS, Name, Shard) ->
     case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
         {ok, Entry} ->
             WriterKey = bondy_oplog_core_registry:entry_writer_key(Entry),
             with_writer_key(WriterKey, fun() ->
+                ok = bondy_oplog_secondary_writer:reset(Entry),
                 _ = bondy_oplog_core_registry:unregister(NS, Name, Shard),
                 case bondy_oplog_core_registry:writer_key_in_use(WriterKey) of
                     true -> ok;
@@ -3358,37 +3387,6 @@ leave_index_writer(NS, Name, Shard) ->
 %% @private
 with_writer_key(WriterKey, Fun) ->
     global:trans({{?MODULE, writer_key, WriterKey}, self()}, Fun, [node()]).
-
-%% @private
-%% Stamp the durable clean-shutdown flag only when every op dispatched to the
-%% shard reached its projection: the registry's current writer flushed, and no
-%% dispatch is left in flight (an op cast to a writer that died leaves its
-%% reservation behind until a rebuild resets it). Otherwise the shard stays
-%% dirty and the next open rebuilds it (`bondy_db_index_lag_test`:
-%% `close_after_writer_restart_keeps_buffered_ops/1`,
-%% `close_before_rebuild_keeps_lost_ops/1`).
-flush_and_mark_clean(NS, Name, Shard) ->
-    maybe
-        {ok, Entry} ?= bondy_oplog_core_registry:lookup(NS, Name, Shard),
-        ok ?= flush_index_writer(Entry),
-        0 ?= bondy_oplog_core_registry:index_inflight(Entry),
-        bondy_oplog_core_registry:index_mark_clean(Entry)
-    else
-        _ -> ok
-    end.
-
-%% @private
-flush_index_writer(Entry) ->
-    case bondy_oplog_core_registry:entry_writer_pid(Entry) of
-        Pid when is_pid(Pid) ->
-            try
-                bondy_oplog_secondary_writer:flush_sync(Pid)
-            catch
-                exit:Reason -> {error, Reason}
-            end;
-        undefined ->
-            {error, no_writer}
-    end.
 
 %% @private
 %% Build the static secondary-index descriptors handed to each primary
@@ -3465,12 +3463,8 @@ cold_start_indexes(NS, InstanceIds, IndexMap) ->
         fun(Name, #{sec_shard_count := SecShardCount}) ->
             case load_index_trust_markers(NS, Name, SecShardCount) of
                 trusted ->
-                    %% Every shard built + cleanly closed: trust the persisted
-                    %% cells, just freshen so finite-`max_lag` reads pass.
                     freshen_index_shards(NS, Name, SecShardCount);
                 needs_rebuild ->
-                    %% A shard is unbuilt or was not cleanly closed — rebuild
-                    %% the index from the (now fully-replayed) primary.
                     _ = bondy_oplog_index_rebuild:rebuild_sync(NS, Name)
             end
         end,
@@ -3501,13 +3495,9 @@ await_primary_shards(InstanceIds) ->
     ).
 
 %% @private
-%% Decide trust-vs-rebuild for the whole index and prime per-shard state. Per
-%% shard it applies BOTH cold-start gates: the durable trust marker (built?) AND
-%% the durable clean-shutdown flag (cleanly closed to head last lifetime?). The
-%% index is trusted only if every shard passes both. As a side effect it loads
-%% the trust marker into the in-memory `needs_rebuild` flag (so a later read
-%% sees the right state) and CLEARS the clean-shutdown flag (so a crash this
-%% lifetime leaves the shard dirty → rebuilt on the next open).
+%% Decide trust-vs-rebuild for the whole index: it is trusted only if every
+%% shard has its durable trust marker. As a side effect it loads the trust
+%% marker into the in-memory mark, so a later read sees the right state.
 load_index_trust_markers(NS, Name, SecShardCount) ->
     Flags = [
         shard_needs_rebuild(NS, Name, Shard)
@@ -3522,17 +3512,8 @@ load_index_trust_markers(NS, Name, SecShardCount) ->
 shard_needs_rebuild(NS, Name, Shard) ->
     case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
         {ok, Entry} ->
-            %% Gate 1 — built? (loads the durable trust marker into the
-            %% in-memory `needs_rebuild` flag as a side effect).
-            MarkerNeedsRebuild =
-                bondy_oplog_core_registry:index_load_rebuild_marker(Entry),
-            %% Gate 2 — cleanly closed to head last lifetime? Read the
-            %% clean-shutdown flag, then clear it so a crash this lifetime
-            %% rebuilds (the clear is journalled before any post-open index
-            %% write; leveled's prefix recovery makes a partial crash safe).
-            WasClean = bondy_oplog_core_registry:index_has_clean(Entry),
-            ok = bondy_oplog_core_registry:index_clear_clean(Entry),
-            MarkerNeedsRebuild orelse (not WasClean);
+            _ = bondy_oplog_core_registry:index_load_rebuild_marker(Entry),
+            bondy_oplog_core_registry:index_needs_rebuild(Entry);
         _ ->
             %% No registry entry (shouldn't happen post-provision) — be safe
             %% and force a rebuild.
@@ -3540,16 +3521,36 @@ shard_needs_rebuild(NS, Name, Shard) ->
     end.
 
 %% @private
-%% Freshen every shard of a trusted index (bump AE) so a finite `max_lag` read
-%% passes without a rebuild — including an empty shard, which a write path
-%% would otherwise leave sentinel-stale forever.
+flush_index_shards(NS, Name, SecShardCount) ->
+    [
+        {Shard,
+            case bondy_oplog_core_registry:lookup(NS, Name, Shard) of
+                {ok, Entry} ->
+                    bondy_oplog_secondary_writer:flush_entry(Entry, infinity);
+                not_found ->
+                    ok
+            end}
+     || Shard <- lists:seq(0, SecShardCount - 1)
+    ].
+
+%% @private
+%% Freshen (bump AE) each shard of a trusted index once its writer has written
+%% the ops the primaries replayed from their intents, so a finite `max_lag`
+%% read passes without a rebuild, an empty shard included. A shard whose writer
+%% did not flush stays unfreshened until its restarted writer writes the
+%% replayed ops (`proofs/tla/IndexIntents_OpenNoFlush.cfg`,
+%% `proofs/tla/IndexIntents_FreshenWithoutFlush.cfg`).
 freshen_index_shards(NS, Name, SecShardCount) ->
-    Now = erlang:monotonic_time(millisecond),
     lists:foreach(
-        fun(Shard) ->
-            _ = bondy_oplog_core_registry:bump_ae(NS, Name, Shard, Now)
+        fun
+            ({Shard, ok}) ->
+                _ = bondy_oplog_core_registry:bump_ae(
+                    NS, Name, Shard, erlang:monotonic_time(millisecond)
+                );
+            ({_Shard, {error, _}}) ->
+                ok
         end,
-        lists:seq(0, SecShardCount - 1)
+        flush_index_shards(NS, Name, SecShardCount)
     ).
 
 %% =============================================================================

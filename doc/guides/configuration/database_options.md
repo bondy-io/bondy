@@ -276,7 +276,8 @@ does not refuse on it ([Clustering](clustering.md);
 Duration, default `60s`.
 
 The fence refuses when any shard of the security tables has gone longer than
-this without a local commit or a sync round that certified it.
+this without a sync round that certified it. A local write does not certify
+a shard: it says nothing about changes made on other nodes.
 
 ### `db.aae.fence.on_isolation` (`bondy_oplog.aae_fence_on_isolation`)
 
@@ -286,8 +287,8 @@ Which sync activity certifies the security shards on a clustered node:
 
 - `refuse` certifies only after a sync round with a peer. A node that
   reaches no peer, including a member that has just restarted and lists only
-  itself, refuses once `db.aae.fence.max_lag` passes without a local commit
-  to the security tables.
+  itself, refuses once `db.aae.fence.max_lag` passes, however much it writes
+  locally.
 - `proceed` also certifies on a tick with no reachable peer. A node cut off
   from the cluster keeps authenticating against a view that may miss a
   revocation made elsewhere.

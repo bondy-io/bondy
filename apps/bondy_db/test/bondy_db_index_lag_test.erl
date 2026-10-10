@@ -15,7 +15,10 @@
 %%     while the index is stale;
 %%   - `index_lag/2` diagnostics;
 %%   - the startup backfill freshens every shard (so a finite `max_lag`
-%%     range read passes over an empty index — the IDX-3 carry-over #4).
+%%     range read passes over an empty index);
+%%   - a rebuild whose writer lost the re-fold, or whose index was marked
+%%     again while it ran, keeps the index marked and runs again;
+%%   - a restarted writer replays the live ops its predecessor lost.
 %% =============================================================================
 
 -module(bondy_db_index_lag_test).
@@ -41,6 +44,22 @@ lag_test_() ->
         test("stale_refusal_carries_lag", fun stale_refusal_carries_lag/1),
         test("primary_scan_fallback", fun primary_scan_fallback/1),
         test("index_lag_reports_fresh", fun index_lag_reports_fresh/1),
+        test(
+            "rebuild_keeps_mark_when_writer_lost_the_refold",
+            fun rebuild_keeps_mark_when_writer_lost_the_refold/1
+        ),
+        test(
+            "rebuild_keeps_mark_when_marked_during_run",
+            fun rebuild_keeps_mark_when_marked_during_run/1
+        ),
+        test(
+            "rebuild_keeps_mark_when_writer_wedged",
+            fun rebuild_keeps_mark_when_writer_wedged/1
+        ),
+        test(
+            "restarted_writer_replays_lost_ops",
+            fun restarted_writer_replays_lost_ops/1
+        ),
         test(
             "saturation_drops_then_rebuild_converges",
             fun saturation_drops_then_rebuild_converges/1
@@ -333,35 +352,45 @@ saturation_drops_then_rebuild_converges({Db, _Sup, _Dir}) ->
 %% A writer that `bondy_oplog_secondary_sup` re-creates from the registry keeps
 %% its index's `coalesce_ms`: under the 600 s window of `open_saturating/1` an
 %% indexed write stays in flight until `flush_sync`, where the 5 ms default
-%% would have flushed it within the 200 ms wait.
+%% would have flushed it within the 200 ms wait. A rebuild's reset and a
+%% compaction cycle's flush would also empty the count, so the rebuild server
+%% is held until the check and the compaction trigger is quiesced.
 restarted_writer_keeps_coalesce_ms({Db, _Sup, _Dir}) ->
     {ok, T} = open_saturating(Db),
-    SecSup = whereis(bondy_oplog_secondary_sup),
-    Ref = monitor(process, SecSup),
-    exit(SecSup, kill),
-    receive
-        {'DOWN', Ref, process, SecSup, _} -> ok
+    ok = bondy_oplog_gc_scheduler:set_trigger(undefined),
+    ok = sys:suspend(bondy_oplog_index_rebuild),
+    try
+        SecSup = whereis(bondy_oplog_secondary_sup),
+        Ref = monitor(process, SecSup),
+        exit(SecSup, kill),
+        receive
+            {'DOWN', Ref, process, SecSup, _} -> ok
+        end,
+        ok = wait_for_new(bondy_oplog_secondary_sup, SecSup, 200),
+        ok = bondy_db:apply(
+            T, <<"r1">>, <<"u1">>, {put, <<"status">>, <<"on">>}
+        ),
+        timer:sleep(200),
+        ?assert(inflight(T, by_status) > 0),
+        ok = flush_index(T, by_status),
+        ?assertEqual(0, inflight(T, by_status))
+    after
+        ok = sys:resume(bondy_oplog_index_rebuild)
     end,
-    ok = wait_for_new(bondy_oplog_secondary_sup, SecSup, 200),
-    ok = bondy_db:apply(T, <<"r1">>, <<"u1">>, {put, <<"status">>, <<"on">>}),
-    timer:sleep(200),
-    ?assert(inflight(T, by_status) > 0),
-    ok = flush_index(T, by_status),
-    ?assertEqual(0, inflight(T, by_status)),
     ok = bondy_db:close_table(T).
 
 %% An op buffered in a writer re-created by a `bondy_oplog_secondary_sup`
-%% restart must survive a graceful close and reopen: the close flushes the live
-%% writer before it marks the index clean, and a reopened clean index is trusted
-%% without a rebuild.
+%% restart survives a graceful close and reopen without a rebuild: the close
+%% discards the buffer, and the open replays the op from the primary's intent
+%% and flushes it before it freshens the trusted index.
 close_after_writer_restart_keeps_buffered_ops({Db, _Sup, _Dir}) ->
     {ok, T0} = open_saturating(Db),
     NS = maps:get(namespace, bondy_db:info(T0)),
     ok = restart_writer_sup(),
     %% Barriers: the restarted supervisor's `init/1` has started its writers,
-    %% and the rebuild each writer requested has run.
+    %% and the index is trusted.
     _ = sys:get_state(bondy_oplog_secondary_sup),
-    _ = sys:get_state(bondy_oplog_index_rebuild),
+    ok = wait_trusted(T0, by_status, 200),
     ok = bondy_db:apply(T0, <<"r1">>, <<"u1">>, {put, <<"status">>, <<"on">>}),
     ?assert(inflight(T0, by_status) > 0),
     ok = bondy_db:close_table(T0),
@@ -392,10 +421,10 @@ close_after_writer_restart_keeps_buffered_ops({Db, _Sup, _Dir}) ->
     ),
     ok = bondy_db:close_table(T1).
 
-%% An op dispatched while no writer ran is lost from the index until the rebuild
-%% the restarted writer requests. A close before that rebuild must leave the
-%% index untrusted, so the reopen rebuilds it. The rebuild orchestrator is held
-%% suspended until the close has returned.
+%% An op dispatched while no writer ran must survive a close made before any
+%% rebuild could run: the restarted writer replays it from the primary's
+%% intent. The rebuild orchestrator is held suspended until the close has
+%% returned.
 close_before_rebuild_keeps_lost_ops({Db, _Sup, _Dir}) ->
     {ok, T0} = open_lww(Db),
     R = <<"r1">>,
@@ -450,9 +479,8 @@ close_while_writer_sup_down({Db, _Sup, _Dir}) ->
 
 %% A write still waiting in the WAL when the table closes is applied by the
 %% instance's applier while the close runs, released here as the close stops
-%% the instance. The reopened index is trusted, so it must hold that write.
-%% Red when the indexes are flushed and stamped clean before the instance
-%% stops.
+%% the instance. The reopened index is trusted, so it must hold that write: the
+%% open replays it from the primary's intent and flushes it.
 close_keeps_ops_applied_after_the_index_flush({Db, _Sup, _Dir}) ->
     {ok, T0} = open_lww(Db),
     R = <<"r1">>,
@@ -491,8 +519,213 @@ close_keeps_ops_applied_after_the_index_flush({Db, _Sup, _Dir}) ->
     ok = bondy_db:close_table(T1).
 
 %% =============================================================================
+%% Rebuild completion
+%% =============================================================================
+
+%% The writers die holding the re-folded ops, before the rebuild flushes them.
+%% The rebuild must not mark the index trusted: it returns `incomplete`, and
+%% the rebuild that runs again restores every row.
+rebuild_keeps_mark_when_writer_lost_the_refold({Db, _Sup, _Dir}) ->
+    {ok, T} = open_buffered(Db),
+    R = <<"r1">>,
+    Keys = [<<"u1">>, <<"u2">>, <<"u3">>],
+    [
+        ok = bondy_db:apply(T, R, K, {set, bondy_db:tick(T), <<"on">>})
+     || K <- Keys
+    ],
+    ok = flush_index(T, by_value),
+    Expected = {ok, [{K, #{}} || K <- Keys]},
+    ?assertEqual(Expected, bondy_db:index_get(T, R, by_value, <<"on">>, #{})),
+    with_flush_hook(
+        fun(_) -> ok = restart_writers(T, by_value) end,
+        fun() ->
+            ?assertEqual(
+                {error, incomplete}, bondy_db:rebuild_index(T, by_value)
+            ),
+            ok = wait_trusted(T, by_value, 200)
+        end
+    ),
+    ?assertEqual(Expected, bondy_db:index_get(T, R, by_value, <<"on">>, #{})),
+    ok = bondy_db:close_table(T).
+
+%% A writer that cannot flush within the rebuild's deadline, and does not
+%% restart, leaves nothing marked after the wipe; the failed flush alone must
+%% keep the index untrusted until a rebuild completes.
+rebuild_keeps_mark_when_writer_wedged({Db, _Sup, _Dir}) ->
+    {ok, T} = open_buffered(Db),
+    R = <<"r1">>,
+    ok = bondy_db:apply(T, R, <<"u1">>, {set, bondy_db:tick(T), <<"on">>}),
+    ok = flush_index(T, by_value),
+    Self = self(),
+    with_flush_hook(
+        fun(Pid) ->
+            ok = sys:suspend(Pid),
+            Self ! {wedged, Pid}
+        end,
+        fun() ->
+            ?assertEqual(
+                {error, incomplete}, bondy_db:rebuild_index(T, by_value)
+            ),
+            ?assert(lists:any(fun needs_rebuild/1, entries(T, by_value))),
+            receive
+                {wedged, Pid} -> ok = sys:resume(Pid)
+            end,
+            ok = wait_trusted(T, by_value, 200)
+        end
+    ),
+    ?assertEqual(
+        {ok, [{<<"u1">>, #{}}]},
+        bondy_db:index_get(T, R, by_value, <<"on">>, #{})
+    ),
+    ok = bondy_db:close_table(T).
+
+%% A mark that arrives while a rebuild runs (a saturation drop, a writer
+%% restart) must survive it: the rebuild returns `incomplete` with the shards
+%% still marked and their trust markers absent, and the rebuild that runs
+%% again restores the markers.
+rebuild_keeps_mark_when_marked_during_run({Db, _Sup, _Dir}) ->
+    {ok, T} = open_buffered(Db),
+    R = <<"r1">>,
+    ok = bondy_db:apply(T, R, <<"u1">>, {set, bondy_db:tick(T), <<"on">>}),
+    ok = flush_index(T, by_value),
+    with_flush_hook(
+        fun(_) -> ok = mark_all_rebuild(T, by_value) end,
+        fun() ->
+            ?assertEqual(
+                {error, incomplete}, bondy_db:rebuild_index(T, by_value)
+            ),
+            ?assert(lists:all(fun needs_rebuild/1, entries(T, by_value))),
+            ?assertNot(lists:any(fun has_trust_marker/1, entries(T, by_value))),
+            ok = wait_trusted(T, by_value, 200)
+        end
+    ),
+    ?assert(lists:all(fun has_trust_marker/1, entries(T, by_value))),
+    ?assertEqual(
+        {ok, [{<<"u1">>, #{}}]},
+        bondy_db:index_get(T, R, by_value, <<"on">>, #{})
+    ),
+    ok = bondy_db:close_table(T).
+
+%% A writer killed while it buffers an op loses it; its restart replays the op
+%% from the primary's intent, without marking the shards. The rebuild server
+%% is held throughout, so no rebuild can be what delivers the op.
+restarted_writer_replays_lost_ops({Db, _Sup, _Dir}) ->
+    {ok, T} = open_buffered(Db),
+    R = <<"r1">>,
+    ok = bondy_db:apply(T, R, <<"u1">>, {set, bondy_db:tick(T), <<"on">>}),
+    ok = sys:suspend(bondy_oplog_index_rebuild),
+    try
+        ok = restart_writers(T, by_value),
+        ?assertNot(lists:any(fun needs_rebuild/1, entries(T, by_value))),
+        ok = flush_index(T, by_value),
+        ?assertEqual(0, inflight(T, by_value)),
+        ?assertEqual(
+            {ok, [{<<"u1">>, #{}}]},
+            bondy_db:index_get(T, R, by_value, <<"on">>, #{})
+        )
+    after
+        ok = sys:resume(bondy_oplog_index_rebuild)
+    end,
+    ok = bondy_db:close_table(T).
+
+%% Runs `Body` while the rebuild's first `flush_entry/2` call first runs
+%% `Hook(Pid)` on the writer it targets. Calls from other processes, such as
+%% an instance's compaction flush barrier, pass through without the hook.
+with_flush_hook(Hook, Body) ->
+    Once = atomics:new(1, []),
+    Rebuild = whereis(bondy_oplog_index_rebuild),
+    ok = meck:new(bondy_oplog_secondary_writer, [passthrough]),
+    try
+        ok = meck:expect(
+            bondy_oplog_secondary_writer, flush_entry, fun(Entry, Timeout) ->
+                Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
+                _ =
+                    self() =:= Rebuild andalso
+                        atomics:add_get(Once, 1, 1) =:= 1 andalso Hook(Pid),
+                meck:passthrough([Entry, Timeout])
+            end
+        ),
+        Body()
+    after
+        meck:unload(bondy_oplog_secondary_writer)
+    end.
+
+%% =============================================================================
 %% Helpers
 %% =============================================================================
+
+restart_writers(Table, IndexName) ->
+    Old = [
+        bondy_oplog_core_registry:entry_writer_pid(E)
+     || E <- entries(Table, IndexName)
+    ],
+    [exit(Pid, kill) || Pid <- Old],
+    wait_until(
+        fun() ->
+            New = [
+                bondy_oplog_core_registry:entry_writer_pid(E)
+             || E <- entries(Table, IndexName)
+            ],
+            lists:all(
+                fun(P) ->
+                    is_pid(P) andalso is_process_alive(P) andalso
+                        not lists:member(P, Old)
+                end,
+                New
+            )
+        end,
+        200
+    ).
+
+wait_trusted(Table, IndexName, Tries) ->
+    wait_until(
+        fun() ->
+            not lists:any(fun needs_rebuild/1, entries(Table, IndexName))
+        end,
+        Tries
+    ).
+
+wait_until(Fun, 0) ->
+    error({timeout, Fun});
+wait_until(Fun, N) ->
+    case Fun() of
+        true ->
+            ok;
+        false ->
+            timer:sleep(50),
+            wait_until(Fun, N - 1)
+    end.
+
+needs_rebuild(Entry) ->
+    bondy_oplog_core_registry:index_needs_rebuild(Entry).
+
+has_trust_marker(Entry) ->
+    {NS, IndexName, Shard} = bondy_oplog_core_registry:entry_key(Entry),
+    {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
+    Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
+    Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
+    case Adapter:get(Handle, B, K) of
+        {ok, _} -> true;
+        not_found -> false
+    end.
+
+entries(Table, IndexName) ->
+    Info = bondy_db:info(Table),
+    NS = maps:get(namespace, Info),
+    #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
+    [
+        Entry
+     || Shard <- lists:seq(0, N - 1),
+        {ok, Entry} <- [bondy_oplog_core_registry:lookup(NS, IndexName, Shard)]
+    ].
+
+open_buffered(Db) ->
+    bondy_db:open_table(Db, users, #{
+        fold_module => lww_register,
+        indexes => [
+            #{name => by_value, extract => [], coalesce_ms => 600000}
+        ]
+    }).
 
 restart_writer_sup() ->
     SecSup = whereis(bondy_oplog_secondary_sup),

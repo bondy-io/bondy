@@ -175,8 +175,10 @@ Shared-shards co-locates every entity type in the shared Bookies, so an index
 wipe must be confined to this table's entity type — otherwise a sibling table
 declaring the same `IndexName` would be over-wiped.
 """.
-index_clear_scope(IndexName, #{entity_type := ET}) when is_atom(IndexName) ->
-    {entity, atom_to_binary(ET, utf8), IndexName}.
+index_clear_scope(IndexName, EntityType) when
+    is_atom(IndexName), is_atom(EntityType)
+->
+    {entity, atom_to_binary(EntityType, utf8), IndexName}.
 
 -doc """
 Shared-shards co-locates every entity type in the shared Bookies, so the primary

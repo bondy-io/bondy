@@ -25,13 +25,18 @@
 (*     claims only what the cell reflects                                  *)
 (*     (`LiveRebootstrapRefold.ClaimSound`).                               *)
 (*   - The stabilization sweep deletes an empty flag cell whose HLC is     *)
-(*     below the stability point (`bondy_oplog_crdt_ew_flag:stabilize/2`,  *)
-(*     `bondy_oplog_cell_utils:apply_stabilize/10`): the HLC of the last   *)
-(*     key of the replica's tree before the first key that some member's   *)
-(*     durable frontier, its own included, does not cover                  *)
-(*     (`bondy_oplog_instance:compute_frontier_for/2`, `member_vvs/2`).    *)
-(*     Bound below stands in for it: the HLC of the earliest event the     *)
-(*     replica claims above the pointwise least of the durable claims.     *)
+(*     strictly below the stability point                                  *)
+(*     (`bondy_oplog_crdt_ew_flag:stabilize/2`,                            *)
+(*     `bondy_oplog_cell_utils:apply_stabilize/10`). The point walks the   *)
+(*     replica's tree in key order against every member's durable         *)
+(*     frontier, its own included (`bondy_oplog_instance:member_vvs/2`).   *)
+(*     BoundMode picks it. "last_confirmed": the HLC of the last key       *)
+(*     before the first one some frontier does not cover                   *)
+(*     (`compute_frontier_for/2`), which never licenses the tree's last    *)
+(*     key. "first_unconfirmed": the HLC of that first key, or past every  *)
+(*     event when every held key is covered, an empty tree included.       *)
+(*     "claims": a stand-in, the HLC of the earliest event the replica     *)
+(*     claims above the pointwise least of the durable claims.             *)
 (*   - `reap_origins/2` drops a retired origin's context entry when no     *)
 (*     surviving dot is that origin's (`bondy_oplog_crdt_aw_set`).         *)
 (*                                                                         *)
@@ -109,8 +114,10 @@ CONSTANTS
     CompactBy,     \* "none" | "receipt" | "durable" | "recorded" | "own" |
                    \* "members":
                    \* how compaction confirms
-    RetiredExempt  \* TRUE: a retired origin's events count as confirmed by
+    RetiredExempt, \* TRUE: a retired origin's events count as confirmed by
                    \* every member, for truncation and for the bound
+    BoundMode      \* "claims" | "last_confirmed" | "first_unconfirmed":
+                   \* the sweep's stability point
 
 ASSUME /\ MaxCrashes \in Nat
        /\ RefoldFirst \in BOOLEAN
@@ -120,6 +127,7 @@ ASSUME /\ MaxCrashes \in Nat
        /\ CompactBy \in {"none", "receipt", "durable", "recorded", "own",
                          "members"}
        /\ RetiredExempt \in BOOLEAN
+       /\ BoundMode \in {"claims", "last_confirmed", "first_unconfirmed"}
        /\ Reap \in BOOLEAN
        /\ InstallMode \in {"replace", "stage"}
 
@@ -378,6 +386,31 @@ Bound(r) ==
     IN IF hs = {} THEN MaxEvents + 1
        ELSE CHOOSE m \in hs : \A k \in hs : m =< k
 
+(* The code's point walks the tree, received events included, in HLC      *)
+(* order, and stops at the first key the stable vector does not cover.     *)
+(* "last_confirmed" takes the key before it, 0 when there is none;         *)
+(* "first_unconfirmed" takes that key, and past every event when the walk   *)
+(* finds none. An empty tree is covered, since the walk finds nothing      *)
+(* uncovered; what may have been cut is Reserve's rule for CompactBy. The  *)
+(* code answers no point when the uncovered key is the tree's first, which *)
+(* takes fewer discards than this mode, never more.                        *)
+Held(r) == recv[r] \ cmp[r]
+Covered(e) ==
+    \/ e.seq =< StableVV[e.org]
+    \/ RetiredExempt /\ e.org \in retired
+Uncovered(r) == {HlcOf(DotOf(e)) : e \in {f \in Held(r) : ~Covered(f)}}
+FirstUnconfirmed(r) ==
+    IF Uncovered(r) = {} THEN MaxEvents + 1
+    ELSE CHOOSE m \in Uncovered(r) : \A k \in Uncovered(r) : m =< k
+LastConfirmed(r) ==
+    LET hs == {h \in {HlcOf(DotOf(e)) : e \in Held(r)} :
+                 h < FirstUnconfirmed(r)}
+    IN IF hs = {} THEN 0 ELSE CHOOSE m \in hs : \A k \in hs : k =< m
+SweepBound(r) ==
+    CASE BoundMode = "claims" -> Bound(r)
+      [] BoundMode = "last_confirmed" -> LastConfirmed(r)
+      [] BoundMode = "first_unconfirmed" -> FirstUnconfirmed(r)
+
 (* The sweep deletes an empty cell below the bound, after catching the     *)
 (* replay up (I1, `ensure_remote_caught_up/1` in the applier's sweep       *)
 (* handler): only held events may remain unfolded. It waits while the      *)
@@ -387,7 +420,7 @@ Discard(r) ==
     /\ ~\E e \in recv[r] : Foldable(r, e)
     /\ ~Present(cell[r])
     /\ "mark" \in HlcGuards => ~mark[r]
-    /\ CellHlc(cell[r]) < Bound(r)
+    /\ CellHlc(cell[r]) < SweepBound(r)
     /\ cell' = [cell EXCEPT ![r] = Bottom]
     /\ UNCHANGED <<recv, app, fold, minted, retired, installs, hvars>>
 
@@ -829,6 +862,28 @@ Owes(r) == mark[r] /\ ~live[r] /\ step[r] # "adopted"
 SomeoneServes ==
     Cardinality(Replicas \ retired) >= 2 =>
         ~\A r \in Replicas \ retired : Owes(r)
+
+\* An emptied cell the sweep can never delete: every event is minted and
+\* received, each held one is covered by every member's durable claims,
+\* nothing is left to fold, the mark is clear, and the cell's HLC is not
+\* below the bound. Under "last_confirmed" the bound is the HLC of the
+\* tree's last key, which is the cell's own once the last event is the
+\* remove that emptied it, so a violation is the expected result there.
+StuckTombstone(r) ==
+    /\ Cardinality(AllEvents) = MaxEvents
+    /\ cell[r] # Bottom
+    /\ ~Present(cell[r])
+    /\ \A e \in AllEvents : e.org \notin retired => e \in recv[r]
+    /\ \A e \in Held(r) : Covered(e)
+    /\ ~\E e \in recv[r] : Foldable(r, e)
+    /\ "mark" \in HlcGuards => ~mark[r]
+    /\ CellHlc(cell[r]) >= SweepBound(r)
+NoStuckTombstone == \A r \in Replicas \ retired : ~StuckTombstone(r)
+
+\* The sweep's bound never exceeds the "claims" stand-in, so every discard
+\* it takes is one the stand-in takes, and what the configs that set
+\* "claims" check holds for it too.
+BelowClaims == \A r \in Replicas : SweepBound(r) =< Bound(r)
 
 \* A truncated event stays claimed from the moment its truncation is
 \* recorded: nothing re-presents it once cut, and its origin's later events

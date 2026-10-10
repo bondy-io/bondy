@@ -154,7 +154,7 @@ Per-entity gives each `(EntityType, Shard)` its own Bookie, so the only index
 buckets present are this table's. The bare-suffix scope is therefore exact —
 there is no co-located sibling to over-wipe.
 """.
-index_clear_scope(IndexName, _TableState) when is_atom(IndexName) ->
+index_clear_scope(IndexName, _EntityType) when is_atom(IndexName) ->
     {suffix, IndexName}.
 
 -doc """

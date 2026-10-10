@@ -126,9 +126,11 @@ therefore observe writes as soon as `apply/4` returns; reads elsewhere
 observe them after replication.
 
 **The secondary index is not part of the primary commit.** `cell_apply`
-derives each index operation from the cell's old and new value, dispatches
-them only after the primary write returns, and dispatches them
-*asynchronously* to a shared index writer (`bondy_oplog_secondary_writer`).
+derives each index operation from the cell's old and new value. On a durable
+table it stores the batch's operations as an intent in the same primary
+write, so a node or writer that stops before writing them replays them from
+the primary. It dispatches them only after the primary write returns, and
+*asynchronously*, to a shared index writer (`bondy_oplog_secondary_writer`).
 Each index has a bounded in-flight budget. A batch that would exceed it is
 dropped, the index shard is marked for rebuild, and its freshness is reset so
 indexed reads refuse to serve until the rebuild completes. The index is a

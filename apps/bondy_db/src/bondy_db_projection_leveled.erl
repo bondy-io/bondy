@@ -134,6 +134,7 @@ value-present frames, exactly as `get/3` does).
     put_batch/2,
     range/5,
     delete/3,
+    write_batch/3,
     clear/2,
     cell_keys/2,
     sync/1,
@@ -296,15 +297,8 @@ typically receives N entries and issues ONE gen_server roundtrip.
     [{Bucket :: binary(), Key :: binary(), Frame :: binary()}]
 ) -> ok | {error, term()}.
 
-put_batch(_Handle, []) ->
-    ok;
 put_batch(H, Entries) when is_map(H), is_list(Entries) ->
-    Pid = bookie(H),
-    ObjectSpecs = build_object_specs(Entries, []),
-    case leveled_bookie:book_mput(Pid, ObjectSpecs) of
-        ok -> ok;
-        pause -> ok
-    end.
+    write_batch(H, Entries, []).
 
 -doc """
 Range read over `(Bucket, [Low, High))`. Returns up to `Limit`
@@ -399,15 +393,28 @@ with `remove` ops.
 delete(H, Bucket, Key) when
     is_binary(Bucket), is_binary(Key)
 ->
-    Pid = bookie(H),
-    ObjectSpecs = [
-        {remove, Bucket, Key, ?SK_STATE, null},
-        {remove, Bucket, Key, ?SK_VALUE, null}
-    ],
-    case leveled_bookie:book_mput(Pid, ObjectSpecs) of
-        ok -> ok;
-        pause -> ok
-    end.
+    write_batch(H, [], [{Bucket, Key}]).
+
+-doc """
+Write every `{Bucket, Key, Frame}` cell of `Puts` and delete both subkeys of
+every `{Bucket, Key}` cell of `Deletes` in one `book_mput/2`.
+""".
+-spec write_batch(
+    handle(),
+    [{Bucket :: binary(), Key :: binary(), Frame :: binary()}],
+    [{Bucket :: binary(), Key :: binary()}]
+) -> ok.
+
+write_batch(_H, [], []) ->
+    ok;
+write_batch(H, Puts, Deletes) when is_list(Puts), is_list(Deletes) ->
+    mput_ok(
+        leveled_bookie:book_mput(
+            bookie(H),
+            build_object_specs(Puts, []) ++
+                lists:flatmap(fun remove_specs/1, Deletes)
+        )
+    ).
 
 -doc """
 Bucket-scoped wipe of one index's cells (the optional `clear/2` callback).
@@ -593,12 +600,10 @@ is_non_index_bucket(Bucket) when is_binary(Bucket) ->
 is_non_index_bucket(_Bucket) ->
     false.
 
-%% The reserved index marker/flag buckets (`<<"$idx_trusted">>`,
-%% `<<"$idx_clean">>`; see `bondy_oplog_index_key`) live outside the index
-%% keyspace (no `/$idx/` infix) but are not primary cells. A realm-keyed primary
-%% bucket never starts with `$`, so a `$idx`-prefix test excludes them safely.
-%% (In `per_entity` these never share the primary Bookie anyway; the guard keeps
-%% `all_primary` correct on any co-located handle.)
+%% The reserved index buckets of `bondy_oplog_index_key` (`$idx_trusted`,
+%% `$idx_version`, `$idx_intent`, `$idx_intents_cleared`) have no `/$idx/`
+%% infix but are not primary cells, and the intent buckets live in the
+%% primary's own projection. No realm-keyed primary bucket starts with `$`.
 is_reserved_idx_bucket(<<"$idx", _/binary>>) -> true;
 is_reserved_idx_bucket(_) -> false.
 
@@ -627,26 +632,27 @@ is_bucket_suffix(_Suffix, _Bucket) ->
 clear_bucket(Pid, Bucket) ->
     FoldFun =
         fun
-            (B, {Key, ?SK_STATE}, Acc) ->
-                [
-                    {remove, B, Key, ?SK_STATE, null},
-                    {remove, B, Key, ?SK_VALUE, null}
-                    | Acc
-                ];
-            (_B, {_Key, _SubKey}, Acc) ->
-                Acc
+            (B, {Key, ?SK_STATE}, Acc) -> remove_specs({B, Key}) ++ Acc;
+            (_B, {_Key, _SubKey}, Acc) -> Acc
         end,
     {async, Folder} =
         leveled_bookie:book_keylist(Pid, ?HEAD_TAG, Bucket, {FoldFun, []}),
     case Folder() of
-        [] ->
-            ok;
-        ObjectSpecs ->
-            case leveled_bookie:book_mput(Pid, ObjectSpecs) of
-                ok -> ok;
-                pause -> ok
-            end
+        [] -> ok;
+        ObjectSpecs -> mput_ok(leveled_bookie:book_mput(Pid, ObjectSpecs))
     end.
+
+%% @private
+remove_specs({Bucket, Key}) ->
+    [
+        {remove, Bucket, Key, ?SK_STATE, null},
+        {remove, Bucket, Key, ?SK_VALUE, null}
+    ].
+
+%% @private
+%% `pause` is leveled's back-pressure hint; the write itself was accepted.
+mput_ok(ok) -> ok;
+mput_ok(pause) -> ok.
 
 %% @private
 dirs(Top) ->

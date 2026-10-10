@@ -12,9 +12,8 @@
 %%   - Sync rounds that fail or are no-ops do NOT bump.
 %%   - Targets the registry does not know about are tolerated and
 %%     counted as `not_found` without wedging the sync session.
-%%   - Item 6 (applier-side bump) and item 8 (AE-side bump) share the
-%%     same registry-backed target list — configuring `ae_targets` at
-%%     the top-level instance opts wires both sides.
+%%   - The appends a round follows leave the counter at the sentinel: only
+%%     the round confirms freshness (`proofs/tla/AuthFence.tla`).
 %% =============================================================================
 
 -module(bondy_oplog_sync_ae_bump_test).
@@ -42,8 +41,7 @@ ae_bump_test_() ->
         fun bump_shares_now_across_targets/0,
         fun no_op_sync_against_empty_peer_still_bumps/0,
         fun failed_sync_does_not_bump/0,
-        fun missing_target_is_tolerated/0,
-        fun top_level_ae_targets_wires_applier_and_ae/0
+        fun missing_target_is_tolerated/0
     ]}.
 
 %% =============================================================================
@@ -65,10 +63,7 @@ no_ae_targets_does_not_bump() ->
     cleanup_ns(NS).
 
 successful_sync_bumps_targets() ->
-    %% Only the puller (A) has an `ae_targets` opt, so the only path
-    %% that bumps the counter is A's sync round — which isolates the
-    %% AE-side bump from the applier-side bump that would otherwise
-    %% fire on B's appends.
+    %% Only the puller (A) has an `ae_targets` opt.
     NS = mk_ns(),
     ok = register_shard(NS, primary, 0),
     Targets = [{NS, primary, 0}],
@@ -126,12 +121,7 @@ no_op_sync_against_empty_peer_still_bumps() ->
     [bondy_oplog:append(A, X) || X <- [a, b, c]],
     ok = bondy_oplog:await_apply(A),
     Before = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
-    %% AE timestamps are `monotonic_time(millisecond)`. The applier's
-    %% commit_now bump (fired on `end_of_log` after the appends above)
-    %% can land in the same ms as the sync bump that follows — the
-    %% test would then observe `After == Before` even though the bump
-    %% did happen. Sleep until the clock has guaranteed to advance.
-    timer:sleep(2),
+    ?assertEqual(sentinel(), Before),
     %% A pulls from B which is empty — no events to apply but the round
     %% completes successfully.
     {ok, _} = bondy_oplog:sync(A, B),
@@ -178,41 +168,6 @@ missing_target_is_tolerated() ->
         not_found,
         bondy_oplog_core_registry:last_ae_at(missing_ns, primary, 0)
     ),
-    cleanup_ns(NS).
-
-top_level_ae_targets_wires_applier_and_ae() ->
-    %% Single top-level `ae_targets` opt should drive BOTH the applier's
-    %% per-commit bump (item 6) AND the sync session's per-round bump
-    %% (item 8). We commit-every=1 so the applier bumps on first append,
-    %% then sync from B (which has nothing) to verify the AE side also
-    %% bumps via the same target.
-    NS = mk_ns(),
-    ok = register_shard(NS, primary, 0),
-    Targets = [{NS, primary, 0}],
-    A = mk_inst(),
-    B = mk_inst(),
-    {ok, _} = bondy_oplog_test_projection:start_instance(A, (opts_for(
-        NS, Targets
-    ))#{
-        applier => #{commit_every => 1}
-    }),
-    {ok, _} = bondy_oplog_test_projection:start_instance(
-        B, opts_for(NS, Targets)
-    ),
-    ?assertEqual(
-        sentinel(),
-        bondy_oplog_core_registry:last_ae_at(NS, primary, 0)
-    ),
-    %% Applier-side bump on first commit.
-    _ = bondy_oplog:append(A, hello),
-    _ = wait_for_ae_advance(NS, primary, 0, sentinel()),
-    Mid = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
-    ?assert(Mid > sentinel()),
-    %% AE-side bump on sync (B is empty so this is a fast roundtrip).
-    timer:sleep(2),
-    {ok, _} = bondy_oplog:sync(A, B),
-    After = bondy_oplog_core_registry:last_ae_at(NS, primary, 0),
-    ?assert(After >= Mid),
     cleanup_ns(NS).
 
 %% =============================================================================
@@ -268,32 +223,6 @@ cleanup_ns(NS) ->
 
 sentinel() ->
     -(1 bsl 62).
-
-wait_for_ae_advance(NS, Index, Shard, Baseline) ->
-    wait_for_ae_advance(NS, Index, Shard, Baseline, 1000).
-
-wait_for_ae_advance(NS, Index, Shard, Baseline, TimeoutMs) ->
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    wait_for_ae_advance_loop(NS, Index, Shard, Baseline, Deadline).
-
-wait_for_ae_advance_loop(NS, Index, Shard, Baseline, Deadline) ->
-    case bondy_oplog_core_registry:last_ae_at(NS, Index, Shard) of
-        V when V > Baseline -> V;
-        _ ->
-            case erlang:monotonic_time(millisecond) >= Deadline of
-                true ->
-                    erlang:error({ae_did_not_advance, NS, Index, Shard});
-                false ->
-                    timer:sleep(5),
-                    wait_for_ae_advance_loop(
-                        NS,
-                        Index,
-                        Shard,
-                        Baseline,
-                        Deadline
-                    )
-            end
-    end.
 
 entry_to_map(E) ->
     #{key => bondy_oplog_core_registry:entry_key(E)}.

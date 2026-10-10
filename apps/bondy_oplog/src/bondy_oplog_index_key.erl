@@ -88,7 +88,10 @@ off-by-one.
 -export([bucket/2]).
 -export([bucket_suffix/1]).
 -export([trust_marker_loc/3]).
--export([clean_flag_loc/3]).
+-export([version_loc/4]).
+-export([intent_loc/3]).
+-export([intent_range/2]).
+-export([intents_cleared_loc/2]).
 -export([shard/3]).
 
 -type column() :: binary() | integer() | atom().
@@ -325,7 +328,9 @@ bucket_suffix(IndexName) when is_atom(IndexName) ->
 Storage location `{Bucket, Key}` of an index shard's **durable trust
 marker** — a reserved cell whose **presence means the shard is built and
 clean** (trustworthy on cold-start) and whose **absence means it must be
-rebuilt** using the durable-marker approach.
+rebuilt** using the durable-marker approach. The marker names the index cell
+format the shard was built in; a marker naming another format counts as
+absent (`bondy_db_index_coldstart_test:old_format_marker_rebuilds/1`).
 
 Inverted ("trusted") rather than "dirty" semantics so that *absence* — the
 default with no on-disk state — uniformly covers BOTH cases that require a
@@ -334,10 +339,11 @@ rebuild on open:
 - a **newly-declared index over an already-populated table** (never built, so
   no marker → rebuild from the primary), and
 - a shard **left incomplete by a pre-restart drop / wedged flush** (the drop
-  removed the marker → rebuild).
+  removes the marker, best-effort → rebuild).
 
-A clean build/rebuild writes the marker (`index_clear_rebuild/1`); a drop
-removes it (`index_mark_rebuild/1`). The compaction flush barrier keeps a
+A completed build/rebuild writes the marker (`index_clear_rebuild/2`); a
+mark for rebuild removes it (`index_mark_rebuild/1`), and a rebuild removes it
+again before its wipe (`index_untrust/1`). The compaction flush barrier keeps a
 trusted shard's durable cells complete `≤ snapshot_wm`, so a restart trusts
 + freshens + tail-replays — never an O(table) re-derive.
 
@@ -360,54 +366,72 @@ this reserved bucket — keeps every shard's marker distinct.
 trust_marker_loc(NS, IndexName, Shard) when
     is_atom(NS), is_atom(IndexName), is_integer(Shard), Shard >= 0
 ->
-    Key = <<
-        (atom_to_binary(NS, utf8))/binary,
-        ?SEP,
-        (atom_to_binary(IndexName, utf8))/binary,
-        ?SEP,
-        (integer_to_binary(Shard))/binary
-    >>,
-    {<<"$idx_trusted">>, Key}.
+    {<<"$idx_trusted">>, reserved_key([NS, IndexName, Shard])}.
 
 -doc """
-Storage location `{Bucket, Key}` of an index shard's **durable
-clean-shutdown flag** — a reserved cell whose **presence means the shard
-was durably flushed to the primary head at a clean shutdown**.
+Storage location `{Bucket, Key}` of the **version record** an index shard
+keeps for one primary shard: the highest index version from that primary
+shard any batch written to this index shard carried. The secondary writer
+writes it in the same `put_batch` as the batch's index cells. On leveled that
+is one `book_mput`, which the Inker writes as one journal object
+(`leveled_inker` `{mput, ...}`), so a crash keeps or drops the two together. A primary shard's counter restarts above it
+on open (`bondy_oplog_core_registry:index_version_recorded/3`).
 
-It is the second gate of the cold-start trust decision, alongside the trust
-marker (`trust_marker_loc/3`): a shard is trusted on open only if it is both
-*built* (trust marker present) **and** *cleanly closed* (this flag present).
-`bondy_db:close_table/1` writes it after `flush_sync`-ing the writer; cold-start
-**clears** it on open (so a crash this run leaves the shard dirty → rebuilt next
-open). The clear is safe under leveled's prefix recovery: it is journalled
-before any post-open index write, so a partial crash either keeps the clear
-(→ rebuild, safe) or loses both clear and writes (→ nothing new lost, trust is
-correct).
-
-Unlike the trust marker — written once at build completion, content-blind —
-this flag is per-run: it certifies that *this lifetime's* writes reached disk,
-which the trust marker alone cannot (it would trust a built-then-crashed shard
-that lost its in-flight coalesce buffer).
-
-Lives in the reserved bucket `<<"$idx_clean">>`, outside the index keyspace for
-the same reasons as the trust marker (no `?IDX_INFIX`, so `clear/2` and range
-scans never touch it). The key encodes `(NS, IndexName, Shard)` so a shared
-backend keeps every shard's flag distinct.
+Lives in the reserved bucket `<<"$idx_version">>`, outside the index
+keyspace for the same reasons as the trust marker. The key encodes
+`(NS, IndexName, Shard, PrimaryShard)`.
 """.
--spec clean_flag_loc(atom(), atom(), non_neg_integer()) ->
+-spec version_loc(atom(), atom(), non_neg_integer(), non_neg_integer()) ->
     {binary(), binary()}.
 
-clean_flag_loc(NS, IndexName, Shard) when
-    is_atom(NS), is_atom(IndexName), is_integer(Shard), Shard >= 0
+version_loc(NS, IndexName, Shard, PrimaryShard) when
+    is_atom(NS),
+    is_atom(IndexName),
+    is_integer(Shard),
+    Shard >= 0,
+    is_integer(PrimaryShard),
+    PrimaryShard >= 0
 ->
-    Key = <<
-        (atom_to_binary(NS, utf8))/binary,
-        ?SEP,
-        (atom_to_binary(IndexName, utf8))/binary,
-        ?SEP,
-        (integer_to_binary(Shard))/binary
-    >>,
-    {<<"$idx_clean">>, Key}.
+    {<<"$idx_version">>, reserved_key([NS, IndexName, Shard, PrimaryShard])}.
+
+-doc """
+Storage location `{Bucket, Key}` of the **index intent** primary shard `Shard`
+of `NS` writes for the batch whose highest index version is `Version`: the
+batch's index ops, stored in the same `put_batch` as its cells. Keys of one
+shard sort by `Version` (`intent_range/2`).
+
+Lives in the primary's projection, in the reserved bucket `<<"$idx_intent">>`,
+outside every table's keyspace.
+""".
+-spec intent_loc(atom(), non_neg_integer(), non_neg_integer()) ->
+    {binary(), binary()}.
+
+intent_loc(NS, Shard, Version) when is_integer(Version), Version >= 0 ->
+    {Bucket, Prefix, _High} = intent_range(NS, Shard),
+    {Bucket, <<Prefix/binary, Version:64>>}.
+
+-doc """
+`{Bucket, Low, High}`: the half-open key range holding every intent of primary
+shard `Shard` of `NS` (`intent_loc/3`), in version order.
+""".
+-spec intent_range(atom(), non_neg_integer()) ->
+    {binary(), binary(), binary()}.
+
+intent_range(NS, Shard) when is_atom(NS), is_integer(Shard), Shard >= 0 ->
+    Key = reserved_key([NS, Shard]),
+    {<<"$idx_intent">>, <<Key/binary, ?SEP>>, <<Key/binary, (?SEP + 1)>>}.
+
+-doc """
+Storage location `{Bucket, Key}` of the version up to which primary shard
+`Shard` of `NS` has cleared its intents. An intent at or below it is not
+replayed, whether or not its delete reached the store.
+""".
+-spec intents_cleared_loc(atom(), non_neg_integer()) -> {binary(), binary()}.
+
+intents_cleared_loc(NS, Shard) when
+    is_atom(NS), is_integer(Shard), Shard >= 0
+->
+    {<<"$idx_intents_cleared">>, reserved_key([NS, Shard])}.
 
 -doc """
 The secondary shard a term lands in: `phash2({Bucket, Term}, ShardCount)`.
@@ -427,6 +451,13 @@ shard(Bucket, Term, ShardCount) when
 %% =============================================================================
 %% INTERNAL
 %% =============================================================================
+
+%% The key of a reserved cell: its parts, `?SEP`-delimited.
+reserved_key(Parts) ->
+    iolist_to_binary(lists:join(<<?SEP>>, [reserved_part(P) || P <- Parts])).
+
+reserved_part(Atom) when is_atom(Atom) -> atom_to_binary(Atom, utf8);
+reserved_part(Int) when is_integer(Int) -> integer_to_binary(Int).
 
 %% Order-preserving, prefix-free escape into the `0x01` range so the
 %% result contains no `0x00`. `0x00 -> 0x01 0x01`, `0x01 -> 0x01 0x02`,

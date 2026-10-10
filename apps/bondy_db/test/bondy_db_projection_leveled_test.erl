@@ -512,9 +512,9 @@ cell_keys_is_entity_scoped({Pid, _Dir}) ->
             %% `users` INDEX cells — excluded (the `/$idx/` infix):
             {<<"users/$idx/by_name">>, <<"active">>, F},
             {<<"r1/users/$idx/by_name">>, <<"active">>, F},
-            %% reserved marker/flag buckets — excluded:
+            %% reserved index buckets — excluded:
             {<<"$idx_trusted">>, <<"m">>, F},
-            {<<"$idx_clean">>, <<"m">>, F},
+            {<<"$idx_version">>, <<"m">>, F},
             %% OTHER tables co-located in the Bookie — excluded (not `users`):
 
             %% shared_shards other table

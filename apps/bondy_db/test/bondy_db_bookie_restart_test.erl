@@ -31,10 +31,10 @@
 %% The anti-entropy cases open two tables that share each shard's instance
 %% and restart shard 0's applier, alone or with its whole subtree, or, for
 %% two fused ephemeral tables, the instance that is their writer. Every
-%% table must stay among the instance's AE targets, so a write to either
-%% table keeps the other's shard fresh; a table left out reads as stale, and
-%% `bondy_auth:security_fence/0` refuses authentication on a stale security
-%% table.
+%% table must stay among the instance's AE targets, so an anti-entropy round
+%% of the instance keeps every table's shard fresh; a table left out reads as
+%% stale, and `bondy_auth:security_fence/0` refuses authentication on a stale
+%% security table.
 %%
 %% The registry cases kill `bondy_oplog_registry` or
 %% `bondy_oplog_core_registry` under a running table. Reads and writes through
@@ -332,8 +332,10 @@ open_siblings(Db) ->
     ?assertEqual(Id, maps:get(0, maps:get(instance_ids, T2))),
     {T1, T2, Id}.
 
-%% Both tables are still the instance's AE targets, and each stays fresh
-%% when only the other is written: every commit bumps every target.
+%% Both tables are still the instance's AE targets. Local writes leave both
+%% stale, since only an anti-entropy round confirms freshness
+%% (`proofs/tla/AuthFence_Refuse_CommitBumps.cfg`); one round of every
+%% instance, with clustering off, then makes both fresh.
 assert_ae_targets_kept(T1, T2, Id) ->
     ?assertEqual(
         lists:sort([
@@ -343,9 +345,17 @@ assert_ae_targets_kept(T1, T2, Id) ->
         lists:sort(bondy_oplog_registry:ae_targets(Id))
     ),
     assert_writes_apply(T1),
-    ?assertEqual(ok, bondy_db:ensure_fresh([T2], 1000)),
     assert_writes_apply(T2),
-    ?assertEqual(ok, bondy_db:ensure_fresh([T1], 1000)).
+    ?assertMatch({stale, _}, bondy_db:ensure_fresh([T1], 1000)),
+    ?assertMatch({stale, _}, bondy_db:ensure_fresh([T2], 1000)),
+    lists:foreach(
+        fun bondy_oplog_sync_session:maybe_bump_ae_isolated/1,
+        lists:usort(
+            maps:values(maps:get(instance_ids, T1)) ++
+                maps:values(maps:get(instance_ids, T2))
+        )
+    ),
+    ?assertEqual(ok, bondy_db:ensure_fresh([T1, T2], 1000)).
 
 gated_opts() ->
     #{

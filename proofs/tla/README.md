@@ -1031,3 +1031,203 @@ every process is idle, the cache holds nothing or the projection's value.
 - The swapped order (`ReadCache_Swap`) is caught by the model only; the
   deterministic test cannot place a fill between the two steps of one
   invalidation.
+
+## `IndexIntents.tla` — can a node keep its secondary index without a rebuild after a crash?
+
+**Question.** A node opens after an unclean shutdown. Must it rebuild every
+secondary index from its primary, or can it re-apply only the index ops that
+did not reach the index store? And does the index stay equal to the primary
+after a catalogue install, which writes primary cells outside the WAL?
+
+**Protocol modelled.**
+- **Write path.** Each primary shard's applier folds a batch of events into one
+  `put_batch` and computes each event's index ops from the cell's old and new
+  value (`bondy_oplog_cell_apply`). It then dispatches the ops to the one
+  secondary writer that serves every shard (`bondy_oplog_secondary_writer`).
+- **Crash.** A store write is one leveled `book_mput`, kept or dropped whole. A
+  crash keeps every synced entry of each store and either a prefix or any
+  subset of the rest, independently per store.
+- **Checkpoint and barrier.** A checkpoint syncs the stores, then records what
+  the shard has applied. The compaction barrier flushes the writer first.
+  After a crash, every event the checkpoint does not claim is presented again.
+- **Install and rebuild.** A catalogue install writes or deletes cells
+  directly. A rebuild clears the index, re-folds every primary, flushes, and
+  marks the index trusted (`bondy_oplog_index_rebuild`).
+- **Clean close** (`CleanReopen`). The primaries stop with nothing left to
+  apply or dispatch, both stores sync, and the open that follows trusts the
+  index and runs no rebuild. With `Intents = FALSE` the writer flushes first;
+  with intents the close discards the writer's buffer
+  (`bondy_oplog_secondary_writer:reset/1`) and the open replays it.
+
+**Mechanism** (`Intents = TRUE`). The `Dispatched`, `InstallBatch` and
+`UnmarkLost` configs are meant to model the code; they differ in their bounds
+and in the failures they allow.
+- **Intent in the cell's batch.** A batch that yields index ops stores them as
+  an intent in the same `put_batch`. Each event takes the next version of its
+  shard's counter.
+- **Version recorded in the index batch.** Every index batch records, per
+  shard, the highest version it writes.
+- **Barrier clears per shard** (`ClearBound = "dispatched"`). After flushing
+  the writer and syncing the index, the barrier clears a shard's intents up to
+  the version the shard had dispatched when the barrier began. It clears
+  nothing while a rebuild is due (`ClearMarked = FALSE`).
+- **Replay after registering.** A restarted writer, and a node at open,
+  registers for dispatch and then replays the leftover intents of every
+  shard. A trusting open flushes the writer before it freshens the index, and
+  does not freshen when that flush fails. A full rebuild runs only for an
+  untrusted index.
+- **Install.** An install writes intents with its cells. A group of cells
+  syncs the primary before its first cell
+  (`bondy_oplog_cell_apply:begin_install/1`) and, when the group has ops,
+  syncs the primary again at its end and then dispatches them
+  (`settle_install/3`).
+- **Order by version.** Index cells are ordered by the version, not the cell
+  HLC. After a crash, a shard's counter restarts at the highest version its
+  primary or the index records.
+- **Rebuild trust mark.** The first request removes the trust mark
+  best-effort (`bondy_oplog_core_registry:index_mark_rebuild/1`). The rebuild
+  removes it again and fails if it cannot (`index_untrust/1`), syncs the
+  index, then wipes it. It marks the index trusted only if the writer that
+  took its re-fold flushed it, and no new request arrived while it ran.
+
+**Properties.** `IndexMatchesPrimary`: once nothing is in flight and the index
+is trusted, the index holds exactly the terms of the primary.
+`FreshMeansComplete`: an index the open freshened holds every op the open
+replayed.
+
+Unless a row says otherwise, these bounds apply: one shard, values
+`{none, a, b}`, two events, batches of up to two, one install, one node crash.
+A violated row gives the length of the counterexample in steps.
+
+The code's mechanism:
+
+| Config | Differs from | Result |
+|---|---|---|
+| `Dispatched` | `Intents`: clear up to what the shard had dispatched | holds; 762,961, depth 20 |
+| `Dispatched_Subset` | `Dispatched`: a crash keeps any subset of unsynced entries | holds; 1,095,364, depth 20 |
+| `Dispatched_2Shards` | `Intents_2Shards`, as `Dispatched` | holds; 792,427, depth 20 |
+| `Dispatched_Writer` | `Intents_Writer`, as `Dispatched` | holds; 2,936,617, depth 27 |
+| `Dispatched_Saturation` | `Intents_Saturation`, as `Dispatched` | holds; 1,403,547, depth 23 |
+| `Dispatched_Clean` | `Intents_Clean`, as `Dispatched` | holds; 3,293,770, depth 23 |
+| `Dispatched_Remark` | `Dispatched`: two backlog drops, so a request arrives during a rebuild | holds; 4,888,911, depth 26 |
+| `Dispatched_Subset_Rebuild` | `Dispatched_Subset`: two shards, a backlog drop, values `{none, a}`, batches of one, no install; only the index keeps any subset | holds; 18,408,740, depth 27 |
+| `InstallBatch` | `Dispatched`: two installs in one group | holds; 21,135,383, depth 23 |
+| `UnmarkLost` | `Dispatched_Saturation`: a best-effort removal of the trust mark may be lost | holds; 2,224,775, depth 23 |
+| `UnmarkLost_Remark` | `Dispatched_Remark`, as `UnmarkLost` | holds; 11,481,937, depth 26 |
+| `UnmarkLost_2Shards` | `Dispatched_Subset_Rebuild`, as `UnmarkLost`, the index keeps a prefix | holds; 21,688,093, depth 27 |
+
+Each mechanism with one part removed:
+
+| Config | Differs from | Result |
+|---|---|---|
+| `DrawnBound` | `Dispatched`: clear up to the counter, undispatched ops included | violated in 4 steps |
+| `OpenSeed` | `Dispatched`: a shard's dispatched version at open is its counter | violated in 5 steps |
+| `OpenNoFlush` | `Dispatched_Clean`: the open freshens without flushing the writer | violated in 4 steps (`FreshMeansComplete`) |
+| `FreshenWithoutFlush` | `Dispatched_Writer`: the open freshens after a failed flush | violated in 5 steps (`FreshMeansComplete`) |
+| `ClearMarked` | `Dispatched_Remark`: the barrier clears while a rebuild is due | violated in 10 steps |
+| `Dispatched_Saturation_NoWipe` | `Dispatched_Saturation`: the rebuild does not clear the index | violated in 8 steps (a dropped remove survives the rebuild) |
+| `Dispatched_Saturation_NoRefold` | `Dispatched_Saturation`: the rebuild's re-fold dispatches nothing | violated in 5 steps |
+| `NoSyncBeforeWipe` | `Dispatched_Subset_Rebuild`: no index sync between removing the mark and the wipe | violated in 11 steps |
+| `NoSyncBeforeMark` | `Dispatched_Subset_Rebuild`: no index sync before the trust mark | violated in 14 steps |
+| `UnmarkLost_2Shards_NoRebuildUnmark` | `UnmarkLost_2Shards`: the rebuild does not remove the mark itself | violated in 11 steps |
+| `UnmarkLost_NoRebuildUnmark` | `UnmarkLost`, as above | holds; 1,313,679, depth 23 (one shard does not reach it) |
+| `InstallBatch_NoSync` | `InstallBatch`: no sync at the end of an install group | violated in 8 steps |
+| `Intents_Subset_NoInstallSync` | `Intents_Subset`: no sync before an install group's first cell | violated in 9 steps (an install survives a crash that loses an earlier write) |
+| `MarkWithoutFlush` | `Intents_Rebuild` with two writer crashes: mark after a failed flush or writer restart | violated in 12 steps (one crash triggers the rebuild, the second loses its re-fold) |
+| `DrainRequests` | `Intents_Rebuild`: mark and drop a request that arrived during the rebuild | violated in 10 steps |
+| `IntentsVersion` | `Intents_Saturation`: recover the version from the primary only | violated in 11 steps (a rebuild's version is not in the primary) |
+| `ReplayBeforeStamp` | `Intents_Writer`: replay before registering | violated in 5 steps |
+| `WriterBound` | `Intents_2Shards`: clear up to the writer-wide highest version | violated in 8 steps |
+| `HlcOrder` | `Intents`: order by the cell HLC | violated in 5 steps (an install at an older HLC) |
+| `SeparateBatch` | `Intents`: the intent in the next batch | violated in 5 steps |
+| `ClearBeforeSync` | `Intents`: clear without syncing the index | violated in 5 steps |
+| `BatchVersion` | `Intents`: one version per batch | violated in 3 steps (put and remove of one batch tie) |
+| `VersionReset` | `Intents`: the counter restarts at zero | violated in 7 steps |
+| `InstallDispatch` | `Intents`: an install dispatches without syncing the primary | violated in 7 steps |
+| `NoInstallIndex` | `Intents`: an install yields no index ops | violated in 2 steps |
+
+The same mechanism with the barrier clearing up to the version the index
+records (`ClearBound = "source"`):
+
+| Config | Differs from | Result |
+|---|---|---|
+| `Intents` | — | holds; 781,864, depth 20 |
+| `Intents_Subset` | `Intents`: a crash keeps any subset of unsynced entries | holds; 1,117,147, depth 20 |
+| `Intents_2Shards` | `Intents`: two shards sharing the writer, batches of one, no install | holds; 1,033,739, depth 20 |
+| `Intents_Writer` | `Intents`: a writer crash, batches of one, no install | holds; 3,043,052, depth 27 |
+| `Intents_Saturation` | `Intents`: a backlog drop, batches of one, no install | holds; 1,407,969, depth 23 |
+| `Intents_Rebuild` | `Intents_Saturation`: a writer crash, values `{none, a}` | holds; 26,681,686, depth 32 |
+| `Intents_Clean` | `Intents`: one clean close and trusting open | holds; 3,412,587, depth 23 |
+
+Without intents (`Intents = FALSE`): every open after a crash rebuilds.
+
+| Config | Differs from | Result |
+|---|---|---|
+| `NoIntents` | no intents; a full rebuild at every open; batches of one, no install | holds; 86,000, depth 18 |
+| `NoIntents_Install` | `NoIntents`: one install | violated in 3 steps |
+| `NoIntents_NoRebuildAtOpen` | `NoIntents`: no rebuild at open | violated in 3 steps |
+| `NoIntents_Writer` | `NoIntents`: a writer crash | violated in 8 steps |
+| `NoIntents_Writer_MarkNeedsFlush` | `NoIntents_Writer`: the rebuild's mark checks the writer | holds; 3,635,337, depth 25 |
+| `NoIntents_Version` | `NoIntents`: order by the version | holds; 86,000, depth 18 |
+| `NoIntents_Version_Writer` | `NoIntents_Writer_MarkNeedsFlush`: order by the version | holds; 3,539,427, depth 25 |
+| `NoIntents_Version_Clean` | `NoIntents_Version`: one clean close and trusting open | holds; 177,105, depth 19 |
+| `NoIntents_Version_Clean_Reset` | `NoIntents_Version_Clean`: the counter restarts at zero | violated in 6 steps (a remove after the clean open ties the live entry) |
+
+**Matching tests.** `bondy_db_shared_shards_clear_test:rebuild_restores_stale_index/1`
+covers the rebuild's wipe and re-fold on co-located tables
+(`Dispatched_Saturation_NoWipe`, `Dispatched_Saturation_NoRefold`). In
+`bondy_db_index_coldstart_test`:
+- `install_keeps_the_index/1` and `install_syncs_before_its_first_cell/1` for
+  the install (`InstallBatch`, `Intents_Subset_NoInstallSync`);
+- `failed_unmark_blocks_the_wipe/1` for the rebuild's removal of the trust
+  mark (`UnmarkLost_2Shards`);
+- `clean_reopen_orders_new_ops_above_old/1` for the counter seed
+  (`NoIntents_Version_Clean_Reset`).
+
+**Not established.**
+- `Intents_Rebuild` allows one writer crash. `MarkWithoutFlush` needs two, so
+  the rebuild's flush check is shown necessary but not shown sufficient with
+  two writer crashes: `Intents_Rebuild` with two writer crashes found no
+  violation in 19,967,449 states before the guard stopped it, incomplete.
+- `UnmarkLost_NoRebuildUnmark` holds: with one shard, the lost removal is not
+  reached. `UnmarkLost_2Shards_NoRebuildUnmark` shows it.
+- `HlcOrder` fails only through an install. Without installs, ordering by the
+  cell HLC is not shown to be wrong.
+- The model has one index and gives each shard one key. A failed index
+  computation (`index_ops_for_cell` raising) is not modelled.
+- That a rolled leveled journal file can lose entries a later file keeps is
+  read from `leveled_cdb:close_file`, not probed. The `_Subset` configs cover
+  it either way.
+
+## `AuthFence.tla` — can a node authenticate on a security view that misses a revocation?
+
+**Question.** The authentication fence (`bondy_auth:security_fence/0`) lets a
+node authenticate only while its view of the security tables was confirmed
+within `max_lag`. Which events may confirm it?
+
+**Protocol modelled.** Two nodes; `r1` revokes a user. A sync round pulls a
+peer's view and confirms the puller. A round with no peer confirms a node with
+clustering off, and a clustered one only under `Policy = "proceed"`. A
+partition cuts the nodes apart. `CommitBumps` makes a local commit confirm too.
+
+**Property.** `FenceSafe`: once the revocation is older than `MaxLag`, a node
+whose fence passes has seen it.
+
+Bounds: `MaxLag = 1`, `MaxTime = 5`.
+
+| Config | Differs from | Result |
+|---|---|---|
+| `AuthFence_Refuse` | — two clustered nodes, policy `refuse` | holds; 1,022 distinct states |
+| `AuthFence_Single` | one node, clustering off | holds; 91 |
+| `AuthFence_Refuse_CommitBumps` | `AuthFence_Refuse`: a local commit confirms | violated in 5 steps (a cut-off node that writes passes without the revocation) |
+| `AuthFence_Proceed` | `AuthFence_Refuse`: policy `proceed` | violated in 6 steps (the trade-off `proceed` accepts) |
+
+`AuthFence_Refuse` is not vacuous: checked against an invariant that no node
+passes after the revocation is older than `MaxLag`, TLC finds one that does,
+by syncing after the revocation.
+
+**Matching test.** `bondy_db_bookie_restart_test` (`assert_ae_targets_kept/3`):
+local writes leave the shards stale, one anti-entropy round confirms them.
+
+**Not established.** The model has two nodes and one revocation. `quorum` is
+not modelled.

@@ -206,7 +206,7 @@ register_shard(NS, Index, Extra) ->
         overlay => disabled
     }).
 
-%% Answers every `bondy_oplog_secondary_writer:flush_sync/2` and reports it.
+%% Answers every `bondy_oplog_secondary_writer:flush_entry/2` and reports it.
 fake_writer(Test) ->
     receive
         {'$gen_call', From, flush_sync} ->

@@ -11,7 +11,7 @@
 -compile([nowarn_export_all, export_all]).
 
 %% BONDY_DB_RECLAMATION_PLAN.md Step 9 — the capstone validation, over a
-%% 2-node Partisan cluster with live AAE (production paths only: writes and
+%% 3-node Partisan cluster with live AAE (production paths only: writes and
 %% deletes through `bondy_db`, stability through the frontier swap the
 %% background sync performs, reclamation through
 %% `bondy_oplog_instance:reclaim_stable_cells/1`):
@@ -26,14 +26,21 @@
 %%     deliberate membership act (`partisan_peer_service:leave/1` — the
 %%     replicated authority), the same tombstone IS reclaimed. This is the
 %%     plan's "frontier advances past a retired member" assertion, and its
-%%     converse: an un-retired silent member holds the frontier down.
+%%     converse: an un-retired silent member holds the frontier down. The
+%%     cluster has three nodes so the survivors stay a cluster: a sole
+%%     member with clustering enabled confirms nothing.
+%%   - `compacted_tombstone_is_reclaimed`: compaction empties a replica's
+%%     tree while the tombstone's cell remains in its projection; the cell
+%%     is still reclaimed on every node. Compaction reaching a tombstone
+%%     before reclamation is the default order (`bondy_oplog_config`:
+%%     `gc_interval_ms/0` against `reclaim_interval_ms/0`).
 %%
 %% Scheduler-driven GC (compaction) is frozen suite-wide, as in
 %% `bondy_frontier_cluster_SUITE`: reclamation must not race MST truncation
 %% in the test window, and recorded peer roots must stay readable for the
 %% frontier computation.
 
--define(NODE_NAMES, [creap1, creap2]).
+-define(NODE_NAMES, [creap1, creap2, creap3]).
 -define(USERS_TABLE, security_users).
 -define(BANDS, 4).
 -define(CONVERGE_MS, 120000).
@@ -41,6 +48,7 @@
 all() ->
     [
         reclaim_after_convergence_no_resurrection,
+        compacted_tombstone_is_reclaimed,
         down_member_blocks_reclamation_until_retired
     ].
 
@@ -62,7 +70,7 @@ end_per_suite(Config) ->
 %% =============================================================================
 
 reclaim_after_convergence_no_resurrection(Config) ->
-    [N1, N2] = nodes_of(Config),
+    [N1, N2, _N3] = nodes_of(Config),
     %% Writes on BOTH sides: N1 owns the `a` bands, N2 the `b` bands.
     APairs = seed_pairs(<<"nra">>),
     BPairs = seed_pairs(<<"nrb">>),
@@ -110,7 +118,7 @@ reclaim_after_convergence_no_resurrection(Config) ->
     ok.
 
 down_member_blocks_reclamation_until_retired(Config) ->
-    [N1, N2] = nodes_of(Config),
+    [N1, N2, _N3] = nodes_of(Config),
     {_, N2, Peer2} = lists:keyfind(N2, 2, ?config(cluster, Config)),
 
     %% A cell that converged while both members were alive.
@@ -147,9 +155,74 @@ down_member_blocks_reclamation_until_retired(Config) ->
     ],
     ok.
 
+compacted_tombstone_is_reclaimed(Config) ->
+    [N1, N2, N3] = Nodes = nodes_of(Config),
+    {B, K} = unique_pair(<<"compacted">>),
+    seed_and_converge(N1, N2, [{B, K}]),
+    ok = wait_converge(N3, B, K, val(B, K)),
+    ok = erpc:call(N2, ?MODULE, do_delete, [?USERS_TABLE, B, K]),
+    [ok = wait_gone(N, B, K) || N <- Nodes],
+
+    ok = compact_until_empty(Nodes, N1, B, K),
+    ?assert(cell_present(N1, B, K)),
+
+    ok = reclaim_until_absent(Nodes, B, K),
+    [?assertEqual({error, not_found}, read(N, B, K)) || N <- Nodes],
+    ok.
+
 %% =============================================================================
 %% CONTROLLER HELPERS
 %% =============================================================================
+
+%% @private
+%% Reclamation passes on every node, with no other write, until no node's
+%% projection holds the cell.
+reclaim_until_absent(Nodes, Band, Key) ->
+    wait_until(
+        fun() ->
+            _ = [reclaim_once(N) || N <- Nodes],
+            not lists:any(fun(N) -> cell_present(N, Band, Key) end, Nodes)
+        end,
+        {tombstone_retained, Band, Key}
+    ).
+
+%% @private
+%% Compaction cycles on every node until `Node`'s tree for the cell's shard
+%% holds no event.
+compact_until_empty(Nodes, Node, Band, Key) ->
+    wait_until(
+        fun() ->
+            _ = [
+                catch_all(fun() ->
+                    erpc:call(N, ?MODULE, do_checkpoint_all, [])
+                end)
+             || N <- Nodes
+            ],
+            _ = [
+                catch_all(fun() ->
+                    erpc:call(N, bondy_oplog_sync_scheduler, trigger, [])
+                end)
+             || N <- Nodes
+            ],
+            _ = [
+                catch_all(fun() ->
+                    erpc:call(N, ?MODULE, do_compact, [?USERS_TABLE, Band, Key])
+                end)
+             || N <- Nodes
+            ],
+            erpc:call(Node, ?MODULE, do_tree_empty, [?USERS_TABLE, Band, Key])
+        end,
+        {never_compacted_to_empty, Node, Band, Key}
+    ).
+
+%% @private
+cell_present(Node, Band, Key) ->
+    erpc:call(Node, ?MODULE, do_cell_present, [?USERS_TABLE, Band, Key]).
+
+%% @private
+unique_pair(Tag) ->
+    U = integer_to_binary(erlang:unique_integer([positive])),
+    {band_for(Tag, 1), <<"k_", U/binary>>}.
 
 %% @private
 nodes_of(Config) ->
@@ -226,6 +299,11 @@ wait_gone(Node, Band, Key) ->
 %% on `Node`. Per-instance errors ({unconfirmed, _} etc.) count as zero —
 %% they are the oracle refusing, which is the behaviour under test.
 reclaim_once(Node) ->
+    %% A member confirms what it has checkpointed, which frozen GC never does.
+    _ = [
+        catch_all(fun() -> erpc:call(N, ?MODULE, do_checkpoint_all, []) end)
+     || N <- [Node | erpc:call(Node, erlang, nodes, [])]
+    ],
     _ =
         try
             erpc:call(Node, bondy_oplog_sync_scheduler, trigger, [])
@@ -350,6 +428,62 @@ do_delete(Table, Band, Key) ->
 %% @private
 do_read(Table, Band, Key) ->
     bondy_db:read(table_handle(Table), Band, Key).
+
+%% @private
+%% Whether the shard's projection holds the cell at all, tombstone or not: a
+%% read returns `not_found` for both.
+do_cell_present(Table, Band, Key) ->
+    Entry = primary_entry(Table, Band, Key),
+    Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
+    Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
+    Scope = bondy_oplog_core_registry:entry_primary_cell_scope(Entry),
+    Size = byte_size(Key),
+    lists:any(
+        fun({_Bucket, SKey}) ->
+            is_binary(SKey) andalso
+                binary:longest_common_suffix([SKey, Key]) =:= Size
+        end,
+        Adapter:cell_keys(Handle, Scope)
+    ).
+
+%% @private
+do_compact(Table, Band, Key) ->
+    bondy_oplog_compaction:compact(instance_of(Table, Band, Key)).
+
+%% @private
+do_tree_empty(Table, Band, Key) ->
+    bondy_oplog_instance:root_hash(instance_of(Table, Band, Key)) =:=
+        undefined.
+
+%% @private
+instance_of(Table, Band, Key) ->
+    bondy_oplog_core_registry:entry_instance_id(
+        primary_entry(Table, Band, Key)
+    ).
+
+%% @private
+primary_entry(Table, Band, Key) ->
+    Tab = table_handle(Table),
+    Shard = bondy_db:shard_for(Tab, Band, Key),
+    {ok, Entry} = bondy_oplog_core_registry:lookup(
+        maps:get(namespace, Tab), primary, Shard
+    ),
+    Entry.
+
+%% @private
+do_checkpoint_all() ->
+    [
+        catch_all(fun() -> bondy_oplog_instance:persist_frontier(I) end)
+     || I <- bondy_oplog:list_instances()
+    ].
+
+%% @private
+catch_all(Fun) ->
+    try
+        Fun()
+    catch
+        _:_ -> ok
+    end.
 
 %% @private
 do_reclaim_all() ->

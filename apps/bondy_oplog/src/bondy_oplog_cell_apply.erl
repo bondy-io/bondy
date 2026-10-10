@@ -47,6 +47,15 @@ behaviour is byte-identical.
     %% shard's registry entry has no ref (defensive only; new registrations
     %% always allocate).
     high_water_ref => bondy_oplog_high_water:ref() | undefined,
+    %% The primary shard's index version counter
+    %% (`bondy_oplog_core_registry:entry_version_ref/1`). Each cell event that
+    %% yields index ops takes its next value, and every op of the event carries
+    %% it as its order in the index cell.
+    version_ref => atomics:atomics_ref() | undefined,
+    %% Whether a batch that yields index ops also writes them as an intent in
+    %% its own `put_batch` (`bondy_oplog_core_registry:index_intent_cell/4`):
+    %% only on a durable projection, whose index outlives a crash.
+    index_intents => boolean(),
     %% Secondary indexes declared on this primary table. Static descriptors
     %% resolved once at init from the applier opts; `[]` (the default) makes the
     %% index dispatch a strict no-op. For each cell the applier materialises it
@@ -60,7 +69,7 @@ behaviour is byte-identical.
     index_name := atom(),
     spec := bondy_oplog_index_spec:spec(),
     sec_shard_count := pos_integer(),
-    %% Per-shard in-flight back-pressure cap; read by `dispatch_index_ops/4`.
+    %% Per-shard in-flight back-pressure cap; read by `dispatch_index_ops/3`.
     %% Defaults to `?DEFAULT_MAX_INFLIGHT` when absent.
     max_inflight => non_neg_integer()
 }.
@@ -76,10 +85,17 @@ the fused instance each hold a `ctx_source()` and dispatch through
 -type ctx_source() :: bondy_oplog_mux:t().
 
 -doc """
-A context's namespace paired with its secondary index descriptors, as returned
-by `sec_idx/1`.
+A context's namespace, its primary shard and that shard's index version
+counter, and its secondary index descriptors, as returned by `sec_idx/1`.
 """.
--type sec_idx() :: {Namespace :: atom(), [index_descriptor()]}.
+-type sec_idx() :: {
+    Namespace :: atom(),
+    {
+        Shard :: non_neg_integer(),
+        VersionRef :: atomics:atomics_ref() | undefined
+    },
+    [index_descriptor()]
+}.
 
 -export_type([cell_apply_ctx/0]).
 -export_type([index_descriptor/0]).
@@ -92,16 +108,19 @@ by `sec_idx/1`.
 -export([apply_cell_pairs_mux/4]).
 -export([apply_cell_pairs_mux/5]).
 -export([build_source/2]).
--export([compute_one_cell/13]).
 -export([oldstate_cache_new/2]).
 -export([oldstate_cache_delete/3]).
 -export([oldstate_cache_put_entries/2]).
 -export([oldstate_cache_clear/1]).
--export([max_hlc/2]).
 -export([sec_idx/1]).
--export([index_op/7]).
+-export([next_index_version/1]).
+-export([index_ops_for_cell/8]).
 -export([merge_idx_ops/2]).
--export([dispatch_index_ops/4]).
+-export([dispatch_index_ops/3]).
+-export([replay_intents/3]).
+-export([install_index/5]).
+-export([begin_install/1]).
+-export([settle_install/3]).
 -export([invalidate_cache/4]).
 -export([advance_high_water/2]).
 
@@ -204,7 +223,9 @@ apply_cell_batch(Ctx, Id, Events) ->
         _ ->
             PutT0 = erlang:monotonic_time(microsecond),
             Entries = [{B, K, F} || {{B, K}, F} <- maps:to_list(LocalWrites)],
-            PutResult = Adapter:put_batch(Handle, Entries),
+            PutResult = Adapter:put_batch(
+                Handle, Entries ++ intent_cells(Ctx, SecIdx, IdxAcc)
+            ),
             telemetry:execute(
                 [bondy_oplog, applier, batch_cell_put],
                 #{
@@ -234,7 +255,7 @@ apply_cell_batch(Ctx, Id, Events) ->
                     %% Only after the primary write is durable do we let
                     %% the index see these terms. The live drain path
                     %% enforces the back-pressure cap (Bypass = false).
-                    ok = dispatch_index_ops(SecIdx, IdxAcc, MaxHlc, false),
+                    ok = dispatch_index_ops(SecIdx, IdxAcc, false),
                     %% Report what is now durable. The caller makes the
                     %% frontier claim, after every group of the batch has
                     %% reported — so the frontier never leads the projection.
@@ -335,7 +356,14 @@ compute_one_cell(
         %% spec degrades only the index (rebuildable) and never drops the
         %% primary write.
         IdxOps = index_ops_for_cell(
-            SecIdx, Id, Kernel, Bucket, Key, OldState, NewState, Hlc
+            SecIdx,
+            Id,
+            Kernel,
+            Bucket,
+            Key,
+            OldState,
+            NewState,
+            next_index_version(SecIdx)
         ),
         {ok, NewFrame, Hlc, IdxOps, OldValueOpt}
     catch
@@ -381,7 +409,7 @@ read_old_value(
 
 %% @private
 %% Decode a stored cell frame into `{OldState, OldValueOpt}` — the exact shape
-%% `compute_one_cell/12` consumes. Shared by the in-batch shadow, the
+%% `compute_one_cell/13` consumes. Shared by the in-batch shadow, the
 %% cache-hit, and the projection-read paths so all three are byte-for-byte
 %% equivalent.
 decode_old_frame(Kernel, Frame) ->
@@ -471,32 +499,72 @@ max_hlc(A, B) when A >= B -> A;
 max_hlc(_, B) -> B.
 
 %% @private
-%% Bundle the namespace + resolved secondary-index descriptors out of the
-%% cell-apply ctx into the compact `{NS, [Descriptor]}` pair threaded
-%% through the cell compute/dispatch path. `[]` (no indexes) makes every
-%% downstream step a strict no-op.
+%% `[]` (no indexes) makes every downstream index step a strict no-op.
 sec_idx(Ctx) ->
-    {NS, _Index, _Shard} = maps:get(shard_key, Ctx),
-    {NS, maps:get(secondary_indexes, Ctx, [])}.
+    {NS, _Index, Shard} = maps:get(shard_key, Ctx),
+    {
+        NS,
+        {Shard, maps:get(version_ref, Ctx, undefined)},
+        maps:get(secondary_indexes, Ctx, [])
+    }.
 
-%% @private
-%% Term-diff one cell's old vs new value into a flat list of
-%% `{IndexName, SecShard, IndexOp}` across every declared secondary index.
-%% Own try/catch: a malformed spec (e.g. a term type the codec rejects)
-%% degrades only the index — the caller's primary write proceeds.
+-doc """
+Take the next index version of the primary shard `SecIdx` names. `0`, with no
+draw, when the shard has no secondary indexes.
+""".
+-spec next_index_version(sec_idx()) -> non_neg_integer().
+
+next_index_version({_NS, _Counter, []}) ->
+    0;
+next_index_version({_NS, {_Shard, Ref}, _SecIndexes}) ->
+    bondy_oplog_core_registry:index_version_next(Ref).
+
+-doc """
+Term-diff one cell's old and new state into `{IndexName, SecShard, IndexOp}`
+ops across every secondary index `SecIdx` declares, each op carrying
+`Version` as its order. `OldState = none` stands for a cell with no indexed
+past, so the ops are a `put` for every current term: the rebuild's re-fold
+into a cleared index. `NewState = none` stands for a deleted cell, so the ops
+are a `remove` for every old term. A `put` goes out for every current term (an idempotent
+re-put also refreshes the denormalised columns when sibling fields changed)
+and a `remove` for every term the value no longer yields.
+
+A raise (e.g. a term type the codec rejects) is logged and yields no ops: it
+degrades only the index, which a rebuild restores, never the primary write.
+""".
+-spec index_ops_for_cell(
+    sec_idx(),
+    term(),
+    bondy_oplog_cell_kernel:t(),
+    binary(),
+    term(),
+    term() | none,
+    term() | none,
+    non_neg_integer()
+) -> [{atom(), non_neg_integer(), bondy_oplog_secondary_writer:op()}].
+
 index_ops_for_cell(
-    {_NS, []}, _Id, _Kernel, _Bucket, _Key, _OldState, _NewState, _Hlc
+    {_NS, _Counter, []}, _Id, _Kernel, _Bucket, _Key, _Old, _New, _Version
 ) ->
     [];
 index_ops_for_cell(
-    {_NS, SecIndexes}, Id, Kernel, Bucket, Key, OldState, NewState, Hlc
+    {_NS, _Counter, SecIndexes},
+    Id,
+    Kernel,
+    Bucket,
+    Key,
+    OldState,
+    NewState,
+    Version
 ) ->
     try
-        OldValue = bondy_oplog_cell_kernel:to_value(Kernel, OldState),
-        NewValue = bondy_oplog_cell_kernel:to_value(Kernel, NewState),
+        OldValue = cell_value(Kernel, OldState),
+        NewValue = cell_value(Kernel, NewState),
         lists:flatmap(
             fun(Desc) ->
-                index_ops_for_one(Desc, Bucket, Key, OldValue, NewValue, Hlc)
+                index_ops_for_one(
+                    Desc, Bucket, Key, OldValue, NewValue, Version
+                )
             end,
             SecIndexes
         )
@@ -504,10 +572,9 @@ index_ops_for_cell(
         C:R:S ->
             ?LOG_ERROR(#{
                 description =>
-                    "bondy_oplog_applier secondary-index op computation "
-                    "raised; the index is degraded for this cell "
-                    "(rebuildable from the primary). The primary write "
-                    "is unaffected.",
+                    "secondary-index op computation raised; the index is "
+                    "degraded for this cell (rebuildable from the "
+                    "primary). The primary is unaffected.",
                 instance_id => Id,
                 bucket => Bucket,
                 cell_key => Key,
@@ -519,18 +586,19 @@ index_ops_for_cell(
     end.
 
 %% @private
-%% A `put` for every current term (an idempotent re-put also refreshes the
-%% denormalised columns when sibling fields changed) and a `remove` for
-%% every term the value no longer yields. The op HLC is the *primary*
-%% cell's new HLC, so the index cell's LWW-over-presence fold converges
-%% regardless of arrival order.
+cell_value(_Kernel, none) ->
+    undefined;
+cell_value(Kernel, State) ->
+    bondy_oplog_cell_kernel:to_value(Kernel, State).
+
+%% @private
 index_ops_for_one(
     #{index_name := IName, spec := Spec, sec_shard_count := SCount} = Desc,
     Bucket,
     Key,
     OldValue,
     NewValue,
-    Hlc
+    Version
 ) ->
     RealmFolded = maps:get(realm_folded, Desc, false),
     OldTerms = lists:usort(bondy_oplog_index_spec:terms(Spec, OldValue)),
@@ -540,13 +608,13 @@ index_ops_for_one(
     Removed = OldTerms -- NewTerms,
     [
         index_op(
-            IName, SecBucket, SCount, T, Key, {put, Cols, Hlc}, RealmFolded
+            IName, SecBucket, SCount, T, Key, {put, Cols, Version}, RealmFolded
         )
      || T <- NewTerms
     ] ++
         [
             index_op(
-                IName, SecBucket, SCount, T, Key, {remove, Hlc}, RealmFolded
+                IName, SecBucket, SCount, T, Key, {remove, Version}, RealmFolded
             )
          || T <- Removed
         ].
@@ -557,8 +625,8 @@ index_op(IName, SecBucket, SCount, Term, PrimaryKey, EventDelta, RealmFolded) ->
     SecKey = index_seckey(Term, PrimaryKey, RealmFolded),
     Op =
         case EventDelta of
-            {put, Cols, Hlc} -> {put, SecBucket, SecKey, Cols, Hlc};
-            {remove, Hlc} -> {remove, SecBucket, SecKey, Hlc}
+            {put, Cols, Version} -> {put, SecBucket, SecKey, Cols, Version};
+            {remove, Version} -> {remove, SecBucket, SecKey, Version}
         end,
     {IName, SecShard, Op}.
 
@@ -596,14 +664,13 @@ merge_idx_ops(Acc, [{IName, SecShard, Op} | Rest]) ->
 %% `needs_rebuild`, its freshness reset to stale so reads refuse, and a rebuild
 %% requested. A rebuild's own re-fold dispatches with `Bypass = true` so it can
 %% reload the full working set in one pass.
-dispatch_index_ops({_NS, []}, _IdxAcc, _MaxHlc, _Bypass) ->
+dispatch_index_ops({_NS, _Counter, []}, _IdxAcc, _Bypass) ->
     ok;
-dispatch_index_ops({NS, SecIndexes}, IdxAcc, MaxHlc, Bypass) ->
-    Hlc =
-        case MaxHlc of
-            undefined -> 0;
-            _ -> MaxHlc
-        end,
+dispatch_index_ops({_NS, _Counter, _SecIndexes}, IdxAcc, _Bypass) when
+    map_size(IdxAcc) =:= 0
+->
+    ok;
+dispatch_index_ops({NS, {Shard, Ref}, SecIndexes}, IdxAcc, Bypass) ->
     Caps = maps:from_list([
         {
             maps:get(index_name, D),
@@ -615,14 +682,199 @@ dispatch_index_ops({NS, SecIndexes}, IdxAcc, MaxHlc, Bypass) ->
         fun({IName, SecShard}, RevOps) ->
             Cap = maps:get(IName, Caps, ?DEFAULT_MAX_INFLIGHT),
             dispatch_one_index(
-                NS, IName, SecShard, lists:reverse(RevOps), Hlc, Cap, Bypass
+                NS, IName, SecShard, Shard, lists:reverse(RevOps), Cap, Bypass
             )
         end,
+        IdxAcc
+    ),
+    bondy_oplog_core_registry:index_version_dispatched(
+        Ref, top_version(IdxAcc)
+    ).
+
+-doc """
+Dispatch the index ops of a primary shard's leftover intents
+(`bondy_oplog_core_registry:index_intents_leftover/4`) to the writers of its
+index shards, bypassing the back-pressure cap, then record their highest
+version as dispatched. `Entry` is the shard's registry row. It is meant to
+run after the row is registered and before the shard's applier starts, so it
+is the only process dispatching for the shard.
+""".
+-spec replay_intents(
+    bondy_oplog_core_registry:shard_entry(),
+    [index_descriptor()],
+    [{pos_integer(), map()}]
+) -> ok.
+
+replay_intents(_Entry, _SecIndexes, []) ->
+    ok;
+replay_intents(Entry, SecIndexes, Intents) ->
+    {NS, _Index, Shard} = bondy_oplog_core_registry:entry_key(Entry),
+    Ref = bondy_oplog_core_registry:entry_version_ref(Entry),
+    IdxAcc = lists:foldl(
+        fun({_Version, Ops}, Acc0) ->
+            maps:fold(
+                fun(Stream, RevOps, Acc) ->
+                    Acc#{Stream => RevOps ++ maps:get(Stream, Acc, [])}
+                end,
+                Acc0,
+                Ops
+            )
+        end,
+        #{},
+        Intents
+    ),
+    dispatch_index_ops({NS, {Shard, Ref}, SecIndexes}, IdxAcc, true).
+
+-doc """
+The index side of an install's write of cell `{Bucket, Key}`: the intent cells
+to write in the same batch as the cell, and the index ops, diffed against the
+cell's current frame. `New` is the frame the install writes, or `none` when
+it deletes the cell. Each call takes one version of the shard's counter.
+`{[], []}`, with no read, when the table has no secondary indexes.
+""".
+-spec install_index(
+    term(), cell_apply_ctx(), binary(), term(), binary() | none
+) ->
+    {
+        [{binary(), term(), binary()}],
+        [{atom(), non_neg_integer(), bondy_oplog_secondary_writer:op()}]
+    }.
+
+install_index(Id, Ctx, Bucket, Key, New) ->
+    case sec_idx(Ctx) of
+        {_NS, _Counter, []} ->
+            {[], []};
+        SecIdx ->
+            #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
+            Old =
+                case Adapter:get(Handle, Bucket, Key) of
+                    {ok, Frame} -> Frame;
+                    not_found -> none
+                end,
+            Ops = index_ops_for_cell(
+                SecIdx,
+                Id,
+                Kernel,
+                Bucket,
+                Key,
+                frame_state(Kernel, Old),
+                frame_state(Kernel, New),
+                next_index_version(SecIdx)
+            ),
+            {intent_cells(Ctx, SecIdx, merge_idx_ops(#{}, Ops)), Ops}
+    end.
+
+-doc """
+Opens an install's group of cells. On a table with secondary indexes it syncs
+the primary first, so an install never overwrites an unsynced write: a crash
+could keep the install and lose that write, whose redo then diffs against the
+installed cell and drops its index ops
+(`proofs/tla/IndexIntents_Intents_Subset.cfg`; without the sync,
+`proofs/tla/IndexIntents_Intents_Subset_NoInstallSync.cfg` violates
+`IndexMatchesPrimary`).
+""".
+-spec begin_install(cell_apply_ctx()) -> ok | {error, term()}.
+
+begin_install(Ctx) ->
+    case sec_idx(Ctx) of
+        {_NS, _Counter, []} -> ok;
+        _SecIdx -> sync_primary(Ctx)
+    end.
+
+-doc """
+Ends an install's group of cells, whose index ops `IdxAcc` holds
+(`merge_idx_ops/2` over `install_index/5`'s ops). When the group wrote all its
+cells (`Status = ok`) and has ops, it syncs the primary, then dispatches
+`IdxAcc`, bypassing the back-pressure cap. The sync comes first because an
+install's cells are not in the WAL, so nothing re-applies one a crash lost
+(`proofs/tla/IndexIntents_InstallBatch.cfg`; without the sync,
+`proofs/tla/IndexIntents_InstallBatch_NoSync.cfg` violates
+`IndexMatchesPrimary`). A failed group or sync marks every shard of the
+table's indexes for rebuild instead, and returns the error.
+""".
+-spec settle_install(cell_apply_ctx(), map(), ok | {error, term()}) ->
+    ok | {error, term()}.
+
+settle_install(_Ctx, IdxAcc, ok) when map_size(IdxAcc) =:= 0 ->
+    ok;
+settle_install(Ctx, IdxAcc, ok) ->
+    SecIdx = sec_idx(Ctx),
+    case sync_primary(Ctx) of
+        ok ->
+            dispatch_index_ops(SecIdx, IdxAcc, true);
+        {error, _} = Error ->
+            ok = mark_indexes(SecIdx),
+            Error
+    end;
+settle_install(Ctx, _IdxAcc, {error, _} = Error) ->
+    ok = mark_indexes(sec_idx(Ctx)),
+    Error.
+
+%% @private
+sync_primary(#{adapter := Adapter, handle := Handle}) ->
+    case bondy_oplog_projection_adapter:sync(Adapter, Handle) of
+        ok -> ok;
+        {error, Reason} -> {error, {projection_sync_failed, Reason}}
+    end.
+
+%% @private
+frame_state(_Kernel, none) ->
+    none;
+frame_state(Kernel, Frame) ->
+    {State, _ValueBytes} = decode_old_frame(Kernel, Frame),
+    State.
+
+%% @private
+mark_indexes({NS, _Counter, SecIndexes}) ->
+    lists:foreach(
+        fun(#{index_name := IName, sec_shard_count := SCount}) ->
+            lists:foreach(
+                fun(SecShard) ->
+                    case
+                        bondy_oplog_core_registry:lookup(NS, IName, SecShard)
+                    of
+                        {ok, Entry} -> bondy_oplog_index_rebuild:mark(Entry);
+                        not_found -> ok
+                    end
+                end,
+                lists:seq(0, SCount - 1)
+            )
+        end,
+        SecIndexes
+    ).
+
+%% @private
+intent_cells(
+    #{index_intents := true}, {NS, {Shard, _Ref}, _SecIndexes}, IdxAcc
+) when
+    map_size(IdxAcc) > 0
+->
+    [
+        bondy_oplog_core_registry:index_intent_cell(
+            NS, Shard, top_version(IdxAcc), IdxAcc
+        )
+    ];
+intent_cells(_Ctx, _SecIdx, _IdxAcc) ->
+    [].
+
+%% @private
+top_version(IdxAcc) ->
+    maps:fold(
+        fun(_Stream, Ops, Max) ->
+            lists:foldl(
+                fun(Op, M) ->
+                    max(bondy_oplog_secondary_writer:op_version(Op), M)
+                end,
+                Max,
+                Ops
+            )
+        end,
+        0,
         IdxAcc
     ).
 
 %% @private
-dispatch_one_index(NS, IName, SecShard, Ops, MaxHlc, Cap, Bypass) ->
+dispatch_one_index(NS, IName, SecShard, Source, Ops, Cap, Bypass) ->
     case bondy_oplog_core_registry:lookup(NS, IName, SecShard) of
         {ok, Entry} ->
             case bondy_oplog_core_registry:entry_writer_pid(Entry) of
@@ -642,7 +894,7 @@ dispatch_one_index(NS, IName, SecShard, Ops, MaxHlc, Cap, Bypass) ->
                             %% its `writer_key` and demuxes the ops back to each
                             %% stream's projection.
                             bondy_oplog_secondary_writer:enqueue(
-                                Pid, {NS, IName}, Ops, MaxHlc
+                                Pid, {NS, IName}, Source, Ops
                             );
                         false ->
                             secondary_saturation_drop(
@@ -663,19 +915,13 @@ dispatch_one_index(NS, IName, SecShard, Ops, MaxHlc, Cap, Bypass) ->
 %% freshness so `index_get`/`index_range` refuse until the rebuild
 %% completes, and request the rebuild.
 secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
-    bondy_oplog_core_registry:index_mark_rebuild(Entry),
     bondy_oplog_core_registry:reset_stale_ae(Entry),
     telemetry:execute(
         [bondy_oplog, secondary_writer, saturated],
         #{dropped_ops => NumOps},
         #{namespace => NS, index_name => IName, shard => SecShard}
     ),
-    try
-        bondy_oplog_index_rebuild:request(NS, IName)
-    catch
-        _:_ -> ok
-    end,
-    ok.
+    bondy_oplog_index_rebuild:mark(Entry).
 
 %% @private
 %% Walks the `{Key, Value}` pairs from the MST (or its diff) and dispatches
@@ -785,7 +1031,12 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                         {B, K, F}
                      || {{B, K}, F} <- maps:to_list(LocalWrites)
                     ],
-                    case Adapter:put_batch(Handle, Entries) of
+                    case
+                        Adapter:put_batch(
+                            Handle,
+                            Entries ++ intent_cells(Ctx, SecIdx, IdxAcc)
+                        )
+                    of
                         ok ->
                             maps:foreach(
                                 fun({B, K}, _F) ->
@@ -803,9 +1054,7 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                                 undefined -> ok;
                                 _ -> advance_high_water(HighWaterRef, MaxHlc)
                             end,
-                            ok = dispatch_index_ops(
-                                SecIdx, IdxAcc, MaxHlc, false
-                            ),
+                            ok = dispatch_index_ops(SecIdx, IdxAcc, false),
                             %% Notify reactors AFTER the durable write + index
                             %% dispatch, so a reactor that reads back sees the
                             %% merged value. Best-effort, never blocks the replay.

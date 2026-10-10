@@ -3,11 +3,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PR-Z: `bondy_oplog_crdt_index_entry` is the native op-based CRDT backing
-%% every secondary-index cell (the op-based successor of the retired
-%% `bondy_oplog_fold_index_entry`, the last fold migrated). These tests pin
-%% its LWW-over-presence semantics: highest-HLC wins, the merge converges
-%% under any operation order, and the encoding round-trips.
+%% `bondy_oplog_crdt_index_entry` is the op-based CRDT backing every
+%% secondary-index cell. These tests pin its LWW-over-presence semantics: the
+%% highest version wins, the merge converges under any operation order, and
+%% the encoding round-trips.
 
 -module(bondy_oplog_crdt_index_entry_test).
 
@@ -26,8 +25,8 @@ ops() ->
     ].
 
 %% The final state of the op sequence: `{put, colsC, 12}` is the highest
-%% HLC, so it wins (live, colsC).
-final_state_is_highest_hlc_test() ->
+%% version, so it wins (live, colsC).
+final_state_is_highest_version_test() ->
     ?assertEqual({live, <<"colsC">>, 12}, fold_crdt(ops())),
     ?assertEqual(<<"colsC">>, ?CRDT:to_value(fold_crdt(ops()))).
 
@@ -47,12 +46,10 @@ contract_markers_test() ->
     ?assertEqual({dead, <<>>, 0}, ?CRDT:init()),
     ?assertEqual(undefined, ?CRDT:to_value(?CRDT:init())).
 
-%% Golden wire-format bytes. The retired `bondy_oplog_fold_index_entry`
-%% used `<<Rank:8, H:64/big, ColsSize:32/big, Cols/binary>>` with
-%% `rank(live)=1, rank(dead)=0`. With the fold deleted there is no module
-%% left to compare against, so this pins the exact bytes — a durable index
-%% cell written before the cutover MUST still decode, and future edits must
-%% not silently change the format.
+%% Golden wire-format bytes, `<<Rank:8, Version:64/big, ColsSize:32/big,
+%% Cols/binary>>` with `rank(live)=1, rank(dead)=0`. A change to them is a
+%% new index cell format, which needs a new `?INDEX_FORMAT` in
+%% `bondy_oplog_core_registry` so durable indexes rebuild on open.
 golden_bytes_test() ->
     ?assertEqual(
         <<1, 7:64/big-unsigned, 2:32/big-unsigned, "xy">>,
@@ -77,7 +74,7 @@ encode_roundtrips_test() ->
     ],
     [?assertEqual(S, ?CRDT:decode_state(?CRDT:encode_state(S))) || S <- States].
 
-hlc_is_max_absorbed_test() ->
+version_is_max_absorbed_test() ->
     S = fold_crdt([{put, <<"a">>, 4}, {remove, 9}, {put, <<"b">>, 6}]),
     ?assertEqual(9, ?CRDT:hlc(S)),
     %% remove at 9 dominates the put at 6 → tombstone, value undefined.

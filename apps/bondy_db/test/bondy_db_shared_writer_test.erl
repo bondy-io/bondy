@@ -45,6 +45,10 @@ shared_writer_test_() ->
         gen(
             "open_during_last_close_of_writer_key",
             fun open_during_last_close_of_writer_key/1
+        ),
+        gen(
+            "close_discards_buffer_on_shared_writer",
+            fun close_discards_buffer_on_shared_writer/1
         )
     ]}.
 
@@ -226,7 +230,8 @@ refcounted_writer_teardown({_Db, Users, Groups, _Sup, _Dir}) ->
 %% A restart of `bondy_oplog_secondary_sup` (here a kill; in production the
 %% exhaustion of its restart intensity) takes every writer with it. The
 %% restarted supervisor must drive every registered index shard again, and the
-%% write made while no writer ran must reach the index through the rebuild.
+%% write made while no writer ran must reach the index, which the restarted
+%% writer replays from the primary's intent.
 %% Covers a single restart; a crash loop that exhausts `bondy_oplog_sup` too is
 %% not exercised.
 secondary_sup_restart_keeps_writers({_Db, Users, Groups, _Sup, _Dir}) ->
@@ -353,6 +358,60 @@ open_during_last_close_of_writer_key({Db, Users, Groups, _Sup, _Dir}) ->
         {closed_again, ok} -> ok
     end.
 
+%% A close leaves the shared writers running for `groups`, holding `users`' op
+%% in their buffers (a long `coalesce_ms` keeps them from flushing it). The
+%% close must discard it: the reopen replays the op from the primary's intent
+%% and flushes exactly that one op, the one its in-flight count reserved. A
+%% kept stale copy is flushed too, which the clamped count does not show.
+close_discards_buffer_on_shared_writer({Db, Users0, Groups0, _Sup, _Dir}) ->
+    ok = bondy_db:close_table(Users0),
+    ok = bondy_db:close_table(Groups0),
+    Slow = #{
+        fold_module => lww_register,
+        indexes => [#{name => by_value, extract => [], coalesce_ms => 600000}]
+    },
+    {ok, Users1} = bondy_db:open_table(Db, users, Slow),
+    {ok, Groups} = bondy_db:open_table(Db, groups, Slow),
+    R = <<"r1">>,
+    ok = bondy_db:apply(
+        Users1, R, <<"u1">>, {set, bondy_db:tick(Users1), <<"v">>}
+    ),
+    Shared = lists:usort(maps:values(writer_pids(Groups, by_value))),
+    ok = bondy_db:close_table(Users1),
+    ?assert(lists:all(fun erlang:is_process_alive/1, Shared)),
+    NS = maps:get(namespace, bondy_db:info(Users1)),
+    Flushed = atomics:new(1, []),
+    HandlerId = {?MODULE, flushed, erlang:unique_integer()},
+    ok = telemetry:attach(
+        HandlerId,
+        [bondy_oplog, secondary_writer, flush],
+        fun
+            (
+                _E, #{ops := N}, #{namespace := Ns, index_name := by_value}, _C
+            ) when
+                Ns =:= NS
+            ->
+                atomics:add(Flushed, 1, N);
+            (_E, _M, _Meta, _C) ->
+                ok
+        end,
+        undefined
+    ),
+    {ok, Users2} =
+        try
+            bondy_db:open_table(Db, users, Slow)
+        after
+            telemetry:detach(HandlerId)
+        end,
+    ?assertEqual(1, atomics:get(Flushed, 1)),
+    ?assertEqual(0, inflight(Users2, by_value)),
+    ?assertEqual(
+        {ok, [{<<"u1">>, #{}}]},
+        bondy_db:index_get(Users2, R, by_value, <<"v">>, #{})
+    ),
+    ok = bondy_db:close_table(Users2),
+    ok = bondy_db:close_table(Groups).
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
@@ -398,6 +457,20 @@ writer_pids(Table, IndexName) ->
             Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
             true = is_pid(Pid),
             {Shard, Pid}
+        end
+     || Shard <- lists:seq(0, N - 1)
+    ]).
+
+inflight(Table, IndexName) ->
+    Info = bondy_db:info(Table),
+    NS = maps:get(namespace, Info),
+    #{IndexName := #{sec_shard_count := N}} = maps:get(indexes, Info),
+    lists:sum([
+        begin
+            {ok, Entry} = bondy_oplog_core_registry:lookup(
+                NS, IndexName, Shard
+            ),
+            bondy_oplog_core_registry:index_inflight(Entry)
         end
      || Shard <- lists:seq(0, N - 1)
     ]).

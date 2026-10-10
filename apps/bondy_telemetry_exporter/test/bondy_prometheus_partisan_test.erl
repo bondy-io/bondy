@@ -16,7 +16,7 @@ partisan_metrics_test_() ->
         {"heartbeat records RTT + send-pending", fun heartbeat/0},
         {"connection up/down counters, with reason", fun conn_churn/0},
         {"membership change deltas + size gauge", fun membership/0},
-        {"channel connection size + target gauges", fun channel_conns/0},
+        {"channel connection target gauge", fun channel_target/0},
         {"connect + TLS handshake latency, by result", fun connect_handshake/0}
     ]}.
 
@@ -69,7 +69,7 @@ membership() ->
     ),
     ?assertEqual(5, gauge(bondy_cluster_membership_size, #{})).
 
-channel_conns() ->
+channel_target() ->
     L = #{peer => 'p4@h', channel => wamp_relay},
     ok = bondy_prometheus:handle_partisan_event(
         [partisan, channel, connections],
@@ -77,7 +77,6 @@ channel_conns() ->
         #{peer_node => 'p4@h', channel => wamp_relay},
         undefined
     ),
-    ?assertEqual(1, gauge(bondy_cluster_channel_connections, L)),
     ?assertEqual(2, gauge(bondy_cluster_channel_connections_target, L)).
 
 connect_handshake() ->

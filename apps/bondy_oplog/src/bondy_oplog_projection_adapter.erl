@@ -72,10 +72,16 @@ passes a new Bucket value to `get/3`, `put_batch/2`, `range/5`, or
   and the rebuild falls back to the MST walk — correct only for the
   ephemeral/peer-synced path (e.g. the registry), whose cells are never
   compacted away. Probe it via `cell_keys_exported/1`.
-- `sync/1` — make every write `put_batch/2` has acknowledged durable. A
+- `sync/1` — make every write `put_batch/2` or `write_batch/3` has
+  acknowledged durable. A
   durable adapter whose acknowledged writes can still be lost to a power
   failure exports it; call it through `sync/2`, which is `ok` for an adapter
-  that does not.
+  that does not. Exporting it is what makes an adapter durable
+  (`is_durable/1`).
+- `write_batch/3` — put several cells and delete several `{Bucket, Key}`
+  cells in one atomic write. Call it through `write_batch/4`, which falls back
+  to `put_batch/2` then one `delete/3` per cell for an adapter that does not
+  export it.
 
 Adapters MUST be safe under concurrent readers; `put_batch/2` may be
 single-writer (the substrate guarantees one applier per shard).
@@ -103,6 +109,8 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 
 -export([cell_keys_exported/1]).
 -export([sync/2]).
+-export([is_durable/1]).
+-export([write_batch/4]).
 
 -type handle() :: any().
 -type bucket() :: term().
@@ -213,7 +221,13 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 
 -callback sync(handle()) -> ok | {error, term()}.
 
--optional_callbacks([head/3, clear/2, cell_keys/2, sync/1]).
+-callback write_batch(
+    handle(),
+    Puts :: [{bucket(), Key :: term(), Frame :: binary()}],
+    Deletes :: [{bucket(), Key :: term()}]
+) -> ok | {error, term()}.
+
+-optional_callbacks([head/3, clear/2, cell_keys/2, sync/1, write_batch/3]).
 
 %% =============================================================================
 %% API
@@ -237,7 +251,8 @@ cell_keys_exported(Adapter) when is_atom(Adapter) ->
     erlang:function_exported(Adapter, cell_keys, 2).
 
 -doc """
-Makes every write `put_batch/2` has acknowledged on `Handle` durable, through
+Makes every write `put_batch/2` or `write_batch/3` has acknowledged on
+`Handle` durable, through
 `Adapter`'s optional `sync/1`. `ok` when `Adapter` does not export it.
 """.
 -spec sync(Adapter :: module(), handle()) -> ok | {error, term()}.
@@ -247,4 +262,45 @@ sync(Adapter, Handle) when is_atom(Adapter) ->
     case erlang:function_exported(Adapter, sync, 1) of
         true -> Adapter:sync(Handle);
         false -> ok
+    end.
+
+-doc """
+Whether `Adapter`'s writes outlive the process that made them: it exports the
+optional `sync/1`. The in-RAM ETS adapter does not.
+""".
+-spec is_durable(Adapter :: module()) -> boolean().
+
+is_durable(Adapter) when is_atom(Adapter) ->
+    _ = code:ensure_loaded(Adapter),
+    erlang:function_exported(Adapter, sync, 1).
+
+-doc """
+Writes every cell of `Puts` and deletes every `{Bucket, Key}` cell of
+`Deletes` on `Handle` in one write, through `Adapter`'s optional
+`write_batch/3`. When `Adapter` does not export it, the puts go in one
+`put_batch/2` and the deletes follow one `delete/3` per cell, so a crash may
+keep the puts without the deletes.
+""".
+-spec write_batch(
+    Adapter :: module(),
+    handle(),
+    [{bucket(), term(), binary()}],
+    [{bucket(), term()}]
+) -> ok | {error, term()}.
+
+write_batch(_Adapter, _Handle, [], []) ->
+    ok;
+write_batch(Adapter, Handle, Puts, Deletes) when is_atom(Adapter) ->
+    _ = code:ensure_loaded(Adapter),
+    case erlang:function_exported(Adapter, write_batch, 3) of
+        true ->
+            Adapter:write_batch(Handle, Puts, Deletes);
+        false ->
+            maybe
+                ok ?= Adapter:put_batch(Handle, Puts),
+                lists:foreach(
+                    fun({B, K}) -> ok = Adapter:delete(Handle, B, K) end,
+                    Deletes
+                )
+            end
     end.

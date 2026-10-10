@@ -142,15 +142,16 @@ no_other_member_with_clustering_reclaims_nothing() ->
     teardown(Id).
 
 %% -----------------------------------------------------------------------------
-%% Empty local tree in a cluster — vacuous, reported as `idle`
+%% Nothing applied in a cluster — vacuous, reported as `idle`
 %% -----------------------------------------------------------------------------
 
-%% A clustered replica whose MST holds no events (never written, or fully
-%% compacted) can have no frontier by construction and holds nothing whose
+%% A clustered replica that has applied nothing holds no cell whose
 %% stability needs certifying: the outcome is the distinct, non-actionable
 %% `idle` — NOT `unconfirmed` (which tells the operator to revive a member
 %% that is alive and converged). The first local event ends the idle state
-%% and the ordinary confirmation discipline takes over.
+%% and the ordinary confirmation discipline takes over. A tree emptied by
+%% compaction keeps its frontier and is not idle
+%% (`bondy_reclamation_cluster_SUITE:compacted_tombstone_is_reclaimed/1`).
 empty_tree_is_idle_not_stalled() ->
     Id = start_instance(),
     Ghost = 'ghost@nowhere',
@@ -182,8 +183,6 @@ empty_tree_is_idle_not_stalled() ->
 
 unconfirmed_member_blocks_stability() ->
     Id = start_instance(),
-    %% The instance must HOLD an event: an empty tree is the vacuous
-    %% `idle` case (tested separately), not a member-blocked stall.
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"held">>, {set, <<"v">>}}),
     ok = bondy_oplog_instance:await_apply(Id),
     Ghost = 'ghost@nowhere',
@@ -213,8 +212,8 @@ confirmed_frontier_is_hand_computed() ->
     ok = bondy_oplog_instance:await_apply(Id),
     %% The peer's durable frontier: everything up to and including e3.
     Witness = bondy_oplog_registry:frontier(Id),
-    %% e4 lands AFTER the peer's frontier — outside the stability frontier.
-    _K4 = bondy_oplog:append(Id, {cell_apply, ?B, <<"kC">>, {set, <<"x">>}}),
+    %% e4 lands AFTER the peer's frontier: the first key it does not cover.
+    K4 = bondy_oplog:append(Id, {cell_apply, ?B, <<"kC">>, {set, <<"x">>}}),
     ok = bondy_oplog_instance:await_apply(Id),
 
     ok = bondy_oplog_peer_state:record_sync_complete(Ghost, Id, Witness),
@@ -223,19 +222,20 @@ confirmed_frontier_is_hand_computed() ->
     bondy_oplog_test_helpers:with_members(
         fun() -> lists:usort([partisan:node(), Ghost]) end,
         fun() ->
-            %% Hand-computed: the largest local key `Witness` covers is e3, so the
-            %% stability point IS e3's HLC — asserted against the captured event
-            %% key, not against the chain's own output.
+            %% Hand-computed: the first local key `Witness` does not cover is
+            %% e4, so the stability point is e4's HLC — asserted against the
+            %% captured event keys, not against the chain's own output.
             {ok, SP} = bondy_oplog_instance:stability_point(Id),
-            ?assertEqual(bondy_oplog_event:key_hlc(K3), SP),
+            ?assert(bondy_oplog_event:key_hlc(K3) < SP),
+            ?assertEqual(bondy_oplog_event:key_hlc(K4), SP),
 
             %% In effect: the kA tombstone (HLC < SP) is reclaimed ...
             {ok, Stats} = bondy_oplog_instance:reclaim_stable_cells(Id),
             ?assert(maps:get(discarded, Stats) >= 1),
 
-            %% ... while a tombstone minted ABOVE the frontier is retained: the
-            %% peer has not confirmed anything past e3, so a second pass at the
-            %% same point discards nothing.
+            %% ... while a tombstone minted above e4 is retained: the peer has
+            %% not confirmed anything past e3, so a second pass discards
+            %% nothing.
             _K5 = bondy_oplog:append(Id, {cell_apply, ?B, <<"kB">>, clear}),
             ok = bondy_oplog_instance:await_apply(Id),
             {ok, Stats2} = bondy_oplog_instance:reclaim_stable_cells(Id),
@@ -249,10 +249,6 @@ confirmed_frontier_is_hand_computed() ->
 %% -----------------------------------------------------------------------------
 
 non_event_frontier_is_a_named_error() ->
-    ?assertEqual(
-        {error, no_frontier},
-        bondy_oplog_instance:frontier_stability_point(undefined)
-    ),
     ?assertEqual(
         {error, non_event_frontier},
         bondy_oplog_instance:frontier_stability_point(<<"not-an-event-key">>)
@@ -276,8 +272,6 @@ non_event_frontier_is_a_named_error() ->
 
 stall_is_observable_within_one_interval() ->
     Id = start_instance(),
-    %% Hold an event so the ghost member genuinely blocks stability (an
-    %% empty tree would be the non-actionable `idle`, which never warns).
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"held">>, {set, <<"v">>}}),
     ok = bondy_oplog_instance:await_apply(Id),
     Ghost = 'dead-member@nowhere',

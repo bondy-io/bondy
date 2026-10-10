@@ -26,14 +26,22 @@ interleaving another rebuild's flush would lose data).
 
 For one index `(NS, IndexName)`:
 
-1. **Discard + wipe** every target secondary shard: reset the writer's
+1. **Discard + wipe** every target secondary shard: mark it for rebuild,
+   remove its durable trust marker (`index_untrust/1`; the mark's own removal
+   is best-effort and can be lost, `IndexIntents_UnmarkLost_2Shards.cfg`), and
+   sync it, so a crash after the wipe leaves it untrusted on disk
+   (`proofs/tla/IndexIntents.tla`, the `IndexIntents_NoSyncBeforeWipe.cfg`
+   ablation). A failed removal or sync fails the run before the wipe. Then
+   reset the writer's
    buffered ops (stale, possibly for terms since removed), `clear/2` the
    shard's projection scoped to the index's bucket suffix (so orphaned
    terms do not survive, without touching co-located tables on a shared
    backend), reset the in-flight counter, and reset freshness to stale so
    reads refuse mid rebuild.
 2. **Re-derive** every primary shard's index via
-   `bondy_oplog_applier:rebuild_indexes_sync/1`. That reads each live
+   `bondy_oplog_applier:rebuild_indexes_sync/2`, naming the shard, so a
+   shared instance re-folds this table and not the one that founded it. That
+   reads each live
    cell's CURRENT projection value and re-dispatches a `put` for every live
    term of every cell, bypassing the back-pressure cap so the full working
    set lands in one pass. (Reading the converged value, rather than
@@ -41,21 +49,41 @@ For one index `(NS, IndexName)`:
    index from latching superseded multi-value siblings.)
 3. **Flush** every secondary writer in the namespace (the target index
    plus any sibling indexes that received idempotent re-puts from the
-   shared re-fold), draining buffers and decrementing in-flight counters.
+   shared re-fold), draining buffers and decrementing in-flight counters,
+   then sync every target shard, so its trust marker is never written ahead
+   of the re-fold it vouches for (the `IndexIntents_NoSyncBeforeMark.cfg`
+   ablation).
 4. **Freshen** the target shards (bump AE, clear `needs_rebuild`) so reads
    pass again — including shards whose working set is empty, which a
-   plain write path would leave sentinel-stale forever.
+   plain write path would leave sentinel-stale forever. This step runs only
+   when every primary was re-folded and every target shard's writer
+   flushed and its projection synced, and a shard is cleared only if nothing marked it after its wipe
+   (`bondy_oplog_core_registry:index_clear_rebuild/2`). A writer that died
+   after the run read the registry fails its flush, so a re-fold it lost
+   fails the run. Otherwise the index stays marked and the rebuild runs
+   again, its delay doubling up to a minute (`bondy_db_index_lag_test`:
+   `rebuild_keeps_mark_when_writer_lost_the_refold`,
+   `rebuild_keeps_mark_when_marked_during_run`).
+   `proofs/tla/IndexIntents_NoIntents_Writer.cfg` and
+   `IndexIntents_DrainRequests.cfg` show an index trusted incomplete
+   without these checks; `IndexIntents_NoIntents_Writer_MarkNeedsFlush.cfg`
+   holds with them.
 
 ## Triggers
 
 - **Untrusted at open** — `bondy_db:open_table` calls `rebuild_sync/2` for
-  an index one of whose shards has no trust marker (never built, or a drop
-  removed it) or no clean-shutdown flag (not closed cleanly last lifetime).
-  An index whose every shard has both is trusted and only freshened.
+  an index one of whose shards has no trust marker (never built, or a mark
+  removed it). An index whose every shard has one is trusted and only
+  freshened; the open replays the primaries' leftover index intents instead
+  (`bondy_db_index_coldstart_test`).
 - **Saturation** — the primary applier drops a batch that would overflow a
   secondary writer's backlog, marks the shard, and `request/2`s a rebuild.
-- **Writer crash** — on restart a writer that had previously been
-  populated `request/2`s a rebuild to recover the ops its lost buffer held.
+- **Writer crash** — on restart a writer marks its in-memory index shards
+  that had been populated and `request/2`s their rebuild. Its durable shards
+  replay their primaries' leftover index intents instead.
+- **Failed index write** — a writer whose projection write fails, and a
+  catalogue install whose group or sync fails
+  (`bondy_oplog_cell_apply:settle_install/3`), mark the affected shards.
 - **Operator / tests** — `bondy_db:rebuild_index/2` (sync barrier).
 
 ## Serialisation + coalescing
@@ -64,12 +92,15 @@ For one index `(NS, IndexName)`:
 inline in the gen_server, so only one runs at a time across all indexes.
 A burst of identical `request/2`s for the same index is coalesced: after a
 rebuild the handler drains any further pending requests for that index
-from its mailbox.
+from its mailbox. Every trigger marks before it requests: a mark after the
+rebuild's wipe fails the run, which then runs again, and a mark before it is
+covered by the run.
 """).
 
 -export([child_spec/0]).
 -export([start_link/0]).
 -export([request/2]).
+-export([mark/1]).
 -export([rebuild_sync/2]).
 
 -export([init/1]).
@@ -84,6 +115,9 @@ from its mailbox.
 %% `?INDEX`). Registry rows under this index are the primary shards; any
 %% other index id is a secondary.
 -define(INDEX, primary).
+-define(RETRY_MS, 1000).
+-define(RETRY_MAX_MS, 60000).
+-define(FLUSH_TIMEOUT_MS, 5000).
 
 %% =============================================================================
 %% API
@@ -115,6 +149,18 @@ request(NS, IndexName) when is_atom(NS), is_atom(IndexName) ->
     gen_server:cast(?SERVER, {request, NS, IndexName}).
 
 -doc """
+Mark the index shard `Entry` for rebuild and request a rebuild of its index.
+The mark makes the shard's reads refuse and keeps a close from stamping it
+clean until a rebuild completes.
+""".
+-spec mark(bondy_oplog_core_registry:shard_entry()) -> ok.
+
+mark(Entry) ->
+    ok = bondy_oplog_core_registry:index_mark_rebuild(Entry),
+    {NS, IndexName, _Shard} = bondy_oplog_core_registry:entry_key(Entry),
+    request(NS, IndexName).
+
+-doc """
 Synchronously rebuild `(NS, IndexName)` and return once the index has been
 re-materialised from the primary and its target shards freshened. The
 barrier used by `bondy_db:open_table` for an untrusted index, the operator
@@ -134,20 +180,23 @@ init([]) ->
 
 handle_call({rebuild, NS, IndexName}, _From, State) ->
     Result = run_rebuild(NS, IndexName),
-    {reply, Result, State};
+    {reply, Result, schedule(NS, IndexName, Result, State)};
 handle_call(_Req, _From, State) ->
     {reply, {error, unknown}, State}.
 
 handle_cast({request, NS, IndexName}, State) ->
-    _ = run_rebuild(NS, IndexName),
-    %% Coalesce a burst of identical requests (e.g. several shards of the
-    %% same index saturating at once) — the single rebuild above already
-    %% covered the whole index.
+    Result = run_rebuild(NS, IndexName),
     ok = drain_requests(NS, IndexName),
-    {noreply, State};
+    {noreply, schedule(NS, IndexName, Result, State)};
 handle_cast(_, State) ->
     {noreply, State}.
 
+handle_info({retry, NS, IndexName}, State) ->
+    Retry = maps:get({NS, IndexName}, State, #{}),
+    handle_cast(
+        {request, NS, IndexName},
+        State#{{NS, IndexName} => Retry#{timer => undefined}}
+    );
 handle_info(_, State) ->
     {noreply, State}.
 
@@ -181,7 +230,7 @@ run_rebuild(NS, IndexName) ->
             [] ->
                 ok;
             _ ->
-                do_rebuild(NS, IndexName, Primaries, Targets, AllSec),
+                Result = do_rebuild(Primaries, Targets, AllSec),
                 DurUs = erlang:monotonic_time(microsecond) - T0,
                 telemetry:execute(
                     [bondy_oplog, secondary_index, rebuild],
@@ -190,16 +239,20 @@ run_rebuild(NS, IndexName) ->
                         target_shards => length(Targets),
                         primary_shards => length(Primaries)
                     },
-                    #{namespace => NS, index_name => IndexName}
+                    #{
+                        namespace => NS,
+                        index_name => IndexName,
+                        result => Result
+                    }
                 ),
-                ok
+                settle(NS, IndexName, Result)
         end
     catch
         C:R:S ->
             ?LOG_ERROR(#{
                 description =>
                     "bondy_oplog_index_rebuild rebuild raised; the index "
-                    "stays marked for rebuild and a later trigger retries.",
+                    "stays marked for rebuild and the rebuild runs again.",
                 namespace => NS,
                 index_name => IndexName,
                 class => C,
@@ -210,52 +263,95 @@ run_rebuild(NS, IndexName) ->
     end.
 
 %% @private
-do_rebuild(NS, IndexName, Primaries, Targets, AllSec) ->
-    %% 1. Discard stale buffers + wipe the target shards. Keep
-    %%    `needs_rebuild` set (reads refuse) until step 4.
-    lists:foreach(fun reset_target_shard/1, Targets),
-    %% 2. Re-fold every primary MST (re-dispatch every live term, cap
-    %%    bypassed). Idempotent re-puts also reach sibling indexes' writers.
-    lists:foreach(fun refold_primary/1, Primaries),
-    %% 3. Flush every index writer in the namespace so both the target's
-    %%    re-puts and the siblings' idempotent re-puts drain (the latter
-    %%    keeps sibling in-flight counters from a false saturation).
-    lists:foreach(fun flush_writer/1, AllSec),
-    %% 4. Freshen the target shards: bump AE (so even an empty shard reads
-    %%    fresh) and clear `needs_rebuild`. Now reads pass.
+do_rebuild(Primaries, Targets, AllSec) ->
+    Seen = [{E, reset_target_shard(E)} || E <- Targets],
+    Refolded = [refold_primary(E) || E <- Primaries],
+    Flushed = [
+        {E, bondy_oplog_secondary_writer:flush_entry(E, ?FLUSH_TIMEOUT_MS)}
+     || E <- AllSec
+    ],
+    Complete =
+        lists:all(fun(R) -> R =:= ok end, Refolded) andalso
+            lists:all(
+                fun({E, R}) ->
+                    R =:= ok orelse not lists:keymember(E, 1, Seen)
+                end,
+                Flushed
+            ) andalso
+            lists:all(fun({E, _Marks}) -> sync_shard(E) =:= ok end, Seen),
+    case Complete of
+        true -> mark_trusted(Seen);
+        false -> incomplete
+    end.
+
+%% @private
+mark_trusted(Seen) ->
     Now = erlang:monotonic_time(millisecond),
-    lists:foreach(
-        fun(E) ->
-            {NS1, Idx, Shard} = bondy_oplog_core_registry:entry_key(E),
-            _ = bondy_oplog_core_registry:bump_ae(NS1, Idx, Shard, Now),
-            bondy_oplog_core_registry:index_clear_rebuild(E)
-        end,
-        Targets
-    ),
-    ok = clean_namespace_tmp(NS, IndexName).
+    Cleared = [
+        begin
+            {NS, Idx, Shard} = bondy_oplog_core_registry:entry_key(E),
+            _ = bondy_oplog_core_registry:bump_ae(NS, Idx, Shard, Now),
+            bondy_oplog_core_registry:index_clear_rebuild(E, Marks)
+        end
+     || {E, Marks} <- Seen
+    ],
+    case lists:all(fun(R) -> R =:= ok end, Cleared) of
+        true -> ok;
+        false -> incomplete
+    end.
+
+%% @private
+settle(_NS, _IndexName, ok) ->
+    ok;
+settle(NS, IndexName, incomplete) ->
+    ?LOG_WARNING(#{
+        description =>
+            "bondy_oplog_index_rebuild did not complete: a primary could "
+            "not be re-folded, a writer did not flush, or the index was "
+            "marked again while it ran. The index stays marked for rebuild "
+            "and the rebuild runs again.",
+        namespace => NS,
+        index_name => IndexName
+    }),
+    {error, incomplete}.
+
+%% @private
+%% One retry timer per index, its delay doubling up to `?RETRY_MAX_MS`, so
+%% the requests and failures of one index never stack full rebuilds.
+schedule(NS, IndexName, ok, State) ->
+    case maps:take({NS, IndexName}, State) of
+        {#{timer := TRef}, State1} when is_reference(TRef) ->
+            _ = erlang:cancel_timer(TRef),
+            receive
+                {retry, NS, IndexName} -> ok
+            after 0 -> ok
+            end,
+            State1;
+        {_, State1} ->
+            State1;
+        error ->
+            State
+    end;
+schedule(NS, IndexName, {error, _}, State) ->
+    case maps:get({NS, IndexName}, State, undefined) of
+        #{timer := TRef} when is_reference(TRef) ->
+            State;
+        Retry ->
+            Delay =
+                case Retry of
+                    #{delay := D} -> min(2 * D, ?RETRY_MAX_MS);
+                    undefined -> ?RETRY_MS
+                end,
+            TRef = erlang:send_after(Delay, self(), {retry, NS, IndexName}),
+            State#{{NS, IndexName} => #{timer => TRef, delay => Delay}}
+    end.
 
 %% @private
 reset_target_shard(Entry) ->
-    %% Mark the shard untrusted FIRST (in-memory flag set + durable trust
-    %% marker removed) so that, even for an operator-triggered rebuild of an
-    %% already-trusted shard, a crash between the wipe below and the
-    %% `index_clear_rebuild` in step 4 leaves the shard untrusted on disk —
-    %% the next cold-start rebuilds rather than trusting half-wiped cells.
     bondy_oplog_core_registry:index_mark_rebuild(Entry),
-    case bondy_oplog_core_registry:entry_writer_pid(Entry) of
-        Pid when is_pid(Pid) ->
-            %% Reset only THIS index shard's stream on the (possibly shared)
-            %% writer — sibling indexes on the same writer keep their buffers.
-            {NS, IName, _Shard} = bondy_oplog_core_registry:entry_key(Entry),
-            _ =
-                try
-                    bondy_oplog_secondary_writer:reset(Pid, {NS, IName})
-                catch
-                    _:_ -> ok
-                end;
-        _ ->
-            ok
-    end,
+    ok = bondy_oplog_core_registry:index_untrust(Entry),
+    ok = sync_shard(Entry),
+    ok = bondy_oplog_secondary_writer:reset(Entry),
     Adapter = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
     %% Bucket-scoped wipe: pass the `clear_scope()` the owner stamped on the
@@ -289,7 +385,14 @@ reset_target_shard(Entry) ->
     end,
     bondy_oplog_core_registry:index_inflight_reset(Entry),
     bondy_oplog_core_registry:reset_stale_ae(Entry),
-    ok.
+    bondy_oplog_core_registry:index_rebuild_marks(Entry).
+
+%% @private
+sync_shard(Entry) ->
+    bondy_oplog_projection_adapter:sync(
+        bondy_oplog_core_registry:entry_projection_adapter(Entry),
+        bondy_oplog_core_registry:entry_projection_handle(Entry)
+    ).
 
 %% @private
 clear_scope(Entry) ->
@@ -304,20 +407,18 @@ clear_scope(Entry) ->
 
 %% @private
 refold_primary(Entry) ->
+    Key = bondy_oplog_core_registry:entry_key(Entry),
     case bondy_oplog_core_registry:entry_instance_id(Entry) of
         undefined ->
             ok;
         InstanceId ->
             case bondy_oplog_registry:applier_pid(InstanceId) of
                 Pid when is_pid(Pid) ->
-                    bondy_oplog_applier:rebuild_indexes_sync(Pid);
+                    bondy_oplog_applier:rebuild_indexes_sync(Pid, Key);
                 _ ->
-                    %% No applier — either a fused instance (which has none
-                    %% by design and runs the rebuild in-process instead)
-                    %% or a genuinely restarting subtree, whose own
-                    %% cold-start replay will re-dispatch: the shard stays
-                    %% marked either way, so a later trigger retries if
-                    %% this pass finds nowhere to run it.
+                    %% A fused instance has no applier and re-folds
+                    %% in-process; any other instance without one is
+                    %% restarting.
                     case bondy_oplog_registry:fused(InstanceId) of
                         true ->
                             case
@@ -325,38 +426,16 @@ refold_primary(Entry) ->
                             of
                                 InstancePid when is_pid(InstancePid) ->
                                     bondy_oplog_instance:rebuild_indexes_sync(
-                                        InstancePid
+                                        InstancePid, Key
                                     );
                                 _ ->
-                                    ok
+                                    skipped
                             end;
                         _ ->
-                            ok
+                            skipped
                     end
             end
     end.
-
-%% @private
-flush_writer(Entry) ->
-    case bondy_oplog_core_registry:entry_writer_pid(Entry) of
-        Pid when is_pid(Pid) ->
-            _ =
-                try
-                    bondy_oplog_secondary_writer:flush_sync(Pid)
-                catch
-                    _:_ -> ok
-                end,
-            ok;
-        _ ->
-            ok
-    end.
-
-%% @private
-clean_namespace_tmp(_NS, _IndexName) ->
-    %% No transient filesystem artefacts to clean: a durable (leveled) index
-    %% is wiped in place by `clear/2` and re-derived, leaving no temp files.
-    %% Hook kept so the rebuild has a single completion point.
-    ok.
 
 %% @private
 index_of(Entry) ->

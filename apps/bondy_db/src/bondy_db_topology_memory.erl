@@ -176,7 +176,7 @@ Memory gives each `(EntityType, Shard)` its own ETS table (the ETS projection
 adapter ignores the scope and clears its single backing table), so the
 bare-suffix scope is exact — there is no co-located sibling to over-wipe.
 """.
-index_clear_scope(IndexName, _TableState) when is_atom(IndexName) ->
+index_clear_scope(IndexName, _EntityType) when is_atom(IndexName) ->
     {suffix, IndexName}.
 
 -doc """
