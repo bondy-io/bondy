@@ -546,7 +546,7 @@ do_forward(#subscribe{} = M, Ctxt) ->
             Error = bondy_wamp_error:to_wamp(
                 bondy_connect_error:new(timeout, #{
                     message =>
-                        ~"Request timed out waiting for subcription response."
+                        ~"Request timed out waiting for subscription response."
                 }),
                 M
             ),
@@ -595,7 +595,7 @@ do_forward(#publish{} = M, Ctxt) ->
 not_found_error(M, _Ctxt) ->
     Msg = iolist_to_binary(
         [
-            ~"There are no subcriptions matching the id ",
+            ~"There are no subscriptions matching the id ",
             $',
             M#unsubscribe.subscription_id,
             $'

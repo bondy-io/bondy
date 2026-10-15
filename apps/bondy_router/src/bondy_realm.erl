@@ -3147,7 +3147,7 @@ precedence_graph_add_edge(Graph, A, B) ->
         false ->
             %% The SSO or Prototype URI is not in the config file
             %% so it must exist already in the store. If it doesn't exist
-            %% we will get an integrity constratint error
+            %% we will get an integrity constraint error
             %% during merge_and_store, so we do nothing here
             ok
     end.

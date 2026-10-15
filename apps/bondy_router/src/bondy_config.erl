@@ -759,7 +759,7 @@ with_tls_material(Name, SocketOpts) ->
     SocketOpts :: [atom() | {atom(), any()}].
 
 normalise_socket_opts(SocketOpts0) ->
-    %% We normlise the buffer option
+    %% We normalise the buffer option
     SocketOpts1 = normalise_socket_buffer(SocketOpts0),
 
     %% We default to listen on any i.e. 0.0.0.0 or :: depending on IPVer

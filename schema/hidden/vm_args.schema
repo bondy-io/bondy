@@ -550,7 +550,7 @@
 ]}.
 
 %% @doc Sets the maximum number of ETS tables.
-%% This limit is partially obsolete but usefull to be set anyways.
+%% This limit is partially obsolete but useful to be set anyways.
 %% See http://erlang.org/doc/man/ets.html#max_ets_tables
 {mapping, "vm.ets.max_tables", "vm_args.+e", [
   {datatype, integer},

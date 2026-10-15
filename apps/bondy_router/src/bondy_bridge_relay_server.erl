@@ -635,7 +635,7 @@ challenge(Realm, Details, State0) ->
                     },
 
                     %% We create a new session object but we do not open it
-                    %% yet, as we need to send the callenge and verify the
+                    %% yet, as we need to send the challenge and verify the
                     %% response
                     Session = bondy_session:new(Uri, Properties),
 

@@ -123,7 +123,7 @@ pick(Arg) ->
 
 -doc """
 Returns the underlying store the partition if `Arg` is a pid. Otherwise hashes
-`Arg` to determine the partition pid and then returns its undelying store
+`Arg` to determine the partition pid and then returns its underlying store
 """.
 -spec store(Arg :: pid() | binary() | entry()) ->
     bondy_registry_store:t() | undefined.

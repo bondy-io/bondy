@@ -213,12 +213,12 @@
 
 ## 1.0.0-rc.57
 ### Fixes
-* Fixes an issue with OIDC tokens containin roles unknown to Bondy
+* Fixes an issue with OIDC tokens containing roles unknown to Bondy
 
 ## 1.0.0-rc.56
 ### Fixes
 * Fix set comparison on authroles calculation
-* Add error logs for failed OIDC conections
+* Add error logs for failed OIDC connections
 
 ## 1.0.0-rc.55
 ### Fixes
@@ -245,7 +245,7 @@
 * RP-Initiated Logout for OIDC sessions. The `/oidc/logout` endpoint now performs a two-step logout: revokes the Bondy ticket and clears cookies, then redirects to the IdP's `end_session_endpoint` (with `id_token_hint` and `post_logout_redirect_uri`) to terminate the IdP session as well. Falls back to a direct SPA redirect if the IdP does not support `end_session_endpoint`. The `post_logout_redirect_uri` must be registered in the IdP's client configuration.
 * Experimental implementation of RPC Gateway that allows for the definition of WAMP to HTTP routing, taking care of Secret Management and Token flows and caching. This is entirely configured on the `bondy.conf` file.
 * Cookies now have the realm as suffix e.g. `bondy_ticket_my_realm`
-* New `bondy.session.self` RPC that returns the caller's session information (usefull when using cookie-based authentication as the cookie cannot be read by the client code).
+* New `bondy.session.self` RPC that returns the caller's session information (useful when using cookie-based authentication as the cookie cannot be read by the client code).
 
 ### Fixes
 * Fixed CORS headers missing from OIDC handler endpoints (`/oidc/login`, `/oidc/callback`, `/oidc/logout`). Cross-origin requests from SPAs were blocked by the browser. The handler now sets CORS headers on all responses and handles `OPTIONS` preflight requests.
@@ -265,7 +265,7 @@
 * Fix dockerfile mistake
 
 ## 1.0.0-rc.48
-- Upgraded to latest PlumDB wich contains fixes to the RocksDB defaults (the previous valus might cause issues due to excessive compaction)
+- Upgraded to latest PlumDB which contains fixes to the RocksDB defaults (the previous values might cause issues due to excessive compaction)
 - RocksDB can be configured via `bondy.conf` using `store.*` options.
 
 ## 1.0.0-rc.47
@@ -275,7 +275,7 @@
 
 ## 1.0.0-rc.46
 ### Fixes
-- Fixes a bug in the OAUTH2 rest handler which would prevent the `client_device_id` option to be considered when obtaining a new token. This was introduced with the new token subsystem. This issue limites teh token scope to {realm, client} as opposed to {realm, client, device_id}.
+- Fixes a bug in the OAUTH2 rest handler which would prevent the `client_device_id` option to be considered when obtaining a new token. This was introduced with the new token subsystem. This issue limites the token scope to {realm, client} as opposed to {realm, client, device_id}.
 
 ## 1.0.0-rc.45
 ### Fixes
@@ -292,8 +292,8 @@
 ## 1.0.0-rc.42
 ### Changes
 - **Partial Registry concurrency improvement** - As we prepare to formalize our battle-tested platform with a `1.0.0` release, we've enhanced the registry with a more scalable and concurrent solution for EXACT matching registrations and subscriptions. PREFIX and WILDCARD matching support retain their existing concurrency limitations. In the next release candidate, we'll implement a more scalable solution for these features alongside a new replication mechanism - the final step to complete the implementation.
-- `bondy.ping` added to be used as connection hearbeats where the client doesn't
-support transport level hearbeats e.g. Web Browser Websocket pings. The RPC replies a single positional argument `"pong"` and it is always authorised to be called by all sessions.
+- `bondy.ping` added to be used as connection heartbeats where the client doesn't
+support transport level heartbeats e.g. Web Browser Websocket pings. The RPC replies a single positional argument `"pong"` and it is always authorised to be called by all sessions.
 
 ## 1.0.0-rc.41
 - Minor fix to new listener `liner.timeout` option to avoid confusion between protocol and socket options.
@@ -393,7 +393,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 
 ## 1.0.0-rc.27
 ## Changes
-* Moved json encoding to `bondy_json` module which now uses the new `json` moduled instead of `jsone` when running on OTP27. In addition, float and date formatting has been implemented to mirror those existing in `jsone`. Also the defaul float format respects the deprecated `jsx` lib format for backwards compatibility.
+* Moved json encoding to `bondy_json` module which now uses the new `json` moduled instead of `jsone` when running on OTP27. In addition, float and date formatting has been implemented to mirror those existing in `jsone`. Also the default float format respects the deprecated `jsx` lib format for backwards compatibility.
 * A new option `serializers.json.float_format` has been added to `bondy.conf` that takes a string representation of the options supported by `erlang:float_to_binary/2`.
 * **NOTICE**: This only affects HTTP Gateway JSON encoding at the moment and not WAMP. This will be addressed in the next release.
 
@@ -403,7 +403,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 
 ## 1.0.0-rc.25
 ### Changes
-* Removed `enacl` and `pbkdf2` libraries, replacing its funcionality with
+* Removed `enacl` and `pbkdf2` libraries, replacing its functionality with
   Erlang's `public_key` and `crypto` applications for password hashing and WAMP
   Cryptosign.
 * Upgraded several dependencies
@@ -460,7 +460,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
    - `bridge.forward.retransmission`
 
 ### Changed
-- Until Partisan gurantees are provided by a more scalable backend we are disabling them by default by removing the previosuly hardcoded configuration and defining the following `bondy.conf` options defauls
+- Until Partisan guarantees are provided by a more scalable backend we are disabling them by default by removing the previously hardcoded configuration and defining the following `bondy.conf` options defaults
    - `router.forward.ack = on|off`
    - `router.forward.retransmission = on|off`
    - `bridge.forward.ack = on|off`
@@ -468,7 +468,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
    -
 
 ### Fixed
-- Fixed a bug that occured in `bondy_rpc_laod_balancer` when entries are empty
+- Fixed a bug that occurred in `bondy_rpc_laod_balancer` when entries are empty
 
 ## 1.0.0-rc.14
 
@@ -639,7 +639,7 @@ cluster.peer_discovery.config.node_basename = bondy
 * User database representation
 * Error types and description improvements
 * Logging improvements
-* Removed high cardinality labels in promethues metrics (before we would tag each WAMP message stats with realm, session, message type etc. this is not good for stats databases like Promethues).
+* Removed high cardinality labels in prometheus metrics (before we would tag each WAMP message stats with realm, session, message type etc. this is not good for stats databases like Prometheus).
 * Added RBAC context caching to avoid computing the user grants on every request.
 * Tickets database location: The location of the tickets changes on beta.64 onwards
 
@@ -750,7 +750,7 @@ cluster.peer_discovery.config.node_basename = bondy
 This version includes a complete redesign of event management and instrumentation.
 The new `bondy_event_manager` is now the way for the different subsystems to asynchronously publish events (notifications) and offload all instrumentation to event handlers:
 
-- `bondy_promethues` is an event handler that implements all promethues instrumentation
+- `bondy_promethues` is an event handler that implements all prometheus instrumentation
 - `bondy_wamp_meta_events` is an event handler that selectively re-published bondy events to WAMP Meta events.
 
 ### New Modules

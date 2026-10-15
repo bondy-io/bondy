@@ -493,11 +493,12 @@ end).
     ]},
     {cancel, [
         '_routing_key'
-         | ?WAMP_TRACE_ATTRS
+        | ?WAMP_TRACE_ATTRS
     ]},
     {interrupt, [
-        'x_session_info', '_session_info'
-         | ?WAMP_TRACE_ATTRS
+        'x_session_info',
+        '_session_info'
+        | ?WAMP_TRACE_ATTRS
     ]},
     {register, [
         'x_disclose_session_info',

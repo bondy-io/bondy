@@ -2079,7 +2079,7 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc The maximun number of elements in the FIFO queue after which older items
+%% @doc The maximum number of elements in the FIFO queue after which older items
 %% are evicted. This is the sum of all queues (1 per worker)
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.job_manager.queue.size",

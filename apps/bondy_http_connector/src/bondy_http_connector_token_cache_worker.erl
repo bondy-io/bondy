@@ -83,7 +83,7 @@ The `cache` key in `auth_conf` controls timing:
 
 -define(DEFAULT_TTL, 3600).
 -define(DEFAULT_REFRESH_MARGIN, 60).
-%% Backoff for retrying a failed pre-emptive refresh. Capped well below the
+%% Backoff for retrying a failed preemptive refresh. Capped well below the
 %% remaining TTL so that callers never have to wait for the cached token to
 %% expire and trip the slow-path 401 retry.
 -define(REFRESH_RETRY_MS, 30_000).

@@ -211,7 +211,7 @@ destroy(#?MODULE{}) ->
 %% PRIVATE
 %% =============================================================================
 
-%% Accumulates in `Acc0` those pages that are decendants of Root.
+%% Accumulates in `Acc0` those pages that are descendants of Root.
 %% Cycle Prevention: ensures that each page is processed only once by
 %% checking if Root is already in the accumulator (`not is_map_key/2` guard).
 gc_aux(Acc0, FromPages, Root) when

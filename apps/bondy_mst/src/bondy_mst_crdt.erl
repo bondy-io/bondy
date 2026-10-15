@@ -447,8 +447,8 @@ put(CRDT0, Key, Value, Opts) ->
         Root = bondy_mst:root(Tree),
 
         %% We store the new root on the version history so that is not
-        %% immediately elegible for garbage collection.
-        %% The version will automatically elegible when its TTL is reached or
+        %% immediately eligible for garbage collection.
+        %% The version will automatically eligible when its TTL is reached or
         %% when history has reached its maximum size.
         CRDT = add_history(CRDT1, Root),
 

@@ -6,7 +6,7 @@
 -module(bondy_context).
 -moduledoc """
 A Bondy Context lets you access information that defines the state of an
-interaction. In a typical interacion, several actors or objects have a hand
+interaction. In a typical interaction, several actors or objects have a hand
 in what is going on e.g. `bondy_session`, `wamp_realm`, etc.
 
 The Bondy Context is passed as an argument through the whole request-response

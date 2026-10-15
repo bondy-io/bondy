@@ -136,7 +136,7 @@ rand_increment(N, Max) ->
     end.
 
 -doc """
-Calls retry/2 with the default the follwing default options:
+Calls retry/2 with the default the following default options:
 
 - `max_retries` = 3,
 - `base_delay` = 100 i.e. 100 milliseconds

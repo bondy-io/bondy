@@ -540,7 +540,7 @@ everywhere. A *template* value reaches only the seven releases that overlay a
 template; `prod`, `prod_named` and `docker` overlay none, so for those only a code
 default counts. And a `listeners.$name.*` mapping can never appear in a generated
 conf — a fuzzy mapping has no concrete name to enumerate — which is why §2.1's
-"no defaults on fuzzy mappings" also means these could not simply be re-declared
+"no defaults on fuzzy mappings" also means these could not simply be redeclared
 in the schema. They live in `bondy_listener_config:option_defaults/2` instead,
 keyed on transport × protocol.
 

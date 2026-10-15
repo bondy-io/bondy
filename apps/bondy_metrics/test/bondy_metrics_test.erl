@@ -1,6 +1,6 @@
 %% =============================================================================
 %% Tests for `bondy_metrics` — the counters/atomics-backed primitive.
-%% Verifies first-touch allocation, idempotent re-use of the same ref,
+%% Verifies first-touch allocation, idempotent reuse of the same ref,
 %% per-label isolation, type safety, gauge set/read, and delete.
 %% =============================================================================
 

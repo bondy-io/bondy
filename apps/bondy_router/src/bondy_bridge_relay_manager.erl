@@ -411,7 +411,7 @@ load_bridges(State0) ->
     Config = bondy_config:get(bridges, #{}),
     %% Initialize all Bridges which have been configured via bondy.conf file
     %% This is a map where the bridge name is the key and the value has an
-    %% almost valid structure but we calidate it again to set some defaults.
+    %% almost valid structure but we validate it again to set some defaults.
     Transient = maps:fold(
         fun(Name, Data, Acc) ->
             %% The call to new can fail with a validation exception
@@ -488,7 +488,7 @@ stop_all(State) ->
     ).
 
 supervised_bridges(_State) ->
-    %% TODO montior pids and add them to 'started'
+    %% TODO monitor pids and add them to 'started'
     %% when created to avoid asking the supervisor
     All = supervisor:which_children(bondy_bridge_relay_client_sup),
     [Id || {Id, _, _, _} <- All].

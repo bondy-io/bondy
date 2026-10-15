@@ -47,3 +47,4 @@ apps/bondy_cbor/bench/output/*
 /harness/fleet-scale/out
 /proofs/tla/states
 /harness/fleet-scale/report.py
+/next.md

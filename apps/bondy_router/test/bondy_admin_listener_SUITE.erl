@@ -137,7 +137,7 @@ admin_local_is_injected_without_configuration(_Config) ->
     %% neither `bondy_ct`'s declared one nor the built-in default mentions it,
     %% and the manager appends it. All three halves are asserted, because the
     %% latter two are what make the first a guarantee rather than a coincidence —
-    %% an operator cannot pre-empt the injected entry with one of their own, and
+    %% an operator cannot preempt the injected entry with one of their own, and
     %% `bondy_listener_config:resolve/2` rejects the name outright if they try.
     ?assertEqual(
         false, lists:keymember(admin_local, 1, bondy_config:get(listeners, []))

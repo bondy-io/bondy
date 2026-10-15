@@ -28,7 +28,7 @@ run the same bridge, and a bridge whose node is down does not migrate.
 - `transient` — restarted only after an abnormal termination. It does not
   survive a node restart.
 
-Bridges declared in `bondy.conf` are transient, because that file re-declares
+Bridges declared in `bondy.conf` are transient, because that file redeclares
 them on every boot; a bridge created through the API defaults to transient for
 the same reason.
 

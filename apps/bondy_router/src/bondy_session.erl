@@ -267,7 +267,7 @@ new(Id, Realm, Opts) when is_binary(Id) andalso is_map(Opts) ->
 
     S1#session{
         %% We choose seconds as we are not interested in the accuracy of time
-        %% but rather in the uniquenes and URL friendliness of the ID
+        %% but rather in the uniqueness and URL friendliness of the ID
         id = Id,
         external_id = bondy_session_id:to_external(Id),
         realm_uri = RealmUri,

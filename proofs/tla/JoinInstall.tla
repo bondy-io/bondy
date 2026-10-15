@@ -30,13 +30,12 @@
 (*     `bondy_oplog_cell_utils:apply_stabilize/10`). The point walks the   *)
 (*     replica's tree in key order against every member's durable         *)
 (*     frontier, its own included (`bondy_oplog_instance:member_vvs/2`).   *)
-(*     BoundMode picks it. "last_confirmed": the HLC of the last key       *)
-(*     before the first one some frontier does not cover                   *)
-(*     (`compute_frontier_for/2`), which never licenses the tree's last    *)
-(*     key. "first_unconfirmed": the HLC of that first key, or past every  *)
-(*     event when every held key is covered, an empty tree included.       *)
-(*     "claims": a stand-in, the HLC of the earliest event the replica     *)
-(*     claims above the pointwise least of the durable claims.             *)
+(*     BoundMode picks it. "first_unconfirmed" is the code                 *)
+(*     (`clustered_stability_point/2`): the HLC of the first key some     *)
+(*     frontier does not cover, or past every event when every held key   *)
+(*     is covered, an empty tree included. "last_confirmed" is the HLC of *)
+(*     the last key before that one, which never licenses the tree's last *)
+(*     key (`_Truncation_CompactMembers_LastConfirmed.cfg`).               *)
 (*   - `reap_origins/2` drops a retired origin's context entry when no     *)
 (*     surviving dot is that origin's (`bondy_oplog_crdt_aw_set`).         *)
 (*                                                                         *)
@@ -116,7 +115,7 @@ CONSTANTS
                    \* how compaction confirms
     RetiredExempt, \* TRUE: a retired origin's events count as confirmed by
                    \* every member, for truncation and for the bound
-    BoundMode      \* "claims" | "last_confirmed" | "first_unconfirmed":
+    BoundMode      \* "last_confirmed" | "first_unconfirmed":
                    \* the sweep's stability point
 
 ASSUME /\ MaxCrashes \in Nat
@@ -127,7 +126,7 @@ ASSUME /\ MaxCrashes \in Nat
        /\ CompactBy \in {"none", "receipt", "durable", "recorded", "own",
                          "members"}
        /\ RetiredExempt \in BOOLEAN
-       /\ BoundMode \in {"claims", "last_confirmed", "first_unconfirmed"}
+       /\ BoundMode \in {"last_confirmed", "first_unconfirmed"}
        /\ Reap \in BOOLEAN
        /\ InstallMode \in {"replace", "stage"}
 
@@ -378,14 +377,6 @@ CellHlc(c) ==
     LET hs == {HlcOf([org |-> o, seq |-> c.cc[o]]) :
                  o \in {x \in Replicas : c.cc[x] > 0}}
     IN IF hs = {} THEN 0 ELSE CHOOSE m \in hs : \A k \in hs : k =< m
-Bound(r) ==
-    LET hs == {HlcOf(DotOf(e)) :
-                 e \in {f \in app[r] \ cmp[r] :
-                         /\ f.seq = StableVV[f.org] + 1
-                         /\ ~(RetiredExempt /\ f.org \in retired)}}
-    IN IF hs = {} THEN MaxEvents + 1
-       ELSE CHOOSE m \in hs : \A k \in hs : m =< k
-
 (* The code's point walks the tree, received events included, in HLC      *)
 (* order, and stops at the first key the stable vector does not cover.     *)
 (* "last_confirmed" takes the key before it, 0 when there is none;         *)
@@ -407,8 +398,7 @@ LastConfirmed(r) ==
                  h < FirstUnconfirmed(r)}
     IN IF hs = {} THEN 0 ELSE CHOOSE m \in hs : \A k \in hs : k =< m
 SweepBound(r) ==
-    CASE BoundMode = "claims" -> Bound(r)
-      [] BoundMode = "last_confirmed" -> LastConfirmed(r)
+    CASE BoundMode = "last_confirmed" -> LastConfirmed(r)
       [] BoundMode = "first_unconfirmed" -> FirstUnconfirmed(r)
 
 (* The sweep deletes an empty cell below the bound, after catching the     *)
@@ -879,11 +869,6 @@ StuckTombstone(r) ==
     /\ "mark" \in HlcGuards => ~mark[r]
     /\ CellHlc(cell[r]) >= SweepBound(r)
 NoStuckTombstone == \A r \in Replicas \ retired : ~StuckTombstone(r)
-
-\* The sweep's bound never exceeds the "claims" stand-in, so every discard
-\* it takes is one the stand-in takes, and what the configs that set
-\* "claims" check holds for it too.
-BelowClaims == \A r \in Replicas : SweepBound(r) =< Bound(r)
 
 \* A truncated event stays claimed from the moment its truncation is
 \* recorded: nothing re-presents it once cut, and its origin's later events

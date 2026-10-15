@@ -486,14 +486,14 @@ a registration procedure_uri.
 uri(#entry{uri = Val}) -> Val.
 
 -doc """
-Returns the match_policy used by this subscription or regitration.
+Returns the match_policy used by this subscription or registration.
 """.
 -spec match_policy(t()) -> binary().
 
 match_policy(#entry{match_policy = Val}) -> Val.
 
 -doc """
-Returns the match_policy used by this subscription or regitration.
+Returns the match_policy used by this subscription or registration.
 """.
 -spec invocation_policy(t()) -> optional(invocation_policy()).
 

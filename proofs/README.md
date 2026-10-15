@@ -533,7 +533,11 @@ One add-wins cell. Receipt (the MST) is separate from application (the cell);
 an anti-entropy round merges the peer's whole MST; the replay folds causally,
 as `causal_tops/4` holds it, and skips an event the frontier claims; the sweep
 deletes an empty cell below the HLC stability point once the replay has caught
-up; a retired origin's events never fold. An install is the code's session:
+up, the point being the HLC of the first tree key some member's durable
+frontier does not cover, or past every event when every held key is covered
+(`BoundMode = "first_unconfirmed"`, the code's
+`bondy_oplog_instance:clustered_stability_point/2`); a retired origin's
+events never fold. An install is the code's session:
 read the source's frontier, stream its cells into a stage, then swap them in
 and re-fold the MST events that frontier does not claim, in one step
 (`bondy_oplog_applier:stage_cells/3`, `commit_stage/4`); finalize reads the
@@ -544,7 +548,9 @@ Invariants: `SettledSound` (once a replica has received and folded every
 event, its cell is the fold of all of them); `SomeoneServes` (while two
 replicas or more are live, some replica can still serve a session or clear
 its mark); `CompactedClaimed` (every event whose truncation a replica recorded
-stays claimed); `NoStrandedRecord` (below).
+stays claimed); `NoStrandedRecord` (below); `NoStuckTombstone` (an emptied
+cell whose every event is received, covered and folded is below the sweep's
+bound), on `_Truncation_CompactMembers` and `_Reap`.
 
 `_Truncation_CompactMembers` is the code: every guard (`mark`, `serve`,
 `replayed`, `target`, `early`, `busy`, `token`, `trunc`, `coverbegin`,
@@ -555,26 +561,27 @@ TLC stopped, which varies by one between runs.
 
 | Config | Bound, and what is removed | Result |
 |---|---|---|
-| `_Truncation_CompactMembers` | 2 replicas, 2 events, 1 install | clean (2,073,971 states, depth 29) |
-| `_Truncation_CompactMembers_3R` | 3 replicas | no violation in 15,856,387 states (depth 17) before the state guard; not exhaustive |
-| `_Stage_2I`, `_Stage_Crash_2I` | no compaction; 2 installs; without and with a crash | clean (4,878,895 and 32,971,120 states) |
-| `_Stage_3E_1I` | no compaction; 3 events, `MaxSeq = 2` | clean (28,022,048 states, depth 31) |
+| `_Truncation_CompactMembers` | 2 replicas, 2 events, 1 install | clean (2,075,539 states, depth 29) |
+| `_Truncation_CompactMembers_LastConfirmed` | the point one key earlier: the HLC of the last key before the first uncovered one | **violated** `NoStuckTombstone`, depth 9 — an emptied cell every member confirms, whose HLC is the tree's last key's, is never below the bound |
+| `_Truncation_CompactMembers_3R` | 3 replicas | no violation in 11,963,287 states (depth 17) before the time guard; not exhaustive |
+| `_Stage_2I`, `_Stage_Crash_2I` | no compaction; 2 installs; without and with a crash | clean (4,882,159 states, depth 35); with the crash, no violation in 26,063,674 states (depth 25) before the time guard; not exhaustive |
+| `_Stage_3E_1I` | no compaction; 3 events, `MaxSeq = 2` | clean (28,027,166 states, depth 31) |
 | `_NoTrunc` | a truncation runs while the mark is held | **violated** `CompactedClaimed`, depth 10 |
-| `_NoCover` | the session begins whether or not the source's frontier covers the replica's truncation record | **violated** `CompactedClaimed`, depth 11 |
-| `_NoServe` | 2 installs; a marked source serves | **violated** `SomeoneServes`, depth 8 |
-| `_NoReplayed` | 3 events, a crash; a source serves before its boot replay | **violated** `SettledSound`, depth 19 |
-| `_NoTarget` | the mark clears at adoption, before the replica claims the target | **violated** `SettledSound`, depth 22 |
+| `_NoCover` | the session begins whether or not the source's frontier covers the replica's truncation record | **violated** `CompactedClaimed`, depth 10 |
+| `_NoServe` | 2 installs; a marked source serves | **violated** `SomeoneServes`, depth 6 |
+| `_NoReplayed` | 3 events, a crash; a source serves before its boot replay | **violated** `SettledSound`, depth 18 |
+| `_NoTarget` | the mark clears at adoption, before the replica claims the target | **violated** `SettledSound`, depth 20 |
 | `_NoEarly` | 2 installs; the mark is written at install, not when the session begins | **violated** `CompactedClaimed`, depth 10 |
-| `_NoBusy` | 2 installs; a replica starts installing while it serves an open session | **violated** `SomeoneServes`, depth 7 |
-| `_Replace` | 3 events, `MaxSeq = 2`; the batches are written over the cells and re-folded later | **violated** `SettledSound`, depth 11 — a local write folds onto the installed cell, lifting its context over an own event the source lacks, and the re-fold skips that event |
-| `_NoRefoldFirst` | 3 events, `MaxSeq = 2`, a crash; a local write folds before the boot replay | **violated** `SettledSound`, depth 9 |
-| `_NoMark` | 3 events, a crash; the sweep does not wait on the mark | clean (12,893,543 states) at `MaxSeq = 1`; at `MaxSeq = 2`, no violation in 11,067,493 states (depth 13) before the state guard, nor in 2,617,498 simulated traces (depth 60) before the time guard |
-| `_NoToken` | 3 events, a crash; the replica takes a detached session's finalize and target | clean (12,671,614 states) at `MaxSeq = 1`; at `MaxSeq = 2`, no violation in 10,916,582 states (depth 13) before the state guard, nor in 2,518,794 simulated traces (depth 60) before the time guard |
-| `_CompactReceipt` | 3 events, a crash; a peer confirms by receipt (a root, or a reported claim) | clean (13,086,318 states) at `MaxSeq = 1`; at `MaxSeq = 2`, no violation in 10,408,725 states (depth 13) before the state guard, nor in 2,578,329 simulated traces (depth 60) before the time guard |
-| `_Reap` | 3 events, a crash; retired origins reaped, and counted as confirmed by every member (`RetiredExempt`) | no violation in 20,314,007 states (depth 20) before the state guard; not exhaustive |
-| `_Truncation_CompactOwn_Stranded` | no witnesses: the replica truncates on its own claims | **violated** `NoStrandedRecord`, depth 6 |
+| `_NoBusy` | 2 installs; a replica starts installing while it serves an open session | **violated** `SomeoneServes`, depth 5 |
+| `_Replace` | 3 events, `MaxSeq = 2`; the batches are written over the cells and re-folded later | **violated** `SettledSound`, depth 10 — a local write folds onto the installed cell, lifting its context over an own event the source lacks, and the re-fold skips that event |
+| `_NoRefoldFirst` | 3 events, `MaxSeq = 2`, a crash; a local write folds before the boot replay | **violated** `SettledSound`, depth 8 |
+| `_NoMark` | 3 events, a crash; the sweep does not wait on the mark | clean (13,169,895 states, depth 33) |
+| `_NoToken` | 3 events, a crash; the replica takes a detached session's finalize and target | clean (12,685,374 states, depth 33) |
+| `_CompactReceipt` | 3 events, a crash; a peer confirms by receipt (a root, or a reported claim) | clean (13,100,798 states, depth 33) |
+| `_Reap` | 3 events, a crash; retired origins reaped, and counted as confirmed by every member (`RetiredExempt`) | no violation in 19,666,863 states (depth 21) before the state guard; not exhaustive |
+| `_Truncation_CompactOwn_Stranded` | no witnesses: the replica truncates on its own claims | **violated** `NoStrandedRecord`, depth 5 |
 | `_Truncation_CompactRecorded_Stranded_3R` | some set of the other members confirms, as a recency filter would | **violated** `NoStrandedRecord`, depth 9 |
-| `_Truncation_CompactDurable_Crash` | every member, the replica included, confirms by its checkpoint; a crash | clean (1,838,873 states, depth 32) |
+| `_Truncation_CompactDurable_Crash` | every member, the replica included, confirms by its checkpoint; a crash | clean (1,841,177 states, depth 32) |
 | `_Truncation_CompactDurable_Crash_NoFloor` | same, a restore of the claims drops the recorded events | **violated** `CompactedClaimed`, depth 12 |
 
 Every guard but two has a violated ablation. The sweep's wait on the mark and
@@ -612,11 +619,11 @@ in its tree, or reachable by an install from that replica.
 
 | Config | Joins | Result |
 |---|---|---|
-| `_Truncation_CompactMembers_SoloClean` | replicas alone, joined while at most one has truncated | clean (2,145,000 states, depth 30) |
-| `_Truncation_CompactMembers_SoloClean_3R` | same, three replicas | no violation in 16,067,567 states (depth 17) before the state guard; not exhaustive |
+| `_Truncation_CompactMembers_SoloClean` | replicas alone, joined while at most one has truncated | clean (2,146,568 states, depth 30) |
+| `_Truncation_CompactMembers_SoloClean_3R` | same, three replicas | no violation in 13,221,147 states (depth 18) before the time guard; not exhaustive |
 | `_Truncation_CompactMembers_SoloJoinAny` | replicas alone, joined at any time | **violated** in 6 states — both truncate alone, and each refuses the other as a source |
-| `_Truncation_CompactMembers_Leave` | members; one leaves (a Partisan leave), restarts alone and returns under `CleanJoin` | clean (12,383,554 states, depth 34) |
-| `_Truncation_CompactMembers_Leave_3R`, `_Leave_Crash` | same, three replicas; same, with crashes | no violation in 1,869,001 and 1,902,988 simulated traces (depth 60) before the time guard, on the spec before the constants the kept configs all share were folded in; not exhaustive |
+| `_Truncation_CompactMembers_Leave` | members; one leaves (a Partisan leave), restarts alone and returns under `CleanJoin` | clean (12,398,770 states, depth 34) |
+| `_Truncation_CompactMembers_Leave_3R`, `_Leave_Crash` | same, three replicas; same, with crashes | no violation in 14,110,286 and 21,448,322 states (depth 16 and 21) before the state guard; not exhaustive |
 | `_Truncation_CompactMembers_Leave_Kept` | same, the others keep counting the member that went alone (no leave) | **violated** in 7 states |
 | `_Truncation_CompactMembers_Leave_JoinAny` | same, it returns without `CleanJoin` | **violated** in 7 states |
 

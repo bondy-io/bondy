@@ -1433,7 +1433,7 @@ parse_request_method(Method, Spec0, Ctxt) ->
 Parses a path action section definition. Before applying validations
 this function applies defaults values and evaluates all terms
 (using `mops:eval/2`).
-If the action type provided is not reconised it fails with
+If the action type provided is not recognised it fails with
 `{unsupported_action_type, Type}`.
 If an action type is not provided if fails with `action_type_missing`.
 """.
@@ -1571,7 +1571,7 @@ merge_eval_vars(Spec0, Ctxt0) ->
 
     %% We update the API section
     Spec1 = Spec0#{?VARS_KEY => MVars, ?DEFAULTS_KEY => MDefs},
-    %% We also update the ctxt as we use it as an accummulator
+    %% We also update the ctxt as we use it as an accumulator
     Ctxt1 = maps:update(?VARS_KEY, MVars, Ctxt0),
     Ctxt2 = maps:update(?DEFAULTS_KEY, MDefs, Ctxt1),
     eval_vars(Spec1, Ctxt2).

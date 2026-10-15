@@ -54,7 +54,7 @@ erl_cookie := env("BONDY_ERL_DISTRIBUTED_COOKIE", "bondy")
 rebar := "env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u LDLIBS CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3"
 
 # codespell arguments, shared by `spellcheck` and `spellfix`.
-spell_args := "-S _build -S doc -S .git -L applys,nd,accout,mattern,pres,fo"
+spell_args := "-S _build -S doc -S .git -S '*.pdf,*.min.js,*/bench/deps,*/dag_cbor_fixtures,*/isabelle/afp,*/jepsen*/store,package-lock.json' -L applys,nd,accout,mattern,pres,fo,notin,alow,edn,ans,ane,queueus,caf,datas,abd,fpr,rever,refreshin,interm,statics,juxt,unparseable,disjointness,implementors,optin,unstalls,finall"
 
 # Show every recipe.
 default:

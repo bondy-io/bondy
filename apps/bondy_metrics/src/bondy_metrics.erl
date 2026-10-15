@@ -54,7 +54,7 @@ it).
   buckets}`; `histogram_delta/2` subtracts two snapshots for
   per-interval reporting.
 
-Type is fixed at first-touch: re-using a name across types returns
+Type is fixed at first-touch: reusing a name across types returns
 `{error, {wrong_type, _}}`. `value/1` on a histogram returns its
 observation `count` (slot 1).
 
@@ -283,7 +283,7 @@ fixed by first-touch on the metric itself (`counter/1` vs `gauge/1` vs
 `histogram/1`), the single source of truth; declaring a type would let
 it disagree with reality.
 
-Idempotent; re-declaring replaces the descriptor. Wait-free — a single
+Idempotent; redeclaring replaces the descriptor. Wait-free — a single
 `ets:insert` into a public table, off the gen_server; safe to call at
 any rate (though the intent is setup code). Like the counters,
 declarations do not survive a `bondy_metrics` restart — the registering

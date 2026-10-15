@@ -151,7 +151,7 @@ vm_extra_check(EtcDir, AllFiles) ->
                     "## Use this file to add any additional Erlang VM ",
                     "arguments that are not provided\n",
                     "## by the options in bondy.config file.\n",
-                    "## The initalization script will remove any line ",
+                    "## The initialization script will remove any line ",
                     "containing options sname,\n",
                     "## name or setcookie as this are dynamically ",
                     "defined by Bondy based on\n"

@@ -37,7 +37,7 @@ complexity* associated with typical CRDTs in large-scale distributed
 environments.
 
 MSTs support:
-- Deterministic contruction - the MST algorithm produces a single possible
+- Deterministic construction - the MST algorithm produces a single possible
 representation for a given set of items
 - Keys are sorted lexicographically
 - Efficient key-value insertion and retrieval
@@ -55,9 +55,9 @@ The tree nodes in layer `L` are blocks of consecutive items whose boundaries
 corresponds to items of layers `L' > L`.
 
 Deterministic randomness obtained by hashind the values is used to determine
-the tree shape. Values stored in the MST are asigned a layer by computing
+the tree shape. Values stored in the MST are assigned a layer by computing
 their hash and writing that value in base `B`. The layer to which an item is
-assigned is the layer whose numner is the length of the longest prefix of the
+assigned is the layer whose number is the length of the longest prefix of the
 hash.
 """).
 

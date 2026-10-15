@@ -270,7 +270,7 @@ free(#?MODULE{tab = Tab} = T, Hash, _Page0) ->
 gc(#?MODULE{} = T, KeepRoots) when
     is_list(KeepRoots)
 ->
-    %% The algorithmm found in the paper, which is suboptimal to say the least
+    %% The algorithm found in the paper, which is suboptimal to say the least
     case ets:info(T#?MODULE.tab, size) > 0 of
         true ->
             prune_unreachable(T, KeepRoots);

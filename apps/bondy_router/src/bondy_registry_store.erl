@@ -11,7 +11,7 @@
 -include("bondy_registry.hrl").
 
 -moduledoc """
-Indeces for matching bondy_registry_entry(s).
+Indices for matching bondy_registry_entry(s).
 """.
 
 -define(IS_TYPE(X), (X == registration orelse X == subscription)).
@@ -2057,7 +2057,7 @@ ets_select(Tab, MS, _) ->
     ets:select(Tab, MS).
 
 %% @private
-%% At the moment (R)emote cannot contina continuation
+%% At the moment (R)emote cannot contain continuation
 zip_local_remote(?EOT, ?EOT) ->
     ?EOT;
 zip_local_remote(L, ?EOT) when is_list(L) ->

@@ -104,7 +104,7 @@
  {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.4.1">>},0},
  {<<"partisan">>,
   {git,"https://github.com/lasp-lang/partisan.git",
-       {ref,"9ea358e6c641442d339e6f9c76b219c801e563dc"}},
+       {ref,"d2c17d8da959b1983b8c7119aef5bbf28861d649"}},
   0},
  {<<"prometheus">>,{pkg,<<"prometheus">>,<<"6.1.3">>},0},
  {<<"prometheus_cowboy">>,{pkg,<<"prometheus_cowboy">>,<<"0.2.0">>},0},

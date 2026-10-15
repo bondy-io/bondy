@@ -129,7 +129,7 @@ purge_session(RealmUri, Session) when is_binary(RealmUri) ->
     integer() | no_return().
 
 %% TODO do not use default but use another function to set up once we store the session.
-%% This way the update_counter will fail for non persistent sessions and we can fallback to a random numnber
+%% This way the update_counter will fail for non persistent sessions and we can fallback to a random number
 incr_session_counter(RealmUri, SessionId) when is_binary(SessionId) ->
     %% IDs in the session scope MUST be incremented by 1 beginning with 1 and
     %% wrapping to 1 after it reached 2^53 (for each direction -
