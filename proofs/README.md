@@ -564,7 +564,7 @@ TLC stopped, which varies by one between runs.
 | `_Truncation_CompactMembers` | 2 replicas, 2 events, 1 install | clean (2,075,539 states, depth 29) |
 | `_Truncation_CompactMembers_LastConfirmed` | the point one key earlier: the HLC of the last key before the first uncovered one | **violated** `NoStuckTombstone`, depth 9 — an emptied cell every member confirms, whose HLC is the tree's last key's, is never below the bound |
 | `_Truncation_CompactMembers_3R` | 3 replicas | no violation in 11,963,287 states (depth 17) before the time guard; not exhaustive |
-| `_Stage_2I`, `_Stage_Crash_2I` | no compaction; 2 installs; without and with a crash | clean (4,882,159 states, depth 35); with the crash, no violation in 26,063,674 states (depth 25) before the time guard; not exhaustive |
+| `_Stage_2I`, `_Stage_Crash_2I` | no compaction; 2 installs; without and with a crash | clean (4,882,159 states, depth 35; and 32,994,964 states, depth 37) |
 | `_Stage_3E_1I` | no compaction; 3 events, `MaxSeq = 2` | clean (28,027,166 states, depth 31) |
 | `_NoTrunc` | a truncation runs while the mark is held | **violated** `CompactedClaimed`, depth 10 |
 | `_NoCover` | the session begins whether or not the source's frontier covers the replica's truncation record | **violated** `CompactedClaimed`, depth 10 |
@@ -578,7 +578,7 @@ TLC stopped, which varies by one between runs.
 | `_NoMark` | 3 events, a crash; the sweep does not wait on the mark | clean (13,169,895 states, depth 33) |
 | `_NoToken` | 3 events, a crash; the replica takes a detached session's finalize and target | clean (12,685,374 states, depth 33) |
 | `_CompactReceipt` | 3 events, a crash; a peer confirms by receipt (a root, or a reported claim) | clean (13,100,798 states, depth 33) |
-| `_Reap` | 3 events, a crash; retired origins reaped, and counted as confirmed by every member (`RetiredExempt`) | no violation in 19,666,863 states (depth 21) before the state guard; not exhaustive |
+| `_Reap` | 3 events, a crash; retired origins reaped, and counted as confirmed by every member (`RetiredExempt`) | no violation in 19,666,863 states (depth 21) before the state guard, nor in 19,600,521 states (depth 21) at `MaxEvents = 2`; not exhaustive |
 | `_Truncation_CompactOwn_Stranded` | no witnesses: the replica truncates on its own claims | **violated** `NoStrandedRecord`, depth 5 |
 | `_Truncation_CompactRecorded_Stranded_3R` | some set of the other members confirms, as a recency filter would | **violated** `NoStrandedRecord`, depth 9 |
 | `_Truncation_CompactDurable_Crash` | every member, the replica included, confirms by its checkpoint; a crash | clean (1,841,177 states, depth 32) |
