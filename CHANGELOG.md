@@ -4,7 +4,7 @@
 ### Action required
 * Upgrading from a pre-release that carries `bondy_db` (for example `1.0.0-rc.olive` or `1.0.0-rc.pear`) requires stopping every node and starting them all on this release. See [Upgrading from the bondy_db pre-releases](doc/guides/configuration/upgrading_from_bondy_db_prereleases.md).
 * Upgrading from `1.0.0-rc.65` requires a new cluster: PlumDB data is not readable by this release. See the [migration guide](doc/guides/configuration/migrating_from_1.0.0-rc.65.md).
-* A single-node deployment must set `cluster.enabled = off`. With `on` and no other member, compaction, reclamation and origin retirement hold (`no_members`) and the authentication freshness fence refuses under its default policy. See [Clustering](doc/guides/configuration/clustering.md#running-a-single-node).
+* A single-node deployment must set `cluster.enabled = off`; with `on` and no other member, compaction, reclamation, origin retirement and the authentication freshness fence hold. See [Clustering](doc/guides/configuration/clustering.md#running-a-single-node).
 * Listeners are declared under `listeners.$name.*`; the fixed per-scheme listener keys are removed, and every enabled `tls` listener must state its certificate. See [Listeners](doc/guides/configuration/listeners.md#migrating-from-the-pre-10-keys).
 * `listeners.$name.linger.timeout` is in seconds; a value written with a unit suffix changes meaning (`scripts/migrate_conf.escript check` reports it). See [Listeners](doc/guides/configuration/listeners.md).
 * Renamed or removed `bondy.conf` keys: `wamp.transport_queue.*` → `wamp.http_transport.*`; the global `wamp.{websocket,sse,longpoll}.*` blocks, the thirty `wamp.broker.*`/`wamp.dealer.*` feature keys, `wamp.dealer.pattern_based_registration`, `wamp.broker.pattern_based_subscription`, `store.*`, `oplog.core.scan_max_concurrency` and `db.compaction.peer_timeout` are removed; `rpc_gateway.*` is `http_connector.*`. `scripts/migrate_conf.escript` reports and rewrites them.
@@ -12,7 +12,7 @@
 * A custom `bondy_oplog_cache_adapter` must implement `ticket/1` and `fill/5` in place of `put/4`.
 
 ### New Features
-* New storage and replication stack replacing PlumDB/RocksDB: `bondy_db` on `bondy_oplog` (write-ahead log, MST history, projections, pull-based anti-entropy) and the vendored `bondy_mst`. See [Database architecture](doc/guides/architecture/db_architecture.md) and [Database options](doc/guides/configuration/database_options.md).
+* New storage and replication stack replacing PlumDB/RocksDB: `bondy_db` on `bondy_oplog` and the vendored `bondy_mst`. See [Database architecture](doc/guides/architecture/db_architecture.md) and [Database options](doc/guides/configuration/database_options.md).
 * Op-based CRDT convergence per table, with per-cell hybrid logical clocks. See [Convergence](doc/guides/database/convergence.md).
 * Deletion with causal-stability tombstone reclamation and origin retirement, both on by default. See [Deletion and reclamation](doc/guides/database/deletion_and_reclamation.md) and [Reclamation options](doc/guides/configuration/reclamation_options.md).
 * Authentication freshness fence (`db.aae.fence.*`). See [Database options](doc/guides/configuration/database_options.md).
@@ -34,8 +34,8 @@
 * Forwarding headers are honoured only from a trusted proxy. See [Listeners](doc/guides/configuration/listeners.md#proxy-protocol-and-forwarded-headers).
 * A node with peer discovery enabled refuses to start on an insecure cluster peer plane unless `cluster.tls.allow_insecure = on`. See [Cluster peer plane](doc/guides/security/cluster_peer_plane.md).
 * Fixed ticket scope normalisation on decode, so stored tickets are found by lookup.
-* A revoked ticket kept authenticating under the default `security.ticket.allow_not_found = on`. Revocation is now a replicated marker that every node refuses once it arrives, and `bondy.ticket.revoke` revokes a ticket. See [Authorization](doc/guides/security/authorization.md#ticket-revocation).
-* `security.master_key.id` accepts only 0 to 65535; its documentation no longer suggests changing it on rotation, which made encrypted realm keys unreadable. See [Realm key encryption](doc/guides/security/realm_key_encryption.md).
+* A revoked ticket kept authenticating under the default `security.ticket.allow_not_found = on`. Revocation now replicates to every node, and `bondy.ticket.revoke` revokes a ticket. See [Authorization](doc/guides/security/authorization.md#ticket-revocation).
+* `security.master_key.id` accepts only 0 to 65535.
 * Fixed: a claim-restricted (for example OIDC) session received the grants of the user's locally stored group memberships. See [Authorization](doc/guides/security/authorization.md).
 * WAMP URI validation rejects control characters, and realm URIs with NUL bytes are refused.
 * Cowboy 2.18.0 and cowlib 2.19.0. See [Listeners](doc/guides/configuration/listeners.md#request-validation).
@@ -121,7 +121,7 @@
 * A write whose WAL writer died mid-append was reported as not written.
 * `bondy_db:close_table/1` could lose index updates.
 * The log line listing loaded realms printed `a, b` instead of their URIs.
-* A raw-socket listener's `idle_timeout` never closed an idle connection; a bridge-relay listener's closed a live bridge whose peer answered pings, and never fired with ping off. Both now close a connection whose peer has sent nothing for `idle_timeout`. See [Listeners](doc/guides/configuration/listeners.md).
+* A raw-socket listener's `idle_timeout` never closed an idle connection, and a bridge-relay listener's closed live ones; both now close a connection whose peer has sent nothing for `idle_timeout`. See [Listeners](doc/guides/configuration/listeners.md).
 * A bridge relay's reconnect budget ended 30 seconds after the first failure, whatever `reconnect.max_retries` said, and a send failure while forwarding or pinging stopped the client instead of reconnecting. See [Bridge relay](doc/guides/configuration/bridge_relay.md).
 * Removing a running bridge relay failed and left it running.
 * A CALL whose options the load balancer refused was answered `wamp.error.no_such_procedure` instead of `wamp.error.invalid_argument`, and an ERROR the router raised for a Payload Passthru CALL copied its `ppt_*` options.
@@ -129,6 +129,8 @@
 * `bondy_cluster_channel_connections` was exported by two collectors in one scrape, which a strict Prometheus parser rejects. See [Metrics](doc/guides/reference/metrics.md).
 * A `registry` shard staged a catalogue install under `/tmp` rather than `platform_tmp_dir`. See [Platform directories](doc/guides/deployment/platform_directories.md#install-spool).
 * `scripts/migrate_conf.escript` called four WAMP features unimplemented or implemented contrary to what the build advertises; its self-test now checks every reason against the build.
+* A departed node's registrations and subscriptions were never reclaimed on a cluster with two or more surviving members.
+* A node or index writer that stopped between a durable write and its index updates lost those updates.
 
 ### Changes
 * MessagePack is encoded and decoded by Bondy's own `bondy_msgpack`; four behaviours change for MessagePack clients. See [Serialisation](doc/guides/introduction/wamp.md#serialisation).
@@ -153,6 +155,8 @@
 * Removed metric `bondy_oplog_peer_exclusions_total`.
 * A peer must announce `call_canceling` in `HELLO` to obtain it; an omitted feature is no longer inherited from the router's advertised set.
 * `bondy_cluster_channel_connections` is labelled by `peer` and `channel`.
+* The authentication freshness fence counts only sync rounds; a local write no longer defers its refusal.
+* Partisan 6.3.1, from 5.0.3.
 
 ## 1.0.0-rc.65
 * Fix bug in decoding of Error messages when using partial JSON encoding
