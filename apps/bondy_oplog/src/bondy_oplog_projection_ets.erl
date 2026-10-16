@@ -72,6 +72,7 @@ I/O, so a separate HEAD read buys nothing. The substrate falls back to
     range/5,
     delete/3,
     clear/2,
+    cell_keys/2,
     info/1
 ]).
 
@@ -217,6 +218,23 @@ process — `ets:delete_all_objects/1` only needs object-write access, which the
 clear(Tab, _Scope) ->
     true = ets:delete_all_objects(Tab),
     ok.
+
+-doc """
+Every `{Bucket, Key}` cell under the bucket named after `ET`, in key order:
+the cell directory the reap, the stability sweep and the secondary-index
+rebuild fold over (`bondy_oplog_cell_utils:primary_cell_directory/4`). It is
+read from the table itself, so it lists a cell for as long as the projection
+holds it, whatever compaction has removed from the MST.
+
+The bucket is bound in the match pattern, so the `ordered_set` scan covers
+that bucket alone and an index bucket (`<<ET/binary, "/$idx/", _/binary>>`)
+in the same table is excluded by the pattern, not by a filter. Only the
+`{entity, ET}` scope is served: `bondy_db_topology_memory:bucket_for/3`
+names every bucket after its entity type, so `all_primary` (every bucket
+that is not an index bucket) never describes a table this adapter holds.
+""".
+cell_keys(Tab, {entity, ET}) when is_binary(ET) ->
+    ets:select(Tab, [{{{ET, '$1'}, '_'}, [], [{{ET, '$1'}}]}]).
 
 -doc "Introspection: row count and memory words for the backing table.".
 info(Tab) ->

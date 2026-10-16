@@ -180,13 +180,12 @@ index_clear_scope(IndexName, _EntityType) when is_atom(IndexName) ->
     {suffix, IndexName}.
 
 -doc """
-Memory is ETS-backed; its projection adapter does not export `cell_keys/2`, so
-the rebuild always takes the MST walk and this scope is never consulted. A value
-is returned only to satisfy the behaviour — `all_primary` matches the dedicated
-per-`(EntityType, Shard)` ETS table conceptually.
+The bucket is the entity type (`bucket_for/3`), so the entity scope is exact
+and `bondy_oplog_projection_ets:cell_keys/2` enumerates that one bucket of the
+`(EntityType, Shard)` table.
 """.
-primary_cell_scope(_TableState) ->
-    all_primary.
+primary_cell_scope(#{entity_type := ET}) ->
+    {entity, atom_to_binary(ET, utf8)}.
 
 close_table(#{shards := Shards, owner := Owner}, State) ->
     %% The owner performs the whole-table `ets:delete/1` (the only

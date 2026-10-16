@@ -53,6 +53,12 @@ range_test_() ->
         fun range_cost_is_flat_in_low/1
     ]}.
 
+cell_keys_test_() ->
+    {foreach, fun setup/0, fun cleanup/1, [
+        fun cell_keys_lists_the_entity_bucket_alone/1,
+        fun cell_keys_over_empty_bucket/1
+    ]}.
+
 setup() ->
     {ok, Tab} = ?MOD:open(ns, primary, 0, #{}),
     Tab.
@@ -193,6 +199,30 @@ range_non_positive_limit_is_empty(Tab) ->
         ?assertEqual(
             [], keys(?MOD:range(Tab, ?B, <<"k01">>, infinity, #{limit => 0}))
         )
+    end.
+
+%% =============================================================================
+%% cell_keys/2
+%% =============================================================================
+
+cell_keys_lists_the_entity_bucket_alone(Tab) ->
+    fun() ->
+        %% Neighbours on both sides of the entity bucket, and the entity's
+        %% own index bucket, which shares the table and the prefix.
+        ok = put_keys(Tab, <<"a">>, [<<"k01">>]),
+        ok = put_keys(Tab, ?B, [<<"k02">>, <<"k01">>]),
+        ok = put_keys(Tab, <<?B/binary, "/$idx/by_x">>, [<<"k01">>]),
+        ok = put_keys(Tab, <<"c">>, [<<"k01">>]),
+        ?assertEqual(
+            [{?B, <<"k01">>}, {?B, <<"k02">>}],
+            ?MOD:cell_keys(Tab, {entity, ?B})
+        )
+    end.
+
+cell_keys_over_empty_bucket(Tab) ->
+    fun() ->
+        ok = put_keys(Tab, <<"a">>, [<<"k01">>]),
+        ?assertEqual([], ?MOD:cell_keys(Tab, {entity, ?B}))
     end.
 
 %% =============================================================================

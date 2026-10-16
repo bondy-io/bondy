@@ -63,15 +63,14 @@ passes a new Bucket value to `get/3`, `put_batch/2`, `range/5`, or
   Adapters that cannot wipe degrade gracefully (the rebuild re-puts every
   live term regardless; only orphaned terms would survive).
 - `cell_keys/2` — enumerate every `{Bucket, Key}` primary cell in a
-  `cell_keys_scope()` (`{entity, ET}` on a co-located backend, `all_primary`
-  on a dedicated-Bookie backend). This is the **authoritative, complete cell
-  directory** the secondary-index rebuild folds over for a DURABLE table: the
-  projection is the durable materialised state, whereas the MST is a
-  truncatable recent-events structure that would miss already-compacted cells.
-  A durable adapter (leveled) MUST export it; an ephemeral one (ETS) omits it
-  and the rebuild falls back to the MST walk — correct only for the
-  ephemeral/peer-synced path (e.g. the registry), whose cells are never
-  compacted away. Probe it via `cell_keys_exported/1`.
+  `cell_keys_scope()` (`{entity, ET}` on a backend whose bucket carries the
+  entity type, `all_primary` on a dedicated-Bookie backend). This is the
+  **complete cell directory** the secondary-index rebuild, the origin reap and
+  the stability sweep fold over: the projection holds every cell, whereas the
+  MST is truncated by compaction and lists only the cells of the events it
+  still holds. Every shipped adapter exports it; the MST walk remains only
+  for an instance with no `cell_keys_scope()`, which `bondy_db` never opens.
+  Probe it via `cell_keys_exported/1`.
 - `sync/1` — make every write `put_batch/2` or `write_batch/3` has
   acknowledged durable. A
   durable adapter whose acknowledged writes can still be lost to a power
@@ -205,16 +204,13 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 %% degrades to live-term re-puts when absent.
 -callback clear(handle(), Scope :: clear_scope()) -> ok.
 
-%% Enumerate every `{Bucket, Key}` primary cell in `Scope` — the authoritative,
-%% COMPLETE cell directory the secondary-index rebuild folds over for a DURABLE
-%% table. `Scope` is a `cell_keys_scope()`; see that type for which backend
-%% needs which form. The projection is the durable materialised state, and
-%% deriving the directory from the MST instead would miss every
-%% already-compacted (or crash-lost) cell — the MST is truncated below the
-%% compaction watermark — leaving a half-built index marked trusted. A durable
-%% adapter (leveled) MUST export it; an ephemeral one (ETS) omits it and
-%% `bondy_oplog_cell_utils:primary_cell_directory/4` falls back to the MST walk,
-%% correct only for the ephemeral/peer-synced path. Probe with
+%% Enumerate every `{Bucket, Key}` primary cell in `Scope` — the COMPLETE cell
+%% directory the secondary-index rebuild, the origin reap and the stability
+%% sweep fold over. `Scope` is a `cell_keys_scope()`; see that type for which
+%% backend needs which form. Deriving the directory from the MST instead misses
+%% every cell whose events compaction has truncated: an index half-built and
+%% marked trusted, or a departed node's cells that no reap can reach
+%% (`CellContextReap.tla`, `DirectoryComplete`). Probe with
 %% `cell_keys_exported/1`.
 -callback cell_keys(handle(), Scope :: cell_keys_scope()) ->
     [{bucket(), Key :: term()}].
@@ -236,13 +232,12 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -doc """
 Whether `Adapter` implements the optional `cell_keys/2` callback.
 
-This is the single decision point for the durable-index rebuild's cell
-directory source (`bondy_oplog_cell_utils:primary_cell_directory/4`): an adapter
-that exports `cell_keys/2` enumerates the authoritative, complete projection
-directory; one that does not falls back to the truncatable MST walk — correct
-only for the ephemeral/peer-synced path. `bondy_db` asserts the same predicate
-at durable-table open so a durable adapter missing the callback fails loudly
-instead of silently building empty indexes on the next rebuild.
+This is the single decision point for the cell directory source
+(`bondy_oplog_cell_utils:primary_cell_directory/4`): an adapter that exports
+`cell_keys/2` enumerates the complete projection directory; one that does not
+falls back to the truncatable MST walk. `bondy_db` asserts the predicate at
+durable-table open so an adapter missing the callback fails loudly instead of
+silently building empty indexes on the next rebuild.
 """.
 -spec cell_keys_exported(Adapter :: module()) -> boolean().
 

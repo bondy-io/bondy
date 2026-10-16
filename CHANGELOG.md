@@ -130,6 +130,7 @@
 * A `registry` shard staged a catalogue install under `/tmp` rather than `platform_tmp_dir`. See [Platform directories](doc/guides/deployment/platform_directories.md#install-spool).
 * `scripts/migrate_conf.escript` called four WAMP features unimplemented or implemented contrary to what the build advertises; its self-test now checks every reason against the build.
 * A departed node's registrations and subscriptions were never reclaimed on a cluster with two or more surviving members.
+* A departed node's registrations and subscriptions survived retirement once the survivors had compacted their registry history.
 * A node or index writer that stopped between a durable write and its index updates lost those updates.
 
 ### Changes

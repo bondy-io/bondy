@@ -599,11 +599,10 @@ sweep_batched_loop(Pid, StableHlc, Max, Cursor, AccStats, Calls) ->
             sweep_batched_loop(Pid, StableHlc, Max, C, Merged, Calls + 1)
     end.
 
-%% Cells the sweeper visits. NOTE this is not a projection-row count: the ETS
-%% projection used by the memory topology does not export `cell_keys/2`, so
-%% `bondy_oplog_cell_utils:primary_cell_directory/4` falls back to walking the MST. The count is
-%% therefore stable across a projection delete, which is why the reclamation
-%% assertions read `discarded` from the sweep rather than differencing this.
+%% Cells the sweeper visits: the projection's own `cell_keys/2` directory
+%% (`bondy_oplog_cell_utils:primary_cell_directory/4`), so a projection
+%% delete lowers it. The reclamation assertions read `discarded` from the
+%% sweep rather than differencing this.
 cell_count(T) ->
     {ok, Stats} = sweep(T, 1),
     ?assertEqual(0, maps:get(discarded, Stats)),

@@ -3420,10 +3420,10 @@ index_descriptors(Specs, DefaultShardCount, Topology) ->
 %% A durable table with secondary indexes needs its projection adapter to
 %% export `cell_keys/2`; without it the rebuild falls back to the
 %% truncatable MST and misses every compacted cell
-%% (`bondy_oplog_cell_utils:primary_cell_directory/4`). The leveled adapter
-%% exports it, so this never fires today — it fails a future adapter loudly
-%% at open instead of silently degrading. Ephemeral/ETS tables omit it by
-%% design and are not asserted.
+%% (`bondy_oplog_cell_utils:primary_cell_directory/4`). Both shipped adapters
+%% export it, so this never fires today — it fails a future adapter loudly
+%% at open instead of silently degrading. Only the durable one is asserted:
+%% it is the one whose half-built index would be marked trusted.
 assert_durable_rebuild_invariant(leveled, IndexMap) when
     map_size(IndexMap) > 0
 ->

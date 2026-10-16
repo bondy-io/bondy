@@ -93,9 +93,9 @@ member_cells(
 
 -doc """
 The primary cell directory for one member: the adapter's own key
-enumeration when it exports `cell_keys/2` (and a scope is configured),
-else the MST fallback (`mst_cell_directory/1`) — truncatable, so only
-sound where cells are never compacted past what a peer re-ships.
+enumeration when it exports `cell_keys/2` and a scope is configured, else
+the MST fallback (`mst_cell_directory/1`), which compaction truncates and
+which therefore lists only the cells of the events the MST still holds.
 """.
 -spec primary_cell_directory(
     Adapter :: module(),
@@ -116,9 +116,9 @@ primary_cell_directory(_Adapter, _Handle, Id, undefined) ->
 
 -doc """
 The MST `cell_apply` cell directory — the fallback for an adapter that
-cannot enumerate its keyspace (the ephemeral ETS adapter) or an instance
-with no `cell_keys_scope()`. Truncatable (see `primary_cell_directory/4`),
-so only sound where cells are never compacted past what a peer re-ships.
+does not export `cell_keys/2` or an instance with no `cell_keys_scope()`.
+Compaction truncates it, so it is complete only while no event of a held
+cell has been compacted (`CellContextReap.tla`, `DirectoryComplete`).
 
 Where the fold runs is decided by the store's `process_bound_reads`
 capability: a backend whose pages are read through a process-bound resource

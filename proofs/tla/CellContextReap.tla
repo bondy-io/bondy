@@ -39,6 +39,18 @@
 (* `CausalDelivery` is orthogonal and is varied independently so a          *)
 (* violation caused by out-of-order delivery — a property of the substrate  *)
 (* with or without reaping — cannot be mistaken for one caused by the reap. *)
+(*                                                                         *)
+(* WHICH CELLS THE REAP CAN SEE                                            *)
+(*                                                                         *)
+(* The reap does not receive the cell; it enumerates cells through          *)
+(* `bondy_oplog_cell_utils:primary_cell_directory/4`, which is the          *)
+(* adapter's own `cell_keys/2` when the adapter exports it and otherwise    *)
+(* the `cell_apply` keys still present in the MST. The MST is truncated by  *)
+(* compaction, so the two directories differ exactly when a cell's events   *)
+(* have all been compacted away while the projection still holds the cell.  *)
+(* `Directory` selects the source: "projection" lists every cell the       *)
+(* projection holds; "tree" lists a cell only while the MST still holds an  *)
+(* event of it. The reap is unchanged either way; only its reach is.        *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, TLC
 
@@ -46,8 +58,12 @@ CONSTANTS
     Replicas,
     MaxSeq,
     ReapEnabled,     \* TRUE = `reap_origins/2` may drop a dead origin's CC entry
-    CausalDelivery   \* TRUE = an op is delivered only once its author's
+    CausalDelivery,  \* TRUE = an op is delivered only once its author's
                      \*        observed context is fully applied here
+    Directory        \* "projection" = the adapter enumerates its own cells
+                     \* "tree"       = the MST `cell_apply` walk
+
+ASSUME Directory \in {"projection", "tree"}
 
 Origins == Replicas
 
@@ -189,11 +205,21 @@ Depart(o) ==
     /\ live' = live \ {o}
     /\ UNCHANGED <<dots, cc, frontier, tree, minted, removed, applied>>
 
+\* The one cell this module models, as each directory lists it. The
+\* projection holds the cell once any op has been folded into it; the MST
+\* lists it only while an op of it survives compaction. Keys are not
+\* modelled, so one op of any origin keeps the cell listed — more than the
+\* single-writer RIB cell gets, where only the owner's own events name it.
+Listed(r) ==
+    IF Directory = "tree" THEN tree[r] # {} ELSE applied[r] # {}
+
 \* THE OPERATION UNDER REVIEW: `reap_origins/2` under the membership-only
 \* driver. Both of its guards are modelled — the origin is claimed by no
-\* current member, and it holds no live dot here — and nothing else.
+\* current member, and it holds no live dot here — and nothing else, except
+\* that the reap only ever reaches a cell its directory lists.
 ReapCell(r, o) ==
     /\ ReapEnabled
+    /\ Listed(r)
     /\ o \notin live
     /\ cc[r][o] > 0
     /\ ~(\E d \in dots[r] : d.org = o)
@@ -239,5 +265,20 @@ NoPhantomDot ==
 ContextCoversDots ==
     \A r \in Replicas :
         \A d \in dots[r] : cc[r][d.org] >= d.seq
+
+\* THE DIRECTORY CONTRACT. Every cell the projection holds is one the reap
+\* can enumerate. This is what `primary_cell_directory/4` must satisfy for
+\* the reap (and the stability sweep, which walks the same directory) to
+\* be complete; a directory that compaction can empty breaks it.
+DirectoryComplete ==
+    \A r \in Replicas : applied[r] # {} => Listed(r)
+
+\* THE HARM of an incomplete directory: a departed origin's context entry
+\* that only the reap can drop, in a cell the reap can no longer find. The
+\* cell then keeps the departed origin's state for as long as the replica
+\* lives, whatever the retirement driver does.
+DeadContextReachable ==
+    \A r \in Replicas, o \in Origins :
+        (o \notin live /\ cc[r][o] > 0) => Listed(r)
 
 =============================================================================

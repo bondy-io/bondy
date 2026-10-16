@@ -46,7 +46,7 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | TLA+ module | Question |
 | --- | --- |
 | `AaeCausalClosure.tla` | Does anti-entropy deliver a per-origin prefix-closed set? |
-| `CellContextReap.tla` | Does reaping a dead origin's tier_2 cell context change what replicas compute? |
+| `CellContextReap.tla` | Does reaping a dead origin's tier_2 cell context change what replicas compute? Can the reap still find the cell once compaction has truncated the MST it enumerates cells from? |
 | `OriginRetirementSet.tla` | Does a replicated grow-only retirement set license the reap across rejoins? |
 | `SeqSeed.tla` | Does the per-origin sequence counter survive a restart? Which durable sources must seed it, in what compaction order? |
 | `MuxBucketSkip.tla` | Can the applied-frontier VV claim an event whose cell was never installed because its BUCKET had no context? Two independent channels — the fold and the bootstrap adoption — and which mechanisms are load-bearing for each. |
@@ -392,6 +392,41 @@ of reachable states.
 Two replicas at `MaxSeq = 2`, reap on, causal delivery
 (`_R2_ReapTRUE_CausalTRUE`) are exhaustively clean on every invariant.
 
+**The cell directory.** The reap enumerates cells through
+`bondy_oplog_cell_utils:primary_cell_directory/4`: the adapter's `cell_keys/2`
+where the adapter exports it, else the `cell_apply` keys the MST still holds.
+`bondy_oplog_compaction_cluster_SUITE` locks registry history to drain to
+quiescent, so a registry adapter without `cell_keys/2` leaves the reap an
+empty directory once compaction has run.
+`bondy_rib_reclamation_cluster_SUITE:departed_node_rib_state_is_reclaimed_after_compaction`
+pins the consequence: it compacts the survivors explicitly before the
+departure and asserts the departed node's registration and subscription
+cells and stubs are gone after retirement. Without an ETS `cell_keys/2` it
+fails on the registration cell with every registry instance reporting
+`cells_scanned => 0`. The `Directory` constant models the source: `"projection"` lists every cell the
+projection holds, `"tree"` only a cell the MST still has an event of. Two
+invariants: `DirectoryComplete` (every held cell is listed) and
+`DeadContextReachable` (a departed origin's unreaped context is in a listed
+cell). `_R2_DirTree` **violates `DirectoryComplete` in 3 steps**: two
+mints and one compaction, no departure needed (22 states generated, 20
+distinct). `_R2_DirTree_Dead`, the same cfg without `DirectoryComplete`,
+**violates `DeadContextReachable` in 3 steps**: replica 1 mints, compacts
+its own op, and origin 1 departs; its context entry `cc[1][1] = 1` is now
+in a cell no directory lists (95 states generated, 75 distinct). Under
+`"projection"` the old reap guard is unchanged on every reachable state (a
+context entry is nonzero only after a fold, and a fold is what lists the
+cell): `_R2_ReapTRUE_CausalTRUE` is exhaustively clean on all seven
+invariants, 1,354,631 distinct, and `_R3S1_ReapTRUE_CausalTRUE` clean at
+its recorded 5,046,890 distinct, and `_R3S1_ReapTRUE_CausalFALSE` still
+stops on `Convergence` at the same depth with both new invariants silent
+before it. Under `"projection"` `DirectoryComplete` is a tautology, so
+these runs show the directory constant did not disturb the earlier results;
+they do not verify the adapter. `bondy_oplog_projection_ets:cell_keys/2`
+(an `ets:select` over the bound entity bucket, scope from
+`bondy_db_topology_memory:primary_cell_scope/1`) puts the registry under the
+`"projection"` directory; the eunit group `cell_keys_test_` in
+`bondy_oplog_projection_ets_test` and the CT case above are the evidence.
+
 **Verdict on the reap: safe.** It does not resurrect and does not break
 convergence. It moves the stamped context down, so a later remove drops fewer
 dots — an error toward FALSE concurrency (extra siblings the CRDT resolves),
@@ -564,7 +599,7 @@ TLC stopped, which varies by one between runs.
 | `_Truncation_CompactMembers` | 2 replicas, 2 events, 1 install | clean (2,075,539 states, depth 29) |
 | `_Truncation_CompactMembers_LastConfirmed` | the point one key earlier: the HLC of the last key before the first uncovered one | **violated** `NoStuckTombstone`, depth 9 — an emptied cell every member confirms, whose HLC is the tree's last key's, is never below the bound |
 | `_Truncation_CompactMembers_3R` | 3 replicas | no violation in 11,963,287 states (depth 17) before the time guard; not exhaustive |
-| `_Stage_2I`, `_Stage_Crash_2I` | no compaction; 2 installs; without and with a crash | clean (4,882,159 states, depth 35); with the crash, no violation in 26,063,674 states (depth 25) before the time guard; not exhaustive |
+| `_Stage_2I`, `_Stage_Crash_2I` | no compaction; 2 installs; without and with a crash | clean (4,882,159 states, depth 35; and 32,994,964 states, depth 37) |
 | `_Stage_3E_1I` | no compaction; 3 events, `MaxSeq = 2` | clean (28,027,166 states, depth 31) |
 | `_NoTrunc` | a truncation runs while the mark is held | **violated** `CompactedClaimed`, depth 10 |
 | `_NoCover` | the session begins whether or not the source's frontier covers the replica's truncation record | **violated** `CompactedClaimed`, depth 10 |
@@ -578,7 +613,7 @@ TLC stopped, which varies by one between runs.
 | `_NoMark` | 3 events, a crash; the sweep does not wait on the mark | clean (13,169,895 states, depth 33) |
 | `_NoToken` | 3 events, a crash; the replica takes a detached session's finalize and target | clean (12,685,374 states, depth 33) |
 | `_CompactReceipt` | 3 events, a crash; a peer confirms by receipt (a root, or a reported claim) | clean (13,100,798 states, depth 33) |
-| `_Reap` | 3 events, a crash; retired origins reaped, and counted as confirmed by every member (`RetiredExempt`) | no violation in 19,666,863 states (depth 21) before the state guard; not exhaustive |
+| `_Reap` | 3 events, a crash; retired origins reaped, and counted as confirmed by every member (`RetiredExempt`) | no violation in 19,666,863 states (depth 21) before the state guard, nor in 19,600,521 states (depth 21) at `MaxEvents = 2`; not exhaustive |
 | `_Truncation_CompactOwn_Stranded` | no witnesses: the replica truncates on its own claims | **violated** `NoStrandedRecord`, depth 5 |
 | `_Truncation_CompactRecorded_Stranded_3R` | some set of the other members confirms, as a recency filter would | **violated** `NoStrandedRecord`, depth 9 |
 | `_Truncation_CompactDurable_Crash` | every member, the replica included, confirms by its checkpoint; a crash | clean (1,841,177 states, depth 32) |
@@ -672,6 +707,7 @@ Verified by reading `apps/bondy_oplog/src` at the time of writing.
 | **Applied frontier as prefix + pending set** | **PROVED** (`Frontier_Pending.thy`); the one-integer alternative **refuted in general** (`no_scalar_writer_sound_and_complete`) and the earlier rule refuted concretely (`FrontierPending_MaxCap*`) | **BUILT** — `bondy_oplog_registry` carries a `pending` column beside `frontier` (`pending/1`, `frontier_and_pending/1`) and `merge_applied/2` writes the contiguous prefix, holding out-of-order seqs in `pending`. `merge_frontier/2` remains a pointwise max and is now the BOOTSTRAP writer only |
 | **Bootstrap frontier adoption** | **PROVED** (`Bucket_Skip_Soundness.adopt_if_complete_sound`), with the responder gate as a HYPOTHESIS; both halves refuted individually (`unconditional_adoption_unsound`, `adoption_unsound_without_serve_gate`) and by TLC (`MuxBucketSkip_Minus_AdoptIfComplete`, `_Minus_ServeGate`) | **BUILT** — both halves: the responder gate, and `bondy_oplog_sync_session:adopt_frontier/3`, which hands `finalize_catalogue_bootstrap/5` the peer's vector only over an install that reported no unroutable bucket |
 | Vector stability | `vector_stable` defined; **not certified by the substrate** | **NOT BUILT** |
+| **Reap cell directory survives compaction** | `CellContextReap` with `Directory`: `_R2_DirTree` refutes the MST directory (`DirectoryComplete` falls in 3 steps), `_R2_DirTree_Dead` shows the consequence (`DeadContextReachable` falls in 3 steps), the three projection cfgs stay clean; under `"projection"` `DirectoryComplete` is a tautology, so the model refutes the tree, it does not verify the ETS adapter | **BUILT** — `bondy_oplog_projection_ets:cell_keys/2` (`ets:select` over the bound entity bucket) and `bondy_db_topology_memory:primary_cell_scope/1`; checked by `bondy_oplog_projection_ets_test` (`cell_keys_test_`) and `bondy_rib_reclamation_cluster_SUITE:departed_node_rib_state_is_reclaimed_after_compaction` |
 | Cross-origin causal delivery | absence **refutes `Convergence`** (`CellContextReap`); a hold that folds nothing ahead of what it observed is causal (`Aw_Kernel.thy`, `causal_hold_delivers_causally`) | **BUILT** — `bondy_oplog_cell_apply:partition_contiguous/4` folds a batch in key order and holds an event whose stamped context names a seq past an origin's foldable top; pinned by `bondy_oplog_bootstrap_rederive_test:held_add_folds_after_a_later_add_that_saw_it` and `held_add_folds_after_its_remove`. `CellContextReap` is not re-run against the hold |
 | **Compaction confirmed by every member's durable frontier** | model-checked (`ConfirmedCompaction_2R_Async`, `_3R`, `_3R_Partition`, `_3R_Retire`, `_2R_Async_Partition_Retire`, `_2R_Async_Live`); a recency filter **refuted** (`_3R_Fresh_Partition`, `NoLoss`); `Confirmed_Compaction.thy` proves `no_loss` and `no_drop` for it, for any number of members, with frontiers recorded independently of the merge (exclusions under its entry above) | **BUILT** — `bondy_oplog_instance:compaction_witnesses/1` supplies every member's recorded durable frontier and `member_vvs/2` adds the replica's own; `compute_frontier_for/2` confirms a key every witness covers (`bondy_oplog_event:covered/2`); pinned by `bondy_oplog_compaction_fused_test:peer_compaction_does_not_stall_ours` and `rootless_live_peer_holds_compaction`, rule table in `bondy_oplog_compaction_frontier_test:frontier_scenarios_test_` |
 | **Truncation capped below the first un-applied key** | **not shown necessary** on the confirmed frontier (`ConfirmedCompaction_2R_Async_NoCap`, clean); `Confirmed_Compaction.thy`'s `compact` rule truncates only applied events, which the replica's own durable frontier as a witness gives | **BUILT** — `capped_truncation_point/2` in `finalize_catalogue_compaction/4`, on the confirmed and the retention frontier; the below-watermark trim (`trim_below_watermark/3`) and the watermark door hold through `door_truncate/4`. `bondy_oplog_compaction_fused_test` passes with the cap disabled, so no test pins it. Retired origins are exempt (`compaction_truncates_held_event_of_retired_origin`) — not in the model. Compaction has no fold path: `bondy_oplog_catalogue_compaction_test:compaction_makes_no_synchronous_applier_call` pins the only applier call left as the `advance_replayed_root/2` cast |

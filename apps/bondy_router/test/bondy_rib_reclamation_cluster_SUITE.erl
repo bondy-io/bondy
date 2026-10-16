@@ -26,12 +26,12 @@
 %%   - the replicated cell in the survivor's projection, and
 %%   - the derived stub row the routing read paths actually consult.
 %%
-%% Its own cluster (not `bondy_reclamation_cluster_SUITE`'s) because retiring
-%% a member is exclusive: two tests cannot both spend it. The cluster has three
-%% nodes so the survivors stay a cluster: a sole member with clustering enabled
-%% confirms nothing.
+%% Each case gets its own cluster (not `bondy_reclamation_cluster_SUITE`'s)
+%% because retiring a member is exclusive: two tests cannot both spend it. The
+%% cluster has three nodes so the survivors stay a cluster: a sole member with
+%% clustering enabled confirms nothing. Node names differ per case so a case
+%% never boots on the data dir a previous case's departed node left behind.
 
--define(NODE_NAMES, [rribrec1, rribrec2, rribrec3]).
 -define(REALM, <<"com.bondy.rib_reclaim">>).
 -define(PROC, <<"com.example.rib_reclaim.proc">>).
 -define(TOPIC, <<"com.example.rib_reclaim.topic">>).
@@ -39,27 +39,31 @@
 -define(CONVERGE_MS, 120000).
 
 all() ->
-    [departed_node_rib_state_is_reclaimed].
+    [
+        departed_node_rib_state_is_reclaimed,
+        departed_node_rib_state_is_reclaimed_after_compaction
+    ].
 
 suite() ->
     [{timetrap, {minutes, 10}}].
 
-init_per_suite(Config) ->
-    Nodes = bondy_ct:start_cluster(?NODE_NAMES, Config),
+init_per_testcase(Case, Config) ->
+    Nodes = bondy_ct:start_cluster(node_names(Case), Config),
     _ = [push_module(Node, ?MODULE) || {_, Node, _} <- Nodes],
-    %% Scheduler-driven GC (compaction) is frozen suite-wide, as in
-    %% `bondy_reclamation_cluster_SUITE`. The reap enumerates cells through
-    %% `bondy_oplog_cell_utils:primary_cell_directory/4`, which for the
-    %% ephemeral ETS adapter falls back to the TRUNCATABLE MST `cell_apply`
-    %% directory — so a compaction inside the test window empties the very
-    %% directory the reap walks, and the pass reports `cells_scanned => 0`
-    %% for reasons that have nothing to do with what is being tested.
+    %% Scheduler-driven compaction is frozen so that each case decides
+    %% whether the registry MST is compacted before the node departs: the
+    %% first case never compacts, the second compacts explicitly.
     _ = [bondy_ct:freeze_gc(Node) || {_, Node, _} <- Nodes],
     [{cluster, Nodes} | Config].
 
-end_per_suite(Config) ->
+end_per_testcase(_Case, Config) ->
     ok = bondy_ct:stop_cluster(?config(cluster, Config)),
     Config.
+
+node_names(departed_node_rib_state_is_reclaimed) ->
+    [rribrec1, rribrec2, rribrec3];
+node_names(departed_node_rib_state_is_reclaimed_after_compaction) ->
+    [rribcmp1, rribcmp2, rribcmp3].
 
 %% =============================================================================
 %% TESTS
@@ -68,18 +72,45 @@ end_per_suite(Config) ->
 departed_node_rib_state_is_reclaimed(Config) ->
     [N1, N2, _N3] = nodes_of(Config),
     {_, N2, Peer2} = lists:keyfind(N2, 2, ?config(cluster, Config)),
+    N2Str = seed_owner_cells(N1, N2),
 
+    %% N2 departs for good and is retired — the deliberate, replicated
+    %% membership act that licenses reclamation.
+    ok = peer:stop(Peer2),
+    assert_reclaimed(N1, N2Str).
+
+%% The same departure after the survivor has compacted its registry MSTs,
+%% the state a long-running cluster is in: the compaction cluster suite
+%% locks registry history to drain to quiescent. It holds only if the
+%% directory the reap and the stability sweep enumerate outlives the MST
+%% events compaction removes (`CellContextReap.tla`, `DirectoryComplete`).
+departed_node_rib_state_is_reclaimed_after_compaction(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    {_, N2, Peer2} = lists:keyfind(N2, 2, ?config(cluster, Config)),
+    N2Str = seed_owner_cells(N1, N2),
+
+    %% Precondition: compaction has removed the seeded cells from the MST
+    %% directory on the survivor while the projection still holds them.
+    ok = wait_directory_empty(N1, N2Str),
+    [
+        ?assert(count_of(cell_value(N1, T, U, N2Str)) > 0)
+     || {T, U} <- rib_cells()
+    ],
+    ct:pal("compacted: ~p", [rib_state(N1, N2Str)]),
+
+    ok = peer:stop(Peer2),
+    assert_reclaimed(N1, N2Str).
+
+%% @private
+%% N2 owns one registration and one subscription; returns N2's nodestring.
+%% All four artifacts must be present on the survivor before the case goes
+%% on: without that precondition the case proves nothing about reclamation.
+seed_owner_cells(N1, N2) ->
     ok = erpc:call(N1, ?MODULE, do_create_realm, [?REALM]),
-
-    %% N2 owns one registration and one subscription.
     ok = erpc:call(N2, ?MODULE, do_create_realm, [?REALM]),
     ok = erpc:call(N2, ?MODULE, do_add_registration, [?REALM, ?PROC]),
     ok = erpc:call(N2, ?MODULE, do_add_subscription, [?REALM, ?TOPIC]),
     N2Str = erpc:call(N2, bondy_config, nodestring, []),
-
-    %% Precondition: all four artifacts are present on the survivor. If this
-    %% does not hold the test proves nothing about reclamation, so it is an
-    %% assertion, not a wait-and-hope.
     ok = wait_state(N1, N2Str, #{
         reg_cell => true,
         reg_stub => true,
@@ -91,13 +122,13 @@ departed_node_rib_state_is_reclaimed(Config) ->
         ?assert(count_of(cell_value(N1, T, U, N2Str)) > 0)
      || {T, U} <- rib_cells()
     ],
+    N2Str.
 
-    %% N2 departs for good and is retired — the deliberate, replicated
-    %% membership act that licenses reclamation.
-    ok = peer:stop(Peer2),
-    ok = erpc:call(N1, ?MODULE, do_retire, [N2]),
-
-    %% Drive the passes synchronously rather than waiting on their timers.
+%% @private
+%% Retires the (stopped) N2 on N1, drives the passes synchronously rather
+%% than waiting on their timers, and asserts all four artifacts are gone.
+assert_reclaimed(N1, N2Str) ->
+    ok = erpc:call(N1, ?MODULE, do_retire, [node_of(N1, N2Str)]),
     Report = erpc:call(N1, ?MODULE, do_run_retirement, []),
     ct:pal("retirement pass: ~p", [Report]),
     Reclaimed = erpc:call(N1, ?MODULE, do_reclaim_all, []),
@@ -138,6 +169,37 @@ departed_node_rib_state_is_reclaimed(Config) ->
 %% @private
 nodes_of(Config) ->
     [Node || {_, Node, _} <- ?config(cluster, Config)].
+
+%% @private
+node_of(Node, NodeStr) ->
+    erpc:call(Node, erlang, list_to_atom, [binary_to_list(NodeStr)]).
+
+%% @private
+%% Compacts every registry instance on `Node` until the MST directory there
+%% lists neither seeded cell, or fails naming what the directory still held
+%% and what the last compaction round answered.
+wait_directory_empty(Node, Owner) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_directory_empty(Node, Owner, Deadline).
+
+wait_directory_empty(Node, Owner, Deadline) ->
+    Rounds = erpc:call(Node, ?MODULE, do_compact_registry, []),
+    case erpc:call(Node, ?MODULE, do_mst_directory_for, [Owner]) of
+        [] ->
+            ok;
+        Held ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true ->
+                    ct:fail(
+                        {registry_mst_not_compacted, #{
+                            directory => Held, compaction => Rounds
+                        }}
+                    );
+                false ->
+                    timer:sleep(1000),
+                    wait_directory_empty(Node, Owner, Deadline)
+            end
+    end.
 
 %% @private
 push_module(Node, Mod) ->
@@ -279,6 +341,40 @@ do_read_cell(Table, Uri, Owner) ->
 has_stub(Type, Uri, Owner) ->
     Stubs = bondy_registry_rib:stub_nodes(Type, ?REALM, ?POLICY, Uri),
     lists:keymember(Owner, 1, Stubs).
+
+%% @private
+%% One compaction cycle per registry instance, as the GC scheduler's default
+%% trigger runs it.
+do_compact_registry() ->
+    [
+        {I, bondy_oplog_compaction:compact(I)}
+     || <<"registry-", _/binary>> = I <- bondy_oplog:list_instances()
+    ].
+
+%% @private
+%% The `cell_apply` entries still in any registry instance's MST for the
+%% cells `Owner` wrote: what `bondy_oplog_cell_utils:primary_cell_directory/4`
+%% enumerates for the ephemeral ETS adapter. A storage key is the raw cell
+%% key, realm-prefixed under a realm-folding topology, so match on suffix.
+do_mst_directory_for(Owner) ->
+    Raws = [
+        term_to_binary({?REALM, ?POLICY, Uri, Owner})
+     || {_, Uri} <- rib_cells()
+    ],
+    [
+        {I, Bucket}
+     || <<"registry-", _/binary>> = I <- bondy_oplog:list_instances(),
+        MST <- [bondy_oplog_registry:mst(I)],
+        MST =/= undefined,
+        {_, {{cell_apply, Bucket, Key, _}, _, _, _}} <- bondy_mst:to_list(MST),
+        is_binary(Key),
+        lists:any(
+            fun(Raw) ->
+                binary:longest_common_suffix([Key, Raw]) =:= byte_size(Raw)
+            end,
+            Raws
+        )
+    ].
 
 %% @private
 %% Retirement: remove the (dead) node from the Partisan membership.

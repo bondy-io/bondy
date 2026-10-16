@@ -364,6 +364,24 @@ Two replicas at `MaxSeq = 2`, reap on, causal delivery
 (`CellContextReap_R2_ReapTRUE_CausalTRUE.cfg`) are exhaustively clean on
 every invariant.
 
+**Which cells the reap can see.** `ReapCell` only reaches a cell its
+directory lists (`Listed`), as `primary_cell_directory/4` only hands
+`reap_origins` the keys it enumerates. `Directory = "tree"` is the MST
+walk the ETS adapter falls back to; `"projection"` is an adapter that
+enumerates its own keys. `DirectoryComplete` and `DeadContextReachable` are
+the properties the fix has to hold; `CellContextReap_R2_DirTree.cfg`
+violates `DirectoryComplete` in 3 steps (mint, mint, compact; 20 distinct
+states), the trace the registry is in after any compaction, and
+`CellContextReap_R2_DirTree_Dead.cfg` violates `DeadContextReachable` in 3
+steps (mint, compact, depart; 75 distinct states), which is the trace
+`bondy_rib_reclamation_cluster_SUITE:departed_node_rib_state_is_reclaimed_after_compaction`
+reproduces on a real cluster. The three earlier cfgs now pin
+`Directory = "projection"`, the guard they ran under before it was named;
+`_R2_ReapTRUE_CausalTRUE` is clean on all seven invariants at 1,354,631
+distinct states and `_R3S1_ReapTRUE_CausalTRUE` at its recorded 5,046,890;
+`_R3S1_ReapTRUE_CausalFALSE` still stops on `Convergence` at the same
+depth, the new invariants silent before it.
+
 **The reap does not resurrect and does not break convergence.** It moves the
 stamped context down, so a later remove drops fewer dots at replicas that
 still hold them — an error toward FALSE concurrency (extra siblings the CRDT
