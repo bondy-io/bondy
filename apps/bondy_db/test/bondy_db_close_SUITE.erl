@@ -122,9 +122,7 @@ secondary_sup_restart_after_close_keeps_the_oplog_app_up(Config) ->
     ?assertEqual(OplogSup, erlang:whereis(bondy_oplog_sup)),
     ?assert(is_process_alive(OplogSup)),
     ?assert(lists:keymember(bondy_oplog, 1, application:which_applications())),
-    ?assertEqual(
-        [], supervisor:which_children(bondy_oplog_secondary_sup)
-    ).
+    ?assertEqual([], index_writers_of(close_suite_restart)).
 
 %% =============================================================================
 %% HELPERS
@@ -204,6 +202,18 @@ flush_index(Table, IndexName) ->
         fun(Pid) -> ok = bondy_oplog_secondary_writer:flush_sync(Pid) end,
         writer_pids(Table, IndexName)
     ).
+
+%% The secondary supervisor is shared with every DB open in the VM, so only
+%% this DB's writers (child id `<<DbName, "/idx/", Shard>>`) count.
+index_writers_of(DbName) ->
+    Prefix = <<(atom_to_binary(DbName))/binary, "/">>,
+    Size = byte_size(Prefix),
+    [
+        Id
+     || {Id, _, _, _} <- supervisor:which_children(bondy_oplog_secondary_sup),
+        is_binary(Id),
+        binary:part(Id, 0, min(Size, byte_size(Id))) =:= Prefix
+    ].
 
 assert_closed(Table, Pids) ->
     ?assertNot(lists:member(namespace(Table), registered_namespaces())),

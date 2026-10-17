@@ -71,6 +71,7 @@ folds events through a state-based `apply_event`.
 -export([apply/6]).
 -export([interpret_overlay/4]).
 -export([decode_value_bytes/2]).
+-export([value_equals_state/1]).
 -export([reap_origins/3]).
 -export([stabilize/3]).
 
@@ -333,6 +334,17 @@ decode_value_bytes({crdt, Mod}, ValueBytes) when is_binary(ValueBytes) ->
             %% runtime_atom_cell_read_after_restart_measured`).
             binary_to_term(ValueBytes)
     end.
+
+-doc """
+Whether the kernel's frames carry no value column: the CRDT declares
+`value_equals_state/0 -> true`, so its state bytes double as value bytes
+(`bondy_oplog_cell_frame:encode/4`). The projection adapters read the one
+column such a kernel writes (`bondy_db_projection_leveled:head/4`).
+""".
+-spec value_equals_state(t()) -> boolean().
+
+value_equals_state({crdt, Mod}) ->
+    crdt_value_equals_state(Mod).
 
 -doc """
 Reap the causal-context entries of permanently-retired origins from a

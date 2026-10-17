@@ -708,7 +708,7 @@ do_read_traced(Entry, Bucket, Key) ->
 
 slow_read_traced(Entry, Bucket, Key) ->
     Kernel = kernel_for(Entry),
-    case read_projection_head(Entry, Bucket, Key) of
+    case read_projection_head(Entry, Kernel, Bucket, Key) of
         not_found ->
             slow_read_no_projection(Entry, Bucket, Key, Kernel);
         {ok, ProjHlc, ValueBytes} ->
@@ -764,14 +764,18 @@ finalise_slow_read(Kernel, NewState, NewHlc, Source) ->
     end.
 
 %% Fast-path projection read: returns `{ok, Hlc, ValueBytes}` via the
-%% adapter's `head/3` callback when available, else falls back to
+%% adapter's `head/4` callback when available, else falls back to
 %% `get/3 + bondy_oplog_cell_frame:extract_head/1`.
-read_projection_head(Entry, Bucket, Key) ->
+read_projection_head(Entry, Kernel, Bucket, Key) ->
     PA = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     PH = bondy_oplog_core_registry:entry_projection_handle(Entry),
-    case erlang:function_exported(PA, head, 3) of
+    case erlang:function_exported(PA, head, 4) of
         true ->
-            case PA:head(PH, Bucket, Key) of
+            Opts = #{
+                value_column =>
+                    not bondy_oplog_cell_kernel:value_equals_state(Kernel)
+            },
+            case PA:head(PH, Bucket, Key, Opts) of
                 {ok, HeadBytes} ->
                     {Hlc, ValueBytes} =
                         bondy_oplog_cell_frame:decode_head(HeadBytes),
@@ -1289,12 +1293,12 @@ path_of_source(projection_with_overlay) -> slow;
 path_of_source(_) -> unknown.
 
 %% Tell whether the projection adapter served the read via its native
-%% `head/3` callback (`native`) or whether the substrate fell back to
+%% `head/4` callback (`native`) or whether the substrate fell back to
 %% `get/3 + bondy_oplog_cell_frame:extract_head/1` (`fallback`). This
 %% is the leveled fast-path indicator used by HEAD-path tests.
 head_path_of(Entry) ->
     PA = bondy_oplog_core_registry:entry_projection_adapter(Entry),
-    case erlang:function_exported(PA, head, 3) of
+    case erlang:function_exported(PA, head, 4) of
         true -> native;
         false -> fallback
     end.

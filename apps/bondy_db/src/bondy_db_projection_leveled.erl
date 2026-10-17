@@ -39,11 +39,19 @@ entries under the `?HEAD_TAG`, distinguished by SubKey:
 Both subkeys carry the HLC so each can be decoded independently.
 For cells whose CRDT/fold declares `value_equals_state/0 -> true`
 (secondary index entries, G-Set) **only the `?SK_STATE` subkey is
-written** — the value subkey is omitted and its absence on read is the
-signal to reconstruct the frame with `ValueBytes = StateBytes` (see
-`build_object_specs/2`, `get/3`). Because the state subkey is the only
-one guaranteed present, **range scans enumerate `?SK_STATE`**, not
+written** — the value subkey is omitted and `get/3` reconstructs the frame
+with `ValueBytes = StateBytes` when it is absent (see
+`build_object_specs/2`). Because the state subkey is the only one
+guaranteed present, **range scans enumerate `?SK_STATE`**, not
 `?SK_VALUE`, so they see these cells too.
+
+A cell's two subkeys land in ONE `book_mput/2`, but two `book_headonly/4`
+calls are not atomic against it: a reader that asks for `?SK_VALUE`, misses,
+and then asks for `?SK_STATE` sees the state of a cell whose write landed
+in between (every cell in a 2,000-cell spin on this bookie, 2026-10-17). So
+`head/4` reads only the subkey the caller's kernel writes and never falls
+back; `get/3`'s two reads are consistent because its callers run in the
+shard's applier, the only writer of the shard's cells.
 
 ## Why head_only mode
 
@@ -130,7 +138,7 @@ value-present frames, exactly as `get/3` does).
     open/4,
     close/1,
     get/3,
-    head/3,
+    head/4,
     put_batch/2,
     range/5,
     delete/3,
@@ -251,36 +259,37 @@ get(H, Bucket, Key) when
     end.
 
 -doc """
-HEAD fast-path read. Returns the value subkey's payload as-is — it
-**is** the HEAD wire format
-(`<<HlcLen:16, HlcBin:HlcLen/binary, ValueBytes/binary>>`). One
-`book_headonly/4` call.
+HEAD fast-path read: one `book_headonly/4` call on the subkey the cell's
+kernel writes — `?SK_VALUE` when `value_column` is true, else `?SK_STATE`,
+whose payload is the HEAD wire format for a `value_equals_state` fold.
+The payload is returned as-is
+(`<<HlcLen:16, HlcBin:HlcLen/binary, ValueBytes/binary>>`).
 
-This is the optional `head/3` callback on
+Never consults the other subkey: a miss on the kernel's column is
+`not_found`, so a cell whose write lands between two reads cannot surface
+its state bytes as a value (`bondy_db_projection_leveled_SUITE`).
+
+This is the optional `head/4` callback on
 `bondy_oplog_projection_adapter`; substrates that lack a native HEAD
 mechanism can skip the export and let the caller fall back to
 `get/3 + bondy_oplog_cell_frame:extract_head/1`.
 """.
--spec head(handle(), Bucket :: binary(), Key :: binary()) ->
+-spec head(
+    handle(),
+    Bucket :: binary(),
+    Key :: binary(),
+    Opts :: bondy_oplog_projection_adapter:head_opts()
+) ->
     {ok, HeadBytes :: binary()} | not_found.
 
-head(H, Bucket, Key) when
+head(H, Bucket, Key, #{value_column := true}) when
     is_binary(Bucket), is_binary(Key)
 ->
-    Pid = bookie(H),
-    case leveled_bookie:book_headonly(Pid, Bucket, Key, ?SK_VALUE) of
-        {ok, HeadBytes} ->
-            {ok, HeadBytes};
-        not_found ->
-            %% No value subkey → this cell was written by a
-            %% value_equals_state fold (only state subkey exists).
-            %% The state subkey payload IS the HEAD wire format
-            %% (StateBytes doubles as ValueBytes for these folds).
-            case leveled_bookie:book_headonly(Pid, Bucket, Key, ?SK_STATE) of
-                {ok, HeadBytes} -> {ok, HeadBytes};
-                not_found -> not_found
-            end
-    end.
+    leveled_bookie:book_headonly(bookie(H), Bucket, Key, ?SK_VALUE);
+head(H, Bucket, Key, #{value_column := false}) when
+    is_binary(Bucket), is_binary(Key)
+->
+    leveled_bookie:book_headonly(bookie(H), Bucket, Key, ?SK_STATE).
 
 -doc """
 Batched cell write. Decodes each V2 frame into `{Hlc, State, Value}`,

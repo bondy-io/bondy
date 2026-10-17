@@ -74,7 +74,7 @@ read_projection_only_emits_source_projection() ->
     {_Meas, Meta} = expect_event([bondy_oplog_core, read]),
     ?assertEqual(projection, maps:get(source, Meta)),
     ?assertEqual(head, maps:get(path, Meta)),
-    %% ETS test adapter does not export head/3 so the substrate falls
+    %% ETS test adapter does not export head/4 so the substrate falls
     %% back to get/3 + extract_head/1.
     ?assertEqual(fallback, maps:get(head_path, Meta)),
     teardown_shard(Setup).

@@ -49,12 +49,16 @@ passes a new Bucket value to `get/3`, `put_batch/2`, `range/5`, or
 
 ## Optional callbacks
 
-- `head/3` — fast-path read that returns the substrate's HEAD wire
+- `head/4` — fast-path read that returns the substrate's HEAD wire
   format (`<<HlcLen:16, Hlc/binary, ValueBytes/binary>>`) without
-  decoding the full V2 frame. Adapters that have a native HEAD
-  mechanism (e.g. leveled's tag extractor + `book_head/4`) implement
-  it; adapters that don't can omit the export and the substrate falls
-  back to `get/3 + bondy_oplog_cell_frame:extract_head/1`.
+  decoding the full V2 frame. `value_column` says whether the cell's
+  kernel writes a value column (`bondy_oplog_cell_kernel:value_equals_state/1`
+  is false); the adapter reads exactly the column that kernel writes, in
+  one substrate call, so a cell being created under the read is either
+  absent or whole (`bondy_db_projection_leveled_SUITE`). Adapters with a
+  native HEAD mechanism implement it; adapters that don't omit the export
+  and the substrate falls back to `get/3 +
+  bondy_oplog_cell_frame:extract_head/1`.
 - `clear/2` — bucket-scoped wipe of one index's cells, used by the
   secondary-index rebuild before a re-fold. Takes a `clear_scope()`
   descriptor (see the type) so the wipe stays scoped to the right index —
@@ -204,7 +208,11 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 
 -callback info(handle()) -> #{atom() => term()}.
 
--callback head(handle(), bucket(), Key :: term()) ->
+-type head_opts() :: #{value_column := boolean()}.
+
+-export_type([head_opts/0]).
+
+-callback head(handle(), bucket(), Key :: term(), Opts :: head_opts()) ->
     {ok, HeadBytes :: binary()} | not_found.
 
 %% Wipe an index's cells from the handle's keyspace, used by the secondary-index
@@ -246,7 +254,7 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 ) -> ok | {error, term()}.
 
 -optional_callbacks([
-    head/3, clear/2, cell_keys/2, cell_keys/3, sync/1, write_batch/3
+    head/4, clear/2, cell_keys/2, cell_keys/3, sync/1, write_batch/3
 ]).
 
 %% =============================================================================

@@ -342,9 +342,9 @@ mst_state_persists_across_close_reopen({Topology, Db, _Sup, LDir, PDir}) ->
 
 head_path_telemetry_reports_native({Topology, Db, _Sup, _LDir, _PDir}) ->
     %% Pin the leveled fast-read path: the projection adapter exports
-    %% `head/3` natively, so a read served from the projection must
+    %% `head/4` natively, so a read served from the projection must
     %% emit `path => head` and `head_path => native`. ETS test
-    %% adapters lack `head/3` and fall back; this assertion guards
+    %% adapters lack `head/4` and fall back; this assertion guards
     %% against silent regressions on the leveled path.
     {ok, T} = bondy_db:open_table(Db, users, #{}),
     Realm = <<"r1">>,

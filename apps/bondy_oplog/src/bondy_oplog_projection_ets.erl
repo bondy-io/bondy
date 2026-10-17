@@ -53,9 +53,9 @@ owner-only (the `public` flag governs only object access, not table
 management), must be called from the owning process — which is why the
 memory topology funnels both `open/4` and `close/1` through the owner.
 
-## No `head/3`
+## No `head/4`
 
-This adapter deliberately does **not** export the optional `head/3`
+This adapter deliberately does **not** export the optional `head/4`
 fast-path. The HEAD path exists to skip a journal hop on durable backends;
 for an in-RAM `ordered_set` `get/3` already returns the full frame with no
 I/O, so a separate HEAD read buys nothing. The substrate falls back to

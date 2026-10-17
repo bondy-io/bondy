@@ -134,6 +134,7 @@
 * A departed node's registrations and subscriptions were never reclaimed on a cluster with two or more surviving members.
 * A departed node's registrations and subscriptions survived retirement once the survivors had compacted their registry history.
 * A node or index writer that stopped between a durable write and its index updates lost those updates.
+* Reading a durable cell while its first write landed could crash the reader with `badarg`: the projection's HEAD read fell back from the value column to the state column between two store calls. It now reads the one column the cell's fold writes.
 
 ### Changes
 * MessagePack is encoded and decoded by Bondy's own `bondy_msgpack`; four behaviours change for MessagePack clients. See [Serialisation](doc/guides/introduction/wamp.md#serialisation).
