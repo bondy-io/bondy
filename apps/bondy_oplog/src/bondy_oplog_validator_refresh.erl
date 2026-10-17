@@ -17,9 +17,9 @@ per-cell fold process) and a fused instance (which holds its own
 it identically.
 
 Calls `Mod:refresh(VS)` on the current snapshot: `{ok, NewVS}` replaces it,
-`{error, _}` or a raised exception keeps the previous one. Validators that
-do not export `refresh/1` are a no-op (debug log only). Total — never
-raises; every outcome is logged and telemetered on
+`{error, _}` keeps the previous one, and a refresh that raises stops the
+caller. Validators that do not export `refresh/1` are a no-op (debug log
+only). Every outcome is logged and telemetered on
 `[bondy_oplog, applier, validator_refresh]` (the event name kept
 unqualified by caller, since a refresh means the same thing regardless of
 which process ran it).
@@ -32,9 +32,9 @@ which process ran it).
 %% =============================================================================
 
 -doc """
-Refreshes `Mod`'s validator snapshot `VS`, returning the new snapshot (or
-`VS` unchanged on any non-success outcome). `InstanceId` and `Reason` are
-carried only for logging/telemetry.
+Refreshes `Mod`'s validator snapshot `VS`, returning the new snapshot, or
+`VS` unchanged when the validator declines or errors. `InstanceId` and
+`Reason` are carried only for logging/telemetry.
 """.
 -spec refresh(
     InstanceId :: term(), Reason :: term(), Mod :: module(), VS :: term()
@@ -64,7 +64,7 @@ refresh(InstanceId, Reason, Mod, VS) ->
             ),
             VS;
         true ->
-            try Mod:refresh(VS) of
+            case Mod:refresh(VS) of
                 {ok, NewVS} ->
                     ?LOG_INFO(#{
                         description =>
@@ -103,32 +103,6 @@ refresh(InstanceId, Reason, Mod, VS) ->
                             outcome => error,
                             refresh_reason => Reason,
                             error => RefreshReason
-                        }
-                    ),
-                    VS
-            catch
-                C:R:S ->
-                    ?LOG_ERROR(#{
-                        description =>
-                            "bondy_oplog validator refresh raised; "
-                            "keeping the previous snapshot",
-                        instance_id => InstanceId,
-                        validator => Mod,
-                        refresh_reason => Reason,
-                        class => C,
-                        reason => R,
-                        stacktrace => S
-                    }),
-                    telemetry:execute(
-                        [bondy_oplog, applier, validator_refresh],
-                        #{count => 1},
-                        #{
-                            instance_id => InstanceId,
-                            validator => Mod,
-                            outcome => crashed,
-                            refresh_reason => Reason,
-                            class => C,
-                            error => R
                         }
                     ),
                     VS

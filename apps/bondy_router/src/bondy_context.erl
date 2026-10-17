@@ -206,10 +206,10 @@ doesn't match `SessionId`.
 
 set_session_id(Ctxt, SessionId) ->
     case maps:find(session, Ctxt) of
-        {value, Session} when Session =/= undefined ->
+        {ok, Session} ->
             bondy_session:id(Session) == SessionId orelse error(badarg),
             Ctxt;
-        _ ->
+        error ->
             Ctxt#{session_id => SessionId}
     end.
 
@@ -305,10 +305,10 @@ realm_uri(_) ->
 
 set_realm_uri(Ctxt, Uri) ->
     case maps:find(session, Ctxt) of
-        {value, Session} when Session =/= undefined ->
+        {ok, Session} ->
             bondy_session:realm_uri(Session) == Uri orelse error(badarg),
             Ctxt;
-        _ ->
+        error ->
             Ctxt#{realm_uri => Uri}
     end.
 
@@ -331,16 +331,19 @@ is_security_enabled(#{realm_uri := Uri}) ->
 is_security_enabled(#{security_enabled := Val}) when is_boolean(Val) ->
     Val.
 
--doc "Sets the realm uri of the provided context.".
+-doc """
+Sets whether security is enabled for the provided context. Fails if a
+session was already set and its own flag doesn't match `Bool`.
+""".
 -spec set_security_enabled(t(), boolean()) -> t() | no_return().
 
 set_security_enabled(Ctxt, Bool) when is_boolean(Bool) ->
     case maps:find(session, Ctxt) of
-        {value, Session} when Session =/= undefined ->
+        {ok, Session} ->
             bondy_session:is_security_enabled(Session) == Bool orelse
                 error(badarg),
             Ctxt;
-        _ ->
+        error ->
             Ctxt#{security_enabled => Bool}
     end.
 
@@ -359,10 +362,10 @@ set_authid(Ctxt, Val) when
     is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous)
 ->
     case maps:find(session, Ctxt) of
-        {value, Session} when Session =/= undefined ->
+        {ok, Session} ->
             bondy_session:authid(Session) == Val orelse error(badarg),
             Ctxt;
-        _ ->
+        error ->
             maps:put(authid, Val, Ctxt)
     end.
 

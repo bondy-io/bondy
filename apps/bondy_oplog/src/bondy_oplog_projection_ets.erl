@@ -73,6 +73,7 @@ I/O, so a separate HEAD read buys nothing. The substrate falls back to
     delete/3,
     clear/2,
     cell_keys/2,
+    cell_keys/3,
     info/1
 ]).
 
@@ -235,6 +236,72 @@ that is not an index bucket) never describes a table this adapter holds.
 """.
 cell_keys(Tab, {entity, ET}) when is_binary(ET) ->
     ets:select(Tab, [{{{ET, '$1'}, '_'}, [], [{{ET, '$1'}}]}]).
+
+-doc """
+One page of `cell_keys/2`: at most `limit` cells (default `infinity`) in key
+order, strictly after `cursor` (default `undefined`, the start of the
+bucket). The page is a slice of the full directory under the `{Bucket, Key}`
+term order, so a cursor from another bucket starts the page at the bucket's
+first cell when it sorts before it and returns nothing when it sorts after
+it; `prop_cell_keys_page_is_a_slice_of_the_directory/0` in
+`bondy_oplog_projection_ets_proper_test` states this against `cell_keys/2`.
+
+A caller paging the directory with a rising cursor pays `O(limit)` per
+page: the walk seeks to the cursor with `ets:next/2` instead of
+re-enumerating the bucket and dropping the prefix, which costs a sweep of
+N cells in pages of P `O(N²/P)`.
+""".
+-spec cell_keys(
+    ets:tid(),
+    {entity, binary()},
+    bondy_oplog_projection_adapter:cell_keys_opts()
+) -> [{binary(), term()}].
+
+cell_keys(_Tab, {entity, _ET}, #{limit := Limit}) when
+    is_integer(Limit), Limit =< 0
+->
+    [];
+cell_keys(Tab, {entity, ET}, Opts) when is_binary(ET) ->
+    Limit = maps:get(limit, Opts, infinity),
+    case first_cell(Tab, ET, maps:get(cursor, Opts, undefined)) of
+        none -> [];
+        {ok, Key} -> lists:reverse(walk_keys(Tab, ET, Key, dec(Limit), [Key]))
+    end.
+
+%% @private
+%% The first cell of the page. `ets:next/2` steps STRICTLY forward from any
+%% term, stored or not, so a cursor inside the bucket needs no probe of its
+%% own; a cursor before the bucket starts at the bucket's first stored key.
+first_cell(Tab, ET, Cursor) when
+    Cursor =:= undefined; element(1, Cursor) < ET
+->
+    case ets:select(Tab, [{{{ET, '$1'}, '_'}, [], [{{ET, '$1'}}]}], 1) of
+        {[Key], _Cont} -> {ok, Key};
+        '$end_of_table' -> none
+    end;
+first_cell(Tab, ET, {ET, _} = Cursor) ->
+    case ets:next(Tab, Cursor) of
+        {ET, _} = Key -> {ok, Key};
+        {_NextBucket, _} -> none;
+        '$end_of_table' -> none
+    end;
+first_cell(_Tab, _ET, _CursorPastBucket) ->
+    none.
+
+%% @private
+%% Keys only, newest-first, bounded by the bucket tag as `walk/6` is.
+walk_keys(_Tab, _ET, _Prev, 0, Acc) ->
+    Acc;
+walk_keys(Tab, ET, Prev, N, Acc) ->
+    case ets:next(Tab, Prev) of
+        {ET, _} = Key -> walk_keys(Tab, ET, Key, dec(N), [Key | Acc]);
+        {_NextBucket, _} -> Acc;
+        '$end_of_table' -> Acc
+    end.
+
+%% @private
+dec(infinity) -> infinity;
+dec(N) -> N - 1.
 
 -doc "Introspection: row count and memory words for the backing table.".
 info(Tab) ->

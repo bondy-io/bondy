@@ -150,7 +150,7 @@ stabilize_below_every_op_keeps_test() ->
 %% `force_reap => true` is what makes a single-writer cell reclaimable once
 %% its writer is permanently gone: the retired origin's contributions are
 %% dropped, `count` reaches its `stabilize_zero`, and the cell discards
-%% outright. That matters because `bondy_oplog_cell_utils:reap_one_cell/6`
+%% outright. That matters because `bondy_oplog_cell_utils:reap_one_cell/5`
 %% re-encodes a VALUE-PRESERVING frame (old value column, shrunk state), so
 %% reclamation rests entirely on `stabilize/2` reading the SHRUNK state —
 %% this is the test that pins that chain. The whole cell is minted by ONE

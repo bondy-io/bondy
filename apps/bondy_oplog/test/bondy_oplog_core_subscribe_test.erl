@@ -3,7 +3,7 @@
 %% (`MST_DB_DESIGN.md` §12, wired in D8).
 %%
 %% Pins: monitor-based cleanup, NS isolation, pattern matching
-%% (`all`, `{prefix, _}`, `{match, F}`, exact), best-effort delivery,
+%% (`all`, `{prefix, _}`, exact), best-effort delivery,
 %% and the public `publish/4` facade.
 %% =============================================================================
 
@@ -26,8 +26,6 @@ subscribe_test_() ->
         fun prefix_binary_pattern_matches_by_prefix/0,
         fun prefix_list_pattern_matches_by_prefix/0,
         fun prefix_pattern_with_type_mismatch_does_not_match/0,
-        fun match_fun_pattern_filters_events/0,
-        fun match_fun_throwing_is_treated_as_false/0,
         fun unsubscribe_stops_delivery/0,
         fun subscriber_down_cleans_up_subscription/0,
         fun ns_isolation_other_ns_events_not_delivered/0,
@@ -66,11 +64,9 @@ bootstrap_ignores_the_key_pattern() ->
     NS = some_ns(),
     {ok, R1} = bondy_oplog_core:subscribe(NS, {prefix, <<"zzz">>}),
     {ok, R2} = bondy_oplog_core:subscribe(NS, {exact, <<"nothing">>}),
-    {ok, R3} = bondy_oplog_core:subscribe(NS, {match, fun(_) -> false end}),
     ok = bondy_oplog_core:publish_bootstrap(NS, <<"b">>),
     ?assertEqual(
         [
-            {bondy_oplog_core_bootstrap_event, NS, <<"b">>},
             {bondy_oplog_core_bootstrap_event, NS, <<"b">>},
             {bondy_oplog_core_bootstrap_event, NS, <<"b">>}
         ],
@@ -78,8 +74,7 @@ bootstrap_ignores_the_key_pattern() ->
         "a wholesale replace has no key, so no pattern may filter it out"
     ),
     ok = bondy_oplog_core:unsubscribe(R1),
-    ok = bondy_oplog_core:unsubscribe(R2),
-    ok = bondy_oplog_core:unsubscribe(R3).
+    ok = bondy_oplog_core:unsubscribe(R2).
 
 %% Ignoring the PATTERN must not mean ignoring the NAMESPACE.
 bootstrap_respects_ns_isolation() ->
@@ -193,39 +188,6 @@ prefix_pattern_with_type_mismatch_does_not_match() ->
     {ok, Ref} = bondy_oplog_core:subscribe(NS, {prefix, <<"p">>}),
     ok = bondy_oplog_core:publish(NS, [a, b], 1, _Op = z),
     ?assertEqual([], drain()),
-    ok = bondy_oplog_core:unsubscribe(Ref).
-
-match_fun_pattern_filters_events() ->
-    NS = some_ns(),
-    Pred = fun
-        (K) when is_binary(K) -> byte_size(K) > 3;
-        (_) -> false
-    end,
-    {ok, Ref} = bondy_oplog_core:subscribe(NS, {match, Pred}),
-    ok = bondy_oplog_core:publish(NS, <<"ab">>, 1, miss),
-    ok = bondy_oplog_core:publish(NS, <<"abcd">>, 2, hit),
-    ok = bondy_oplog_core:publish(NS, <<"abcde">>, 3, hit2),
-    ?assertEqual(
-        [
-            {bondy_oplog_core_event, NS, <<"abcd">>, 2, hit},
-            {bondy_oplog_core_event, NS, <<"abcde">>, 3, hit2}
-        ],
-        drain()
-    ),
-    ok = bondy_oplog_core:unsubscribe(Ref).
-
-match_fun_throwing_is_treated_as_false() ->
-    %% A predicate that throws on some inputs must not propagate; the
-    %% dispatcher silently treats it as a non-match.
-    NS = some_ns(),
-    Pred = fun(K) when is_binary(K) -> byte_size(K) > 3 end,
-    {ok, Ref} = bondy_oplog_core:subscribe(NS, {match, Pred}),
-    ok = bondy_oplog_core:publish(NS, not_a_binary, 1, miss),
-    ok = bondy_oplog_core:publish(NS, <<"abcd">>, 2, hit),
-    ?assertEqual(
-        [{bondy_oplog_core_event, NS, <<"abcd">>, 2, hit}],
-        drain()
-    ),
     ok = bondy_oplog_core:unsubscribe(Ref).
 
 unsubscribe_stops_delivery() ->

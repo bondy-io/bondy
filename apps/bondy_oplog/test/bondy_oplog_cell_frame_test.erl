@@ -110,6 +110,26 @@ decode_full_truncated_frame_raises_test() ->
     ?assertError(function_clause, ?MOD:decode_full(<<>>)),
     ?assertError(function_clause, ?MOD:decode_full(<<0:8>>)).
 
+hlc_of_whole_frames_test() ->
+    ?assertEqual({ok, 42}, ?MOD:hlc(?MOD:encode(42, <<"s">>, undefined, true))),
+    ?assertEqual({ok, 42}, ?MOD:hlc(?MOD:encode(42, <<"s">>, <<"v">>, false))),
+    ?assertEqual({ok, 0}, ?MOD:hlc(?MOD:encode(0, <<>>, <<>>, false))).
+
+%% A frame cut anywhere, padded, or announcing a column longer than it
+%% carries is not whole; nor is one of another version.
+hlc_of_broken_frames_is_error_test() ->
+    Whole = ?MOD:encode(7, <<"state">>, <<"value">>, false),
+    Size = byte_size(Whole),
+    [
+        ?assertEqual(error, ?MOD:hlc(binary:part(Whole, 0, N)))
+     || N <- lists:seq(0, Size - 1)
+    ],
+    ?assertEqual(error, ?MOD:hlc(<<Whole/binary, 0>>)),
+    NoValue = ?MOD:encode(7, <<"state">>, undefined, true),
+    ?assertEqual(error, ?MOD:hlc(<<NoValue/binary, 0>>)),
+    <<V:8, Rest/binary>> = Whole,
+    ?assertEqual(error, ?MOD:hlc(<<(V + 1):8, Rest/binary>>)).
+
 %% =============================================================================
 %% Negative-HLC guard
 %% =============================================================================

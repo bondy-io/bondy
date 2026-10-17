@@ -54,6 +54,7 @@ rebuild_repopulates_index() ->
     %% wiped-then-never-repopulated shard empty.
     ok = bondy_db:rebuild_index(T, by_status),
     ?assertEqual([<<"n1">>], name_col(T, R)),
+    ok = bondy_db:close_table(T),
     ok = bondy_db:close(Db).
 
 %% =============================================================================

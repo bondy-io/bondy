@@ -261,7 +261,7 @@ origins a previous pass on this node already reaped out of every cell
 context. The returned report carries the updated `swept` set.
 
 The scan is a FULL enumeration of every cell of every instance
-(`bondy_oplog_cell_utils:member_cells/4`), and the candidate set is drawn
+(`bondy_oplog_cell_utils:member_cells/5`), and the candidate set is drawn
 from the applied-frontier VVs, which only a retirement clears. Without
 this, a single departed node makes every subsequent pass rescan the entire
 projection, for the life of the node, to find nothing.
@@ -579,14 +579,11 @@ collect_member_origins(Members) ->
 collect_member_origins([], _I, _T, _TOpts, Acc) ->
     {ok, lists:usort(Acc)};
 collect_member_origins([M | Rest], I, Transport, TOpts, Acc) ->
-    try Transport:request(M, I, get_origins, TOpts) of
+    case Transport:request(M, I, get_origins, TOpts) of
         {ok, Origins} when is_list(Origins) ->
             collect_member_origins(Rest, I, Transport, TOpts, Origins ++ Acc);
-        Other ->
-            {error, {member_unreachable, M, Other}}
-    catch
-        Class:Reason ->
-            {error, {member_unreachable, M, {Class, Reason}}}
+        {error, _} = Error ->
+            {error, {member_unreachable, M, Error}}
     end.
 
 %% @private
@@ -738,14 +735,11 @@ member_retired(Members, InstanceId) ->
 
 %% @private
 member_retired(M, I, Transport, TOpts) ->
-    try Transport:request(M, I, get_retired, TOpts) of
+    case Transport:request(M, I, get_retired, TOpts) of
         {ok, Origins} when is_list(Origins) ->
             {ok, Origins};
-        Other ->
-            {error, {member_unreachable, Other}}
-    catch
-        Class:Reason ->
-            {error, {member_unreachable, {Class, Reason}}}
+        {error, _} = Error ->
+            {error, {member_unreachable, Error}}
     end.
 
 %% @private

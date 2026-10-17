@@ -110,7 +110,7 @@ reclamation_members_no_other_member() ->
 
 reclamation_members_unavailable() ->
     bondy_oplog_test_helpers:with_members(
-        fun() -> error(badarg) end,
+        fun() -> error(membership_unavailable) end,
         fun() ->
             ?assertEqual(
                 {error, membership_unavailable},

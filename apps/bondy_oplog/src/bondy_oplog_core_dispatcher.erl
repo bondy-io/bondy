@@ -40,7 +40,6 @@ ets:new(bondy_oplog_core_dispatcher_tab, [
 | `all`                   | every event                                                 |
 | `{prefix, P}` (binary)  | binary keys with `P` as a prefix                            |
 | `{prefix, P}` (list)    | list keys with `P` as a prefix                              |
-| `{match, F}`            | keys for which `F(Key)` returns `true`                      |
 | `{exact, T}`            | keys equal to `T`                                           |
 
 Exact-key subscriptions use `{exact, T}`. Bare terms are not accepted —
@@ -113,7 +112,6 @@ does not police this.
 -type pattern() ::
     all
     | {prefix, binary() | list()}
-    | {match, fun((term()) -> boolean())}
     | {exact, term()}.
 
 -export_type([pattern/0]).
@@ -161,7 +159,14 @@ start_link() ->
 -spec subscribe(atom(), pattern()) -> {ok, reference()}.
 
 subscribe(NS, Pattern) when is_atom(NS) ->
+    is_pattern(Pattern) orelse error({invalid_pattern, Pattern}),
     gen_server:call(?MODULE, {subscribe, NS, self(), Pattern}).
+
+%% @private
+is_pattern(all) -> true;
+is_pattern({prefix, P}) -> is_binary(P) orelse is_list(P);
+is_pattern({exact, _}) -> true;
+is_pattern(_) -> false.
 
 -spec unsubscribe(reference()) -> ok.
 
@@ -295,9 +300,7 @@ emit_subscribe_event(NS, Pattern) ->
 
 pattern_type(all) -> all;
 pattern_type({prefix, _}) -> prefix;
-pattern_type({match, _}) -> match;
-pattern_type({exact, _}) -> exact;
-pattern_type(_) -> unknown.
+pattern_type({exact, _}) -> exact.
 
 %% =============================================================================
 %% Pattern matching
@@ -312,17 +315,8 @@ matches({prefix, P}, Key) when is_list(P), is_list(Key) ->
     lists:prefix(P, Key);
 matches({prefix, _}, _Key) ->
     false;
-matches({match, F}, Key) when is_function(F, 1) ->
-    try F(Key) of
-        true -> true;
-        _ -> false
-    catch
-        _:_ -> false
-    end;
 matches({exact, T}, Key) ->
-    Key =:= T;
-matches(_, _) ->
-    false.
+    Key =:= T.
 
 %% =============================================================================
 %% gen_server callbacks
@@ -371,12 +365,14 @@ handle_cast(_, State) ->
     {noreply, State}.
 
 handle_info({broadcast_started, Epoch}, State) ->
+    %% `bondy_oplog_core_events` owns its table; while it restarts there is
+    %% none, and nothing is subscribed to tell.
     try
         bondy_oplog_core_events:notify(
             bondy_oplog_core_dispatcher_started, Epoch
         )
     catch
-        _:_ -> ok
+        error:badarg -> ok
     end,
     {noreply, State};
 handle_info({'DOWN', Mon, process, _Pid, _Reason}, State) ->

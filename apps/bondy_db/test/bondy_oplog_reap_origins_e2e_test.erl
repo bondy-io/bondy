@@ -131,8 +131,8 @@ aw_reap_dominated_peer() ->
         ok, bondy_db:apply(Ta, <<"r">>, <<"k">>, {put, <<"k">>, <<"va3">>})
     ),
     ?assertEqual(#{<<"k">> => [<<"va3">>]}, read_aw(Ta)),
-    ok = bondy_db:close(DbA),
-    ok = bondy_db:close(DbB).
+    ok = close_db(DbA, [Ta]),
+    ok = close_db(DbB, [Tb]).
 
 %% =============================================================================
 %% tier_0 no-op
@@ -151,7 +151,7 @@ tier0_reap_noop() ->
     {ok, Report} = bondy_oplog_instance:reap_origins(I, [<<"anything">>]),
     ?assertEqual(false, maps:get(supported, Report)),
     ?assertEqual(0, maps:get(cells_reaped, Report)),
-    ok = bondy_db:close(Db).
+    ok = close_db(Db, [T]).
 
 %% =============================================================================
 %% Multiplexed applier — the reap must not be gated by the FOUNDING
@@ -166,8 +166,8 @@ tier0_reap_noop() ->
 mux_reap_reaches_non_founding_tables() ->
     {DbA, _Oa} = open_mux_db(reap_mux_a),
     {DbB, Ob} = open_mux_db(reap_mux_b),
-    {ok, _La} = bondy_db:open_table(DbA, items_lww, #{}),
-    {ok, _Lb} = bondy_db:open_table(DbB, items_lww, #{}),
+    {ok, La} = bondy_db:open_table(DbA, items_lww, #{}),
+    {ok, Lb} = bondy_db:open_table(DbB, items_lww, #{}),
     {ok, Ma} = bondy_db:open_table(DbA, items_mv, #{crdt_module => ?MV}),
     {ok, Mb} = bondy_db:open_table(DbB, items_mv, #{crdt_module => ?MV}),
     Ia = instance_of(Ma),
@@ -185,8 +185,8 @@ mux_reap_reaches_non_founding_tables() ->
     ?assert(maps:get(cells_reaped, Report) >= 1),
     %% Value-preserving, and only the mv member was touched.
     ?assertEqual([<<"va2">>], read_mv(Ma)),
-    ok = bondy_db:close(DbA),
-    ok = bondy_db:close(DbB).
+    ok = close_db(DbA, [La, Ma]),
+    ok = close_db(DbB, [Lb, Mb]).
 
 %% =============================================================================
 %% Compacted cells — the reap directory must come from the projection
@@ -281,13 +281,7 @@ complement_reaps_unclaimed_origins() ->
     ?assert(lists:member(Ob, Advertised)),
 
     %% B departs for good.
-    ok = bondy_db:close(DbB),
-    _ =
-        try
-            bondy_oplog:stop_instance(Ib)
-        catch
-            _:_ -> ok
-        end,
+    ok = close_db(DbB, [Tb]),
 
     {ok, Report} = bondy_oplog_origin_retirement:run(),
     ?assert(lists:member(Ob, maps:get(dead_origins, Report))),
@@ -296,7 +290,7 @@ complement_reaps_unclaimed_origins() ->
     ?assertNot(lists:member(Oa, maps:get(dead_origins, Report))),
     %% Value-preserving.
     ?assertEqual([<<"va2">>], read_mv(Ta)),
-    ok = bondy_db:close(DbA).
+    ok = close_db(DbA, [Ta]).
 
 %% One unreachable member aborts the whole pass — a sample of the membership
 %% licenses nothing. The dead origin survives the aborted pass and is
@@ -313,13 +307,7 @@ complement_fails_closed_on_unreachable() ->
     ok = sync_both(Ia, Ib),
     ok = bondy_db:apply(Ta, <<"r">>, <<"k">>, {set, <<"va2">>}),
     ok = bondy_oplog:await_apply(Ia),
-    ok = bondy_db:close(DbB),
-    _ =
-        try
-            bondy_oplog:stop_instance(Ib)
-        catch
-            _:_ -> ok
-        end,
+    ok = close_db(DbB, [Tb]),
 
     ok = meck:new(bondy_cluster, [passthrough]),
     try
@@ -353,7 +341,7 @@ complement_fails_closed_on_unreachable() ->
     %% relies on.
     {ok, Report} = bondy_oplog_origin_retirement:run(),
     ?assert(lists:member(Ob, maps:get(origins_reaped, Report))),
-    ok = bondy_db:close(DbA).
+    ok = close_db(DbA, [Ta]).
 
 %% =============================================================================
 %% Helpers
@@ -425,6 +413,14 @@ sync_both(Ia, Ib) ->
     ok = replay(Ia),
     ok = replay(Ib),
     ok.
+
+%% Tables first: `bondy_db:close_table/1` stops the table's instance, while
+%% `bondy_db:close/1` only stops the owner of the ETS tables, which leaves a
+%% still-registered instance holding a deleted table for the next
+%% `bondy_oplog_origin_retirement:run/0` to crash on.
+close_db(Db, Tables) ->
+    lists:foreach(fun(T) -> ok = bondy_db:close_table(T) end, Tables),
+    bondy_db:close(Db).
 
 open_db(Name, Crdt) ->
     Origin = bondy_oplog_origin:new(),

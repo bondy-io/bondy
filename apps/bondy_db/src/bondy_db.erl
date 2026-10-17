@@ -132,8 +132,8 @@ ok = bondy_db:close(Db).
 `close_table/1` stops the per-shard oplog instances, unregisters the
 shards from `bondy_oplog_core_registry`, deletes the per-shard caches,
 and asks the topology to release its physical resources for the table.
-`close/1` then shuts down the topology (and any Bookies still owned by
-it).
+`close/1` closes every table still open on the DB the same way, then
+shuts down the topology (and any Bookies still owned by it).
 """).
 
 -export([apply/4]).
@@ -192,6 +192,7 @@ it).
 
 -define(DEFAULT_SHARD_COUNT, 8).
 -define(INDEX, primary).
+-define(TABLES, bondy_db_tables).
 
 -define(APPLY_TIMEOUT, 5000).
 
@@ -294,6 +295,7 @@ to release the topology's physical resources.
 open(Name, Opts) when is_atom(Name), is_map(Opts) ->
     case maps:find(topology, Opts) of
         {ok, Topology} when is_atom(Topology) ->
+            ok = ensure_table_catalogue(),
             TopologyOpts = maps:get(topology_opts, Opts, #{}),
             case Topology:init(Name, TopologyOpts) of
                 {ok, State} ->
@@ -318,6 +320,16 @@ open(Name, Opts) when is_atom(Name), is_map(Opts) ->
         error ->
             {error, {missing_required_opt, topology}}
     end.
+
+%% @private
+%% The open tables of every DB on this node, keyed `{DbName, EntityType}`,
+%% so `close/1` can close the ones its caller did not. Manager-owned: the
+%% facade has no process of its own.
+ensure_table_catalogue() ->
+    {ok, ?TABLES} = bondy_connect_table_manager:get_or_create(?TABLES, [
+        set, public, named_table, {read_concurrency, true}
+    ]),
+    ok.
 
 %% @private
 %% A DB-scoped projection provider for `projection_backend => ets`
@@ -545,7 +557,7 @@ open_table_provision(
                 true -> ok;
                 false -> cold_start_indexes(NS, InstanceIds, IndexMap)
             end,
-        {ok, #{
+        Table = #{
             db_name => DbName,
             db_topology => Topology,
             db_hlc => maps:get(hlc, Db),
@@ -565,7 +577,9 @@ open_table_provision(
             instance_ids => InstanceIds,
             cache_handles => CacheHandles,
             indexes => IndexMap
-        }}
+        },
+        true = ets:insert(?TABLES, {{DbName, EntityType}, Table}),
+        {ok, Table}
     end.
 
 %% @private
@@ -652,8 +666,10 @@ only stops it on `close/1`.
 
 close_table(
     #{
+        db_name := DbName,
         db_topology := Topology,
         table_state := TableState,
+        entity_type := EntityType,
         namespace := NS,
         shard_count := ShardCount,
         instance_ids := InstanceIds,
@@ -670,26 +686,35 @@ close_table(
     ),
     teardown_indexes(NS, maps:get(indexes, Table, #{})),
     _ = Topology:close_table(TableState, undefined),
+    true = ets:delete(?TABLES, {DbName, EntityType}),
     ok.
 
 -doc """
-Tear down `Db`: stop every Bookie, release every resource. Calls the
-topology's `shutdown/1` and, if a dedicated ETS provider was created at
-`open/2` (for `projection_backend => ets` tables on a non-memory
-topology), stops it too.
+Tear down `Db`: close every table still open on it with `close_table/1`,
+then call the topology's `shutdown/1` and, if a dedicated ETS provider was
+created at `open/2` (for `projection_backend => ets` tables on a non-memory
+topology), stop it too.
 
-Callers SHOULD `close_table/1` each open table first. `close/1` does
-not chase open tables — it only walks the topology.
+A table its caller did not close is closed here, so a closed DB leaves no
+`bondy_oplog_core_registry` row, oplog instance or index writer behind
+(`bondy_db_close_SUITE`). A row left behind would be restarted by
+`bondy_oplog_secondary_sup` on a dead projection handle and take
+`bondy_oplog_sup` down with it.
 """.
 -spec close(Db :: db()) -> ok.
 
-close(#{topology := Topology, topology_state := State} = Db) ->
+close(#{name := Name, topology := Topology, topology_state := State} = Db) ->
+    lists:foreach(fun close_table/1, open_tables(Name)),
     _ =
         case maps:get(ets_provider, Db, undefined) of
             undefined -> ok;
             EtsState -> bondy_db_topology_memory:shutdown(EtsState)
         end,
     Topology:shutdown(State).
+
+%% @private
+open_tables(DbName) ->
+    ets:select(?TABLES, [{{{DbName, '_'}, '$1'}, [], ['$1']}]).
 
 -doc """
 Release the WAL drain on every collapsed per-shard instance of `Db`.

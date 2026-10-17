@@ -84,6 +84,7 @@ Where `ValueBytes` is `ValueBin` (HasValueColumn=1) or `StateBin`
 
 -export([encode/4]).
 -export([decode_full/1]).
+-export([hlc/1]).
 -export([extract_head/1]).
 -export([decode_head/1]).
 -export([encoded_size/3]).
@@ -155,6 +156,28 @@ decode_full(
             <<>> = Rest,
             {Hlc, StateBytes, undefined}
     end.
+
+-doc """
+The HLC of a frame whose layout is whole, `error` for any other binary: the
+header, the state column and the value column, when announced, must each
+fit the frame exactly. For bytes a peer shipped, where `decode_full/1`'s
+raise is not the right answer.
+""".
+-spec hlc(binary()) -> {ok, bondy_connect_hlc:hlc()} | error.
+
+hlc(
+    <<?VERSION:8, ?HAS_VALUE_COLUMN:1, _Reserved:7, HlcLen:16/big-unsigned,
+        HlcBin:HlcLen/binary, StateLen:32/big-unsigned, _:StateLen/binary,
+        ValueLen:32/big-unsigned, _:ValueLen/binary>>
+) ->
+    {ok, binary:decode_unsigned(HlcBin, big)};
+hlc(
+    <<?VERSION:8, ?NO_VALUE_COLUMN:1, _Reserved:7, HlcLen:16/big-unsigned,
+        HlcBin:HlcLen/binary, StateLen:32/big-unsigned, _:StateLen/binary>>
+) ->
+    {ok, binary:decode_unsigned(HlcBin, big)};
+hlc(Frame) when is_binary(Frame) ->
+    error.
 
 -doc """
 Project a V2 frame to the HEAD wire format

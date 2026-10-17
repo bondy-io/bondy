@@ -66,13 +66,9 @@ setup() ->
     }),
     {Db, Table, Sup, Dir}.
 
-cleanup({Db, _Table, Sup, Dir}) ->
-    _ =
-        try
-            bondy_db:close(Db)
-        catch
-            _:_ -> ok
-        end,
+cleanup({Db, Table, Sup, Dir}) ->
+    ok = bondy_db:close_table(Table),
+    ok = bondy_db:close(Db),
     _ = [
         try
             bondy_oplog:stop_instance(I)

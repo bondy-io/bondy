@@ -32,7 +32,7 @@ instance's) never leaks in.
 
 On a multiplexed per-shard instance the shard's cells span every
 registered table, each with its own CRDT kernel, projection handle and
-cell scope. Each pass therefore iterates the mux MEMBERS (`member_cells/4`
+cell scope. Each pass therefore iterates the mux MEMBERS (`member_cells/5`
 below): each table's cells are enumerated through ITS OWN ctx (scope +
 handle) and decoded with ITS OWN kernel. Sweeping from a single founding
 ctx alone would both miss every other table's cells and misdecode them
@@ -40,10 +40,10 @@ with the wrong kernel.
 """).
 
 -export([distinct_cell_keys/1]).
--export([member_cells/4]).
+-export([member_cells/5]).
 -export([mst_cell_directory/1]).
 -export([primary_cell_directory/4]).
--export([with_cell_state/10]).
+-export([with_cell_state/7]).
 -export([reap/4]).
 -export([sweep/6]).
 -export([reindex_table/3]).
@@ -65,31 +65,62 @@ with the wrong kernel.
 %% =============================================================================
 
 -doc """
-The `{Bucket, Key}` cell keys a table member owns, sorted, optionally
-resuming past a cursor. `MKey =:= all` matches every bucket in the
+The first `Limit` `{Bucket, Key}` cell keys a table member owns, sorted,
+strictly after `CellCursor`. `MKey =:= all` matches every bucket in the
 directory (a `{single, Ctx}` source); otherwise only cells whose bucket is
 `MKey` (one bucket of a `{dir, #{Bucket => Ctx}}` multiplexed source).
+
+When the adapter pages (`cell_keys/3`) and the page cannot contain another
+member's cells, because the member is every bucket or the scope is the
+member's own bucket, the adapter seeks to the cursor and the call costs the
+page. Otherwise the whole directory is enumerated, sorted and cut, which
+costs the directory on every call.
 """.
 -spec member_cells(
     MCtx :: map(),
     MKey :: term(),
     CellCursor :: undefined | {term(), {term(), term()}},
+    Limit :: pos_integer() | infinity,
     InstanceId :: term()
 ) -> [{term(), term()}].
 
 member_cells(
-    #{adapter := Adapter, handle := Handle} = MCtx, MKey, CellCursor, Id
+    #{adapter := Adapter, handle := Handle} = MCtx, MKey, CellCursor, Limit, Id
 ) ->
     Scope = maps:get(primary_cell_scope, MCtx, undefined),
-    All = lists:sort([
-        BK
-     || {B, _K} = BK <- primary_cell_directory(Adapter, Handle, Id, Scope),
-        MKey =:= all orelse B =:= MKey
-    ]),
-    case CellCursor of
-        undefined -> All;
-        {MKey, LastCell} -> [BK || BK <- All, BK > LastCell]
+    Cursor =
+        case CellCursor of
+            undefined -> undefined;
+            {MKey, LastCell} -> LastCell
+        end,
+    Paged =
+        Scope =/= undefined andalso
+            (MKey =:= all orelse Scope =:= {entity, MKey}) andalso
+            bondy_oplog_projection_adapter:cell_keys_page_exported(Adapter),
+    case Paged of
+        true ->
+            Adapter:cell_keys(Handle, Scope, #{
+                cursor => Cursor, limit => Limit
+            });
+        false ->
+            All = lists:sort([
+                BK
+             || {B, _K} = BK <- primary_cell_directory(
+                    Adapter, Handle, Id, Scope
+                ),
+                MKey =:= all orelse B =:= MKey
+            ]),
+            After =
+                case Cursor of
+                    undefined -> All;
+                    {_, _} -> [BK || BK <- All, BK > Cursor]
+                end,
+            take(After, Limit)
     end.
+
+%% @private
+take(Cells, infinity) -> Cells;
+take(Cells, Limit) -> lists:sublist(Cells, Limit).
 
 -doc """
 The primary cell directory for one member: the adapter's own key
@@ -210,22 +241,17 @@ distinct_cell_keys(MST) ->
 
 -doc """
 Reads and decodes one cell's current projection frame, calling
-`Fun(Hlc, State, ValueBytes)` with it — `NotFound` when the cell has no
-projection value, `OnFail` (after a structured `?LOG_WARNING`) when the
-read/decode/`Fun` raises. Total by construction: every batch cell-admin op
-uses this so one malformed/unreadable cell degrades only itself, never
-the whole pass.
+`Fun(Hlc, State, ValueBytes)` with it, or `NotFound` when the cell has no
+projection value. A frame that does not decode, or a handle that cannot be
+read, raises: the pass that walked the directory to this cell stops there.
 """.
 -spec with_cell_state(
     Adapter :: module(),
     Handle :: term(),
     Kernel :: term(),
-    InstanceId :: term(),
     Bucket :: term(),
     Key :: term(),
-    Desc :: iodata(),
     NotFound :: term(),
-    OnFail :: term(),
     Fun :: fun(
         (
             Hlc :: term(), State :: term(), ValueBytes :: binary() | undefined
@@ -233,33 +259,15 @@ the whole pass.
     )
 ) -> term().
 
-with_cell_state(
-    Adapter, Handle, Kernel, Id, Bucket, Key, Desc, NotFound, OnFail, Fun
-) ->
-    try
-        case Adapter:get(Handle, Bucket, Key) of
-            not_found ->
-                NotFound;
-            {ok, Frame} ->
-                {Hlc, StateBytes, ValueBytes} =
-                    bondy_oplog_cell_frame:decode_full(Frame),
-                State = bondy_oplog_cell_kernel:decode_state(
-                    Kernel, StateBytes
-                ),
-                Fun(Hlc, State, ValueBytes)
-        end
-    catch
-        C:R:S ->
-            ?LOG_WARNING(#{
-                description => Desc,
-                instance_id => Id,
-                bucket => Bucket,
-                cell_key => Key,
-                class => C,
-                reason => R,
-                stacktrace => S
-            }),
-            OnFail
+with_cell_state(Adapter, Handle, Kernel, Bucket, Key, NotFound, Fun) ->
+    case Adapter:get(Handle, Bucket, Key) of
+        not_found ->
+            NotFound;
+        {ok, Frame} ->
+            {Hlc, StateBytes, ValueBytes} =
+                bondy_oplog_cell_frame:decode_full(Frame),
+            State = bondy_oplog_cell_kernel:decode_state(Kernel, StateBytes),
+            Fun(Hlc, State, ValueBytes)
     end.
 
 %% =============================================================================
@@ -331,10 +339,10 @@ reap_members(
     [{MKey, MCtx} | Rest], Id, Guard, Retired, Scanned, Origins, CellsN
 ) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = MCtx,
-    Cells = member_cells(MCtx, MKey, undefined, Id),
+    Cells = member_cells(MCtx, MKey, undefined, infinity, Id),
     Reaped = lists:foldl(
         fun(CellKey, Acc) ->
-            case reap_one_cell(Adapter, Handle, Kernel, Id, CellKey, Retired) of
+            case reap_one_cell(Adapter, Handle, Kernel, CellKey, Retired) of
                 skip -> Acc;
                 {Frame, Ids} -> [{CellKey, Frame, Ids} | Acc]
             end
@@ -365,19 +373,14 @@ kernel_reap_supported({crdt, Mod}) ->
 %% Read one cell's CURRENT projection frame, reap the retired origins from
 %% its decoded state, and re-encode a value-preserving frame (same Hlc and
 %% value column — only the state bytes shrink). `skip` when the cell has no
-%% projection value, nothing was reaped, or the read/decode/reap raises
-%% (`with_cell_state/10` owns the protection).
-reap_one_cell(Adapter, Handle, Kernel, Id, {Bucket, Key}, Retired) ->
+%% projection value or nothing was reaped.
+reap_one_cell(Adapter, Handle, Kernel, {Bucket, Key}, Retired) ->
     with_cell_state(
         Adapter,
         Handle,
         Kernel,
-        Id,
         Bucket,
         Key,
-        "bondy_oplog_cell_utils dead-origin reap could not read a cell's "
-        "projection value; it is skipped this pass.",
-        skip,
         skip,
         fun(Hlc, State, ValueBytes) ->
             case bondy_oplog_cell_kernel:reap_origins(Kernel, State, Retired) of
@@ -386,9 +389,7 @@ reap_one_cell(Adapter, Handle, Kernel, Id, {Bucket, Key}, Retired) ->
                         Kernel, NewState
                     ),
                     {value_preserving_frame(Hlc, StateBytes2, ValueBytes), Ids};
-                _ ->
-                    %% `{_NewState, []}` (no matching entry) or
-                    %% `not_supported` (defensive — already gated above).
+                {_NewState, []} ->
                     skip
             end
         end
@@ -595,7 +596,10 @@ sweep_members(
                 Rest, Cursor, Rem, Overlay, Id, StableHlc, Acc0, Last
             );
         {sweep, CellCursor} ->
-            Cells = member_cells(MCtx, MKey, CellCursor, Id),
+            %% One past the budget: `sweep_cells/9` reports `stopped` only
+            %% when a cell is left over, and a page cut exactly at the
+            %% budget would end the last member's sweep as `done`.
+            Cells = member_cells(MCtx, MKey, CellCursor, inc(Rem), Id),
             case
                 sweep_cells(
                     Cells, MCtx, MKey, Overlay, Id, StableHlc, Rem, Acc0, Last
@@ -656,6 +660,10 @@ sweep_cells(
     end.
 
 %% @private
+inc(infinity) -> infinity;
+inc(N) when is_integer(N) -> N + 1.
+
+%% @private
 dec_budget(infinity) -> infinity;
 dec_budget(N) when is_integer(N), N > 0 -> N - 1.
 
@@ -677,13 +685,9 @@ sweep_one_cell(
         Adapter,
         Handle,
         Kernel,
-        Id,
         Bucket,
         Key,
-        "bondy_oplog_cell_utils cell sweep could not read a cell's "
-        "projection value; it is left in place and retried on a later pass.",
         Acc,
-        bump(skipped, Acc),
         fun(Hlc, State, ValueBytes) ->
             apply_stabilize(
                 MCtx,
@@ -950,20 +954,14 @@ reindex(
 %% @private
 %% Read one cell's CURRENT projection frame and term-project its value into
 %% index `put` ops. Returns `skip` when the cell has no projection value
-%% yet (a not-yet-replayed peer cell) or the read/decode/projection raises
-%% (`with_cell_state/10` owns the protection).
+%% yet (a not-yet-replayed peer cell).
 reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key, Version) ->
     with_cell_state(
         Adapter,
         Handle,
         Kernel,
-        Id,
         Bucket,
         Key,
-        "bondy_oplog_cell_utils index rebuild could not read a cell's "
-        "projection value; its index terms are skipped this pass (the "
-        "shard stays marked and a later trigger retries).",
-        skip,
         skip,
         fun(_Hlc, State, _ValueBytes) ->
             {ok,

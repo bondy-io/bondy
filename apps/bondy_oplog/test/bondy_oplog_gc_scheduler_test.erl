@@ -50,7 +50,10 @@ trigger_invokes_callback() ->
     Self = self(),
     Ref = make_ref(),
     bondy_oplog_gc_scheduler:set_trigger(
-        fun(I) -> Self ! {Ref, I} end
+        fun(I) ->
+            Self ! {Ref, I},
+            ok
+        end
     ),
     Inst = mk_inst(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
@@ -66,7 +69,10 @@ trigger_per_running_instance() ->
     Self = self(),
     Ref = make_ref(),
     bondy_oplog_gc_scheduler:set_trigger(
-        fun(I) -> Self ! {Ref, I} end
+        fun(I) ->
+            Self ! {Ref, I},
+            ok
+        end
     ),
     A = mk_inst(),
     B = mk_inst(),
@@ -82,7 +88,10 @@ trigger_for_single_instance() ->
     Self = self(),
     Ref = make_ref(),
     bondy_oplog_gc_scheduler:set_trigger(
-        fun(I) -> Self ! {Ref, I} end
+        fun(I) ->
+            Self ! {Ref, I},
+            ok
+        end
     ),
     A = mk_inst(),
     B = mk_inst(),
@@ -143,11 +152,17 @@ named_second_scheduler_is_independent() ->
     RefD = make_ref(),
     RefN = make_ref(),
     Name = gc_sched_test_named,
-    bondy_oplog_gc_scheduler:set_trigger(fun(I) -> Self ! {RefD, I} end),
+    bondy_oplog_gc_scheduler:set_trigger(fun(I) ->
+        Self ! {RefD, I},
+        ok
+    end),
     {ok, Pid} = bondy_oplog_gc_scheduler:start_link(#{
         name => Name,
         interval_ms => 0,
-        trigger => fun(I) -> Self ! {RefN, I} end
+        trigger => fun(I) ->
+            Self ! {RefN, I},
+            ok
+        end
     }),
     Inst = mk_inst(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
@@ -221,7 +236,10 @@ capped_ticks_rotate_across_all_instances() ->
         name => Name,
         interval_ms => 0,
         max_concurrency => Cap,
-        trigger => fun(I) -> Self ! {Ref, I} end
+        trigger => fun(I) ->
+            Self ! {Ref, I},
+            ok
+        end
     }),
     Instances = [mk_inst() || _ <- lists:seq(1, 6)],
     [{ok, _} = bondy_oplog_test_projection:start_instance(I) || I <- Instances],

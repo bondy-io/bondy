@@ -137,7 +137,7 @@ cleanup(Dirs) ->
 
 clean_restart_trusts(Dirs) ->
     %% --- First lifetime: write + index two entries, flush, close. ---
-    {Db0, Sup0} = open(Dirs),
+    {Db0, _} = open(Dirs),
     {ok, T0} = open_table(Db0),
     write(T0, <<"u1">>, <<"active">>),
     write(T0, <<"u2">>, <<"active">>),
@@ -146,12 +146,12 @@ clean_restart_trusts(Dirs) ->
         {ok, [{<<"u1">>, #{}}, {<<"u2">>, #{}}]},
         bondy_db:index_get(T0, ?R, by_value, <<"active">>, #{})
     ),
-    close(T0, Db0, Sup0),
+    close(Db0),
 
     %% --- Second lifetime: count rebuilds across the reopen. ---
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
-    {Db1, Sup1} = open(Dirs),
+    {Db1, _} = open(Dirs),
     {ok, T1} = open_table(Db1),
     try
         %% The persisted index cells are TRUSTED — no O(table) rebuild ran.
@@ -170,13 +170,13 @@ clean_restart_trusts(Dirs) ->
         )
     after
         detach_rebuild_counter(),
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 untrusted_restart_rebuilds(Dirs) ->
     %% --- First lifetime: write + index, flush, then strip every shard's
     %% durable trust marker (simulating a pre-restart saturation drop), close.
-    {Db0, Sup0} = open(Dirs),
+    {Db0, _} = open(Dirs),
     {ok, T0} = open_table(Db0),
     write(T0, <<"u1">>, <<"active">>),
     flush_index(T0, by_value),
@@ -185,7 +185,7 @@ untrusted_restart_rebuilds(Dirs) ->
         bondy_db:index_get(T0, ?R, by_value, <<"active">>, #{})
     ),
     untrust_all_shards(T0, by_value),
-    close(T0, Db0, Sup0),
+    close(Db0),
 
     %% Second lifetime: the unmarked index triggers a rebuild on open. The
     %% assertion is the DECISION — a shard whose durable trust marker is
@@ -195,13 +195,13 @@ untrusted_restart_rebuilds(Dirs) ->
     %% tier2). `clean_restart_trusts` covers the trusted path.
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
-    {Db1, Sup1} = open(Dirs),
-    {ok, T1} = open_table(Db1),
+    {Db1, _} = open(Dirs),
+    {ok, _} = open_table(Db1),
     try
         ?assert(counters:get(Ctr, 1) >= 1)
     after
         detach_rebuild_counter(),
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 %% A graceful restart with a tail that was written but not flushed trusts the
@@ -210,7 +210,7 @@ untrusted_restart_rebuilds(Dirs) ->
 %% timer from flushing it). The close discards the buffer, and the open
 %% replays u3 from the primary's index intents.
 graceful_tail_restart_trusts(Dirs) ->
-    {Db0, Sup0} = open(Dirs),
+    {Db0, _} = open(Dirs),
     {ok, T0} = open_table_slow(Db0),
     write(T0, <<"u1">>, <<"active">>),
     write(T0, <<"u2">>, <<"active">>),
@@ -218,11 +218,11 @@ graceful_tail_restart_trusts(Dirs) ->
     write(T0, <<"u3">>, <<"active">>),
     %% u3 is durable in the primary, still buffered in the index writer.
     ?assertMatch({ok, {_, _}}, bondy_db:read(T0, ?R, <<"u3">>)),
-    close(T0, Db0, Sup0),
+    close(Db0),
 
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
-    {Db1, Sup1} = open(Dirs),
+    {Db1, _} = open(Dirs),
     {ok, T1} = open_table_slow(Db1),
     try
         ?assertEqual(0, counters:get(Ctr, 1)),
@@ -239,7 +239,7 @@ graceful_tail_restart_trusts(Dirs) ->
         )
     after
         detach_rebuild_counter(),
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 %% A write durable in the primary whose index op is lost in a crash is in the
@@ -256,11 +256,11 @@ crash_tail_restart_replays(Dirs) ->
     write(T0, <<"u3">>, <<"active">>),
     ?assertMatch({ok, {_, _}}, bondy_db:read(T0, ?R, <<"u3">>)),
     reset_index(T0, by_value),
-    crash(Db0, Sup0),
+    crash(Sup0),
 
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
-    {Db1, Sup1} = open(Dirs),
+    {Db1, _} = open(Dirs),
     {ok, T1} = open_table_slow(Db1),
     try
         ?assertEqual(0, counters:get(Ctr, 1)),
@@ -270,7 +270,7 @@ crash_tail_restart_replays(Dirs) ->
         )
     after
         detach_rebuild_counter(),
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 %% A trusted reopen keeps the persisted index cells, whose versions came from
@@ -281,18 +281,18 @@ crash_tail_restart_replays(Dirs) ->
 %% index shards were registered, gives them version 1: `b` stays dead and `a`
 %% stays live.
 clean_reopen_orders_new_ops_above_old(Dirs) ->
-    {Db0, Sup0} = open(Dirs),
+    {Db0, _} = open(Dirs),
     {ok, T0} = open_table(Db0),
     [
         write(T0, <<"u1">>, V)
      || V <- [<<"a">>, <<"b">>, <<"a">>, <<"b">>, <<"a">>]
     ],
     flush_index(T0, by_value),
-    close(T0, Db0, Sup0),
+    close(Db0),
 
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
-    {Db1, Sup1} = open(Dirs),
+    {Db1, _} = open(Dirs),
     {ok, T1} = open_table(Db1),
     try
         ?assertEqual(0, counters:get(Ctr, 1)),
@@ -307,14 +307,14 @@ clean_reopen_orders_new_ops_above_old(Dirs) ->
         )
     after
         detach_rebuild_counter(),
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 %% A built shard, closed gracefully, whose trust marker names no index cell
 %% format (the marker an index ordered by HLC was written with), is rebuilt on
 %% open.
 old_format_marker_rebuilds(Dirs) ->
-    {Db0, Sup0} = open(Dirs),
+    {Db0, _} = open(Dirs),
     {ok, T0} = open_table(Db0),
     write(T0, <<"u1">>, <<"active">>),
     flush_index(T0, by_value),
@@ -326,11 +326,11 @@ old_format_marker_rebuilds(Dirs) ->
             {B, K, bondy_oplog_cell_frame:encode(0, <<>>, undefined, true)}
         ])
     end),
-    close(T0, Db0, Sup0),
+    close(Db0),
 
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
-    {Db1, Sup1} = open(Dirs),
+    {Db1, _} = open(Dirs),
     {ok, T1} = open_table(Db1),
     try
         ?assert(counters:get(Ctr, 1) >= 1),
@@ -340,7 +340,7 @@ old_format_marker_rebuilds(Dirs) ->
         )
     after
         detach_rebuild_counter(),
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 %% Each applied batch that changes the index writes its ops as an intent in the
@@ -348,7 +348,7 @@ old_format_marker_rebuilds(Dirs) ->
 %% clears every intent up to the version the shard had dispatched, recording
 %% that bound.
 intents_written_and_cleared(Dirs) ->
-    {Db, Sup} = open(Dirs),
+    {Db, _} = open(Dirs),
     {ok, T} = open_table(Db),
     try
         write(T, <<"u1">>, <<"a">>),
@@ -364,14 +364,14 @@ intents_written_and_cleared(Dirs) ->
         ?assertEqual([], intents(T)),
         ?assert(intents_cleared(T) >= Top)
     after
-        close(T, Db, Sup)
+        close(Db)
     end.
 
 %% A writer that does not flush within the barrier's timeout is marked for
 %% rebuild, and its shard's ops may be in no store but the intents: the
 %% compaction must leave them.
 wedged_writer_keeps_intents(Dirs) ->
-    {Db, Sup} = open(Dirs),
+    {Db, _} = open(Dirs),
     {ok, T} = open_table(Db),
     [Pid] = writer_pids(T, by_value),
     try
@@ -381,14 +381,14 @@ wedged_writer_keeps_intents(Dirs) ->
         ?assertMatch([_], intents(T))
     after
         ok = sys:resume(Pid),
-        close(T, Db, Sup)
+        close(Db)
     end.
 
 %% The index store refuses the writer's batch, so u1's op is in no store but its
 %% intent. The writer marks the shard for rebuild, and the compaction must leave
 %% the intent. The rebuild server is held so no rebuild clears the mark first.
 failed_index_write_keeps_intents(Dirs) ->
-    {Db, Sup} = open(Dirs),
+    {Db, _} = open(Dirs),
     {ok, T} = open_table(Db),
     ok = sys:suspend(bondy_oplog_index_rebuild),
     ok = meck:new(bondy_db_projection_leveled, [passthrough]),
@@ -408,12 +408,12 @@ failed_index_write_keeps_intents(Dirs) ->
     after
         meck:unload(bondy_db_projection_leveled),
         ok = sys:resume(bondy_oplog_index_rebuild),
-        close(T, Db, Sup)
+        close(Db)
     end.
 
 %% More intents than one range scan returns: the clear must page through all.
 clear_pages_through_many_intents(Dirs) ->
-    {Db, Sup} = open(Dirs),
+    {Db, _} = open(Dirs),
     {ok, T} = open_table(Db),
     try
         [
@@ -424,7 +424,7 @@ clear_pages_through_many_intents(Dirs) ->
         compact(T),
         ?assertEqual([], intents(T))
     after
-        close(T, Db, Sup)
+        close(Db)
     end.
 
 %% The index never receives u1's last three ops (the writer's buffer is
@@ -439,16 +439,16 @@ reopen_seeds_from_intents(Dirs) ->
     [write(T0, <<"u1">>, V) || V <- [<<"b">>, <<"c">>, <<"d">>]],
     {Top, _} = lists:last(intents(T0)),
     reset_index(T0, by_value),
-    crash(Db0, Sup0),
+    crash(Sup0),
 
-    {Db1, Sup1} = open(Dirs),
+    {Db1, _} = open(Dirs),
     {ok, T1} = open_table_slow(Db1),
     try
         write(T1, <<"u1">>, <<"e">>),
         {Next, _} = lists:last(intents(T1)),
         ?assert(Next > Top)
     after
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 %% A crash leaves the registry rows of both indexes behind, pointing at the
@@ -466,9 +466,9 @@ dropped_index_does_not_block_open(Dirs) ->
     }),
     write(T0, <<"u1">>, <<"active">>),
     flush_index(T0, by_value),
-    crash(Db0, Sup0),
+    crash(Sup0),
 
-    {Db1, Sup1} = open(Dirs),
+    {Db1, _} = open(Dirs),
     {ok, T1} = open_table(Db1),
     try
         ?assertEqual(
@@ -476,7 +476,7 @@ dropped_index_does_not_block_open(Dirs) ->
             bondy_db:index_get(T1, ?R, by_value, <<"active">>, #{})
         )
     after
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 %% A crash loses u2's index op. The next open fails after the index shards
@@ -489,7 +489,7 @@ failed_open_keeps_intents(Dirs) ->
     flush_index(T0, by_value),
     write(T0, <<"u2">>, <<"active">>),
     reset_index(T0, by_value),
-    crash(Db0, Sup0),
+    crash(Sup0),
 
     {Db1, Sup1} = open(Dirs),
     ok = meck:new(bondy_oplog, [passthrough]),
@@ -501,11 +501,11 @@ failed_open_keeps_intents(Dirs) ->
     after
         meck:unload(bondy_oplog)
     end,
-    crash(Db1, Sup1),
+    crash(Sup1),
 
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
-    {Db2, Sup2} = open(Dirs),
+    {Db2, _} = open(Dirs),
     {ok, T2} = open_table_slow(Db2),
     try
         ?assertEqual(0, counters:get(Ctr, 1)),
@@ -515,7 +515,7 @@ failed_open_keeps_intents(Dirs) ->
         )
     after
         detach_rebuild_counter(),
-        close(T2, Db2, Sup2)
+        close(Db2)
     end.
 
 %% A rebuild syncs the index after removing the trust marker and before the
@@ -524,7 +524,7 @@ failed_open_keeps_intents(Dirs) ->
 %% `IndexIntents_NoSyncBeforeMark.cfg`). This checks the order of the calls on
 %% the projection adapter, not what a crash keeps.
 rebuild_syncs_around_the_trust_marker(Dirs) ->
-    {Db, Sup} = open(Dirs),
+    {Db, _} = open(Dirs),
     {ok, T} = open_table(Db),
     write(T, <<"u1">>, <<"a">>),
     flush_index(T, by_value),
@@ -579,7 +579,7 @@ rebuild_syncs_around_the_trust_marker(Dirs) ->
         ?assert(lists:any(fun(S) -> S > Refold andalso S < Mark end, Syncs))
     after
         meck:unload(bondy_db_projection_leveled),
-        close(T, Db, Sup)
+        close(Db)
     end.
 
 positions(Pred, List) ->
@@ -590,7 +590,7 @@ positions(Pred, List) ->
 %% without wiping the index (`proofs/tla/IndexIntents_UnmarkLost_2Shards.cfg`).
 %% Once the delete works, the rebuild completes.
 failed_unmark_blocks_the_wipe(Dirs) ->
-    {Db, Sup} = open(Dirs),
+    {Db, _} = open(Dirs),
     {ok, T} = open_table(Db),
     try
         write(T, <<"u1">>, <<"a">>),
@@ -618,7 +618,7 @@ failed_unmark_blocks_the_wipe(Dirs) ->
             bondy_db:index_get(T, ?R, by_value, <<"a">>, #{})
         )
     after
-        close(T, Db, Sup)
+        close(Db)
     end.
 
 %% A catalogue install gives u1 the frame of u2, whose value is b, and prunes
@@ -627,7 +627,7 @@ failed_unmark_blocks_the_wipe(Dirs) ->
 %% a: the replay re-puts u1 under b but no remove of a, which only the
 %% install's ops carry (`proofs/tla/IndexIntents_InstallBatch.cfg`).
 install_keeps_the_index(Dirs) ->
-    {Db, Sup} = open(Dirs),
+    {Db, _} = open(Dirs),
     {ok, T} = open_table(Db),
     try
         write(T, <<"u1">>, <<"a">>),
@@ -654,7 +654,7 @@ install_keeps_the_index(Dirs) ->
             {ok, []}, bondy_db:index_get(T, ?R, by_value, <<"a">>, #{})
         )
     after
-        close(T, Db, Sup)
+        close(Db)
     end.
 
 %% No barrier runs after the writes, so the primary may hold unsynced entries
@@ -664,7 +664,7 @@ install_keeps_the_index(Dirs) ->
 %% A sync by another process does not count: writes can land between it and
 %% the install.
 install_syncs_before_its_first_cell(Dirs) ->
-    {Db, Sup} = open(Dirs),
+    {Db, _} = open(Dirs),
     {ok, T} = open_table(Db),
     try
         write(T, <<"u1">>, <<"a">>),
@@ -699,7 +699,7 @@ install_syncs_before_its_first_cell(Dirs) ->
             meck:unload(bondy_db_projection_leveled)
         end
     after
-        close(T, Db, Sup)
+        close(Db)
     end.
 
 %% The writer dies just before the open's flush. The open still succeeds,
@@ -712,11 +712,11 @@ writer_death_at_open_flush(Dirs) ->
     write(T0, <<"u1">>, <<"active">>),
     flush_index(T0, by_value),
     write(T0, <<"u2">>, <<"active">>),
-    crash(Db0, Sup0),
+    crash(Sup0),
 
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
-    {Db1, Sup1} = open(Dirs),
+    {Db1, _} = open(Dirs),
     Opener = self(),
     ok = meck:new(bondy_oplog_secondary_writer, [passthrough]),
     ok = meck:expect(
@@ -750,7 +750,7 @@ writer_death_at_open_flush(Dirs) ->
         )
     after
         detach_rebuild_counter(),
-        close(T1, Db1, Sup1)
+        close(Db1)
     end.
 
 kill_writer(Entry) ->
@@ -812,56 +812,24 @@ open_table_slow(Db) ->
 write(T, Key, Value) ->
     ok = bondy_db:apply(T, ?R, Key, {set, bondy_db:tick(T), Value}).
 
-%% Graceful shutdown: close the DB (stops the leveled Bookies), stop every
-%% oplog instance (they cache now-dead Bookie handles), then stop the leveled
-%% supervisor. The on-disk leveled/pack/WAL state survives.
-close(Table, Db, Sup) ->
-    _ =
-        try
-            bondy_db:close_table(Table)
-        catch
-            _:_ -> ok
-        end,
-    _ =
-        try
-            bondy_db:close(Db)
-        catch
-            _:_ -> ok
-        end,
-    stop_everything(),
-    case is_process_alive(Sup) of
-        true -> bondy_db_leveled_sup:stop(Sup);
-        false -> ok
-    end,
-    ok.
+%% Graceful shutdown: `bondy_db:close/1` closes the table, stops its
+%% instance and the leveled supervisor with its Bookies. The on-disk
+%% leveled/pack/WAL state survives.
+close(Db) ->
+    ok = bondy_db:close(Db).
 
-%% Simulate a crash: tear down the running processes without `close_table/1`.
-%% The on-disk leveled, pack and WAL state survives, so the next open recovers
-%% the primary's durable state.
-crash(Db, Sup) ->
-    _ =
-        try
-            bondy_db:close(Db)
-        catch
-            _:_ -> ok
-        end,
+%% Simulate a crash: kill the running processes without `close_table/1` or
+%% `close/1`, so every registry row of the table survives with a dead
+%% handle. The on-disk leveled, pack and WAL state survives too.
+crash(Sup) ->
     stop_everything(),
-    case is_process_alive(Sup) of
-        true -> bondy_db_leveled_sup:stop(Sup);
-        false -> ok
-    end,
-    ok.
+    bondy_db_leveled_sup:stop(Sup).
 
 stop_everything() ->
-    _ = [
-        try
-            bondy_oplog:stop_instance(I)
-        catch
-            _:_ -> ok
-        end
-     || I <- bondy_oplog:list_instances()
-    ],
-    ok.
+    lists:foreach(
+        fun(I) -> _ = bondy_oplog:stop_instance(I) end,
+        bondy_oplog:list_instances()
+    ).
 
 flush_index(Table, IndexName) ->
     Info = bondy_db:info(Table),

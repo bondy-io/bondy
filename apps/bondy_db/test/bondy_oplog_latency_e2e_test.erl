@@ -86,7 +86,7 @@ samples_emitted() ->
     ?assert(P99 =< Max),
     ?assert(is_integer(maps:get(interval_ms, Meta))),
     ?assert(maps:get(interval_ms, Meta) >= 1),
-    close_stop(Db, Id).
+    ok = bondy_db:close(Db).
 
 %% The bondy_metrics histogram backing the instance records exactly one
 %% observation per write (independent of the emit path).
@@ -103,7 +103,7 @@ histogram_count_matches() ->
     }),
     ?assertEqual(N, maps:get(count, Snap)),
     ?assert(maps:get(sum, Snap) >= 0),
-    close_stop(Db, Id).
+    ok = bondy_db:close(Db).
 
 %% With sampling disabled, a fresh instance accumulates no histogram and the
 %% forced tick emits nothing for it.
@@ -132,7 +132,7 @@ disabled_suppresses() ->
     end),
     ?assertEqual(timeout, Result),
     ok = bondy_oplog_latency:set_enabled(true),
-    close_stop(Db, Id).
+    ok = bondy_db:close(Db).
 
 %% An instance that takes NO real writes still reports a heartbeat once the
 %% idle probe is enabled: tick 1 probes it (async reserved-cell write),
@@ -163,7 +163,7 @@ idle_probe_heartbeats() ->
     ?assertEqual(
         {error, not_found}, bondy_db:read(T, <<"realm">>, <<"never">>)
     ),
-    close_stop(Db, Id).
+    ok = bondy_db:close(Db).
 
 %% probe_write must produce a type-correct, accepted op for each CRDT: a
 %% tier_2 add-wins map (context-stamped) and the dynamic-HLC lww register.
@@ -177,7 +177,7 @@ probe_write_per_type() ->
     ?assertEqual(ok, bondy_db:probe_write(IdM)),
     %% the reserved cell is invisible to a normal read of the user keyspace
     ?assertEqual({error, not_found}, bondy_db:read(Tm, <<"realm">>, <<"k">>)),
-    close_stop(DbM, IdM),
+    ok = bondy_db:close(DbM),
 
     %% tier_0 lww (the default type) — probe op carries a fresh HLC
     {DbL, _Ol} = open_lww_db(lat_probe_lww),
@@ -185,7 +185,7 @@ probe_write_per_type() ->
     IdL = instance_of(Tl),
     ?assertEqual(ok, bondy_db:probe_write(IdL)),
     ?assertEqual(ok, bondy_db:probe_write(IdL)),
-    close_stop(DbL, IdL).
+    ok = bondy_db:close(DbL).
 
 %% When an instance is stopped, the next tick prunes its histogram so it
 %% does not leak across instance churn.
@@ -200,10 +200,9 @@ churn_prune() ->
     %% Record a snapshot so the histogram is tracked.
     ok = bondy_oplog_latency:snapshot_now(),
 
-    %% Stop the instance (close/1 only drops the table handle); the next
-    %% tick reconciles against the registry and deletes the orphaned
-    %% histogram.
-    close_stop(Db, Id),
+    %% Closing the DB stops the instance; the next tick reconciles against
+    %% the registry and deletes the orphaned histogram.
+    ok = bondy_db:close(Db),
     ?assertNot(lists:member(Id, bondy_oplog_registry:list())),
     ok = bondy_oplog_latency:snapshot_now(),
     ?assertEqual(not_found, hist_snapshot(Id)).
@@ -246,13 +245,6 @@ open_lww_db(Name) ->
 instance_of(Table) ->
     #{0 := InstanceId} = maps:get(instance_ids, Table),
     InstanceId.
-
-%% Fully tear down: close the handle AND stop the instance, so it leaves
-%% the registry (close/1 alone leaves a registered instance with a dead
-%% projection that the idle probe would otherwise hit).
-close_stop(Db, Id) ->
-    ok = bondy_db:close(Db),
-    ok = bondy_oplog:stop_instance(Id).
 
 hist_snapshot(Id) ->
     bondy_metrics:histogram_snapshot(#{

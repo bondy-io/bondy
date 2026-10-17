@@ -654,13 +654,7 @@ invalidate_cache(undefined, _Handle, _Bucket, _Key) ->
 invalidate_cache(_Adapter, undefined, _Bucket, _Key) ->
     ok;
 invalidate_cache(Adapter, Handle, Bucket, Key) ->
-    _ =
-        try
-            Adapter:delete(Handle, Bucket, Key)
-        catch
-            _:_ -> ok
-        end,
-    ok.
+    Adapter:delete(Handle, Bucket, Key).
 
 bump_ae(undefined) ->
     ok;

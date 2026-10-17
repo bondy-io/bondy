@@ -639,8 +639,10 @@ with_flush_hook(Hook, Body) ->
         ok = meck:expect(
             bondy_oplog_secondary_writer, flush_entry, fun(Entry, Timeout) ->
                 Pid = bondy_oplog_core_registry:entry_writer_pid(Entry),
+                %% The orchestrator runs each rebuild in a worker it spawns.
+                {parent, Parent} = process_info(self(), parent),
                 _ =
-                    self() =:= Rebuild andalso
+                    Parent =:= Rebuild andalso
                         atomics:add_get(Once, 1, 1) =:= 1 andalso Hook(Pid),
                 meck:passthrough([Entry, Timeout])
             end

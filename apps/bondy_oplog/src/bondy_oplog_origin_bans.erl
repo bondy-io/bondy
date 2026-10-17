@@ -683,22 +683,14 @@ set_persist_alarm(Path, Reason) ->
             [Path, Reason]
         )
     ),
-    _ =
-        try
-            alarm_handler:set_alarm({?PERSIST_ALARM_ID, Desc})
-        catch
-            _:_ -> ok
-        end,
+    erlang:whereis(alarm_handler) =/= undefined andalso
+        alarm_handler:set_alarm({?PERSIST_ALARM_ID, Desc}),
     ok.
 
 %% @private
 clear_persist_alarm() ->
-    _ =
-        try
-            alarm_handler:clear_alarm(?PERSIST_ALARM_ID)
-        catch
-            _:_ -> ok
-        end,
+    erlang:whereis(alarm_handler) =/= undefined andalso
+        alarm_handler:clear_alarm(?PERSIST_ALARM_ID),
     ok.
 
 %% @private

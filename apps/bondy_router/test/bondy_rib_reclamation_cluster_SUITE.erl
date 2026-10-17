@@ -33,15 +33,15 @@
 %% never boots on the data dir a previous case's departed node left behind.
 
 -define(REALM, <<"com.bondy.rib_reclaim">>).
--define(PROC, <<"com.example.rib_reclaim.proc">>).
--define(TOPIC, <<"com.example.rib_reclaim.topic">>).
 -define(POLICY, <<"exact">>).
 -define(CONVERGE_MS, 120000).
+-define(SWEEP_EVENT, [bondy_oplog, applier, cells_swept]).
 
 all() ->
     [
         departed_node_rib_state_is_reclaimed,
-        departed_node_rib_state_is_reclaimed_after_compaction
+        departed_node_rib_state_is_reclaimed_after_compaction,
+        departed_node_rib_state_is_reclaimed_in_single_cell_sweeps
     ].
 
 suite() ->
@@ -52,7 +52,7 @@ init_per_testcase(Case, Config) ->
     _ = [push_module(Node, ?MODULE) || {_, Node, _} <- Nodes],
     %% Scheduler-driven compaction is frozen so that each case decides
     %% whether the registry MST is compacted before the node departs: the
-    %% first case never compacts, the second compacts explicitly.
+    %% first case never compacts, the others compact explicitly.
     _ = [bondy_ct:freeze_gc(Node) || {_, Node, _} <- Nodes],
     [{cluster, Nodes} | Config].
 
@@ -63,7 +63,9 @@ end_per_testcase(_Case, Config) ->
 node_names(departed_node_rib_state_is_reclaimed) ->
     [rribrec1, rribrec2, rribrec3];
 node_names(departed_node_rib_state_is_reclaimed_after_compaction) ->
-    [rribcmp1, rribcmp2, rribcmp3].
+    [rribcmp1, rribcmp2, rribcmp3];
+node_names(departed_node_rib_state_is_reclaimed_in_single_cell_sweeps) ->
+    [rribpag1, rribpag2, rribpag3].
 
 %% =============================================================================
 %% TESTS
@@ -72,12 +74,13 @@ node_names(departed_node_rib_state_is_reclaimed_after_compaction) ->
 departed_node_rib_state_is_reclaimed(Config) ->
     [N1, N2, _N3] = nodes_of(Config),
     {_, N2, Peer2} = lists:keyfind(N2, 2, ?config(cluster, Config)),
-    N2Str = seed_owner_cells(N1, N2),
+    Cells = cells(1),
+    N2Str = seed_owner_cells(N1, N2, Cells),
 
     %% N2 departs for good and is retired — the deliberate, replicated
     %% membership act that licenses reclamation.
     ok = peer:stop(Peer2),
-    assert_reclaimed(N1, N2Str).
+    assert_reclaimed(N1, N2Str, Cells).
 
 %% The same departure after the survivor has compacted its registry MSTs,
 %% the state a long-running cluster is in: the compaction cluster suite
@@ -87,84 +90,122 @@ departed_node_rib_state_is_reclaimed(Config) ->
 departed_node_rib_state_is_reclaimed_after_compaction(Config) ->
     [N1, N2, _N3] = nodes_of(Config),
     {_, N2, Peer2} = lists:keyfind(N2, 2, ?config(cluster, Config)),
-    N2Str = seed_owner_cells(N1, N2),
+    Cells = cells(1),
+    N2Str = seed_owner_cells(N1, N2, Cells),
 
     %% Precondition: compaction has removed the seeded cells from the MST
     %% directory on the survivor while the projection still holds them.
-    ok = wait_directory_empty(N1, N2Str),
-    [
-        ?assert(count_of(cell_value(N1, T, U, N2Str)) > 0)
-     || {T, U} <- rib_cells()
-    ],
-    ct:pal("compacted: ~p", [rib_state(N1, N2Str)]),
+    ok = wait_directory_empty(N1, N2Str, Cells),
+    assert_cells_held(N1, N2Str, Cells),
+    ct:pal("compacted: ~p", [rib_state(N1, N2Str, Cells)]),
 
     ok = peer:stop(Peer2),
-    assert_reclaimed(N1, N2Str).
+    assert_reclaimed(N1, N2Str, Cells).
+
+%% The stability sweep pages through the compacted directory one cell per
+%% batch (`reclaim_batch_cells` = 1, each batch resumed from the cursor the
+%% previous one returned), so a cursor that skipped a cell shows as a sweep
+%% that scanned fewer cells than seeded, and a page cut past the budget as a
+%% batch that scanned more than one. The departure then has to reclaim every
+%% seeded cell through the same paged sweep.
+departed_node_rib_state_is_reclaimed_in_single_cell_sweeps(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    {_, N2, Peer2} = lists:keyfind(N2, 2, ?config(cluster, Config)),
+    Cells = cells(4),
+    N2Str = seed_owner_cells(N1, N2, Cells),
+    ok = wait_directory_empty(N1, N2Str, Cells),
+    assert_cells_held(N1, N2Str, Cells),
+
+    ok = erpc:call(
+        N1, application, set_env, [bondy_oplog, reclaim_batch_cells, 1]
+    ),
+    ok = erpc:call(N1, ?MODULE, do_count_sweeps, []),
+    Swept = erpc:call(N1, ?MODULE, do_reclaim_all, []),
+    ct:pal("single-cell sweep: ~p", [Swept]),
+    {Batches, Scanned} = erpc:call(N1, ?MODULE, do_sweep_counts, []),
+    ct:pal("sweep batches: ~p, cells scanned: ~p", [Batches, Scanned]),
+    ?assert(Scanned >= length(Cells), "the paged sweep skipped a cell"),
+    ?assert(Scanned =< Batches, "a batch swept more than one cell"),
+    assert_cells_held(N1, N2Str, Cells),
+
+    ok = peer:stop(Peer2),
+    assert_reclaimed(N1, N2Str, Cells).
+
+%% =============================================================================
+%% CONTROLLER HELPERS
+%% =============================================================================
 
 %% @private
-%% N2 owns one registration and one subscription; returns N2's nodestring.
-%% All four artifacts must be present on the survivor before the case goes
-%% on: without that precondition the case proves nothing about reclamation.
-seed_owner_cells(N1, N2) ->
+%% `N` registrations and `N` subscriptions, each a distinct URI.
+cells(N) ->
+    lists:append([
+        [
+            {registration, uri("proc", I)},
+            {subscription, uri("topic", I)}
+        ]
+     || I <- lists:seq(1, N)
+    ]).
+
+%% @private
+uri(Kind, I) ->
+    iolist_to_binary(["com.example.rib_reclaim.", Kind, ".", integer_to_list(I)]).
+
+%% @private
+%% Every artifact of `Cells` present (`true`) or absent (`false`).
+artifacts(Cells, Present) ->
+    maps:from_list([
+        {{Artifact, Type, Uri}, Present}
+     || {Type, Uri} <- Cells, Artifact <- [cell, stub]
+    ]).
+
+%% @private
+%% N2 owns every cell; returns N2's nodestring. Every artifact must be
+%% present on the survivor before the case goes on: without that
+%% precondition the case proves nothing about reclamation.
+seed_owner_cells(N1, N2, Cells) ->
     ok = erpc:call(N1, ?MODULE, do_create_realm, [?REALM]),
     ok = erpc:call(N2, ?MODULE, do_create_realm, [?REALM]),
-    ok = erpc:call(N2, ?MODULE, do_add_registration, [?REALM, ?PROC]),
-    ok = erpc:call(N2, ?MODULE, do_add_subscription, [?REALM, ?TOPIC]),
-    N2Str = erpc:call(N2, bondy_config, nodestring, []),
-    ok = wait_state(N1, N2Str, #{
-        reg_cell => true,
-        reg_stub => true,
-        sub_cell => true,
-        sub_stub => true
-    }),
-    ct:pal("seeded: ~p", [rib_state(N1, N2Str)]),
-    [
-        ?assert(count_of(cell_value(N1, T, U, N2Str)) > 0)
-     || {T, U} <- rib_cells()
+    _ = [
+        ok = erpc:call(N2, ?MODULE, do_add, [Type, Uri])
+     || {Type, Uri} <- Cells
     ],
+    N2Str = erpc:call(N2, bondy_config, nodestring, []),
+    ok = wait_state(N1, N2Str, Cells, artifacts(Cells, true)),
+    ct:pal("seeded: ~p", [rib_state(N1, N2Str, Cells)]),
+    assert_cells_held(N1, N2Str, Cells),
     N2Str.
 
 %% @private
+assert_cells_held(Node, Owner, Cells) ->
+    [
+        ?assert(count_of(cell_value(Node, Type, Uri, Owner)) > 0)
+     || {Type, Uri} <- Cells
+    ],
+    ok.
+
+%% @private
 %% Retires the (stopped) N2 on N1, drives the passes synchronously rather
-%% than waiting on their timers, and asserts all four artifacts are gone.
-assert_reclaimed(N1, N2Str) ->
+%% than waiting on their timers, and asserts every artifact is gone.
+assert_reclaimed(N1, N2Str, Cells) ->
     ok = erpc:call(N1, ?MODULE, do_retire, [node_of(N1, N2Str)]),
     Report = erpc:call(N1, ?MODULE, do_run_retirement, []),
     ct:pal("retirement pass: ~p", [Report]),
     Reclaimed = erpc:call(N1, ?MODULE, do_reclaim_all, []),
     ct:pal("reclaim pass: ~p", [Reclaimed]),
 
-    Final = wait_all_gone(N1, N2Str),
+    Final = wait_all_gone(N1, N2Str, Cells),
     ct:pal("post-retirement RIB state on ~p: ~p", [N1, Final]),
+    Survivors = [Artifact || Artifact := true <- Final],
 
     %% Only on failure: the reap declining a cell it scanned is the hard case
     %% to diagnose after the fact, and the cluster is gone once the suite ends.
-    Final =:=
-        #{
-            reg_cell => false,
-            reg_stub => false,
-            sub_cell => false,
-            sub_stub => false
-        } orelse
+    Survivors =:= [] orelse
         ct:pal(
-            "DIAGNOSTIC: ~p", [erpc:call(N1, ?MODULE, do_diagnose, [N2Str])]
+            "DIAGNOSTIC: ~p",
+            [erpc:call(N1, ?MODULE, do_diagnose, [N2Str, hd(Cells)])]
         ),
-
-    #{
-        reg_cell := RegCell,
-        reg_stub := RegStub,
-        sub_cell := SubCell,
-        sub_stub := SubStub
-    } = Final,
-    ?assertEqual(false, RegCell, "registration cell survived retirement"),
-    ?assertEqual(false, RegStub, "registration stub survived retirement"),
-    ?assertEqual(false, SubCell, "subscription cell survived retirement"),
-    ?assertEqual(false, SubStub, "subscription stub survived retirement"),
+    ?assertEqual([], Survivors, "RIB artifacts survived retirement"),
     ok.
-
-%% =============================================================================
-%% CONTROLLER HELPERS
-%% =============================================================================
 
 %% @private
 nodes_of(Config) ->
@@ -176,15 +217,16 @@ node_of(Node, NodeStr) ->
 
 %% @private
 %% Compacts every registry instance on `Node` until the MST directory there
-%% lists neither seeded cell, or fails naming what the directory still held
-%% and what the last compaction round answered.
-wait_directory_empty(Node, Owner) ->
+%% lists no seeded cell, or fails naming what the directory still held and
+%% what the last compaction round answered.
+wait_directory_empty(Node, Owner, Cells) ->
     Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
-    wait_directory_empty(Node, Owner, Deadline).
+    Raws = [raw_key(Uri, Owner) || {_, Uri} <- Cells],
+    wait_directory_empty_until(Node, Raws, Deadline).
 
-wait_directory_empty(Node, Owner, Deadline) ->
+wait_directory_empty_until(Node, Raws, Deadline) ->
     Rounds = erpc:call(Node, ?MODULE, do_compact_registry, []),
-    case erpc:call(Node, ?MODULE, do_mst_directory_for, [Owner]) of
+    case erpc:call(Node, ?MODULE, do_mst_directory_for, [Raws]) of
         [] ->
             ok;
         Held ->
@@ -197,7 +239,7 @@ wait_directory_empty(Node, Owner, Deadline) ->
                     );
                 false ->
                     timer:sleep(1000),
-                    wait_directory_empty(Node, Owner, Deadline)
+                    wait_directory_empty_until(Node, Raws, Deadline)
             end
     end.
 
@@ -208,12 +250,8 @@ push_module(Node, Mod) ->
     ok.
 
 %% @private
-rib_cells() ->
-    [{bondy_rib_registrations, ?PROC}, {bondy_rib_subscriptions, ?TOPIC}].
-
-%% @private
-cell_value(Node, Table, Uri, Owner) ->
-    erpc:call(Node, ?MODULE, do_read_cell, [Table, Uri, Owner]).
+cell_value(Node, Type, Uri, Owner) ->
+    erpc:call(Node, ?MODULE, do_read_cell, [Type, Uri, Owner]).
 
 %% @private
 %% A registration cell's value is a struct with a `count` field; a
@@ -222,19 +260,19 @@ count_of({ok, {#{count := C}, _}}) when is_integer(C) -> C;
 count_of({ok, {C, _}}) when is_integer(C) -> C.
 
 %% @private
-rib_state(Node, Owner) ->
-    erpc:call(Node, ?MODULE, do_rib_state, [Owner]).
+rib_state(Node, Owner, Cells) ->
+    erpc:call(Node, ?MODULE, do_rib_state, [Owner, Cells]).
 
 %% @private
 %% Polls until the survivor's view matches `Expected`, so a slow AAE hop is a
 %% wait rather than a flake. Returns `ok`, or fails the test with the last
 %% observed state so a mismatch names what actually differed.
-wait_state(Node, Owner, Expected) ->
+wait_state(Node, Owner, Cells, Expected) ->
     Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
-    wait_state(Node, Owner, Expected, Deadline).
+    wait_state(Node, Owner, Cells, Expected, Deadline).
 
-wait_state(Node, Owner, Expected, Deadline) ->
-    case rib_state(Node, Owner) of
+wait_state(Node, Owner, Cells, Expected, Deadline) ->
+    case rib_state(Node, Owner, Cells) of
         Expected ->
             ok;
         Other ->
@@ -247,28 +285,22 @@ wait_state(Node, Owner, Expected, Deadline) ->
                     );
                 false ->
                     timer:sleep(500),
-                    wait_state(Node, Owner, Expected, Deadline)
+                    wait_state(Node, Owner, Cells, Expected, Deadline)
             end
     end.
 
 %% @private
 %% Polls until every artifact is gone, returning the LAST observed state
 %% either way — reclamation may need more than one pass, and on failure the
-%% caller asserts per artifact so the report names which ones survived.
-wait_all_gone(Node, Owner) ->
+%% caller reports which artifacts survived.
+wait_all_gone(Node, Owner, Cells) ->
     Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
-    wait_all_gone(Node, Owner, Deadline).
+    wait_all_gone(Node, Owner, Cells, artifacts(Cells, false), Deadline).
 
-wait_all_gone(Node, Owner, Deadline) ->
-    All = #{
-        reg_cell => false,
-        reg_stub => false,
-        sub_cell => false,
-        sub_stub => false
-    },
-    case rib_state(Node, Owner) of
-        All ->
-            All;
+wait_all_gone(Node, Owner, Cells, Gone, Deadline) ->
+    case rib_state(Node, Owner, Cells) of
+        Gone ->
+            Gone;
         Other ->
             case erlang:monotonic_time(millisecond) > Deadline of
                 true ->
@@ -277,9 +309,13 @@ wait_all_gone(Node, Owner, Deadline) ->
                     timer:sleep(1000),
                     _ = erpc:call(Node, ?MODULE, do_reclaim_all, []),
                     _ = erpc:call(Node, ?MODULE, do_rib_check, []),
-                    wait_all_gone(Node, Owner, Deadline)
+                    wait_all_gone(Node, Owner, Cells, Gone, Deadline)
             end
     end.
+
+%% @private
+raw_key(Uri, Owner) ->
+    term_to_binary({?REALM, ?POLICY, Uri, Owner}).
 
 %% =============================================================================
 %% PEER-SIDE HELPERS (run ON the cluster nodes)
@@ -297,45 +333,49 @@ do_create_realm(Uri) ->
     end.
 
 %% @private
-do_add_registration(Uri, Proc) ->
+do_add(registration, Uri) ->
     Ref = bondy_ref:new(internal, {bondy_wamp_api, resolve}),
     Opts = #{match => ?POLICY, invoke => <<"single">>},
-    case bondy_registry:add(registration, Uri, Proc, Opts, Ref) of
+    case bondy_registry:add(registration, ?REALM, Uri, Opts, Ref) of
         {ok, _, _} -> ok;
-        {ok, _} -> ok;
-        Other -> error({registration_add_failed, Other})
-    end.
-
-%% @private
-do_add_subscription(Uri, Topic) ->
+        {ok, _} -> ok
+    end;
+do_add(subscription, Uri) ->
     Ref = bondy_ref:new(internal, {bondy_wamp_api, resolve}),
-    case bondy_registry:add(subscription, Uri, Topic, #{}, Ref) of
+    case bondy_registry:add(subscription, ?REALM, Uri, #{}, Ref) of
         {ok, _, _} -> ok;
-        {ok, _} -> ok;
-        Other -> error({subscription_add_failed, Other})
+        {ok, _} -> ok
     end.
 
 %% @private
-%% The four artifacts, read on this node, for cells owned by `Owner`.
-do_rib_state(Owner) ->
-    #{
-        reg_cell => has_cell(bondy_rib_registrations, ?PROC, Owner),
-        reg_stub => has_stub(registration, ?PROC, Owner),
-        sub_cell => has_cell(bondy_rib_subscriptions, ?TOPIC, Owner),
-        sub_stub => has_stub(subscription, ?TOPIC, Owner)
-    }.
+%% Both artifacts of every cell of `Cells`, read on this node, for the cells
+%% `Owner` wrote.
+do_rib_state(Owner, Cells) ->
+    maps:from_list(
+        lists:append([
+            [
+                {{cell, Type, Uri}, has_cell(Type, Uri, Owner)},
+                {{stub, Type, Uri}, has_stub(Type, Uri, Owner)}
+            ]
+         || {Type, Uri} <- Cells
+        ])
+    ).
 
 %% @private
-has_cell(Table, Uri, Owner) ->
-    case do_read_cell(Table, Uri, Owner) of
+has_cell(Type, Uri, Owner) ->
+    case do_read_cell(Type, Uri, Owner) of
         {ok, _} -> true;
-        _ -> false
+        {error, not_found} -> false
     end.
 
 %% @private
-do_read_cell(Table, Uri, Owner) ->
-    Key = term_to_binary({?REALM, ?POLICY, Uri, Owner}),
-    bondy_db:read(bondy_namespace_catalog:table(Table), ?REALM, Key).
+do_read_cell(Type, Uri, Owner) ->
+    Table = bondy_namespace_catalog:table(table_of(Type)),
+    bondy_db:read(Table, ?REALM, raw_key(Uri, Owner)).
+
+%% @private
+table_of(registration) -> bondy_rib_registrations;
+table_of(subscription) -> bondy_rib_subscriptions.
 
 %% @private
 has_stub(Type, Uri, Owner) ->
@@ -353,14 +393,11 @@ do_compact_registry() ->
 
 %% @private
 %% The `cell_apply` entries still in any registry instance's MST for the
-%% cells `Owner` wrote: what `bondy_oplog_cell_utils:primary_cell_directory/4`
-%% enumerates for the ephemeral ETS adapter. A storage key is the raw cell
-%% key, realm-prefixed under a realm-folding topology, so match on suffix.
-do_mst_directory_for(Owner) ->
-    Raws = [
-        term_to_binary({?REALM, ?POLICY, Uri, Owner})
-     || {_, Uri} <- rib_cells()
-    ],
+%% cells with raw keys `Raws`: what `bondy_oplog_cell_utils:
+%% primary_cell_directory/4` enumerates for the ephemeral ETS adapter. A
+%% storage key is the raw cell key, realm-prefixed under a realm-folding
+%% topology, so match on suffix.
+do_mst_directory_for(Raws) ->
     [
         {I, Bucket}
      || <<"registry-", _/binary>> = I <- bondy_oplog:list_instances(),
@@ -393,60 +430,61 @@ do_retire(Node) ->
 do_run_retirement() ->
     #{
         enabled => bondy_oplog_config:origin_retirement_enabled(),
-        run =>
-            try
-                bondy_oplog_origin_retirement:run()
-            catch
-                C:R -> {'EXIT', {C, R}}
-            end
+        run => bondy_oplog_origin_retirement:run()
     }.
 
 %% @private
 do_reclaim_all() ->
     [
-        {I,
-            try
-                bondy_oplog_instance:reclaim_stable_cells(I)
-            catch
-                C:R -> {'EXIT', {C, R}}
-            end}
+        {I, bondy_oplog_instance:reclaim_stable_cells(I)}
      || I <- bondy_oplog:list_instances()
     ].
 
 %% @private
-%% Why did the reap not fire? Reports, for the registration RIB cell owned by
+%% Counts, per registry instance sweep batch, the batches and the cells they
+%% scanned; `do_sweep_counts/0` reads them back.
+do_count_sweeps() ->
+    Ref = counters:new(2, []),
+    telemetry:attach(?MODULE, ?SWEEP_EVENT, fun ?MODULE:on_cells_swept/4, Ref).
+
+%% @private
+on_cells_swept(?SWEEP_EVENT, #{scanned := Scanned}, #{instance_id := Id}, Ref) ->
+    case Id of
+        <<"registry-", _/binary>> ->
+            ok = counters:add(Ref, 1, 1),
+            ok = counters:add(Ref, 2, Scanned);
+        <<_/binary>> ->
+            ok
+    end.
+
+%% @private
+do_sweep_counts() ->
+    [#{config := Ref}] = [
+        H
+     || #{id := ?MODULE} = H <- telemetry:list_handlers(?SWEEP_EVENT)
+    ],
+    {counters:get(Ref, 1), counters:get(Ref, 2)}.
+
+%% @private
+%% Why did the reap not fire? Reports, for the cell `{Type, Uri}` owned by
 %% `Owner`: the origins its stored state actually carries, the dead set this
 %% node computes, and a DIRECT per-instance reap report (which carries
 %% `supported` and `cells_scanned`, both of which `reap_instance/2` discards).
-do_diagnose(Owner) ->
+do_diagnose(Owner, {Type, Uri}) ->
     Dead = dead_origins(),
-    Cell =
-        try
-            do_read_cell(bondy_rib_registrations, ?PROC, Owner)
-        catch
-            C0:R0 -> {'EXIT', {C0, R0}}
-        end,
     Reports = [
-        {I,
-            try
-                bondy_oplog_instance:reap_origins(I, Dead)
-            catch
-                C:R -> {'EXIT', {C, R}}
-            end}
+        {I, bondy_oplog_instance:reap_origins(I, Dead)}
      || I <- bondy_oplog:list_instances()
     ],
     #{
         dead => Dead,
         dead_count => length(Dead),
-        cell => Cell,
+        cell => do_read_cell(Type, Uri, Owner),
         reap_reports => [
             {I, Rep}
-         || {I, Rep} <- Reports,
-            case Rep of
-                {ok, #{cells_scanned := N}} when N > 0 -> true;
-                {ok, #{supported := true}} -> true;
-                _ -> false
-            end
+         || {I, {ok, #{cells_scanned := N, supported := Supported}} = Rep} <-
+                Reports,
+            N > 0 orelse Supported
         ],
         unsupported => [
             I
@@ -455,7 +493,7 @@ do_diagnose(Owner) ->
         %% For every instance that actually SCANNED a cell: does its applied
         %% frontier carry any of the origins we just declared dead? If yes,
         %% the writer IS known dead and present here, and the decline happens
-        %% inside `reap_one_cell/6`. If no, the dead set never named the
+        %% inside `reap_one_cell/5`. If no, the dead set never named the
         %% cell's writer and the fault is upstream.
         scanned_frontiers => [
             {I, #{

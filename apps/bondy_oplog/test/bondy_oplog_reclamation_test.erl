@@ -101,7 +101,7 @@ membership_error_reclaims_nothing() ->
     ok = bondy_oplog_instance:await_apply(Id),
 
     bondy_oplog_test_helpers:with_members(
-        fun() -> error(badarg) end,
+        fun() -> error(membership_unavailable) end,
         fun() ->
             ?assertEqual(
                 {error, membership_unavailable},

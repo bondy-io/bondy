@@ -306,14 +306,15 @@ restart(Id, Failures, State) ->
     end.
 
 %% @private
-%% A start that raises must not stop this process: its restart would find
-%% the same dead subtrees at once and retry them without backoff until
+%% A dynamic supervisor that is itself restarting (`noproc`) is retried with
+%% backoff rather than crashing this process: its restart would find the same
+%% dead subtrees at once and retry them without backoff until
 %% `bondy_oplog_sup` gives up and takes every instance with it.
 start(Id, Opts) ->
     try
         bondy_oplog_instance_dyn_sup:restart_instance(Id, Opts)
     catch
-        Class:Reason -> {error, {Class, Reason}}
+        exit:{noproc, _} -> {error, noproc}
     end.
 
 %% @private

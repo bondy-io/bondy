@@ -31,11 +31,11 @@ instance) cannot pile up unbounded.
 |---|---|---|
 | `gc_scheduler`       | `true`  | Enable / disable. |
 | `gc_interval_ms`     | `1000`  | Time between ticks. |
-| `gc_trigger`         | `undefined` | `fun((InstanceId) -> any())`; defaults to running compaction per instance. |
+| `gc_trigger`         | `undefined` | `fun((InstanceId) -> ok | {ok, term()} | {error, term()})`; defaults to running compaction per instance. |
 | `gc_max_concurrency` | `4`     | Cap on concurrently running trigger workers. Instances over the cap on a tick are skipped this round. |
 
-Errors raised by the trigger are caught and logged in the worker; they
-do not crash the scheduler.
+A trigger that raises ends its worker; the scheduler logs the abnormal
+exit from the worker's `DOWN` and keeps ticking.
 
 ## Named instances
 
@@ -50,11 +50,15 @@ module or
 smuggling per-instance time checks into a shared trigger.
 """).
 
+-type trigger_fun() :: fun(
+    (instance_id()) -> ok | {ok, term()} | {error, term()}
+).
+
 -record(state, {
     name :: atom(),
     enabled :: boolean(),
     interval_ms :: non_neg_integer(),
-    trigger :: undefined | fun((instance_id()) -> any()),
+    trigger :: undefined | trigger_fun(),
     tick_ref :: undefined | reference(),
     max_concurrency :: pos_integer(),
     in_flight :: #{pid() => instance_id()},
@@ -161,7 +165,7 @@ trigger_for(Name, InstanceId) when is_atom(Name) ->
 Replaces the trigger callback at runtime. Pass `undefined` to
 quiesce.
 """).
--spec set_trigger(undefined | fun((instance_id()) -> any())) -> ok.
+-spec set_trigger(undefined | trigger_fun()) -> ok.
 
 set_trigger(Fun) ->
     set_trigger(?MODULE, Fun).
@@ -272,10 +276,9 @@ handle_cast(_Msg, State) ->
 handle_info(tick, State) ->
     {noreply, schedule_tick(run_tick(State))};
 handle_info({'DOWN', _Ref, process, Pid, Reason}, State) ->
-    %% `run_trigger/3` catches trigger exceptions, so an abnormal worker
-    %% exit is something outside it (e.g. a kill). It must not be silent:
-    %% a permanently dying worker would otherwise look identical to a
-    %% permanently healthy one.
+    %% A trigger that raises ends its worker abnormally. It must not be
+    %% silent: a permanently dying worker would otherwise look identical to
+    %% a permanently healthy one.
     Reason =:= normal orelse
         ?LOG_WARNING(#{
             description => "GC worker exited abnormally",
@@ -301,7 +304,7 @@ terminate(_Reason, _State) ->
 run_tick(#state{enabled = false} = State) ->
     State;
 run_tick(#state{} = State0) ->
-    Instances0 = safe_list_instances(),
+    Instances0 = bondy_oplog:list_instances(),
     %% Least-recently-fired first: the cap admits only max_concurrency
     %% workers per round, so a stable head-of-list order would starve
     %% every instance beyond the cap forever whenever the head's
@@ -396,20 +399,10 @@ fire_async(InstanceId, #state{in_flight = InFlight} = State) ->
 %% additionally cast back to the scheduler for the rate-limited stall log.
 run_trigger(Name, InstanceId, Fun) when is_function(Fun, 1) ->
     Outcome =
-        try Fun(InstanceId) of
-            {error, Reason} -> {error, Reason};
-            _ -> ok
-        catch
-            K:V:S ->
-                ?LOG_WARNING(#{
-                    description => "GC trigger raised",
-                    scheduler => Name,
-                    instance => InstanceId,
-                    class => K,
-                    reason => V,
-                    stacktrace => S
-                }),
-                {error, {raised, K, V}}
+        case Fun(InstanceId) of
+            ok -> ok;
+            {ok, _} -> ok;
+            {error, Reason} -> {error, Reason}
         end,
     telemetry:execute(
         [bondy_oplog, scheduler, gc, trigger_outcome],
@@ -433,7 +426,6 @@ run_trigger(Name, InstanceId, Fun) when is_function(Fun, 1) ->
 %% @private
 outcome_label(ok) -> ok;
 outcome_label({error, {unconfirmed, _}}) -> unconfirmed;
-outcome_label({error, {raised, K, _}}) -> {raised, K};
 outcome_label({error, Reason}) when is_atom(Reason) -> Reason;
 outcome_label({error, _}) -> error.
 
@@ -500,44 +492,40 @@ maybe_log_stall(InstanceId, Reason, State) ->
 %% (e.g. it has been down since this node booted). Runs only on the
 %% rate-limited log path; total.
 member_status(InstanceId) ->
-    try
-        {ok, Members} = bondy_oplog_instance:reclamation_members(),
-        States = bondy_oplog_peer_state:get_instance_peer_states(
-            InstanceId, 0
-        ),
-        ByPeer = maps:from_list([
-            {to_bin(P), S}
-         || #{peer := P} = S <- States
-        ]),
-        Now = os:system_time(millisecond),
-        lists:map(
-            fun(Member) ->
-                case maps:get(to_bin(Member), ByPeer, undefined) of
-                    #{last_sync := T} ->
-                        #{member => Member, last_sync_age_ms => Now - T};
-                    undefined ->
-                        #{member => Member, status => never_synced}
-                end
-            end,
-            Members
-        )
+    case bondy_oplog_instance:reclamation_members() of
+        {ok, Members} -> member_sync_ages(InstanceId, Members);
+        {error, _} -> unavailable
+    end.
+
+%% @private
+%% `bondy_oplog_peer_state` owns its table; while it restarts there is none.
+member_sync_ages(InstanceId, Members) ->
+    try bondy_oplog_peer_state:get_instance_peer_states(InstanceId, 0) of
+        States ->
+            ByPeer = maps:from_list([
+                {to_bin(P), S}
+             || #{peer := P} = S <- States
+            ]),
+            Now = os:system_time(millisecond),
+            lists:map(
+                fun(Member) ->
+                    case maps:get(to_bin(Member), ByPeer, undefined) of
+                        #{last_sync := T} ->
+                            #{member => Member, last_sync_age_ms => Now - T};
+                        undefined ->
+                            #{member => Member, status => never_synced}
+                    end
+                end,
+                Members
+            )
     catch
-        _:_ ->
-            unavailable
+        error:badarg -> unavailable
     end.
 
 %% @private
 to_bin(V) when is_atom(V) -> atom_to_binary(V, utf8);
 to_bin(V) when is_binary(V) -> V;
 to_bin(V) when is_list(V) -> list_to_binary(V).
-
-%% @private
-safe_list_instances() ->
-    try
-        bondy_oplog:list_instances()
-    catch
-        _:_ -> []
-    end.
 
 %% @private
 %% Cancels the in-flight `tick` timer (if any) and flushes any pending

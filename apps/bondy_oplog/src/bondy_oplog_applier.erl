@@ -168,6 +168,9 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
 -record(state, {
     instance_id :: instance_id(),
     instance_pid :: pid(),
+    %% Remote-event verify workers by pid, each with the caller it replies
+    %% to; `handle_info({'DOWN', ...})` replies for one that raised.
+    verify_workers = #{} :: #{pid() => gen_server:from()},
     wal_pid :: pid(),
     wal_dir :: file:filename_all(),
     iter :: bondy_log_reader:t() | undefined,
@@ -495,7 +498,7 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
 -export([stall_test_fields/1]).
 -endif.
 -export([collect_frames/2]).
--export([diff_pairs/3]).
+-export([diff_pairs/2]).
 
 -export([init/1]).
 -export([handle_call/3]).
@@ -1566,46 +1569,20 @@ handle_call(
     %% snapshot + the instance pid + the caller's `From` tag, performs
     %% the verify, forwards verified events to the instance for
     %% origin-ban / backpressure / watermark / install, and replies on
-    %% behalf of the applier. The outer try/catch wraps the entire
-    %% worker body — including `gen_server:reply/2` — so the caller
-    %% can never hang on its `infinity` call: any exception (verify
-    %% raised, forward raised, even reply raised) is logged and a
-    %% best-effort fallback reply is attempted via `catch`.
-    _ = spawn(fun() ->
-        try
-            Reply =
-                case Mod:verify_event(Event, VS) of
-                    ok ->
-                        forward_remote(InstP, Event);
-                    {error, Reason} = VerifyErr ->
-                        ok = log_verify_failure(Id, Event, Reason),
-                        VerifyErr
-                end,
-            gen_server:reply(From, Reply)
-        catch
-            C:R:S ->
-                ?LOG_WARNING(#{
-                    description =>
-                        "bondy_oplog_applier verify worker raised before "
-                        "delivering a reply; the remote event has been "
-                        "rejected",
-                    instance_id => Id,
-                    class => C,
-                    reason => R,
-                    stacktrace => S
-                }),
-                %% Best-effort fallback. `gen_server:reply/2` is
-                %% documented as never failing on a dead caller, but
-                %% the wrapping `catch` swallows any pathological
-                %% exception so the worker always exits cleanly.
-                try
-                    gen_server:reply(From, {error, {verify_crashed, R}})
-                catch
-                    _:_ -> ok
-                end
-        end
+    %% behalf of the applier.
+    {Pid, _Mon} = spawn_monitor(fun() ->
+        Reply =
+            case Mod:verify_event(Event, VS) of
+                ok ->
+                    forward_remote(InstP, Event);
+                {error, Reason} = VerifyErr ->
+                    ok = log_verify_failure(Id, Event, Reason),
+                    VerifyErr
+            end,
+        gen_server:reply(From, Reply)
     end),
-    {noreply, State};
+    Workers = State#state.verify_workers,
+    {noreply, State#state{verify_workers = Workers#{Pid => From}}};
 handle_call(
     {sweep_stable_cells, StableHlc, Opts},
     _From,
@@ -1926,6 +1903,16 @@ handle_info(drain_backstop, #state{drain_deferred = true} = State) ->
 handle_info(drain_backstop, State) ->
     %% Backstop fired while we were already draining — ignore.
     {noreply, State};
+handle_info(
+    {'DOWN', _Ref, process, Pid, Reason},
+    #state{verify_workers = Workers} = State
+) when is_map_key(Pid, Workers) ->
+    %% A worker that raised is reported by the runtime; its caller gets the
+    %% reply from here, so the `infinity` call behind it never hangs.
+    {From, Workers1} = maps:take(Pid, Workers),
+    Reason =:= normal orelse
+        gen_server:reply(From, {error, {verify_crashed, Reason}}),
+    {noreply, State#state{verify_workers = Workers1}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -2656,29 +2643,13 @@ replay_diff(
     end.
 
 %% @private
-%% Returns the `[{Key, Value}]` list to re-apply. Falls back to a full
-%% `to_list/1` if the diff raises — for example, if `LastRoot`'s pages
-%% have been partially GC'd between two replays. The applier never
-%% silently misses events: a failed diff costs one extra full fold.
-diff_pairs(MST, undefined, _Id) ->
+%% Returns the `[{Key, Value}]` list to re-apply. A page of `LastRoot` lost
+%% to GC since the previous replay reads as empty (`bondy_mst:diff_to_list/2`),
+%% which only widens the diff: the applier never silently misses events.
+diff_pairs(MST, undefined) ->
     bondy_mst:to_list(MST);
-diff_pairs(MST, LastRoot, Id) ->
-    try
-        bondy_mst:diff_to_list(MST, LastRoot)
-    catch
-        C:R:S ->
-            ?LOG_WARNING(#{
-                description =>
-                    "bondy_mst:diff_to_list raised; falling back to "
-                    "full MST scan for this replay",
-                instance_id => Id,
-                last_root => LastRoot,
-                class => C,
-                reason => R,
-                stacktrace => S
-            }),
-            bondy_mst:to_list(MST)
-    end.
+diff_pairs(MST, LastRoot) ->
+    bondy_mst:diff_to_list(MST, LastRoot).
 
 %% @private
 %% A peer snapshot bundles cells from EVERY table on the shard, each tagged with
@@ -2883,20 +2854,17 @@ install_decoded(Id, Ctx, {Bucket, Key, Frame}, Acc) ->
 
 %% @private
 decode_cell_hlc(Id, Bucket, Key, Frame) ->
-    try bondy_oplog_cell_frame:decode_full(Frame) of
-        {Hlc, _StateBytes, _ValueBytes} -> {ok, Hlc}
-    catch
-        C:R:St ->
+    case bondy_oplog_cell_frame:hlc(Frame) of
+        {ok, Hlc} ->
+            {ok, Hlc};
+        error ->
             ?LOG_WARNING(#{
                 description =>
-                    "catalogue install: cell skipped due to "
-                    "decode error",
+                    "catalogue install: cell skipped, its frame does not "
+                    "decode",
                 instance_id => Id,
                 bucket => Bucket,
-                cell_key => Key,
-                class => C,
-                reason => R,
-                stacktrace => St
+                cell_key => Key
             }),
             error
     end.
@@ -3433,7 +3401,7 @@ publish_batch(
 ) ->
     {Count, Skipped} = lists:foldl(
         fun(Event, {C, S}) ->
-            case derive_publish(Fun, Event, Id) of
+            case derive_publish(Fun, Event) of
                 skip ->
                     {C, S + 1};
                 {Key, Op} ->
@@ -3502,39 +3470,8 @@ bucket_publish_ns(Source, Bucket) ->
         _ -> undefined
     end.
 
-derive_publish(Fun, Event, InstanceId) ->
-    try Fun(Event) of
-        skip ->
-            skip;
-        {K, Op} ->
-            {K, Op};
-        Bad ->
-            log_publish_fun_bad_return(InstanceId, Event, Bad),
-            skip
-    catch
-        C:R:S ->
-            log_publish_fun_raised(InstanceId, Event, C, R, S),
-            skip
+derive_publish(Fun, Event) ->
+    case Fun(Event) of
+        skip -> skip;
+        {K, Op} -> {K, Op}
     end.
-
-log_publish_fun_bad_return(InstanceId, Event, Bad) ->
-    ?LOG_WARNING(#{
-        description =>
-            "bondy_oplog_applier publish_fun returned an unexpected "
-            "shape; event will not be published",
-        instance_id => InstanceId,
-        key => bondy_oplog_event:key(Event),
-        return => Bad
-    }).
-
-log_publish_fun_raised(InstanceId, Event, C, R, S) ->
-    ?LOG_WARNING(#{
-        description =>
-            "bondy_oplog_applier publish_fun raised; event will not "
-            "be published",
-        instance_id => InstanceId,
-        key => bondy_oplog_event:key(Event),
-        class => C,
-        reason => R,
-        stacktrace => S
-    }).

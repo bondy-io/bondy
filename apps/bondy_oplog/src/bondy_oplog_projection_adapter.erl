@@ -103,10 +103,12 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
     bucket/0,
     range_opts/0,
     clear_scope/0,
-    cell_keys_scope/0
+    cell_keys_scope/0,
+    cell_keys_opts/0
 ]).
 
 -export([cell_keys_exported/1]).
+-export([cell_keys_page_exported/1]).
 -export([sync/2]).
 -export([is_durable/1]).
 -export([write_batch/4]).
@@ -154,6 +156,14 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -type cell_keys_scope() ::
     {entity, EntityType :: binary()}
     | all_primary.
+
+%% One page of a `cell_keys/3` enumeration: at most `limit` cells (default
+%% `infinity`), strictly after `cursor` (default `undefined`, the start) in
+%% the scope's `{Bucket, Key}` term order.
+-type cell_keys_opts() :: #{
+    cursor => undefined | {bucket(), Key :: term()},
+    limit => pos_integer() | infinity
+}.
 
 %% =============================================================================
 %% BEHAVIOUR CALLBACKS
@@ -215,6 +225,18 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -callback cell_keys(handle(), Scope :: cell_keys_scope()) ->
     [{bucket(), Key :: term()}].
 
+%% A page of `cell_keys/2`, so a caller that walks the directory with a
+%% rising cursor (`bondy_oplog_cell_utils:member_cells/5`) pays for the page,
+%% not for the prefix it has already swept. The page is a slice of the sorted
+%% `cell_keys/2` result cut strictly after `cursor` and to `limit`
+%% (`bondy_oplog_projection_ets_proper_test`,
+%% `prop_cell_keys_page_is_a_slice_of_the_directory/0`). Probe with
+%% `cell_keys_page_exported/1`.
+-callback cell_keys(
+    handle(), Scope :: cell_keys_scope(), Opts :: cell_keys_opts()
+) ->
+    [{bucket(), Key :: term()}].
+
 -callback sync(handle()) -> ok | {error, term()}.
 
 -callback write_batch(
@@ -223,7 +245,9 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
     Deletes :: [{bucket(), Key :: term()}]
 ) -> ok | {error, term()}.
 
--optional_callbacks([head/3, clear/2, cell_keys/2, sync/1, write_batch/3]).
+-optional_callbacks([
+    head/3, clear/2, cell_keys/2, cell_keys/3, sync/1, write_batch/3
+]).
 
 %% =============================================================================
 %% API
@@ -244,6 +268,18 @@ silently building empty indexes on the next rebuild.
 cell_keys_exported(Adapter) when is_atom(Adapter) ->
     _ = code:ensure_loaded(Adapter),
     erlang:function_exported(Adapter, cell_keys, 2).
+
+-doc """
+Whether `Adapter` implements the optional paged `cell_keys/3` callback, the
+decision point for whether a bounded sweep seeks to its cursor or
+re-enumerates the directory and drops the prefix
+(`bondy_oplog_cell_utils:member_cells/5`).
+""".
+-spec cell_keys_page_exported(Adapter :: module()) -> boolean().
+
+cell_keys_page_exported(Adapter) when is_atom(Adapter) ->
+    _ = code:ensure_loaded(Adapter),
+    erlang:function_exported(Adapter, cell_keys, 3).
 
 -doc """
 Makes every write `put_batch/2` or `write_batch/3` has acknowledged on

@@ -219,47 +219,57 @@ drain_requests(NS, IndexName) ->
     end.
 
 %% @private
+%% The run is a monitored worker so that a raise inside it is a crash report
+%% with its stack and a retry, and never the orchestrator's own death: the
+%% retry timers live in the orchestrator's state.
 run_rebuild(NS, IndexName) ->
-    T0 = erlang:monotonic_time(microsecond),
-    try
-        Shards = bondy_oplog_core_registry:shards_for(NS),
-        Primaries = [E || E <- Shards, index_of(E) =:= ?INDEX],
-        Targets = [E || E <- Shards, index_of(E) =:= IndexName],
-        AllSec = [E || E <- Shards, is_secondary(E)],
-        case Targets of
-            [] ->
-                ok;
-            _ ->
-                Result = do_rebuild(Primaries, Targets, AllSec),
-                DurUs = erlang:monotonic_time(microsecond) - T0,
-                telemetry:execute(
-                    [bondy_oplog, secondary_index, rebuild],
-                    #{
-                        duration_us => DurUs,
-                        target_shards => length(Targets),
-                        primary_shards => length(Primaries)
-                    },
-                    #{
-                        namespace => NS,
-                        index_name => IndexName,
-                        result => Result
-                    }
-                ),
-                settle(NS, IndexName, Result)
-        end
-    catch
-        C:R:S ->
+    Parent = self(),
+    {Pid, Ref} = spawn_monitor(fun() ->
+        Parent ! {rebuild_result, self(), do_run_rebuild(NS, IndexName)}
+    end),
+    receive
+        {rebuild_result, Pid, Result} ->
+            true = erlang:demonitor(Ref, [flush]),
+            Result;
+        {'DOWN', Ref, process, Pid, Reason} ->
             ?LOG_ERROR(#{
                 description =>
-                    "bondy_oplog_index_rebuild rebuild raised; the index "
-                    "stays marked for rebuild and the rebuild runs again.",
+                    "bondy_oplog_index_rebuild rebuild worker crashed; the "
+                    "index stays marked for rebuild and the rebuild runs "
+                    "again.",
                 namespace => NS,
                 index_name => IndexName,
-                class => C,
-                reason => R,
-                stacktrace => S
+                reason => Reason
             }),
-            {error, R}
+            {error, {rebuild_crashed, Reason}}
+    end.
+
+do_run_rebuild(NS, IndexName) ->
+    T0 = erlang:monotonic_time(microsecond),
+    Shards = bondy_oplog_core_registry:shards_for(NS),
+    Primaries = [E || E <- Shards, index_of(E) =:= ?INDEX],
+    Targets = [E || E <- Shards, index_of(E) =:= IndexName],
+    AllSec = [E || E <- Shards, is_secondary(E)],
+    case Targets of
+        [] ->
+            ok;
+        _ ->
+            Result = do_rebuild(Primaries, Targets, AllSec),
+            DurUs = erlang:monotonic_time(microsecond) - T0,
+            telemetry:execute(
+                [bondy_oplog, secondary_index, rebuild],
+                #{
+                    duration_us => DurUs,
+                    target_shards => length(Targets),
+                    primary_shards => length(Primaries)
+                },
+                #{
+                    namespace => NS,
+                    index_name => IndexName,
+                    result => Result
+                }
+            ),
+            settle(NS, IndexName, Result)
     end.
 
 %% @private
@@ -365,12 +375,7 @@ reset_target_shard(Entry) ->
     Scope = clear_scope(Entry),
     case erlang:function_exported(Adapter, clear, 2) of
         true ->
-            _ =
-                try
-                    Adapter:clear(Handle, Scope)
-                catch
-                    _:_ -> ok
-                end;
+            ok = Adapter:clear(Handle, Scope);
         false ->
             %% Without a clear, the re-fold still re-puts every live term;
             %% only orphaned terms (no longer yielded) would survive. Both
@@ -428,10 +433,10 @@ refold_primary(Entry) ->
                                     bondy_oplog_instance:rebuild_indexes_sync(
                                         InstancePid, Key
                                     );
-                                _ ->
+                                undefined ->
                                     skipped
                             end;
-                        _ ->
+                        false ->
                             skipped
                     end
             end

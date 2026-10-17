@@ -55,8 +55,10 @@
 ### Performance
 * A database's shards open concurrently, and write-ahead-log recovery reads in larger chunks.
 * Durable pack sealing runs off the apply path (`db.pack_seal_mode = async`, default), with a smaller seal threshold (`db.pack_auto_seal_bytes`). See [Database options](doc/guides/configuration/database_options.md).
+* The in-memory registry's cell sweep resumes from its cursor instead of re-reading the whole cell directory on every batch.
 
 ### Fixes
+* `bondy_db:close/1` closes every table still open on the DB. A table left open at close kept its index-shard registry rows on a dead projection handle, and the next restart of the index writers' supervisor took the oplog application down.
 * A power loss could undo renames in the durable stores; `platform_data_dir` must accept `fsync` on a directory. See [Platform directories](doc/guides/deployment/platform_directories.md).
 * A read could keep returning a value a later write had replaced.
 * A node whose `main` database opened slowly failed its liveness probe and was restarted in a loop. See [Listeners](doc/guides/configuration/listeners.md#health-probes).
@@ -154,6 +156,7 @@
 * The write-ahead log is its own application, `bondy_log`; `bondy_stdlib` is `bondy_connect_lib`.
 * Renamed log messages: "Prefix-closure hold" is "Causal hold", and "Reclamation stalled" is "GC stalled".
 * Removed metric `bondy_oplog_peer_exclusions_total`.
+* `bondy_oplog_core:subscribe/2` accepts `all`, `{prefix, P}` and `{exact, K}` patterns; the `{match, F}` pattern is removed. A consumer `verify_event`, `refresh` or `publish_fun` callback that raises now crashes its caller instead of being logged.
 * A peer must announce `call_canceling` in `HELLO` to obtain it; an omitted feature is no longer inherited from the router's advertised set.
 * `bondy_cluster_channel_connections` is labelled by `peer` and `channel`.
 * The authentication freshness fence counts only sync rounds; a local write no longer defers its refusal.

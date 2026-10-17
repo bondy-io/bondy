@@ -95,3 +95,6 @@ and that the Erlang token stream is unchanged.
 - Use `~""` binary-string sigil, not `<<"">>`.
 - OTP27 `-moduledoc`/`-doc` triple-quoted strings.
 - Never `ets:tab2list` + `lists:filter` when `ets:select` with a match-spec works.
+- No catch-all clauses: no `_:_`, bare `_` or unbound-class `catch` clause, no
+  `catch Expr`, no trailing `_ ->` over a function result or external term in
+  `case` or `receive`. Match the shapes the code expects; let the rest crash.

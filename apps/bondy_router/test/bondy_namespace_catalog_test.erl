@@ -281,7 +281,7 @@ provisions_all() ->
         %% or a departed node's cell is never reclaimed: `reap_origins/2`
         %% reaps an origin only once it has no live dot in ANY field, so one
         %% undeclared field defeats the policy on all the others and
-        %% `bondy_oplog_cell_utils:reap_one_cell/6` then skips the write
+        %% `bondy_oplog_cell_utils:reap_one_cell/5` then skips the write
         %% entirely. The field set is DECLARED here, not scanned off the
         %% schema: a ratchet that iterates whatever it finds cannot notice a
         %% field going missing. `bondy_rib_reclamation_cluster_SUITE` is the

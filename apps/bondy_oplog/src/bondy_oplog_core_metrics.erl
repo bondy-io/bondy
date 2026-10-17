@@ -318,7 +318,7 @@ run_tick(#state{} = State0) ->
     %% registered with the substrate. The latter ensures we still emit
     %% freshness-lag gauges for idle namespaces.
     NSs = lists:usort(
-        counter_namespaces() ++ safe_namespaces()
+        counter_namespaces() ++ bondy_oplog_core_registry:namespaces()
     ),
     Snapshot1 = lists:foldl(
         fun(NS, Acc) -> emit_namespace_gauges(NS, Now, State0, Acc) end,
@@ -384,18 +384,13 @@ counter_namespaces() ->
     Labels = lists:flatten([bondy_metrics:with_name(N) || N <- Names]),
     lists:usort([NS || {#{namespace := NS}, _V} <- Labels]).
 
-safe_namespaces() ->
-    try
-        bondy_oplog_core_registry:namespaces()
-    catch
-        _:_ -> []
-    end.
-
+%% `bondy_oplog_core_dispatcher` owns its table; while it restarts there is
+%% none.
 subscriber_count(NS) ->
     try
         bondy_oplog_core_dispatcher:subscription_count(NS)
     catch
-        _:_ -> 0
+        error:badarg -> 0
     end.
 
 %% @private
@@ -412,7 +407,7 @@ subscriber_count(NS) ->
 %% same cell apply as its primary (`dispatch_index_ops/4`), so it carries no
 %% freshness independent of the primary shard it rides on.
 freshness_lag_max_ms(NS, NowMs) ->
-    try bondy_oplog_core_registry:primary_shards_for(NS) of
+    case bondy_oplog_core_registry:primary_shards_for(NS) of
         [] ->
             0;
         Entries ->
@@ -425,6 +420,4 @@ freshness_lag_max_ms(NS, NowMs) ->
                  || E <- Entries
                 ]
             )
-    catch
-        _:_ -> 0
     end.

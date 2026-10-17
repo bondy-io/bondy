@@ -521,17 +521,13 @@ request_peer_frontiers(Instance, Peer, Transport, TransportOpts) ->
 %% (`bondy_oplog_instance:durable_frontier/1`), in the answer shapes
 %% `bondy_oplog_transport` allows. The durable one is `undefined` when unknown.
 fetch_peer_frontiers(Instance, Peer, Transport, TransportOpts) ->
-    try Transport:request(Peer, Instance, get_frontier, TransportOpts) of
+    case Transport:request(Peer, Instance, get_frontier, TransportOpts) of
         {ok, Frontier, _Fp, Durable} when is_map(Frontier), is_map(Durable) ->
             {ok, {Frontier, Durable}};
         {ok, Frontier} when is_map(Frontier) ->
             {ok, {Frontier, undefined}};
         {error, _} = Error ->
-            Error;
-        Other ->
-            {error, {unexpected_reply, Other}}
-    catch
-        Class:Reason -> {error, {Class, Reason}}
+            Error
     end.
 
 %% @private
@@ -863,11 +859,7 @@ pull_until_complete(
     %% if this session dies. First entry only; chase re-pins its refreshed root.
     _ =
         Budget0 =:= undefined andalso
-            (try
-                bondy_oplog_instance:pin_peer_root(Instance, PeerRoot)
-            catch
-                _:_ -> ok
-            end),
+            bondy_oplog_instance:pin_peer_root(Instance, PeerRoot),
     case bondy_oplog_instance:missing_set(Instance, PeerRoot) of
         [] ->
             %% Every page reachable from PeerRoot is now in our store.
@@ -1010,12 +1002,7 @@ chase_refreshed_root(
         _ ->
             %% Chasing a refreshed root: pin it like the session-start
             %% root (the stale pin expires by TTL).
-            _ =
-                try
-                    bondy_oplog_instance:pin_peer_root(Instance, NewRoot)
-                catch
-                    _:_ -> ok
-                end,
+            ok = bondy_oplog_instance:pin_peer_root(Instance, NewRoot),
             pull_until_complete(
                 Instance,
                 Peer,
@@ -1201,12 +1188,7 @@ maybe_frontier_gap(
                     Result;
                 Deficit ->
                     Presence = deficit_presence(Instance, Deficit),
-                    LocalRoot =
-                        try
-                            bondy_oplog_instance:root_hash(Instance)
-                        catch
-                            _:_ -> ok
-                        end,
+                    LocalRoot = bondy_oplog_instance:root_hash(Instance),
                     telemetry:execute(
                         [bondy_oplog, sync_session, frontier_gap],
                         #{count => 1, origins => map_size(Deficit)},
@@ -1246,48 +1228,48 @@ maybe_frontier_gap(Result, _Instance, _Peer, _PeerFrontier, _PeerRoot) ->
 %% the event and the deficit is local apply-side lag the settle barriers
 %% did not cover; `false` ⇒ the peer's answered frontier counted an
 %% event its served tree never shipped (peer-side over-claim). Bounded:
-%% probes at most 10 missing seqs per behind origin. Diagnostic only —
-%% total, `#{}` on any failure.
+%% probes at most 10 missing seqs per behind origin. `#{}` for an empty
+%% log; the instance calls raise as they do everywhere else.
 deficit_presence(Instance, Deficit) ->
-    try
-        First = bondy_oplog_instance:first_key(Instance),
-        Last = bondy_oplog_instance:latest_key(Instance),
-        case First =:= undefined orelse Last =:= undefined of
-            true ->
-                #{};
-            false ->
-                Want = maps:fold(
-                    fun(Origin, #{peer := S, local := L}, Acc) ->
-                        Lo = max(L + 1, S - 9),
-                        lists:foldl(
-                            fun(Seq, Acc1) -> Acc1#{{Origin, Seq} => false} end,
-                            Acc,
-                            lists:seq(Lo, S)
-                        )
-                    end,
-                    #{},
-                    Deficit
-                ),
-                bondy_oplog_instance:fold_range(
-                    Instance,
-                    First,
-                    Last,
-                    fun(E, Acc) ->
-                        K = bondy_oplog_event:key(E),
-                        OS = {
-                            bondy_oplog_event:key_origin(K),
-                            bondy_oplog_event:key_seq(K)
-                        },
-                        case maps:is_key(OS, Acc) of
-                            true -> Acc#{OS => true};
-                            false -> Acc
-                        end
-                    end,
-                    Want
-                )
-        end
-    catch
-        _:_ ->
+    case
+        {
+            bondy_oplog_instance:first_key(Instance),
+            bondy_oplog_instance:latest_key(Instance)
+        }
+    of
+        {{ok, First}, {ok, Last}} ->
+            Want = maps:fold(
+                fun(Origin, #{peer := S, local := L}, Acc) ->
+                    Lo = max(L + 1, S - 9),
+                    lists:foldl(
+                        fun(Seq, Acc1) -> Acc1#{{Origin, Seq} => false} end,
+                        Acc,
+                        lists:seq(Lo, S)
+                    )
+                end,
+                #{},
+                Deficit
+            ),
+            bondy_oplog_instance:fold_range(
+                Instance,
+                First,
+                Last,
+                fun(E, Acc) ->
+                    K = bondy_oplog_event:key(E),
+                    OS = {
+                        bondy_oplog_event:key_origin(K),
+                        bondy_oplog_event:key_seq(K)
+                    },
+                    case maps:is_key(OS, Acc) of
+                        true -> Acc#{OS => true};
+                        false -> Acc
+                    end
+                end,
+                Want
+            );
+        {empty, _} ->
+            #{};
+        {_, empty} ->
             #{}
     end.
 
@@ -1296,22 +1278,11 @@ deficit_presence(Instance, Deficit) ->
 %% projected + installed) and, when the instance is applier-backed, the
 %% applier caught up (queued replay casts served + the I1 fence run).
 settle_local(Instance) ->
-    _ =
-        try
-            bondy_oplog_instance:await_apply(Instance)
-        catch
-            _:_ -> ok
-        end,
+    _ = bondy_oplog_instance:await_apply(Instance),
     case bondy_oplog_registry:applier_pid(Instance) of
         Pid when is_pid(Pid) ->
-            _ =
-                try
-                    bondy_oplog_applier:barrier(Pid)
-                catch
-                    _:_ -> ok
-                end,
-            ok;
-        _ ->
+            bondy_oplog_applier:barrier(Pid);
+        undefined ->
             ok
     end.
 
@@ -1322,11 +1293,7 @@ settle_local(Instance) ->
 %% something". Empty map = no deficit. Origins are node-scoped so the
 %% map is bounded by cluster size.
 frontier_deficit(Instance, PeerFrontier) ->
-    Local =
-        case bondy_oplog_registry:frontier(Instance) of
-            M when is_map(M) -> M;
-            _ -> #{}
-        end,
+    Local = bondy_oplog_registry:frontier(Instance),
     %% One read for the whole peer frontier, not one per origin.
     Retired = bondy_oplog_origin_bans:retired_set(),
     maps:fold(

@@ -7,8 +7,6 @@
 %%     `bondy_oplog_core:publish/4`; subscribers receive matching events.
 %%   - `publish_fun` returning `skip` suppresses delivery without
 %%     wedging the applier.
-%%   - `publish_fun` raising is tolerated (event not published, applier
-%%     continues).
 %%   - A commit leaves the AE counters of the instance's `ae_targets` at
 %%     the "infinitely stale" sentinel: only an anti-entropy round confirms
 %%     freshness (`bondy_oplog_sync_ae_bump_test`, `proofs/tla/AuthFence.tla`).
@@ -36,7 +34,6 @@ wiring_test_() ->
         fun publish_default_is_noop/0,
         fun publish_forwards_events_to_subscribers/0,
         fun publish_skip_suppresses_delivery/0,
-        fun publish_fun_raise_is_tolerated/0,
         fun publish_partial_opts_are_rejected/0,
         fun commit_does_not_bump_ae_targets/0
     ]}.
@@ -113,33 +110,6 @@ publish_skip_suppresses_delivery() ->
     Ops = [Op || {_NS, _K, _H, Op} <- Msgs],
     ?assertEqual([{set, 1, <<"a">>}, {set, 3, <<"b">>}], Ops),
     ?assertEqual(no_message, recv_one(50)),
-    ok = bondy_oplog_core:unsubscribe(SubRef),
-    ok = bondy_oplog:stop_instance(Id).
-
-publish_fun_raise_is_tolerated() ->
-    Id = mk_id(),
-    NS = ns_of(Id),
-    {ok, SubRef} = bondy_oplog_core:subscribe(NS, all),
-    Fun = fun(E) ->
-        case bondy_oplog_event:op(E) of
-            {set, 2, _} -> error(boom);
-            Op -> {<<"k">>, Op}
-        end
-    end,
-    {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{
-        applier => #{
-            publish_ns => NS,
-            publish_fun => Fun
-        }
-    }),
-    _ = bondy_oplog:append(Id, {set, 1, <<"a">>}),
-    _ = bondy_oplog:append(Id, {set, 2, <<"b">>}),
-    _ = bondy_oplog:append(Id, {set, 3, <<"c">>}),
-    %% The applier keeps draining past the raise.
-    ok = bondy_oplog_test_projection:drain(Id),
-    Msgs = collect_messages(2, 1000),
-    Ops = [Op || {_NS, _K, _H, Op} <- Msgs],
-    ?assertEqual([{set, 1, <<"a">>}, {set, 3, <<"c">>}], Ops),
     ok = bondy_oplog_core:unsubscribe(SubRef),
     ok = bondy_oplog:stop_instance(Id).
 

@@ -211,6 +211,9 @@ behind that barrier.
 
 -record(state, {
     instance_id :: binary(),
+    %% Fused remote-event verify workers by pid, each with the caller it
+    %% replies to; `handle_info({'DOWN', ...})` replies for one that raised.
+    verify_workers = #{} :: #{pid() => gen_server:from()},
     origin :: bondy_oplog_origin:t(),
     hlc :: bondy_connect_hlc:t(),
     seq :: atomics:atomics_ref(),
@@ -1311,10 +1314,13 @@ call_await_overlay_drained(Pid, Timeout) ->
 %% @private
 lookup_instance_id(Pid) when is_pid(Pid) ->
     try gen_server:call(Pid, instance_id, 1000) of
-        Id when is_binary(Id) -> Id;
-        _ -> undefined
+        Id when is_binary(Id) -> Id
     catch
-        _:_ -> undefined
+        exit:{timeout, _} -> undefined;
+        exit:{noproc, _} -> undefined;
+        exit:noproc -> undefined;
+        exit:{normal, _} -> undefined;
+        exit:{shutdown, _} -> undefined
     end.
 
 -spec get(instance_id() | pid(), bondy_oplog_event:event_key()) ->
@@ -3043,16 +3049,14 @@ do_handle_call(
     {replay_pairs, _LastRoot}, _From, #state{mst = undefined} = State
 ) ->
     {reply, {ok, no_change}, State};
-do_handle_call(
-    {replay_pairs, LastRoot}, _From, #state{mst = MST, instance_id = Id} = State
-) ->
+do_handle_call({replay_pairs, LastRoot}, _From, #state{mst = MST} = State) ->
     CurrentRoot = bondy_mst:root(MST),
     Reply =
         case CurrentRoot of
             LastRoot ->
                 {ok, no_change};
             _ ->
-                Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot, Id),
+                Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot),
                 {ok, {CurrentRoot, Pairs}}
         end,
     {reply, Reply, State};
@@ -3087,46 +3091,27 @@ do_handle_call(
     %% and other remote events interleave: the worker captures the read-only
     %% validator snapshot, verifies, forwards verified events back to this
     %% instance for origin-ban / backpressure / watermark / install, and replies
-    %% on its behalf. The outer try/catch guarantees the `infinity` caller never
-    %% hangs.
+    %% on its behalf.
     InstancePid = self(),
-    _ = spawn(fun() ->
-        try
-            Reply =
-                case Mod:verify_event(Event, VS) of
-                    ok ->
-                        fused_forward_remote(InstancePid, Event);
-                    {error, Reason} = VerifyErr ->
-                        ?LOG_WARNING(#{
-                            description =>
-                                "bondy_oplog_instance fused verify worker "
-                                "rejected a remote event",
-                            instance_id => Id,
-                            reason => Reason
-                        }),
-                        VerifyErr
-                end,
-            gen_server:reply(From, Reply)
-        catch
-            C:R:S ->
-                ?LOG_WARNING(#{
-                    description =>
-                        "bondy_oplog_instance fused verify worker raised "
-                        "before delivering a reply; the remote event has "
-                        "been rejected",
-                    instance_id => Id,
-                    class => C,
-                    reason => R,
-                    stacktrace => S
-                }),
-                try
-                    gen_server:reply(From, {error, {verify_crashed, R}})
-                catch
-                    _:_ -> ok
-                end
-        end
+    {Pid, _Mon} = spawn_monitor(fun() ->
+        Reply =
+            case Mod:verify_event(Event, VS) of
+                ok ->
+                    fused_forward_remote(InstancePid, Event);
+                {error, Reason} = VerifyErr ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "bondy_oplog_instance fused verify worker "
+                            "rejected a remote event",
+                        instance_id => Id,
+                        reason => Reason
+                    }),
+                    VerifyErr
+            end,
+        gen_server:reply(From, Reply)
     end),
-    {noreply, State};
+    Workers = State#state.verify_workers,
+    {noreply, State#state{verify_workers = Workers#{Pid => From}}};
 do_handle_call({install_remote, Event}, _From, State0) ->
     %% Sole install path for peer-received events. Signature
     %% verification ran in the applier process (see
@@ -3778,6 +3763,16 @@ handle_info(
     %% Seal worker crashed before reporting (a normal exit is flushed by the
     %% `seal_done` handler's demonitor, so reaching here is a genuine fault).
     retry_or_fail_seal(State, PackId, {worker_down, Reason});
+handle_info(
+    {'DOWN', _Ref, process, Pid, Reason},
+    #state{verify_workers = Workers} = State
+) when is_map_key(Pid, Workers) ->
+    %% A worker that raised is reported by the runtime; its caller gets the
+    %% reply from here, so the `infinity` call behind it never hangs.
+    {From, Workers1} = maps:take(Pid, Workers),
+    Reason =:= normal orelse
+        gen_server:reply(From, {error, {verify_crashed, Reason}}),
+    {noreply, State#state{verify_workers = Workers1}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -4134,13 +4129,14 @@ fused_commit_now(#state{fused_drain = FD} = State0) ->
             Seg = bondy_log_state:committed_segment(
                 FD#fused_drain.consumer_offset
             ),
-            _ =
-                try
-                    bondy_oplog_wal:set_committed_segment(WalPid, Seg)
-                catch
-                    _:_ -> ok
-                end,
-            State1#state{fused_drain = FD#fused_drain{uncommitted = 0}};
+            case bondy_oplog_wal:set_committed_segment(WalPid, Seg) of
+                ok ->
+                    State1#state{
+                        fused_drain = FD#fused_drain{uncommitted = 0}
+                    };
+                {error, _} ->
+                    State1
+            end;
         {error, _} ->
             %% WAL mid-restart — keep `uncommitted` and retry the
             %% retention bump at the next commit boundary.
@@ -4284,7 +4280,7 @@ fused_replay_diff(
     #state{mst = MST, instance_id = Id, origin = Origin, fused_drain = FD} =
         State
 ) ->
-    Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot, Id),
+    Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot),
     {_Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
         FD#fused_drain.cell_apply_source,
         Id,
@@ -4685,14 +4681,9 @@ door_fold(
     %% never-applied below the watermark, so the caller's VV re-check
     %% keeps it doored — exactly this function's stated degrade path —
     %% and the fused replay re-presents it once the gap fills.
-    _ =
-        try
-            bondy_oplog_cell_apply:apply_cell_pairs_mux(
-                S, Id, Pairs, Origin, #{hold => true}
-            )
-        catch
-            _:_ -> ok
-        end,
+    _ = bondy_oplog_cell_apply:apply_cell_pairs_mux(
+        S, Id, Pairs, Origin, #{hold => true}
+    ),
     ok;
 door_fold(#state{}, _Pairs) ->
     ok.
@@ -4746,34 +4737,19 @@ terminate(
     %% clean stop so the next start restores the compacted-prefix maxima (the
     %% suffix replays from the WAL tail). Durable backends only — an ephemeral
     %% instance has no checkpoint and rebuilds the frontier from the apply path.
-    %% Best-effort and BEFORE `close/1`: a failure just falls back to a
-    %% WAL-replay-only frontier next boot.
-    _ =
-        try
-            maybe_persist_frontier(State)
-        catch
-            _:_ -> ok
-        end,
-    %% Best-effort: at node shutdown `alarm_handler` may already be gone, and
-    %% a stale alarm on an instance that is no longer running would outlive
-    %% every reader of it.
-    _ =
-        try
-            clear_instance_alarms(InstanceId)
-        catch
-            _:_ -> ok
-        end,
+    %% BEFORE `close/1`: an `{error, _}` falls back to a WAL-replay-only
+    %% frontier next boot.
+    _ = maybe_persist_frontier(State),
+    %% A stale alarm on an instance that is no longer running would outlive
+    %% every reader of it; at node shutdown `alarm_handler` may be gone.
+    erlang:whereis(alarm_handler) =/= undefined andalso
+        clear_instance_alarms(InstanceId),
     %% Leave the registry row in place so that on a one_for_all subtree
     %% restart the dyn_sup mapping (`sup_pid`) survives. The row's
     %% `instance_pid` field will be stale until the new instance
     %% gen_server's init runs and republishes; lock-free read paths
     %% use `is_process_alive/1` to detect that case.
-    _ =
-        try
-            CkptMod:close(CkptState)
-        catch
-            _:_ -> ok
-        end,
+    ok = CkptMod:close(CkptState),
     %% CLOSE (not destroy) a durable MST: `terminate` runs on EVERY stop — node
     %% shutdown, supervisor `one_for_all` subtree restart — none of which mean
     %% "delete this data". A pack-store `destroy/1` is `file:del_dir_r/1`, which
@@ -4781,28 +4757,21 @@ terminate(
     %% (resume falls back to `beginning` because `bondy_mst:last/1` returns
     %% `undefined`) and leave the WAL never truncating. Ephemeral backends keep
     %% `destroy/1`: it frees the table and there is no on-disk state to lose.
-    %% Unknown backends fail safe to `close`.
-    _ =
-        try
-            case Backend of
-                ets -> bondy_mst:destroy(MST);
-                map -> bondy_mst:destroy(MST);
-                _ -> bondy_mst:close(MST)
-            end
-        catch
-            _:_ -> ok
+    ok =
+        case Backend of
+            ets -> bondy_mst:destroy(MST);
+            map -> bondy_mst:destroy(MST);
+            Module when is_atom(Module) -> bondy_mst:close(MST)
         end,
     %% Drop the overlay — it dies with the instance, no heir, no
     %% survival across subtree restart. The applier reads the tid
     %% from the registry, and the registry row's `overlay_tab`
     %% becomes stale here until the next `init/1` republishes a
     %% fresh one. Applier-side reads tolerate `undefined`.
-    _ =
-        try
-            ets:delete(Overlay)
-        catch
-            _:_ -> ok
-        end,
+    case Overlay of
+        undefined -> ok;
+        Tid when is_reference(Tid) -> true = ets:delete(Tid)
+    end,
     ok.
 
 %% @private
@@ -6383,33 +6352,21 @@ run_compaction(
     #state{instance_id = InstanceId, mst = MST, watermark = Watermark0} = State,
     Witnesses
 ) ->
-    try
-        case compute_frontier_for(MST, Witnesses) of
-            unservable ->
-                rebuild_frontier(State, Witnesses);
-            undefined ->
-                retention(InstanceId, MST, Watermark0, retention_ctx(State));
-            Frontier when
-                Watermark0 =/= undefined,
-                Frontier =< Watermark0
-            ->
-                retention(InstanceId, MST, Watermark0, retention_ctx(State));
-            Frontier ->
-                %% The projection is the durable checkpoint, so compaction
-                %% only bounds the MST: no per-cycle `interpret_cog` re-fold of
-                %% the stable range. `commit_compaction/3` truncates.
-                {ok, {catalogue_compacted, Frontier, meet(Witnesses)}}
-        end
-    catch
-        Class:Reason:Stack ->
-            ?LOG_ERROR(#{
-                description => "compaction raised",
-                instance_id => InstanceId,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stack
-            }),
-            {error, {compaction_failed, Class, Reason}}
+    case compute_frontier_for(MST, Witnesses) of
+        unservable ->
+            rebuild_frontier(State, Witnesses);
+        undefined ->
+            retention(InstanceId, MST, Watermark0, retention_ctx(State));
+        Frontier when
+            Watermark0 =/= undefined,
+            Frontier =< Watermark0
+        ->
+            retention(InstanceId, MST, Watermark0, retention_ctx(State));
+        Frontier ->
+            %% The projection is the durable checkpoint, so compaction
+            %% only bounds the MST: no per-cycle `interpret_cog` re-fold of
+            %% the stable range. `commit_compaction/3` truncates.
+            {ok, {catalogue_compacted, Frontier, meet(Witnesses)}}
     end.
 
 %% @private
@@ -6522,7 +6479,7 @@ reclamation_members() ->
         Members ->
             {ok, Members}
     catch
-        _:_ ->
+        error:membership_unavailable ->
             {error, membership_unavailable}
     end.
 
@@ -7377,13 +7334,7 @@ clear_index_intents(#state{instance_id = Id}) ->
 clear_intents(false, _Entry, _Version) ->
     ok;
 clear_intents(true, Entry, Version) ->
-    Result =
-        try
-            bondy_oplog_core_registry:index_clear_intents(Entry, Version)
-        catch
-            Class:Reason -> {error, {Class, Reason}}
-        end,
-    case Result of
+    case bondy_oplog_core_registry:index_clear_intents(Entry, Version) of
         ok ->
             ok;
         {error, R} ->

@@ -518,12 +518,7 @@ the config is not yet readable.
 -spec partisan_max_message_size() -> pos_integer().
 
 partisan_max_message_size() ->
-    try partisan_config:get(max_message_size) of
-        N when is_integer(N) andalso N > 0 -> N;
-        _ -> 67108864
-    catch
-        _:_ -> 67108864
-    end.
+    partisan_config:get(max_message_size, 67108864).
 
 -doc """
 Fraction of the Partisan frame cap a single AAE sync response may fill (default

@@ -157,7 +157,7 @@ unreadable_membership_is_reported() ->
     ok = append_cells(A, 1, 5),
     ok = converge(A, B),
     bondy_oplog_test_helpers:with_members(
-        fun() -> error(unavailable) end,
+        fun() -> error(membership_unavailable) end,
         fun() ->
             ?assertEqual(
                 {error, membership_unavailable}, bondy_oplog:compact(A)

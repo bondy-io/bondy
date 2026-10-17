@@ -194,22 +194,9 @@ is reserved.
 stop_instance(InstanceId, _Opts) when is_binary(InstanceId) ->
     case bondy_oplog_instance_dyn_sup:stop_instance(InstanceId) of
         ok ->
-            %% Drop node-shared registry rows for the now-gone instance.
-            %% Best-effort: if a registry isn't running (e.g. tests
-            %% bring up only part of the tree) we silently skip.
-            _ =
-                try
-                    bondy_oplog_peer_state:forget_instance(InstanceId)
-                catch
-                    _:_ -> ok
-                end,
-            _ =
-                try
-                    bondy_oplog_quarantine:forget_instance(InstanceId)
-                catch
-                    _:_ -> ok
-                end,
-            ok;
+            %% Casts, so a registry a partial tree never started drops them.
+            ok = bondy_oplog_peer_state:forget_instance(InstanceId),
+            ok = bondy_oplog_quarantine:forget_instance(InstanceId);
         Other ->
             Other
     end.

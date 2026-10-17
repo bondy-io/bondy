@@ -205,20 +205,18 @@ running(InstanceId) ->
     end.
 
 %% @private
-%% Locates a running per-instance subtree by asking each child's instance
-%% gen_server for its id — the same enumeration `bondy_oplog:list_instances/0`
-%% performs, so anything that function can see, `stop_instance/1` can kill.
-%% O(children); only reached on the registry-row-missing path, which is a
-%% teardown anomaly, not steady state.
+%% Locates a running per-instance subtree by the instance id in its child
+%% spec — the same enumeration `bondy_oplog:list_instances/0` performs, so
+%% anything that function can see, `stop_instance/1` can kill. O(children);
+%% only reached on the registry-row-missing path, which is a teardown
+%% anomaly, not steady state.
 find_child_by_instance_id(InstanceId) ->
     Children = supervisor:which_children(?SERVER),
     Found = [
         SupPid
      || {_Id, SupPid, supervisor, _} <- Children,
         is_pid(SupPid),
-        InstancePid <- [bondy_oplog_instance_sup:instance_pid(SupPid)],
-        is_pid(InstancePid),
-        instance_id_of(InstancePid) =:= InstanceId
+        instance_id_of(SupPid) =:= InstanceId
     ],
     case Found of
         [SupPid | _] -> SupPid;
@@ -226,14 +224,14 @@ find_child_by_instance_id(InstanceId) ->
     end.
 
 %% @private
-%% Total: a child that dies mid-scan reads as a non-match rather than
-%% raising out of a cleanup path.
-instance_id_of(InstancePid) ->
-    try bondy_oplog_instance:info(InstancePid) of
-        #{instance_id := Id} -> Id;
-        _ -> undefined
+%% Read from the subtree's child spec, so no call reaches an instance that
+%% may be stopping; a subtree gone mid-scan reads as a non-match.
+instance_id_of(SupPid) ->
+    try supervisor:get_childspec(SupPid, bondy_oplog_instance) of
+        {ok, #{start := {bondy_oplog_instance, start_link, [Id, _]}}} -> Id;
+        {error, not_found} -> undefined
     catch
-        _:_ -> undefined
+        exit:{noproc, _} -> undefined
     end.
 
 %% @private

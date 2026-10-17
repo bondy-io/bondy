@@ -180,8 +180,8 @@ measurements — useful as an alert signal when an instance keeps
 failing to bootstrap.
 
 A consumer can override the routing entirely by setting
-`sync_dispatch` to a custom fun. Exceptions raised by a custom
-dispatch are caught and logged. Custom dispatchers bypass the cap
+`sync_dispatch` to a custom fun. A custom dispatch that raises takes
+the scheduler down with it. Custom dispatchers bypass the cap
 and the backoff; consumers wanting either with a custom strategy
 should call back into
 `bondy_oplog_sync_scheduler:default_dispatch/2` after their
@@ -664,7 +664,7 @@ run_tick(#state{tick_seq = Seq, load_ewma = Prev} = State) ->
     %% scarce node-wide AAE concurrency slots. Without this, a fixed
     %% iteration order would let the head instances monopolise the cap and
     %% starve the tail (the failure the user flagged for low caps).
-    Instances = rotate(lists:sort(safe_list_instances()), Seq),
+    Instances = rotate(lists:sort(bondy_oplog:list_instances()), Seq),
     lists:foreach(
         fun(InstanceId) -> dispatch_for(InstanceId, State) end,
         Instances
@@ -792,29 +792,8 @@ dispatch_for(InstanceId, #state{} = State) ->
         undefined ->
             ok;
         Fun when is_function(Fun, 2) ->
-            try
-                Fun(InstanceId, Peers)
-            catch
-                K:V:S ->
-                    ?LOG_WARNING(#{
-                        description => "sync dispatch raised",
-                        instance => InstanceId,
-                        class => K,
-                        reason => V,
-                        stacktrace => S
-                    }),
-                    ok
-            end
-    end.
-
-%% @private
-%% Soft-fail to an empty list rather than crash the scheduler: the
-%% registry table is absent before it starts and after it stops.
-safe_list_instances() ->
-    try
-        bondy_oplog:list_instances()
-    catch
-        _:_ -> []
+            _ = Fun(InstanceId, Peers),
+            ok
     end.
 
 %% @private
@@ -877,7 +856,7 @@ check_holes(#state{holes = Holes} = State) ->
         Threshold ->
             State#state{
                 holes = check_holes(
-                    safe_list_instances(),
+                    bondy_oplog:list_instances(),
                     erlang:monotonic_time(millisecond),
                     Threshold,
                     Holes
@@ -1340,14 +1319,12 @@ do_maybe_dispatch_live(InstanceId, Peers) ->
 %% freshens those targets and the read-side auth fence depends on that bump
 %% landing within `auth_max_lag`, so throttling such an instance would starve
 %% the bump and trip the fence. An instance with no targets cannot affect the
-%% fence (the bump is a strict no-op there), so throttling it is safe. Any
-%% lookup error fails safe — treated as fence-backing.
+%% fence (the bump is a strict no-op there), so throttling it is safe. An
+%% instance without a registry row fails safe — treated as fence-backing.
 backs_fence(InstanceId) ->
-    try bondy_oplog_registry:ae_targets(InstanceId) of
-        L when is_list(L) -> L =/= [];
-        _ -> true
-    catch
-        _:_ -> true
+    case bondy_oplog_registry:ae_targets(InstanceId) of
+        undefined -> true;
+        Targets when is_list(Targets) -> Targets =/= []
     end.
 
 %% @private
@@ -1506,12 +1483,15 @@ rebootstrap_state(InstanceId) ->
     end.
 
 %% @private
+%% An instance that stops, or is stopping, while asked owes nothing yet.
 owed_rebootstrap(InstanceId) ->
     try bondy_oplog_instance:owes_install(InstanceId) of
         true -> {pending, undefined};
         false -> none
     catch
-        _:_ -> none
+        exit:{noproc, _} -> none;
+        exit:{normal, _} -> none;
+        exit:{shutdown, _} -> none
     end.
 
 %% @private
@@ -1597,13 +1577,16 @@ live_decide(InstanceId, Root, Now, Base, Max) ->
 
 %% @private
 %% The instance's in-memory MST root, used purely as a change detector
-%% for the throttle. Soft-fails to `undefined` (treated as "no change"
-%% against a prior `undefined`) if the instance is mid-restart.
+%% for the throttle. `undefined` (treated as "no change" against a prior
+%% `undefined`) while the instance is not running or is stopping.
 current_root(InstanceId) ->
     try
         bondy_oplog_instance:root_hash(InstanceId)
     catch
-        _:_ -> undefined
+        error:{noproc, {bondy_oplog_instance, InstanceId}} -> undefined;
+        exit:{noproc, _} -> undefined;
+        exit:{normal, _} -> undefined;
+        exit:{shutdown, _} -> undefined
     end.
 
 %% @private

@@ -246,9 +246,7 @@ dispatch(InstanceId, get_origins) when is_binary(InstanceId) ->
     %% NODE-level, deliberately: the origins this node currently claims,
     %% for the retirement reap-by-complement
     %% (`bondy_oplog_origin_retirement`). The instance id only routes the
-    %% request; every instance answers identically. A mixed-version peer
-    %% that lacks this verb answers `{error, {dispatch_failed, _}}`, which
-    %% the retirement pass treats as member-unreachable — fail-closed.
+    %% request; every instance answers identically.
     {ok, bondy_oplog_origin_retirement:local_origins()};
 dispatch(InstanceId, get_retired) when is_binary(InstanceId) ->
     {ok, bondy_oplog_origin_bans:retired()};
@@ -410,25 +408,11 @@ init([]) ->
     }}.
 
 handle_call({sync_protocol, InstanceId, Request}, From, State) ->
-    %% Spawn-and-go: free the responder's mailbox immediately. The
-    %% worker dispatches and uses gen_server:reply/2 to answer.
+    %% Spawn-and-go: free the responder's mailbox immediately. The worker
+    %% dispatches and uses gen_server:reply/2 to answer; one that raises
+    %% leaves the caller to its transport timeout, as an unreachable peer does.
     _ = spawn(fun() ->
-        Reply =
-            try
-                dispatch(InstanceId, Request)
-            catch
-                C:R:S ->
-                    ?LOG_WARNING(#{
-                        description => "responder dispatch raised",
-                        instance_id => InstanceId,
-                        request => Request,
-                        class => C,
-                        reason => R,
-                        stacktrace => S
-                    }),
-                    {error, {dispatch_failed, R}}
-            end,
-        partisan_gen_server:reply(From, Reply)
+        partisan_gen_server:reply(From, dispatch(InstanceId, Request))
     end),
     {noreply, State};
 handle_call(_Req, _From, State) ->
@@ -499,20 +483,12 @@ set_oversized_alarm() ->
         "the bondy_oplog_sync_oversized_item_last_bytes metric and the WARNING "
         "logs for the size and identity."
     >>,
-    _ =
-        try
-            alarm_handler:set_alarm({?OVERSIZED_ALARM_ID, Desc})
-        catch
-            _:_ -> ok
-        end,
+    erlang:whereis(alarm_handler) =/= undefined andalso
+        alarm_handler:set_alarm({?OVERSIZED_ALARM_ID, Desc}),
     ok.
 
 %% @private
 clear_oversized_alarm() ->
-    _ =
-        try
-            alarm_handler:clear_alarm(?OVERSIZED_ALARM_ID)
-        catch
-            _:_ -> ok
-        end,
+    erlang:whereis(alarm_handler) =/= undefined andalso
+        alarm_handler:clear_alarm(?OVERSIZED_ALARM_ID),
     ok.

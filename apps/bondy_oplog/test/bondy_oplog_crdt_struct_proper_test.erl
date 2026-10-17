@@ -288,7 +288,7 @@ properties_test_() ->
 %% `reap_origins/2` reaps an origin's CC entry only once it has no live dot in
 %% ANY field — `live_origins/1` folds over all of them — so ONE field without
 %% `force_reap` keeps the origin live and defeats the policy on every other
-%% field. `bondy_oplog_cell_utils:reap_one_cell/6` then SKIPS the write, so
+%% field. `bondy_oplog_cell_utils:reap_one_cell/5` then SKIPS the write, so
 %% the force-reaped fields are discarded too and the reap is a total no-op.
 %%
 %% This is not hypothetical: the registry RIB registration schema declared
@@ -326,7 +326,7 @@ prop_reap_origins_idempotent() ->
 
 %% The conservative default, stated as a law rather than an example: a field
 %% that does NOT declare `force_reap` keeps its value across a reap, whatever
-%% else the schema declares. This is what makes `reap_one_cell/6`'s
+%% else the schema declares. This is what makes `reap_one_cell/5`'s
 %% value-preserving frame sound for every undeclared field.
 prop_reap_preserves_undeclared_field_values() ->
     ?FORALL(

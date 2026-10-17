@@ -56,7 +56,8 @@ range_test_() ->
 cell_keys_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
         fun cell_keys_lists_the_entity_bucket_alone/1,
-        fun cell_keys_over_empty_bucket/1
+        fun cell_keys_over_empty_bucket/1,
+        fun cell_keys_page_cost_is_flat_in_cursor/1
     ]}.
 
 setup() ->
@@ -251,6 +252,31 @@ range_cost_is_flat_in_low(Tab) ->
         ?assert(Late < N div 10),
         %% ...and flat, not merely sublinear: the two pages are the same
         %% size, so their costs may not differ by more than a small factor.
+        ?assert(Late < 4 * Early)
+    end}.
+
+%% The same ratchet as `range_cost_is_flat_in_low/1` for the paged
+%% directory: a page taken near the end of the bucket must not visit the
+%% cells before its cursor, or a sweep of N cells in pages of P costs
+%% O(N²/P). Bounds as there: under N/10, and within a small factor of an
+%% early page of the same size.
+cell_keys_page_cost_is_flat_in_cursor(Tab) ->
+    {timeout, 60, fun() ->
+        N = 50_000,
+        Limit = 100,
+        ok = put_keys(Tab, ?B, [key_n(I) || I <- lists:seq(1, N)]),
+        Scope = {entity, ?B},
+        Early = reductions(fun() ->
+            ?MOD:cell_keys(Tab, Scope, #{
+                cursor => {?B, key_n(N div 20)}, limit => Limit
+            })
+        end),
+        Late = reductions(fun() ->
+            ?MOD:cell_keys(Tab, Scope, #{
+                cursor => {?B, key_n(N - N div 20)}, limit => Limit
+            })
+        end),
+        ?assert(Late < N div 10),
         ?assert(Late < 4 * Early)
     end}.
 

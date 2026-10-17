@@ -203,9 +203,7 @@ apply_cell_batch(Ctx, Id, Events) ->
                                 WAcc1,
                                 max_hlc(HlcAcc, NewHlc),
                                 merge_idx_ops(IAcc, IdxOps)
-                            };
-                        skip ->
-                            {WAcc, HlcAcc, IAcc}
+                            }
                     end;
                 _ ->
                     {WAcc, HlcAcc, IAcc}
@@ -284,11 +282,9 @@ apply_cell_batch(Ctx, Id, Events) ->
 %% — the substrate has not been written yet at this point — then fall back to
 %% `Adapter:get/3`.
 %%
-%% Only the kernel apply is caught, and a raise there returns `skip`. The read
-%% is outside the catch: a storage error must stop the applier, which resumes
-%% from `consumer.offset` and re-applies the event, rather than skip an event
-%% the caller has already been told is applied
-%% (`bondy_oplog_commit_barrier_test`).
+%% A raise anywhere here stops the applier, which resumes from
+%% `consumer.offset` and re-applies the event, rather than skip an event the
+%% caller has already been told is applied (`bondy_oplog_commit_barrier_test`).
 compute_one_cell(
     Id,
     Adapter,
@@ -331,57 +327,37 @@ compute_one_cell(
         #{duration_us => erlang:monotonic_time(microsecond) - ReadT0},
         #{instance_id => Id}
     ),
-    try
-        ApplyT0 = erlang:monotonic_time(microsecond),
-        %% The cell kernel ({fold, _} legacy or {crdt, _} operation-based)
-        %% applies one operation and returns every frame component. The
-        %% fold-vs-CRDT branch lives in `bondy_oplog_cell_kernel`, not here.
-        {NewState, Hlc, NewStateBytes, NewValueBytes, ValueEqualsState} =
-            bondy_oplog_cell_kernel:apply(
-                Kernel, OldState, OldValueOpt, FoldEvent, Meta, Context
-            ),
-        NewFrame = bondy_oplog_cell_frame:encode(
-            Hlc,
-            NewStateBytes,
-            NewValueBytes,
-            ValueEqualsState
+    ApplyT0 = erlang:monotonic_time(microsecond),
+    %% The cell kernel ({fold, _} legacy or {crdt, _} operation-based)
+    %% applies one operation and returns every frame component. The
+    %% fold-vs-CRDT branch lives in `bondy_oplog_cell_kernel`, not here.
+    {NewState, Hlc, NewStateBytes, NewValueBytes, ValueEqualsState} =
+        bondy_oplog_cell_kernel:apply(
+            Kernel, OldState, OldValueOpt, FoldEvent, Meta, Context
         ),
-        telemetry:execute(
-            [bondy_oplog, applier, cell_apply_event],
-            #{duration_us => erlang:monotonic_time(microsecond) - ApplyT0},
-            #{instance_id => Id}
-        ),
-        %% Term-diff the cell's old vs new value into secondary index ops.
-        %% Wrapped in its own try (`index_ops_for_cell/8`) so a malformed
-        %% spec degrades only the index (rebuildable) and never drops the
-        %% primary write.
-        IdxOps = index_ops_for_cell(
-            SecIdx,
-            Id,
-            Kernel,
-            Bucket,
-            Key,
-            OldState,
-            NewState,
-            next_index_version(SecIdx)
-        ),
-        {ok, NewFrame, Hlc, IdxOps, OldValueOpt}
-    catch
-        C:R:S ->
-            ?LOG_ERROR(#{
-                description =>
-                    "bondy_oplog_applier cell_apply raised; the cell "
-                    "has been skipped. Batch continues with remaining cells.",
-                instance_id => Id,
-                bucket => Bucket,
-                cell_key => Key,
-                kernel => Kernel,
-                class => C,
-                reason => R,
-                stacktrace => S
-            }),
-            skip
-    end.
+    NewFrame = bondy_oplog_cell_frame:encode(
+        Hlc,
+        NewStateBytes,
+        NewValueBytes,
+        ValueEqualsState
+    ),
+    telemetry:execute(
+        [bondy_oplog, applier, cell_apply_event],
+        #{duration_us => erlang:monotonic_time(microsecond) - ApplyT0},
+        #{instance_id => Id}
+    ),
+    %% Term-diff the cell's old vs new value into secondary index ops.
+    IdxOps = index_ops_for_cell(
+        SecIdx,
+        Id,
+        Kernel,
+        Bucket,
+        Key,
+        OldState,
+        NewState,
+        next_index_version(SecIdx)
+    ),
+    {ok, NewFrame, Hlc, IdxOps, OldValueOpt}.
 
 %% @private
 %% Resolve OldValue from the frame-cache (hit) or the projection
@@ -549,7 +525,7 @@ index_ops_for_cell(
     [];
 index_ops_for_cell(
     {_NS, _Counter, SecIndexes},
-    Id,
+    _Id,
     Kernel,
     Bucket,
     Key,
@@ -557,33 +533,16 @@ index_ops_for_cell(
     NewState,
     Version
 ) ->
-    try
-        OldValue = cell_value(Kernel, OldState),
-        NewValue = cell_value(Kernel, NewState),
-        lists:flatmap(
-            fun(Desc) ->
-                index_ops_for_one(
-                    Desc, Bucket, Key, OldValue, NewValue, Version
-                )
-            end,
-            SecIndexes
-        )
-    catch
-        C:R:S ->
-            ?LOG_ERROR(#{
-                description =>
-                    "secondary-index op computation raised; the index is "
-                    "degraded for this cell (rebuildable from the "
-                    "primary). The primary is unaffected.",
-                instance_id => Id,
-                bucket => Bucket,
-                cell_key => Key,
-                class => C,
-                reason => R,
-                stacktrace => S
-            }),
-            []
-    end.
+    OldValue = cell_value(Kernel, OldState),
+    NewValue = cell_value(Kernel, NewState),
+    lists:flatmap(
+        fun(Desc) ->
+            index_ops_for_one(
+                Desc, Bucket, Key, OldValue, NewValue, Version
+            )
+        end,
+        SecIndexes
+    ).
 
 %% @private
 cell_value(_Kernel, none) ->
@@ -958,139 +917,122 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     %% `publish_batch`, so they are filtered here by `LocalOrigin` — only a cell
     %% whose event-key origin differs from this node's own origin is a true merge.
     PublishNs = maps:get(publish_ns, Ctx, undefined),
-    try
-        {LocalWrites, MaxHlc, N, IdxAcc, PubAcc} = lists:foldl(
-            fun
-                (
-                    {MstKey, {
-                        {cell_apply, Bucket, CellKey, FoldEvent},
+    {LocalWrites, MaxHlc, N, IdxAcc, PubAcc} = lists:foldl(
+        fun
+            (
+                {MstKey, {
+                    {cell_apply, Bucket, CellKey, FoldEvent},
+                    EventMeta,
+                    _Prev,
+                    _Sig
+                }},
+                {WAcc, HlcAcc, NAcc, IAcc, PAcc}
+            ) ->
+                case
+                    compute_one_cell(
+                        Id,
+                        Adapter,
+                        Handle,
+                        Kernel,
+                        CrdtOpts,
+                        WAcc,
+                        Bucket,
+                        CellKey,
+                        FoldEvent,
+                        MstKey,
                         EventMeta,
-                        _Prev,
-                        _Sig
-                    }},
-                    {WAcc, HlcAcc, NAcc, IAcc, PAcc}
-                ) ->
-                    case
-                        compute_one_cell(
-                            Id,
-                            Adapter,
-                            Handle,
-                            Kernel,
-                            CrdtOpts,
-                            WAcc,
+                        SecIdx,
+                        OldStateCache
+                    )
+                of
+                    {ok, NewFrame, NewHlc, IdxOps, OldValueBytes} ->
+                        WAcc1 = WAcc#{{Bucket, CellKey} => NewFrame},
+                        %% Only a peer-authored cell is a true merge; a
+                        %% locally-authored cell swept into the diff was
+                        %% already published locally.
+                        CellPublishNs = merge_publish_ns(
+                            PublishNs, MstKey, LocalOrigin
+                        ),
+                        PAcc1 = maybe_collect_merge(
+                            CellPublishNs,
+                            PAcc,
                             Bucket,
                             CellKey,
                             FoldEvent,
-                            MstKey,
-                            EventMeta,
-                            SecIdx,
-                            OldStateCache
-                        )
-                    of
-                        {ok, NewFrame, NewHlc, IdxOps, OldValueBytes} ->
-                            WAcc1 = WAcc#{{Bucket, CellKey} => NewFrame},
-                            %% Only a peer-authored cell is a true merge; a
-                            %% locally-authored cell swept into the diff was
-                            %% already published locally.
-                            CellPublishNs = merge_publish_ns(
-                                PublishNs, MstKey, LocalOrigin
-                            ),
-                            PAcc1 = maybe_collect_merge(
-                                CellPublishNs,
-                                PAcc,
-                                Bucket,
-                                CellKey,
-                                FoldEvent,
-                                NewHlc,
-                                decode_publish_old(
-                                    Kernel, CellPublishNs, OldValueBytes
+                            NewHlc,
+                            decode_publish_old(
+                                Kernel, CellPublishNs, OldValueBytes
+                            )
+                        ),
+                        {
+                            WAcc1,
+                            max_hlc(HlcAcc, NewHlc),
+                            NAcc + 1,
+                            merge_idx_ops(IAcc, IdxOps),
+                            PAcc1
+                        }
+                end;
+            (_, Acc) ->
+                Acc
+        end,
+        {#{}, undefined, 0, #{}, #{}},
+        Pairs
+    ),
+    Materialised =
+        case map_size(LocalWrites) of
+            0 ->
+                batch_seqs(Pairs);
+            _ ->
+                Entries = [
+                    {B, K, F}
+                 || {{B, K}, F} <- maps:to_list(LocalWrites)
+                ],
+                case
+                    Adapter:put_batch(
+                        Handle,
+                        Entries ++ intent_cells(Ctx, SecIdx, IdxAcc)
+                    )
+                of
+                    ok ->
+                        maps:foreach(
+                            fun({B, K}, _F) ->
+                                invalidate_cache(
+                                    CacheAdapter, CacheHandle, B, K
                                 )
-                            ),
-                            {
-                                WAcc1,
-                                max_hlc(HlcAcc, NewHlc),
-                                NAcc + 1,
-                                merge_idx_ops(IAcc, IdxOps),
-                                PAcc1
-                            };
-                        skip ->
-                            {WAcc, HlcAcc, NAcc, IAcc, PAcc}
-                    end;
-                (_, Acc) ->
-                    Acc
-            end,
-            {#{}, undefined, 0, #{}, #{}},
-            Pairs
-        ),
-        Materialised =
-            case map_size(LocalWrites) of
-                0 ->
-                    batch_seqs(Pairs);
-                _ ->
-                    Entries = [
-                        {B, K, F}
-                     || {{B, K}, F} <- maps:to_list(LocalWrites)
-                    ],
-                    case
-                        Adapter:put_batch(
-                            Handle,
-                            Entries ++ intent_cells(Ctx, SecIdx, IdxAcc)
-                        )
-                    of
-                        ok ->
-                            maps:foreach(
-                                fun({B, K}, _F) ->
-                                    invalidate_cache(
-                                        CacheAdapter, CacheHandle, B, K
-                                    )
-                                end,
-                                LocalWrites
-                            ),
-                            %% Write-through the peer/replay frames too,
-                            %% so a subsequent local read sees the durable
-                            %% value (no-op when disabled).
-                            oldstate_cache_put_entries(OldStateCache, Entries),
-                            case MaxHlc of
-                                undefined -> ok;
-                                _ -> advance_high_water(HighWaterRef, MaxHlc)
                             end,
-                            ok = dispatch_index_ops(SecIdx, IdxAcc, false),
-                            %% Notify reactors AFTER the durable write + index
-                            %% dispatch, so a reactor that reads back sees the
-                            %% merged value. Best-effort, never blocks the replay.
-                            ok = publish_merges(PublishNs, PubAcc),
-                            %% Report what is now durable; the caller makes the
-                            %% frontier claim, so the frontier never leads the
-                            %% projection.
-                            batch_seqs(Pairs);
-                        {error, Reason} ->
-                            ?LOG_WARNING(#{
-                                description =>
-                                    "bondy_oplog_applier replay batch write "
-                                    "failed; the cells will be re-applied on "
-                                    "the next sync tick",
-                                instance_id => Id,
-                                count => map_size(LocalWrites),
-                                reason => Reason
-                            }),
-                            #{}
-                    end
-            end,
-        {N, Materialised}
-    catch
-        C:R:S ->
-            ?LOG_WARNING(#{
-                description =>
-                    "bondy_oplog_applier replay_cell_events raised; "
-                    "the projection may be temporarily stale on this "
-                    "node — the next sync tick re-issues the replay.",
-                instance_id => Id,
-                class => C,
-                reason => R,
-                stacktrace => S
-            }),
-            {0, #{}}
-    end.
+                            LocalWrites
+                        ),
+                        %% Write-through the peer/replay frames too,
+                        %% so a subsequent local read sees the durable
+                        %% value (no-op when disabled).
+                        oldstate_cache_put_entries(OldStateCache, Entries),
+                        case MaxHlc of
+                            undefined -> ok;
+                            _ -> advance_high_water(HighWaterRef, MaxHlc)
+                        end,
+                        ok = dispatch_index_ops(SecIdx, IdxAcc, false),
+                        %% Notify reactors AFTER the durable write + index
+                        %% dispatch, so a reactor that reads back sees the
+                        %% merged value. Best-effort, never blocks the replay.
+                        ok = publish_merges(PublishNs, PubAcc),
+                        %% Report what is now durable; the caller makes the
+                        %% frontier claim, so the frontier never leads the
+                        %% projection.
+                        batch_seqs(Pairs);
+                    {error, Reason} ->
+                        ?LOG_WARNING(#{
+                            description =>
+                                "bondy_oplog_applier replay batch write "
+                                "failed; the cells will be re-applied on "
+                                "the next sync tick",
+                            instance_id => Id,
+                            count => map_size(LocalWrites),
+                            reason => Reason
+                        }),
+                        #{}
+                end
+        end,
+    {N, Materialised}.
 
 %% @private
 batch_seqs(Pairs) ->
@@ -1662,20 +1604,13 @@ maybe_collect_merge(_NS, PubAcc, Bucket, CellKey, FoldEvent, Hlc, Old) ->
 %% frame's value bytes. Only paid for cells actually being published
 %% (`NS =/= undefined`); `undefined` when the cell did not exist (and for a
 %% `value_equals_state` fold, whose frames carry no value column — no published
-%% table uses one). Decode failure degrades to `undefined` — the old value is
-%% advisory (diffing / conflict detection), never load-bearing for the merge
-%% itself.
+%% table uses one).
 decode_publish_old(_Kernel, undefined, _ValueBytes) ->
     undefined;
 decode_publish_old(_Kernel, _NS, undefined) ->
     undefined;
 decode_publish_old(Kernel, _NS, ValueBytes) ->
-    try
-        bondy_oplog_cell_kernel:decode_value_bytes(Kernel, ValueBytes)
-    catch
-        _:_ ->
-            undefined
-    end.
+    bondy_oplog_cell_kernel:decode_value_bytes(Kernel, ValueBytes).
 
 %% @private
 %% Publish one remote-merge event per collected cell. The published `(Key, Op)`
@@ -1704,15 +1639,7 @@ invalidate_cache(undefined, _Handle, _Bucket, _Key) ->
 invalidate_cache(_Adapter, undefined, _Bucket, _Key) ->
     ok;
 invalidate_cache(Adapter, Handle, Bucket, Key) ->
-    %% `delete/3` is the cache_adapter callback. Swallow any errors —
-    %% a failed cache eviction must not stop the drain.
-    _ =
-        try
-            Adapter:delete(Handle, Bucket, Key)
-        catch
-            _:_ -> ok
-        end,
-    ok.
+    Adapter:delete(Handle, Bucket, Key).
 
 %% @private
 %% Advance the per-shard high-water HLC mark

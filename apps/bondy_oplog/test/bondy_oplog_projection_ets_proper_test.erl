@@ -28,6 +28,17 @@
 %% `ets:next_lookup/2` so that the sharpest case (a row deleted between
 %% reading its key and reading its value) cannot arise at all rather than
 %% being handled by an untestable branch; see `range/5`'s docs.
+%%
+%% `cell_keys/3` is pinned the same way, against `cell_keys/2`: a page is
+%% the first `Limit` keys of the full directory strictly after the cursor,
+%% and following each page's last key from `undefined` until a short page
+%% re-assembles the whole directory. The corpus carries an index bucket
+%% (`<<"a/$idx/x">>`) that sorts BETWEEN two primary buckets, so a walk
+%% that leaves its bucket by one key lands on it. Cursors are drawn from
+%% every bucket, not only the scoped one, because the sweep's cursor is a
+%% term the caller stores and replays, not a key the adapter handed out.
+%% Static table only: a key written between two pages is covered by the
+%% total order (`BK > Cursor`) the oracle states, not by a generator.
 
 -module(bondy_oplog_projection_ets_proper_test).
 
@@ -36,11 +47,15 @@
 
 -define(MOD, bondy_oplog_projection_ets).
 -define(BUCKETS, [<<"a">>, <<"ab">>, <<"b">>]).
+-define(IDX_BUCKET, <<"a/$idx/x">>).
 -define(DEFAULT_NUMTESTS, 500).
 
 -export([prop_agrees_with_the_guarded_select/0]).
 -export([prop_never_leaves_its_bucket/0]).
 -export([prop_deletions_are_reflected/0]).
+-export([prop_cell_keys_page_is_a_slice_of_the_directory/0]).
+-export([prop_cell_keys_pages_reassemble_the_directory/0]).
+-export([prop_cell_keys_never_leaves_its_bucket/0]).
 
 %% =============================================================================
 %% Properties
@@ -98,9 +113,82 @@ prop_deletions_are_reflected() ->
         end)
     ).
 
+-doc false.
+prop_cell_keys_page_is_a_slice_of_the_directory() ->
+    ?FORALL(
+        {Corpus, ET, Cursor, Limit},
+        {cell_corpus_gen(), oneof(?BUCKETS), cursor_gen(), limit_gen()},
+        with_table(Corpus, fun(Tab) ->
+            Scope = {entity, ET},
+            Got = ?MOD:cell_keys(Tab, Scope, #{
+                cursor => Cursor, limit => Limit
+            }),
+            Got =:= directory_slice(Tab, Scope, Cursor, Limit)
+        end)
+    ).
+
+-doc false.
+prop_cell_keys_pages_reassemble_the_directory() ->
+    %% The sweep's use: `undefined`, then each page's LAST key, until a page
+    %% comes back shorter than `Limit`. Every key once, in order, and no
+    %% page beyond the short one.
+    ?FORALL(
+        {Corpus, ET, Limit},
+        {cell_corpus_gen(), oneof(?BUCKETS), limit_gen()},
+        with_table(Corpus, fun(Tab) ->
+            Scope = {entity, ET},
+            Pages = pages(Tab, Scope, undefined, Limit, []),
+            lists:append(Pages) =:= lists:sort(?MOD:cell_keys(Tab, Scope)) andalso
+                lists:all(
+                    fun(P) -> length(P) =:= Limit end, lists:droplast(Pages)
+                )
+        end)
+    ).
+
+-doc false.
+prop_cell_keys_never_leaves_its_bucket() ->
+    %% Stated against the corpus, as `prop_never_leaves_its_bucket/0` is:
+    %% the index bucket and the prefix buckets hold keys of the same shape,
+    %% so a page that walked one key past its bucket is detectable only by
+    %% where each returned key was stored.
+    ?FORALL(
+        {Corpus, ET, Cursor, Limit},
+        {cell_corpus_gen(), oneof(?BUCKETS), cursor_gen(), limit_gen()},
+        with_table(Corpus, fun(Tab) ->
+            Got = ?MOD:cell_keys(Tab, {entity, ET}, #{
+                cursor => Cursor, limit => Limit
+            }),
+            lists:all(
+                fun({B, K}) ->
+                    B =:= ET andalso lists:member({B, K}, Corpus)
+                end,
+                Got
+            )
+        end)
+    ).
+
 %% =============================================================================
 %% The oracle
 %% =============================================================================
+
+%% `cell_keys/2` is the oracle for `cell_keys/3`: the full directory in key
+%% order, cut strictly after the cursor and to the limit. `cell_keys/2`
+%% itself is pinned by `cell_keys_test_` in `bondy_oplog_projection_ets_test`.
+directory_slice(Tab, Scope, Cursor, Limit) ->
+    All = lists:sort(?MOD:cell_keys(Tab, Scope)),
+    After =
+        case Cursor of
+            undefined -> All;
+            _ -> [BK || BK <- All, BK > Cursor]
+        end,
+    lists:sublist(After, Limit).
+
+pages(Tab, Scope, Cursor, Limit, Acc) ->
+    Page = ?MOD:cell_keys(Tab, Scope, #{cursor => Cursor, limit => Limit}),
+    case length(Page) < Limit of
+        true -> lists:reverse([Page | Acc]);
+        false -> pages(Tab, Scope, lists:last(Page), Limit, [Page | Acc])
+    end.
 
 %% The implementation `range/5` replaced, verbatim. Correct but O(position):
 %% an `ordered_set` narrows on a bound key PATTERN, never on a `>=` GUARD,
@@ -136,6 +224,20 @@ guarded_select(Tab, Bucket, Low, High, Limit) ->
 corpus_gen() ->
     ?LET(Pairs, list({oneof(?BUCKETS), key_gen()}), lists:usort(Pairs)).
 
+%% `corpus_gen/0` plus rows in the index bucket, which sorts between
+%% `<<"a">>` and `<<"ab">>` and which no `{entity, _}` scope may list.
+cell_corpus_gen() ->
+    ?LET(
+        Pairs,
+        list({oneof([?IDX_BUCKET | ?BUCKETS]), key_gen()}),
+        lists:usort(Pairs)
+    ).
+
+%% A cursor is any `{Bucket, Key}` the caller may replay: a stored key, an
+%% unstored key, or a key of a bucket outside the scope, on either side of it.
+cursor_gen() ->
+    oneof([undefined, {oneof([?IDX_BUCKET | ?BUCKETS]), key_gen()}]).
+
 %% Bounds come from the SAME alphabet as the stored keys, so `Low`/`High`
 %% land on stored keys about as often as between them — which is what
 %% exercises both branches of `first_row/4`.
@@ -167,7 +269,10 @@ properties_test_() ->
         Props = [
             prop_agrees_with_the_guarded_select(),
             prop_never_leaves_its_bucket(),
-            prop_deletions_are_reflected()
+            prop_deletions_are_reflected(),
+            prop_cell_keys_page_is_a_slice_of_the_directory(),
+            prop_cell_keys_pages_reassemble_the_directory(),
+            prop_cell_keys_never_leaves_its_bucket()
         ],
         lists:foreach(
             fun(Prop) -> ?assert(proper:quickcheck(Prop, Opts)) end,

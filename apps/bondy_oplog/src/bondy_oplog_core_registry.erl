@@ -1121,8 +1121,7 @@ provisioning so that:
   pre-restart drop) refuses reads and is rebuilt.
 
 Returns `false` (no rebuild) for a primary or an entry without `inflight_ref`.
-For an index entry an absent/unreadable marker returns `true` (rebuild) — the
-safe default.
+For an index entry an absent marker returns `true` (rebuild).
 """.
 -spec index_load_rebuild_marker(shard_entry()) -> boolean().
 
@@ -1184,10 +1183,9 @@ consistency_class(NS) when is_atom(NS) ->
 %% Stored as a reserved cell in the index shard's own projection at
 %% `bondy_oplog_index_key:trust_marker_loc/3` (bucket `<<"$idx_trusted">>`,
 %% outside the index keyspace, so `clear/2` and range scans never see it).
-%% All three are best-effort (`catch`) — a persistence failure degrades to the
-%% in-memory marks and never raises into the caller (a saturation drop, a
-%% wedged-flush backstop, a completed rebuild). `index_untrust/1` is the strict
-%% removal.
+%% A `put_batch` error from the adapter is returned to the caller; a raise
+%% from the adapter (a dead handle) propagates, as it does on every other
+%% projection write.
 
 %% @private
 persist_trust_marker(#entry{
@@ -1196,23 +1194,13 @@ persist_trust_marker(#entry{
     projection_handle = H
 }) when A =/= undefined ->
     {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
-    _ =
-        try
-            A:put_batch(H, [{B, K, trust_marker_frame()}])
-        catch
-            _:_ -> ok
-        end,
-    ok;
+    A:put_batch(H, [{B, K, trust_marker_frame()}]);
 persist_trust_marker(_) ->
     ok.
 
 %% @private
 remove_trust_marker(E) ->
-    try
-        index_untrust(E)
-    catch
-        _:_ -> ok
-    end.
+    index_untrust(E).
 
 %% @private
 has_trust_marker(#entry{
@@ -1221,13 +1209,9 @@ has_trust_marker(#entry{
     projection_handle = H
 }) when A =/= undefined ->
     {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
-    try A:get(H, B, K) of
-        {ok, Frame} ->
-            frame_state(Frame) =:= ?INDEX_FORMAT;
-        _ ->
-            false
-    catch
-        _:_ -> false
+    case A:get(H, B, K) of
+        {ok, Frame} -> frame_state(Frame) =:= ?INDEX_FORMAT;
+        not_found -> false
     end;
 has_trust_marker(_) ->
     false.
@@ -1252,7 +1236,7 @@ version below it.
 -spec index_version_recorded(
     atom(), [{atom(), pos_integer()}], non_neg_integer()
 ) ->
-    {ok, non_neg_integer()} | {error, {index_version_unreadable, term()}}.
+    {ok, non_neg_integer()} | {error, {index_version_unreadable, dead_handle}}.
 
 index_version_recorded(NS, Indexes, Shard) ->
     try
@@ -1267,7 +1251,8 @@ index_version_recorded(NS, Indexes, Shard) ->
                 ]
             ])}
     catch
-        _:Reason -> {error, {index_version_unreadable, Reason}}
+        error:badarg -> {error, {index_version_unreadable, dead_handle}};
+        exit:{noproc, _} -> {error, {index_version_unreadable, dead_handle}}
     end.
 
 -doc """
@@ -1363,10 +1348,17 @@ What primary shard `Shard` of `NS` records of its intents in its own
 projection (`Adapter`, `Handle`): the version they are cleared up to
 (`index_intents_cleared/1`), and each intent above it as its version and the
 index ops `index_intent_cell/4` stored, in version order.
+
+`{error, {index_intents_unreadable, dead_handle}}` when the primary's
+projection handle is dead: an ETS table or `persistent_term` pool entry that
+is gone raises `badarg`, a stopped Bookie exits `noproc`. A registry row can
+outlive its handle because `bondy_db:close/1` does not close the DB's open
+tables (`bondy_db_index_coldstart_test`, "an index dropped after a crash does
+not block the open"); `index_version_recorded/3` answers the same way.
 """.
 -spec index_intents_leftover(module(), term(), atom(), non_neg_integer()) ->
     {ok, non_neg_integer(), [{pos_integer(), map()}]}
-    | {error, {index_intents_unreadable, term()}}.
+    | {error, {index_intents_unreadable, dead_handle}}.
 
 index_intents_leftover(Adapter, Handle, NS, Shard) ->
     try
@@ -1391,7 +1383,8 @@ index_intents_leftover(Adapter, Handle, NS, Shard) ->
         ),
         {ok, Cleared, lists:reverse(Leftover)}
     catch
-        _:Reason -> {error, {index_intents_unreadable, Reason}}
+        error:badarg -> {error, {index_intents_unreadable, dead_handle}};
+        exit:{noproc, _} -> {error, {index_intents_unreadable, dead_handle}}
     end.
 
 -doc """

@@ -157,17 +157,11 @@ no `monotonic_time` reads.
 record(InstanceId, LatencyUs) when
     is_binary(InstanceId), is_integer(LatencyUs)
 ->
-    try
-        _ = bondy_metrics:histogram(#{
-            name => ?METRIC,
-            label => #{instance_id => InstanceId},
-            value => LatencyUs
-        }),
-        ok
-    catch
-        _:_ -> ok
-    end;
-record(_, _) ->
+    _ = bondy_metrics:histogram(#{
+        name => ?METRIC,
+        label => #{instance_id => InstanceId},
+        value => LatencyUs
+    }),
     ok.
 
 ?DOC("""
@@ -423,13 +417,13 @@ run_probe(InstanceId) ->
             ok;
         {Mod, Fun} ->
             T0 = erlang:monotonic_time(microsecond),
-            try Mod:Fun(InstanceId) of
+            case Mod:Fun(InstanceId) of
                 ok ->
                     record(InstanceId, erlang:monotonic_time(microsecond) - T0);
-                _ ->
+                {skip, _} ->
+                    ok;
+                {error, _} ->
                     ok
-            catch
-                _:_ -> ok
             end
     end.
 

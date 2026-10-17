@@ -96,6 +96,7 @@ no_spurious_siblings() ->
     RebuiltCol = name_col(T, R),
     ?assertEqual(LiveCol, RebuiltCol),
     ?assertEqual([<<"n8">>], RebuiltCol),
+    ok = bondy_db:close_table(T),
     ok = bondy_db:close(Db).
 
 %% Two replicas write the same map-key concurrently (neither observes the
@@ -137,6 +138,8 @@ preserves_concurrent_siblings() ->
     %% Rebuild A's index and confirm the projected column keeps both.
     ok = bondy_db:rebuild_index(Ta, by_status),
     ?assertEqual([<<"blue">>, <<"red">>], color_col(Ta, R)),
+    ok = bondy_db:close_table(Ta),
+    ok = bondy_db:close_table(Tb),
     ok = bondy_db:close(DbA),
     ok = bondy_db:close(DbB).
 
