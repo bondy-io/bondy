@@ -626,14 +626,12 @@ callback_mod(Method, Fun) when is_function(Fun, 1) ->
 
 %% @private
 compute_available_methods(Realm, Ctxt) ->
-    %% The allowed methods for the Realm
     RealmAllowed = bondy_realm:authmethods(Realm),
 
     case bondy_realm:is_security_enabled(Realm) of
         true ->
             do_compute_available_methods(Ctxt, RealmAllowed);
         false ->
-            %% We allow all methods in realm
             RealmAllowed
     end.
 
@@ -686,7 +684,6 @@ do_compute_available_methods(#{user_id := UserId} = Ctxt, RealmAllowed) ->
 
     Available = lists:usort(lists:filtermap(Filter, Allowed)),
 
-    %% We remove the order attribute, returning only the list of methods
     [Method || {_, Method} <- Available].
 
 %% @private

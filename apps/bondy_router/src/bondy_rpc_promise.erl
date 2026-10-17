@@ -130,7 +130,6 @@ Creates a new promise.
 ) -> t().
 
 new_call(RealmUri, Caller, CallId, Opts) ->
-    %% We validate the arguments
     bondy_ref:is_type(Caller) orelse
         error({badarg, {caller, Caller}}),
 
@@ -165,7 +164,6 @@ new_call(RealmUri, Caller, CallId, Opts) ->
         TTL == infinity orelse
         error({badarg, {timeout, TTL}}),
 
-    %% We create the key
     CallerSessionId = bondy_ref:session_id(Caller),
 
     Now = erlang:system_time(millisecond),
@@ -182,7 +180,6 @@ new_call(RealmUri, Caller, CallId, Opts) ->
         expiry = Expiry
     },
 
-    %% We create the promise
     Keys = [callee, via, procedure_uri, timeout],
     Info = maps:without(Keys, Opts),
 
@@ -212,7 +209,6 @@ Creates a new promise.
 new_invocation(RealmUri, Caller, CallId, Callee, InvocationId, Opts) when
     is_binary(RealmUri), is_integer(InvocationId), is_integer(CallId)
 ->
-    %% We validate the arguments
     bondy_ref:is_type(Callee) orelse
         error({badarg, {callee, Callee}}),
 
@@ -245,7 +241,6 @@ new_invocation(RealmUri, Caller, CallId, Callee, InvocationId, Opts) when
         TTL == infinity orelse
         error({badarg, {timeout, TTL}}),
 
-    %% We create the key
     CalleeSessionId = bondy_ref:session_id(Callee),
     CallerSessionId = bondy_ref:session_id(Caller),
 
@@ -265,7 +260,6 @@ new_invocation(RealmUri, Caller, CallId, Callee, InvocationId, Opts) when
         expiry = Expiry
     },
 
-    %% We create the promise
     Keys = [via, procedure_uri, timeout],
     Info = maps:without(Keys, Opts),
 

@@ -172,13 +172,6 @@ init_per_suite(Config) ->
     %% and are called through node 2, `?SLOW` joins node 2 and is called
     %% through node 1 — so every procedure is required on every member rather
     %% than only where each case happens to need it.
-    %%
-    %% Measured 2026-08-31: `session_ops_forward_to_the_owner` failed with
-    %% `no_such_procedure` for `?ECHO` whenever ANY suite that boots Bondy on
-    %% the CT node ran first, and passed when this suite ran alone. Only the
-    %% first case failed — by the second the replication had caught up, which
-    %% is what a missing wait looks like rather than a leak from the
-    %% preceding suite.
     _ = [
         ok = wait_until(
             fun() ->

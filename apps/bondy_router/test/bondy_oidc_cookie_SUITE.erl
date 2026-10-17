@@ -20,7 +20,6 @@ private functions directly — no Bondy runtime needed.
 
 all() ->
     [
-        %% same_site_atom/1
         same_site_atom_binary_lax,
         same_site_atom_binary_strict,
         same_site_atom_binary_none,
@@ -28,7 +27,6 @@ all() ->
         same_site_atom_atom_strict,
         same_site_atom_atom_none,
 
-        %% cookie_opts/6
         cookie_opts_default_lax,
         cookie_opts_none,
         cookie_opts_strict,
@@ -37,7 +35,6 @@ all() ->
         cookie_opts_http_only_true,
         cookie_opts_http_only_false,
 
-        %% set_resp_cookie integration (via meck)
         set_ticket_cookie_same_site_none,
         set_ticket_cookie_same_site_lax,
         set_csrf_cookie_same_site_none,

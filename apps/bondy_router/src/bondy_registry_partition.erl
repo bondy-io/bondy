@@ -526,7 +526,6 @@ init([Index]) ->
     %% supervisor, and we wouldn't observe janitor crashes for restart.
     erlang:process_flag(trap_exit, true),
 
-    %% We connect this worker to the pool worker name
     PoolName = ?REGISTRY_POOL,
     WorkerName = ?SERVER_NAME(Index),
     true = gproc_pool:connect_worker(PoolName, WorkerName),

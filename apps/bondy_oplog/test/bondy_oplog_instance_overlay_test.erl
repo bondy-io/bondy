@@ -92,7 +92,6 @@ fold_range_merges_overlay_and_mst() ->
         [{p, N} || N <- lists:seq(1, 5)] ++
             [{s, N} || N <- lists:seq(6, 10)],
     ?assertEqual(Expected, Ops),
-    %% Strict ascending key order:
     Keys = [bondy_oplog_event:key(E) || E <- EventsOut],
     ?assertEqual(lists:sort(Keys), Keys),
     ok = bondy_oplog:stop_instance(Id).
@@ -104,26 +103,19 @@ size_includes_overlay_rows() ->
     Id = mk_id(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     [bondy_oplog:append(Id, N) || N <- lists:seq(1, 10)],
-    %% Read size repeatedly — it should be 10 from the very first
-    %% read (overlay carries the events until applier catches up).
     ?assertEqual(10, bondy_oplog:size(Id)),
     ok = bondy_oplog:await_apply(Id),
     ?assertEqual(10, bondy_oplog:size(Id)),
     ok = bondy_oplog:stop_instance(Id).
 
 first_and_latest_merge_overlay() ->
-    %% first_key/latest_key must consult both overlay and MST.
     Id = mk_id(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id),
-    %% Append two events; both end up in overlay before the applier
-    %% catches up. first_key/latest_key should still return valid
-    %% keys.
     K1 = bondy_oplog:append(Id, a),
     K2 = bondy_oplog:append(Id, b),
     ?assertEqual({ok, K1}, bondy_oplog:first_key(Id)),
     ?assertEqual({ok, K2}, bondy_oplog:latest_key(Id)),
     ok = bondy_oplog:await_apply(Id),
-    %% Same after apply (events now in MST).
     ?assertEqual({ok, K1}, bondy_oplog:first_key(Id)),
     ?assertEqual({ok, K2}, bondy_oplog:latest_key(Id)),
     ok = bondy_oplog:stop_instance(Id).
@@ -133,10 +125,7 @@ await_apply_drains_overlay() ->
     {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     [bondy_oplog:append(Id, N) || N <- lists:seq(1, 20)],
     ok = bondy_oplog:await_apply(Id, 5000),
-    %% After await, every overlay row has been evicted; size still
-    %% reads 20 because the events are now all in the MST.
     ?assertEqual(20, bondy_oplog:size(Id)),
-    %% Overlay should be empty.
     case bondy_oplog_registry:overlay_tab(Id) of
         undefined -> ok;
         Tab -> ?assertEqual(0, ets:info(Tab, size))
@@ -223,7 +212,6 @@ overlay_value_round_trip() ->
     ?assertEqual({hello, world}, bondy_oplog_event:op(Event)),
     ?assertEqual({meta, 42}, bondy_oplog_event:meta(Event)),
     ok = bondy_oplog:await_apply(Id),
-    %% Same after apply — value is now read from the MST.
     {ok, EventAfter} = bondy_oplog:get(Id, Key),
     ?assertEqual({hello, world}, bondy_oplog_event:op(EventAfter)),
     ?assertEqual({meta, 42}, bondy_oplog_event:meta(EventAfter)),
@@ -236,13 +224,10 @@ overlay_evicts_after_apply() ->
     Id = mk_id(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     Keys = [bondy_oplog:append(Id, N) || N <- lists:seq(1, 16)],
-    %% Pre-apply: every key is reachable.
     [?assertMatch({ok, _}, bondy_oplog:get(Id, K)) || K <- Keys],
     ok = bondy_oplog:await_apply(Id),
-    %% Overlay is empty.
     Tab = bondy_oplog_registry:overlay_tab(Id),
     ?assertEqual(0, ets:info(Tab, size)),
-    %% Reads still work — they hit the MST now.
     [?assertMatch({ok, _}, bondy_oplog:get(Id, K)) || K <- Keys],
     ok = bondy_oplog:stop_instance(Id).
 

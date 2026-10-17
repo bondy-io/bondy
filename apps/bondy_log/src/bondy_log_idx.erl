@@ -268,7 +268,6 @@ will not produce an index entry.
 -spec would_index(accumulator(), pos_integer()) -> boolean().
 
 would_index(#acc{entries_rev = []}, _FrameLen) ->
-    %% First frame of segment is always indexed.
     true;
 would_index(#acc{bytes_since_last = B, interval_bytes = I}, FrameLen) when
     is_integer(FrameLen), FrameLen > 0
@@ -572,8 +571,6 @@ bsearch(E, T, Lo, Hi, Best) ->
             %% lives to the left.
             bsearch(E, T, Lo, Mid - 1, Best);
         T =< L ->
-            %% In-range hit — return immediately, this is the best
-            %% possible answer.
             {ok, O};
         true ->
             %% Past this entry's range — update fallback and look right

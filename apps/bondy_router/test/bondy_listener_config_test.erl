@@ -646,8 +646,6 @@ partial_ping_with_enabled_absent_is_accepted_test() ->
     %% every `maybe_enable_ping/2' falls through to "ping off" when `enabled' is
     %% absent (pinned by `ping_off_is_the_handler_fall_through_test'), so there
     %% is no crash to prevent and rejecting it would refuse a node that runs.
-    %% This used to be an error, which was a guard for a missing clause rather
-    %% than for a real defect.
     Inventory = [
         {pub, #{
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
@@ -746,9 +744,6 @@ ping_enabled_false_needs_no_siblings_test() ->
 carrier_key_set_nowhere_gets_the_code_default_test() ->
     %% Neither listener nor global sets anything, so every carrier key comes
     %% from `carrier_defaults/1' and the resolved config is TOTAL over them.
-    %% This used to assert `#{}' — the values reached the handler from the
-    %% global `wamp.websocket.*' block instead, and an absent key fell through
-    %% to Cowboy's own default rather than Bondy's.
     %%
     %% Equality with the whole table, not a spot check: the failure this is for
     %% is a key missing from one side, and asserting a handful of keys would
@@ -782,8 +777,6 @@ websocket_dynamic_buffer_is_not_overridable_test() ->
     ?assertNot(maps:is_key(protocol_opts, Cfg)).
 
 admin_listener_defaults_to_loopback_test() ->
-    %% Today's admin listeners default their bind address to loopback (schema
-    %% comment "default to loopback"). That default moves here.
     Inventory = [
         {admin, #{
             transport => tcp,
@@ -847,9 +840,6 @@ partial_listener_ping_is_rejected_test() ->
     ?assertMatch({ok, [_]}, bondy_listener_config:resolve(Inventory, Off)).
 
 stream_listener_ping_siblings_are_the_same_for_both_protocols_test() ->
-    %% Both halves of the sibling list, one protocol each, because the list is
-    %% now shared and a per-protocol list is what it replaced.
-    %%
     %% A raw-socket block naming `interval` instead of `idle_timeout` — the
     %% shape the deleted `wamp.tls.ping.interval` mapping produced — is REJECTED.
     %% It used to be accepted, on the premise that

@@ -69,7 +69,6 @@ requirements() ->
     | {error, Reason :: any(), NewState :: state()}.
 
 challenge(_, _, State) ->
-    %% No challenge required
     {false, State}.
 
 -spec authenticate(

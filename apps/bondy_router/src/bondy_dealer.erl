@@ -489,9 +489,6 @@ unregister(RegId, Ctxt) when is_map(Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     unregister(RegId, RealmUri);
 unregister(RegId, RealmUri) when is_binary(RealmUri) ->
-    %% The uri() form of the contract. This clause used to pass the
-    %% binary through `bondy_context:realm_uri/1`, whose catch-all
-    %% answers `undefined` — so it could never have worked.
     case bondy_registry:lookup(registration, RealmUri, RegId) of
         {error, not_found} = Error ->
             Error;

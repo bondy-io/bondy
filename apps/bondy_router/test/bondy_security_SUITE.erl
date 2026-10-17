@@ -80,7 +80,6 @@ init_per_suite(Config) ->
     [{realm_uri, RealmUri}, {realm, Realm} | Config].
 
 end_per_suite(Config) ->
-    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 add_realm(RealmUri) ->
@@ -174,7 +173,6 @@ create_groups(Config) ->
     ),
     ?assertEqual(N + 1, length(bondy_rbac_group:list(Uri))),
 
-    %% Create required groups for the tests
     ?assertMatch(
         {ok, _},
         bondy_rbac_group:add(
@@ -334,9 +332,7 @@ resource_owner_change_password(Config) ->
     ok = bondy_rbac_user:change_password(
         RealmUri, Username, NewPass, OldPass
     ),
-    %% Validate that we have only changed the password
     {ok, User2} = bondy_rbac_user:lookup(RealmUri, Username),
-    %% error([User1, User2]),
     true = User1 =/= User2,
     {save_config, lists:keyreplace(password, 1, Prev, {password, NewPass})}.
 
@@ -428,13 +424,6 @@ user_auth1(Config) ->
 user_update(Config) ->
     {user_auth1, Prev} = ?config(saved_config, Config),
     Pass = <<"New-Password">>,
-    % Out = #{
-    %     <<"groups">> => [],
-    %     <<"has_password">> => true,
-    %     <<"meta">> => #{<<"foo">> => <<"bar2">>},
-    %     <<"sources">> => [],
-    %     <<"username">> => <<"AlE2">>
-    % },
     {ok, #{type := user}} = bondy_rbac_user:update(
         ?config(realm_uri, Prev),
         ?config(username, Prev),

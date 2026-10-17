@@ -271,7 +271,6 @@ property_is_projected_externally(_) ->
 longpoll_session_draws_from_the_listener_message_budget(_) ->
     with_listener_message_budget(fun(RealmUri) ->
         Base = "http://127.0.0.1:18080/wamp/longpoll",
-        %% open
         {ok, 200, _, OpenRef} = hackney:request(
             post,
             Base ++ "/open",

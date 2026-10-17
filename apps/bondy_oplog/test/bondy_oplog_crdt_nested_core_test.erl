@@ -108,7 +108,6 @@ rmv_prunes_only_observed_dots_test() ->
             inc, 3
         }
     ),
-    %% Remove observing only a's dot -- b's concurrent apply survives.
     Entries2 = ?M:rmv(Entries1, <<"k">>, [{<<"a">>, 1}]),
     DS = maps:get(<<"k">>, Entries2),
     ?assertEqual(3, ?M:nested_value(?COUNTER, DS)).
@@ -127,7 +126,6 @@ rmv_on_absent_key_is_a_noop_test() ->
 
 put_prunes_writers_own_observed_dot_test() ->
     Entries0 = ?M:put(#{}, <<"k">>, {<<"a">>, 1}, [], <<"v1">>),
-    %% A second write from the same origin, observing its own prior dot.
     Entries1 = ?M:put(
         Entries0, <<"k">>, {<<"a">>, 2}, [{<<"a">>, 1}], <<"v2">>
     ),
@@ -184,7 +182,6 @@ stabilize_fold_single_entry_runs_unchanged_test() ->
         {<<"a">>, 1} => {sub, ?COUNTER, 10, {inc, 1}},
         {<<"b">>, 1} => {sub, ?COUNTER, 20, {inc, 2}}
     },
-    %% Nothing to compress — a run of one is already minimal.
     ?assertEqual(unchanged, ?M:stabilize_fold(DS, 100)).
 
 stabilize_fold_flat_store_unchanged_test() ->
@@ -210,7 +207,6 @@ stabilize_fold_g_counter_run_test() ->
         {<<"b">>, 1} => {sub, GC, 15, {inc, 5}}
     },
     {folded, DS1} = ?M:stabilize_fold(DS, 100),
-    %% Origin a's run collapses to its total; b's single entry stays.
     ?assertEqual(
         #{
             {<<"a">>, 2} => {sub, GC, 20, {inc, 3}},

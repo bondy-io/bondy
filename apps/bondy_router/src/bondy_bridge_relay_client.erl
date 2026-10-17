@@ -228,7 +228,6 @@ terminate(Reason, StateName, #state{socket = undefined}) ->
     }),
     ok;
 terminate(Reason, StateName, #state{} = State0) ->
-    %% Ensure we closed socket
     Transport = State0#state.transport,
     Socket = State0#state.socket,
     try
@@ -239,13 +238,10 @@ terminate(Reason, StateName, #state{} = State0) ->
 
     State1 = State0#state{socket = undefined},
 
-    %% Cleanup internal router state
     State = cleanup(State1),
 
-    %% Cancel monitor
     ok = bondy_cluster:monitor_network(false),
 
-    %% Notify
     ok = on_disconnect(State),
 
     terminate(Reason, StateName, State).
@@ -409,7 +405,6 @@ active(internal, {abort, _SessionId, Reason, Details}, _State) ->
     },
     {stop, {shutdown, Info}};
 active(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
-    %% We reply the challenge.
     case authenticate(ChallengeExtra, State) of
         ok ->
             Actions = [
@@ -448,7 +443,6 @@ active(internal, {goodbye, SessionId, ?WAMP_CLOSE_REALM, Details}, State) ->
         details => Details
     }),
 
-    %% Kick out all local sessions
     ok = bondy_realm:close(RealmUri, ?WAMP_CLOSE_REALM),
 
     %% We currently support a single session so we shutdown the connection.
@@ -537,9 +531,7 @@ idle(enter, active, State) ->
 idle({timeout, ping_idle_timeout}, ping_idle_timeout, State) ->
     maybe_send_ping(State);
 idle({timeout, ping_timeout}, ping_timeout, State0) ->
-    %% No ping response in time
     State = ping_fail(State0),
-    %% Try to send another one or stop if retry limit reached
     maybe_send_ping(State);
 idle(state_timeout, idle_timeout, _State) ->
     %% We will be restarted
@@ -549,7 +541,6 @@ idle(state_timeout, idle_timeout, _State) ->
     },
     {stop, {shutdown, Info}};
 idle(internal, {pong, Bin}, #state{ping_payload = Bin} = State0) ->
-    %% We got a response to our ping
     State = ping_succeed(State0),
     Actions = [
         {{timeout, ping_timeout}, cancel},
@@ -617,7 +608,6 @@ handle_event(cast, {forward_message, Msg, SessionId}, _, State) ->
             redial(Reason, State)
     end;
 handle_event(internal, {ping, Data}, _, State) ->
-    %% The remote (server) is sending us a ping
     case send_message({pong, Data}, State) of
         ok ->
             %% We keep all timers as a ping should not reset the idle state
@@ -647,7 +637,6 @@ handle_event(info, {?BONDY_REQ, _Pid, RealmUri, Msg}, _StateName, State) ->
 handle_event(info, {Tag, Socket, Data}, _, #state{socket = Socket} = State) when
     ?SOCKET_DATA(Tag)
 ->
-    %% Allow socket to send us more messages
     ok = set_socket_active(State),
 
     try
@@ -765,7 +754,6 @@ handle_event(EventType, EventContent, StateName, _) ->
         event => EventContent,
         state_name => StateName
     }),
-    %% We also keep timers
     keep_state_and_data.
 
 %% =============================================================================
@@ -865,7 +853,6 @@ maybe_reconnect(Reason, #state{reconnect_retry = R0} = State0) when
             State = State0#state{reconnect_retry = R1},
             {keep_state, State, [{state_timeout, Delay, connect}]};
         {Limit, R1} when Limit == deadline orelse Limit == max_retries ->
-            %% We reached max retries
             State = State0#state{reconnect_retry = R1},
             Info = #{
                 description =>
@@ -1038,7 +1025,6 @@ maybe_send_ping(#state{ping_retry = undefined} = State, Actions0) ->
 maybe_send_ping(#state{} = State, Actions0) ->
     case bondy_connect_retry:get(State#state.ping_retry) of
         Time when is_integer(Time) ->
-            %% We send a ping
             Bin = State#state.ping_payload,
 
             case send_message({ping, Bin}, State) of
@@ -1224,7 +1210,6 @@ setup_proxing(SessionId, State0) ->
     %% configuration and create|remove their proxies on the remote
     State1 = add_event_handler(Session, State0),
 
-    %% Get the existing local registrations and subscriptions and proxy them
     State2 = proxy_existing(Session, State1),
 
     %% We finally subscribe to user configured topics so that we can re-publish
@@ -1305,19 +1290,13 @@ add_event_handler(Session, State) when is_map(Session) ->
     RealmUri = maps:get(realm_uri, Session),
     MyRef = maps:get(ref, Session),
 
-    %% We subscribe to registration|subscription events with the following
-    %% callback function.
     Fun = fun
         ({Tag, Term}) ->
             IsMatch =
-                %% It must be a registry event, so Term must be an entry
                 bondy_registry_entry:is_entry(Term) andalso
                     %% We avoid forwarding our own subscriptions
                     SessionId =/= bondy_registry_entry:session_id(Term) andalso
-                    %% We are only interested in events for this realm
                     RealmUri =:= bondy_registry_entry:realm_uri(Term) andalso
-                    %% matching the following event types
-
                     (Tag =:= registration_created orelse
                         Tag =:= registration_added orelse
                         Tag =:= registration_deleted orelse
@@ -1338,7 +1317,6 @@ add_event_handler(Session, State) when is_map(Session) ->
                     ok
             end;
         (_) ->
-            %% Other event types
             ok
     end,
 
@@ -1397,7 +1375,6 @@ subscribe_topics(Session0, State) ->
 proxy_existing(Session, State0) ->
     RealmUri = maps:get(realm_uri, Session),
 
-    %% We want all sessions, callback modules or processes
     AnySessionId = '_',
     Limit = 100,
 

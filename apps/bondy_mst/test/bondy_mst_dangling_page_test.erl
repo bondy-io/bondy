@@ -100,7 +100,6 @@ merge_aux_with_dangling_root_does_not_crash() ->
     %% Must not crash. The dangling-A branch copies B over.
     Merged = bondy_mst:merge(A1, B1),
     ?assert(is_tuple(Merged)),
-    %% B's keys are now reachable from the merged tree.
     ?assertEqual(value(101), bondy_mst:get(Merged, key(101))),
     ok.
 

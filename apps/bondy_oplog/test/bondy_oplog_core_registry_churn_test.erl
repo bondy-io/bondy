@@ -179,9 +179,7 @@ assert_invariants() ->
         mon_to_key := MonToKey,
         key_to_mon := KeyToMon
     } = bondy_oplog_core_registry:snapshot_for_invariants(),
-    %% Map sizes must match.
     ?assertEqual(map_size(MonToKey), map_size(KeyToMon)),
-    %% mon_to_key and key_to_mon are inverses.
     maps:foreach(
         fun(Mon, Key) ->
             ?assertEqual(Mon, maps:get(Key, KeyToMon))
@@ -194,7 +192,6 @@ assert_invariants() ->
         end,
         KeyToMon
     ),
-    %% Every tracked key has a matching ETS row (atomic snapshot).
     EntryKeys = sets:from_list(
         [bondy_oplog_core_registry:entry_key(E) || E <- Entries]
     ),
@@ -204,7 +201,6 @@ assert_invariants() ->
         end,
         KeyToMon
     ),
-    %% Every ETS row has a matching monitor entry.
     lists:foreach(
         fun(E) ->
             Key = bondy_oplog_core_registry:entry_key(E),

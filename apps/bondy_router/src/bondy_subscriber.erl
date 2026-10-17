@@ -47,12 +47,6 @@ It is used by `bondy_broker:subscribe/4` and `bondy_broker:unsubscribe/1`.
 %% CALLBACK API
 %% =============================================================================
 
-% -callback init(Args :: any()) ->
-%     {ok, NewState :: any()} | {error, Reason :: any()}.
-
-% -callback handle_event(Event :: wamp_event(), State :: any()) ->
-%     {ok, NewState :: any()}.
-
 %% =============================================================================
 %% API
 %% =============================================================================

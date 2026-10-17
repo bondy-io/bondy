@@ -291,11 +291,6 @@ ensure_subscribed(#sub{table = Table, label = Label, kind = Kind} = Sub) ->
             %% provisioned each table — so a bootstrap completing before that
             %% wins the race and its event is lost with no replay.
             %%
-            %% MEASURED 2026-08-22: on a PLAIN restart the surviving on-disk
-            %% peer state lets AAE bootstrap the registry within milliseconds
-            %% of the instance starting, and the restart-suite case failed
-            %% 1-in-5 with zero notifications observed on the node.
-            %%
             %% Rebuilding here removes the dependency on having heard it: the
             %% state this reactor maintains is DERIVED from the projection, so
             %% deriving it once at attach time is correct regardless of what

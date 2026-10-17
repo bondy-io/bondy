@@ -385,8 +385,6 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
     MS = [{{'$1', '_', '_'}, [{'=/=', '$1', ?ROOT_KEY}], ['$1']}],
     All = ets:select(Tab, MS),
 
-    %% We build a bloomfilter containing all the hashes of pages emanating from
-    %% roots in KeepRoots
     BF = bloom_filter(T, KeepRoots),
 
     W0 = ets:info(Tab, memory),
@@ -410,7 +408,6 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
                     %% future executions
                     {N, Acc};
                 false ->
-                    %% Definitely not in the set so we free
                     true = ets:delete(Tab, Hash),
                     {
                         N + 1,

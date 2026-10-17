@@ -91,7 +91,6 @@ hash.
 -type hash_algorithm() :: sha256 | sha512.
 -type comparator() :: fun((key(), key()) -> eq | lt | gt).
 -type merger() :: fun((key(), value(), value()) -> value()).
-%% Fold
 -type fold_fun() :: fun(({key(), value()}, any()) -> any()).
 -type fold_opts() :: [fold_opt()].
 -type fold_opt() ::
@@ -764,7 +763,6 @@ delete(#?MODULE{store = Store0} = T, Key) ->
                     not_found ->
                         T;
                     {undefined, Store1} ->
-                        %% Tree became empty, handle undefined root
                         T#?MODULE{store = Store1};
                     {NewRoot, Store1} when is_binary(NewRoot) ->
                         Store = bondy_mst_store:set_root(Store1, NewRoot),
@@ -1311,12 +1309,10 @@ badarg(Opts, Opt, Expected) when is_binary(Opt) ->
     ).
 
 %% @private
-%% The default comparator function used in the MST.
 comparator(A, B) when A < B -> lt;
 comparator(A, B) when A == B -> eq;
 comparator(A, B) when A > B -> gt.
 
-%% -----------------------------------------------------------------------------
 %% @private
 %% The default merger function, assuming MST as a set. (where all
 %% values are `true`).
@@ -1334,19 +1330,16 @@ calc_level(#?MODULE{hash_algorithm = Algo}, Key) ->
     count_leading_zero_nibbles(bondy_mst_utils:hash(Key, Algo), 0).
 
 %% @private
-%% Counts the leading zero 4-bit nibbles of a binary digest.
 count_leading_zero_nibbles(<<0:4, Rest/bitstring>>, Acc) ->
     count_leading_zero_nibbles(Rest, Acc + 1);
 count_leading_zero_nibbles(_, Acc) ->
     Acc.
 
 %% @private
-%% Compares two keys using the MST’s configured comparator.
 compare(#?MODULE{comparator = Fun}, A, B) ->
     Fun(A, B).
 
 %% @private
-%% Merges two values using the MST’s configured merger function.
 merge_values(#?MODULE{merger = Fun}, Key, A, B) ->
     Fun(Key, A, B).
 
@@ -1367,7 +1360,6 @@ do_get(#?MODULE{} = T, Key, Root) ->
     end.
 
 %% @private
-%% Recursively retrieves a value from the MST.
 do_get(T, Key, Low, []) ->
     do_get(T, Key, Low);
 do_get(T, Key, Low, [{K, V, Low2} | Rest]) ->
@@ -2465,10 +2457,7 @@ dump(Store, Root, Space) ->
      || {K, V, R} <- List
     ].
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% Navigate to the appropriate level to delete the key
-%% -----------------------------------------------------------------------------
 delete_at(T, Key, KeyLevel, Store0, Hash) when is_binary(Hash) ->
     Page = bondy_mst_store:get(Store0, Hash),
     PageLevel = bondy_mst_page:level(Page),
@@ -2496,12 +2485,9 @@ delete_from_level(T, Key, Page, Store0) ->
     delete_from_list(T, Key, Level, Low, List, Store0).
 
 %% @private
-%% Scan the list to find and remove the key
 delete_from_list(T, Key, _Level, Low, [{K, _V, R}], Store0) ->
     case compare(T, Key, K) of
         eq ->
-            %% Only entry in page, merge Low with R and return merged tree
-            %% The page disappears
             merge_subtrees(T, Store0, Low, R);
         _ ->
             not_found
@@ -2513,7 +2499,6 @@ delete_from_list(T, Key, Level, Low, [{K, V, R} | Rest], Store0) ->
             NewPage = bondy_mst_page:new(Level, NewLow, Rest),
             bondy_mst_store:put(Store1, NewPage);
         lt ->
-            %% Key should be before first entry, doesn't exist
             not_found;
         gt ->
             delete_in_list_tail(
@@ -2524,7 +2509,6 @@ delete_from_list(_, _, _, _, [], _) ->
     not_found.
 
 %% @private
-%% Search for key in the tail of the list, accumulating entries before the match
 delete_in_list_tail(T, Key, Level, Low, Before, [{K, _V, R}], Store0) ->
     case compare(T, Key, K) of
         eq ->
@@ -2553,14 +2537,12 @@ delete_in_list_tail(T, Key, Level, Low, Before, [{K, V, R} | Rest], Store0) ->
         lt ->
             not_found;
         gt ->
-            %% Keep searching, accumulate this entry
             delete_in_list_tail(
                 T, Key, Level, Low, Before ++ [{K, V, R}], Rest, Store0
             )
     end.
 
 %% @private
-%% Delete key from a subtree below this level
 delete_below_level(T, Key, KeyLevel, Page, Store0) ->
     Level = bondy_mst_page:level(Page),
     Low = bondy_mst_page:low(Page),
@@ -2569,7 +2551,6 @@ delete_below_level(T, Key, KeyLevel, Page, Store0) ->
 
     case compare(T, Key, K0) of
         lt ->
-            %% Key is in Low subtree
             case delete_at(T, Key, KeyLevel, Store0, Low) of
                 not_found ->
                     not_found;
@@ -2578,14 +2559,11 @@ delete_below_level(T, Key, KeyLevel, Page, Store0) ->
                     bondy_mst_store:put(Store1, NewPage)
             end;
         _ ->
-            %% Key is in one of the list entries' subtrees
             delete_sub_after_first(T, Key, KeyLevel, Level, Low, Store0, List)
     end.
 
 %% @private
-%% Navigate through list entries to find which subtree contains the key
 delete_sub_after_first(T, Key, KeyLevel, PageLevel, Low, Store0, [{K, V, R}]) ->
-    %% Must be in this last subtree R
     case delete_at(T, Key, KeyLevel, Store0, R) of
         not_found ->
             not_found;
@@ -2605,7 +2583,6 @@ delete_sub_after_first(
 ) ->
     case compare(T, Key, K2) of
         lt ->
-            %% Key is in R1 subtree (between K1 and K2)
             case delete_at(T, Key, KeyLevel, Store0, R1) of
                 not_found ->
                     not_found;
@@ -2615,7 +2592,6 @@ delete_sub_after_first(
                     bondy_mst_store:put(Store1, NewPage)
             end;
         _ ->
-            %% Key is after K2, continue searching
             delete_sub_after_first_cont(
                 T,
                 Key,
@@ -2632,7 +2608,6 @@ delete_sub_after_first(
 delete_sub_after_first_cont(
     T, Key, KeyLevel, PageLevel, Low, Before, Store0, [{K, V, R}]
 ) ->
-    %% Must be in this last subtree
     case delete_at(T, Key, KeyLevel, Store0, R) of
         not_found ->
             not_found;
@@ -2653,7 +2628,6 @@ delete_sub_after_first_cont(
 ) ->
     case compare(T, Key, K2) of
         lt ->
-            %% Key is in R1 subtree
             case delete_at(T, Key, KeyLevel, Store0, R1) of
                 not_found ->
                     not_found;
@@ -2663,7 +2637,6 @@ delete_sub_after_first_cont(
                     bondy_mst_store:put(Store1, NewPage)
             end;
         _ ->
-            %% Continue searching
             delete_sub_after_first_cont(
                 T,
                 Key,
@@ -2677,7 +2650,6 @@ delete_sub_after_first_cont(
     end.
 
 %% @private
-%% Merge two subtrees using the existing merge algorithm
 merge_subtrees(_T, Store, undefined, undefined) ->
     {undefined, Store};
 merge_subtrees(_T, Store, Hash, undefined) ->
@@ -2685,5 +2657,4 @@ merge_subtrees(_T, Store, Hash, undefined) ->
 merge_subtrees(_T, Store, undefined, Hash) ->
     {Hash, Store};
 merge_subtrees(T, Store, Hash1, Hash2) ->
-    %% Reuse the existing merge_aux to combine the two subtrees
     merge_aux(T, T, Store, Hash1, Hash2).

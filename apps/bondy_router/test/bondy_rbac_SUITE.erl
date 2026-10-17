@@ -17,14 +17,12 @@
 
 all() ->
     [
-        %% Original tests
         test_1,
         test_grants,
         group_topsort_error,
         group_topsort,
         prototype_1,
 
-        %% New coverage tests
         is_reserved_name_atoms,
         is_reserved_name_binaries,
         is_reserved_name_non_reserved,
@@ -69,7 +67,6 @@ init_per_suite(Config) ->
     [{realm_uri, RealmUri} | Config].
 
 end_per_suite(Config) ->
-    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 add_realm(RealmUri) ->
@@ -367,8 +364,6 @@ test_grants(_) ->
     _ = bondy_realm:create(Data),
     C = bondy_rbac:get_context(Uri, <<"device_registry_test">>),
 
-    % dbg:tracer(), dbg:p(all,c), dbg:tpl(bondy_rbac, '_', x),
-
     ?assertMatch(
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"bondy.realm.list">>, C)
@@ -482,14 +477,11 @@ prototype_1(_) ->
             }
         ]
     },
-    %% We create a proto realm
     _ = bondy_realm:create(Config),
 
-    %% We create a new realm with the proto
     Uri = <<"prototype_1.child">>,
     _ = add_realm(Uri, <<"prototype_1.proto">>),
 
-    %% We get a fresh context
     C1 = bondy_rbac:get_context(Uri, ?U1),
     ?assertMatch(
         ok,
@@ -507,13 +499,11 @@ prototype_1(_) ->
         "U1 should not yet have permission"
     ),
 
-    %% We grant permission through group membership
     ?assertMatch(
         ok,
         bondy_rbac_user:add_group(Uri, ?U1, <<"prototype_group_a">>)
     ),
 
-    %% We get a fresh context
     C2 = bondy_rbac:get_context(Uri, ?U1),
 
     ?assertMatch(
@@ -522,13 +512,10 @@ prototype_1(_) ->
         "U1 should now have permission via prototypical inheritance"
     ),
 
-    %% We override prototype_group_b by creating a group of the same name on
-    %% the child realm.
     _ = bondy_rbac_group:add(
         Uri, bondy_rbac_group:new(#{name => <<"prototype_group_b">>})
     ),
 
-    %% We get a fresh context
     C3 = bondy_rbac:get_context(Uri, ?U1),
     ?assertError(
         {not_authorized, _},
@@ -564,13 +551,11 @@ is_reserved_name_non_reserved(_) ->
     ?assertNot(bondy_rbac:is_reserved_name(<<"admin">>)),
     ?assertNot(bondy_rbac:is_reserved_name(<<"my_group">>)),
     ?assertNot(bondy_rbac:is_reserved_name(<<"com.example.service">>)),
-    %% Non-binary, non-atom should error
     ?assertError(invalid_name, bondy_rbac:is_reserved_name(123)).
 
 normalise_name_casefold(_) ->
     ?assertEqual(<<"hello">>, bondy_rbac:normalise_name(<<"Hello">>)),
     ?assertEqual(<<"hello">>, bondy_rbac:normalise_name(<<"HELLO">>)),
-    %% Already lowercased
     ?assertEqual(<<"hello">>, bondy_rbac:normalise_name(<<"hello">>)),
     %% Idempotent
     Name = <<"MiXeD_CaSe">>,
@@ -633,7 +618,6 @@ grant_revoke_lifecycle(_) ->
         users => [#{username => <<"tester_1">>, groups => [<<"testers">>]}]
     }),
 
-    %% Grant call permission to testers group on a prefix resource
     ok = bondy_rbac:grant(Uri, #{
         <<"permissions">> => [<<"wamp.call">>],
         <<"uri">> => <<"com.api.">>,
@@ -646,7 +630,6 @@ grant_revoke_lifecycle(_) ->
         ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.api.foo">>, C1)
     ),
 
-    %% Revoke it
     ok = bondy_rbac:revoke(Uri, #{
         <<"permissions">> => [<<"wamp.call">>],
         <<"uri">> => <<"com.api.">>,
@@ -670,7 +653,6 @@ partial_revoke(_) ->
         users => [#{username => <<"dev_1">>, groups => [<<"devs">>]}]
     }),
 
-    %% Grant multiple permissions
     ok = bondy_rbac:grant(Uri, #{
         <<"permissions">> => [<<"wamp.call">>, <<"wamp.register">>],
         <<"uri">> => <<"com.svc.">>,
@@ -686,7 +668,6 @@ partial_revoke(_) ->
         ok, bondy_rbac:authorize(<<"wamp.register">>, <<"com.svc.a">>, C1)
     ),
 
-    %% Revoke only wamp.register
     ok = bondy_rbac:revoke(Uri, #{
         <<"permissions">> => [<<"wamp.register">>],
         <<"uri">> => <<"com.svc.">>,
@@ -720,11 +701,9 @@ grant_deduplication(_) ->
         <<"roles">> => [<<"ops">>]
     },
 
-    %% Grant same thing twice
     ok = bondy_rbac:grant(Uri, Grant),
     ok = bondy_rbac:grant(Uri, Grant),
 
-    %% Should have no duplicates in accumulated grants
     Grants = bondy_rbac:group_grants(Uri, <<"ops">>),
     PermLists = [Perms || {_, Perms} <- Grants],
     lists:foreach(
@@ -770,7 +749,6 @@ revoke_user_grants(_) ->
     C1 = bondy_rbac:get_context(Uri, <<"revoke_me">>),
     ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.call">>, <<"anything">>, C1)),
 
-    %% Revoke all grants for this user
     ok = bondy_rbac:revoke_user(Uri, <<"revoke_me">>),
 
     C2 = bondy_rbac:get_context(Uri, <<"revoke_me">>),
@@ -834,12 +812,10 @@ exact_match_grant(_) ->
 
     C = bondy_rbac:get_context(Uri, <<"exact_u">>),
 
-    %% Exact match should work
     ?assertEqual(
         ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.my.procedure">>, C)
     ),
 
-    %% Different URI should not match
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.my.procedure.sub">>, C)
@@ -850,10 +826,6 @@ exact_match_grant(_) ->
     ).
 
 prefix_match_grant_component_boundary(_) ->
-    %% Z-1 end-to-end: a `com.app.order` PREFIX grant must authorize the exact
-    %% URI and genuine sub-URIs, but NOT sibling URIs that only share the byte
-    %% prefix across a component boundary (RBAC is the sole caller of the fixed
-    %% `bondy_wamp_uri:match/3` prefix path).
     Uri = <<"com.test.prefix_boundary">>,
     _ = bondy_realm:create(#{
         uri => Uri,
@@ -927,7 +899,6 @@ wildcard_match_grant(_) ->
         bondy_rbac:authorize(<<"wamp.subscribe">>, <<"com.bar.events">>, C)
     ),
 
-    %% Should not match when the fixed parts differ
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.subscribe">>, <<"com.foo.other">>, C)
@@ -942,7 +913,6 @@ mixed_match_strategies(_) ->
         groups => [#{name => <<"mixed_g">>}],
         users => [#{username => <<"mixed_u">>, groups => [<<"mixed_g">>]}],
         grants => [
-            %% Exact match for one specific procedure
             #{
                 permissions => [<<"wamp.register">>],
                 resources => [
@@ -950,7 +920,6 @@ mixed_match_strategies(_) ->
                 ],
                 roles => [<<"mixed_g">>]
             },
-            %% Prefix match for a namespace
             #{
                 permissions => [<<"wamp.call">>],
                 resources => [
@@ -963,7 +932,6 @@ mixed_match_strategies(_) ->
 
     C = bondy_rbac:get_context(Uri, <<"mixed_u">>),
 
-    %% wamp.register only on exact URI
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.api.health">>, C)
@@ -973,7 +941,6 @@ mixed_match_strategies(_) ->
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.api.other">>, C)
     ),
 
-    %% wamp.call on any URI with the prefix
     ?assertEqual(
         ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.api.health">>, C)
     ),
@@ -997,14 +964,12 @@ user_specific_grants(_) ->
             #{username => <<"group_only_u">>, groups => [<<"base_g">>]}
         ],
         grants => [
-            %% Group grant
             #{
                 permissions => [<<"wamp.call">>],
                 uri => <<"com.shared.">>,
                 match => <<"prefix">>,
                 roles => [<<"base_g">>]
             },
-            %% Direct user grant
             #{
                 permissions => [<<"wamp.register">>],
                 uri => <<"com.special.">>,
@@ -1017,7 +982,6 @@ user_specific_grants(_) ->
     CDirect = bondy_rbac:get_context(Uri, <<"direct_u">>),
     CGroupOnly = bondy_rbac:get_context(Uri, <<"group_only_u">>),
 
-    %% Both users have group grant
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.shared.x">>, CDirect)
@@ -1027,7 +991,6 @@ user_specific_grants(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.shared.x">>, CGroupOnly)
     ),
 
-    %% Only direct_u has the direct user grant
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.special.x">>, CDirect)
@@ -1068,13 +1031,11 @@ anonymous_context_authorization(_) ->
 
     AnonC = bondy_rbac:get_anonymous_context(Uri, <<"anon_user">>),
 
-    %% Anonymous user should have 'all' group grants
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.public.data">>, AnonC)
     ),
 
-    %% But not permissions not granted to 'all'
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.public.data">>, AnonC)
@@ -1090,7 +1051,6 @@ anonymous_permission_denied_message(_) ->
 
     AnonC = bondy_rbac:get_anonymous_context(Uri, <<"anon_test">>),
 
-    %% Verify error message mentions "Anonymous user"
     try
         bondy_rbac:authorize(<<"wamp.register">>, <<"some.uri">>, AnonC),
         ct:fail("Expected not_authorized error")
@@ -1116,14 +1076,12 @@ context_refresh_after_epoch(_) ->
 
     C1 = bondy_rbac:get_context(Uri, <<"refresh_u">>),
 
-    %% Immediately, context should not refresh
     {false, C2} = bondy_rbac:refresh_context(C1),
     ?assertEqual(C1, C2),
 
     %% Wait for epoch to expire (CTXT_REFRESH_SECS = 1 in TEST mode)
     timer:sleep(1100),
 
-    %% Now it should refresh
     {true, _C3} = bondy_rbac:refresh_context(C1).
 
 session_rbac_invalidated_on_revoke(_) ->
@@ -1299,7 +1257,6 @@ explicit_groups_oidc(_) ->
         Uri, <<"oidc_user@idp.com">>, [<<"idp_admin">>, <<"idp_reader">>]
     ),
 
-    %% Should have grants from both explicit groups
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.admin.x">>, C)
@@ -1309,7 +1266,6 @@ explicit_groups_oidc(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.read.y">>, C)
     ),
 
-    %% Should not have grants not assigned to those groups
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.publish">>, <<"com.admin.x">>, C)
@@ -1358,15 +1314,12 @@ explicit_groups_exclude_local_memberships(_) ->
     %% ...but the session's claims name only claimed_g.
     C = bondy_rbac:get_context(Uri, <<"claims_u">>, [<<"claimed_g">>]),
 
-    %% Claimed group's grant applies.
     ?assertEqual(
         ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.claimed.x">>, C)
     ),
-    %% Direct user grant applies.
     ?assertEqual(
         ok, bondy_rbac:authorize(<<"wamp.subscribe">>, <<"com.direct.x">>, C)
     ),
-    %% The local (unclaimed) membership's grant must NOT leak in.
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.publish">>, <<"com.local.x">>, C)
@@ -1403,7 +1356,6 @@ nested_group_inheritance_deep(_) ->
 
     C = bondy_rbac:get_context(Uri, <<"deep_user">>),
 
-    %% User in level_3 should inherit grants from level_0 through the chain
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.deep.resource">>, C)
@@ -1447,9 +1399,7 @@ explicit_groups_deep_inheritance(_) ->
             #{name => <<"level_1">>, groups => [<<"level_0">>]},
             #{name => <<"level_2">>, groups => [<<"level_1">>]},
             #{name => <<"level_3">>, groups => [<<"level_2">>]},
-            %% Diamond: level_1b also member of level_0
             #{name => <<"level_1b">>, groups => [<<"level_0">>]},
-            %% level_2d member of both level_1 and level_1b
             #{name => <<"level_2d">>, groups => [<<"level_1">>, <<"level_1b">>]}
         ],
         grants => [
@@ -1480,41 +1430,32 @@ explicit_groups_deep_inheritance(_) ->
         ]
     }),
 
-    %% ---- Linear chain: explicit group = [level_3] ----
-    %% Should inherit grants from level_3, level_2, level_1, and level_0
     C3 = bondy_rbac:get_context(
         Uri, <<"oidc_deep@idp.com">>, [<<"level_3">>]
     ),
 
-    %% level_3 own grant
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.publish">>, <<"com.l3.x">>, C3)
     ),
-    %% level_2 grant (1 hop up)
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.subscribe">>, <<"com.l2.x">>, C3)
     ),
-    %% level_1 grant (2 hops up)
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.l1.x">>, C3)
     ),
-    %% level_0 grant (3 hops up — root)
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.l0.x">>, C3)
     ),
 
-    %% Negative: a permission not granted at any level
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.unregister">>, <<"com.l0.x">>, C3)
     ),
 
-    %% ---- Middle of chain: explicit group = [level_2] ----
-    %% Should inherit level_2, level_1, level_0 but NOT level_3
     C2 = bondy_rbac:get_context(
         Uri, <<"oidc_mid@idp.com">>, [<<"level_2">>]
     ),
@@ -1531,13 +1472,11 @@ explicit_groups_deep_inheritance(_) ->
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.l0.x">>, C2)
     ),
-    %% Must NOT have level_3 grant
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.publish">>, <<"com.l3.x">>, C2)
     ),
 
-    %% ---- Multiple explicit groups: [level_3, level_1] ----
     %% Redundant but should not break (level_1 already visited via level_3)
     CMulti = bondy_rbac:get_context(
         Uri, <<"oidc_multi@idp.com">>, [<<"level_3">>, <<"level_1">>]
@@ -1552,19 +1491,16 @@ explicit_groups_deep_inheritance(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.l0.x">>, CMulti)
     ),
 
-    %% ---- Diamond: explicit group = [level_2d] ----
     %% level_2d → level_1 → level_0  AND  level_2d → level_1b → level_0
     %% Should get grants from level_1, level_1b, and level_0 (no duplicates)
     CDiamond = bondy_rbac:get_context(
         Uri, <<"oidc_diamond@idp.com">>, [<<"level_2d">>]
     ),
 
-    %% level_1 grant (via level_2d → level_1)
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.l1.x">>, CDiamond)
     ),
-    %% level_0 grant (via either path)
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.l0.x">>, CDiamond)
@@ -1577,7 +1513,6 @@ explicit_groups_deep_inheritance(_) ->
 %% =============================================================================
 
 externalize_grant_formats(_) ->
-    %% Test role + resource format
     Ext1 = bondy_rbac:externalize_grant(
         {{<<"group/admin">>, {<<"com.api.">>, <<"prefix">>}}, [<<"wamp.call">>]}
     ),
@@ -1593,7 +1528,6 @@ externalize_grant_formats(_) ->
         Ext1
     ),
 
-    %% Test exact match resource
     Ext2 = bondy_rbac:externalize_grant(
         {{<<"com.my.proc">>, <<"exact">>}, [<<"wamp.register">>]}
     ),
@@ -1608,7 +1542,6 @@ externalize_grant_formats(_) ->
         Ext2
     ),
 
-    %% Test empty URI (any) resource
     Ext3 = bondy_rbac:externalize_grant(
         {{<<>>, <<"prefix">>}, [<<"wamp.call">>]}
     ),
@@ -1623,7 +1556,6 @@ externalize_grant_formats(_) ->
         Ext3
     ),
 
-    %% Test the bare 'any' resource
     Ext4 = bondy_rbac:externalize_grant({any, [<<"wamp.call">>]}),
     ?assertMatch(
         #{
@@ -1663,7 +1595,6 @@ group_deletion_cascades_grants(_) ->
         ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.eph.x">>, C1)
     ),
 
-    %% Delete the group — should cascade-revoke its grants
     ok = bondy_rbac_group:remove(Uri, <<"ephemeral">>),
 
     C2 = bondy_rbac:get_context(Uri, <<"cascade_u">>),
@@ -1721,7 +1652,6 @@ grant_to_any_resource(_) ->
 
     C2 = bondy_rbac:get_context(Uri2, <<"super_u2">>),
 
-    %% Empty-prefix matches any binary URI
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.anything.here">>, C2)
@@ -1774,9 +1704,7 @@ reverse_grants_on_resource(_) ->
         lists:sort([<<"g_alpha">>, <<"g_beta">>, <<"u_solo">>]),
         reverse_roles(Uri, Shared)
     ),
-    %% Reverse on the other resource returns only the one group granted there.
     ?assertEqual([<<"g_alpha">>], reverse_roles(Uri, Other)),
-    %% A resource nobody was granted on returns empty.
     ?assertEqual(
         [], bondy_rbac:grants_on_resource(Uri, {<<"com.nobody">>, <<"exact">>})
     ),
@@ -2019,7 +1947,6 @@ security_disabled_allows_all(_) ->
         session => bondy_session:new(Uri, SessionOpts)
     },
 
-    %% When security is disabled, all operations are allowed
     ?assertEqual(
         ok,
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.any.thing">>, Ctxt)

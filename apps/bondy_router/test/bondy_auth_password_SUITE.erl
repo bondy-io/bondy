@@ -20,53 +20,39 @@
 
 all() ->
     [
-        %% Original tests (preserved)
         test_1,
         test_2,
 
-        %% Source/CIDR filtering
         user1_allowed_from_any_ip,
         user2_rejected_outside_cidr,
         user2_allowed_within_cidr,
 
-        %% Correct password / wrong password
         correct_password_succeeds,
         wrong_password_fails,
         empty_password_string_fails,
 
-        %% Challenge step
         challenge_returns_true_empty_map,
 
-        %% Method selection
         method_not_in_realm_rejected,
         invalid_method_name_rejected,
         already_set_method_mismatch,
 
-        %% User without password
         user_without_password_excluded,
 
-        %% Anonymous user
         anonymous_user_password_not_available,
 
-        %% Non-existent user
         nonexistent_user_error,
 
-        %% Non-existent realm
         nonexistent_realm_error,
 
-        %% Authenticate returns empty extra map
         authenticate_returns_empty_extra,
 
-        %% Context accessors
         context_accessors,
 
-        %% Multiple auth methods on realm
         password_coexists_with_other_methods,
 
-        %% Authenticate via challenge then authenticate
         full_challenge_authenticate_flow,
 
-        %% Multiple source CIDRs for same user
         multiple_source_cidrs,
 
         %% CP-for-security (§9.8) — the AE fence refuses non-bearer methods too
@@ -368,7 +354,6 @@ user2_rejected_outside_cidr(Config) ->
         lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))
     ),
 
-    %% Trying to authenticate should fail with method_not_allowed
     ?assertMatch(
         {error, method_not_allowed},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt)
@@ -474,7 +459,6 @@ wrong_password_fails(Config) ->
         {error, bad_signature},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt)
     ),
-    %% Also try a completely unrelated string
     ?assertMatch(
         {error, bad_signature},
         bondy_auth:authenticate(
@@ -506,13 +490,11 @@ challenge_returns_true_empty_map(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Password auth challenge returns {true, EmptyMap, NewCtxt}
     {true, Extra, Ctxt1} = bondy_auth:challenge(
         ?PASSWORD_AUTH, #{}, Ctxt0
     ),
     ?assertEqual(#{}, Extra),
 
-    %% After challenge, we can authenticate
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
@@ -547,7 +529,6 @@ invalid_method_name_rejected(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Totally bogus method name
     ?assertMatch(
         {error, invalid_method},
         bondy_auth:authenticate(
@@ -563,11 +544,8 @@ already_set_method_mismatch(Config) ->
         SessionId, RealmUri, ?U3, [], {127, 0, 0, 1}
     ),
 
-    %% Set method via challenge to PASSWORD_AUTH
     {true, _, Ctxt1} = bondy_auth:challenge(?PASSWORD_AUTH, #{}, Ctxt0),
 
-    %% Now trying to authenticate with a DIFFERENT valid method should fail
-    %% because the context method is already set to PASSWORD_AUTH
     ?assertMatch(
         {error, invalid_method},
         bondy_auth:authenticate(?WAMP_CRA_AUTH, ?P2, undefined, Ctxt1)
@@ -653,7 +631,6 @@ authenticate_returns_empty_extra(Config) ->
     {ok, Extra, _} = bondy_auth:authenticate(
         ?PASSWORD_AUTH, ?P1, undefined, Ctxt
     ),
-    %% Password auth returns empty extra map on success
     ?assertEqual(#{}, Extra).
 
 %% =============================================================================
@@ -697,7 +674,6 @@ password_coexists_with_other_methods(Config) ->
     %% Anonymous should NOT be available (user is identified)
     ?assertNot(lists:member(?WAMP_ANON_AUTH, Methods)),
 
-    %% Password auth should work
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt)
@@ -715,22 +691,18 @@ full_challenge_authenticate_flow(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Step 1: Challenge (for password, always returns {true, #{}, _})
     {true, ChallengeExtra, Ctxt1} = bondy_auth:challenge(
         ?PASSWORD_AUTH, #{}, Ctxt0
     ),
     ?assertEqual(#{}, ChallengeExtra),
 
-    %% Step 2: Authenticate with correct password
     {ok, AuthExtra, Ctxt2} = bondy_auth:authenticate(
         ?PASSWORD_AUTH, ?P1, undefined, Ctxt1
     ),
     ?assertEqual(#{}, AuthExtra),
 
-    %% The method is set in the context after challenge
     ?assertEqual(?PASSWORD_AUTH, bondy_auth:method(Ctxt2)),
 
-    %% Step 2b: Authenticate with wrong password on the same context
     ?assertMatch(
         {error, bad_signature},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt1)

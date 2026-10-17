@@ -105,7 +105,6 @@ Indices for matching bondy_registry_entry(s).
 -type reg_idx() :: #reg_idx{}.
 -type sub_idx() :: #sub_idx{}.
 -type index_entry() :: reg_idx() | sub_idx().
-%% -type remote_sub_idx()          ::  #remote_sub_idx{}.
 -type index_key() :: {RealmUri :: uri(), Uri :: uri()}.
 -type invoke() :: binary().
 -type wildcard(T) :: T | '_'.
@@ -2094,7 +2093,6 @@ topic_session_restrictions(Var, Opts) ->
                 %% Idem as not provided
                 {'_', []};
             {ok, EligibleIds} ->
-                %% We include the provided ProtocolSessionIds
                 Eligible = maybe_or(
                     [
                         {'=:=', Var, {const, S}}
@@ -2111,7 +2109,6 @@ topic_session_restrictions(Var, Opts) ->
         {ok, []} ->
             R;
         {ok, ExcludedIds} ->
-            %% We exclude the provided ProtocolSessionIds
             Excluded = maybe_and(
                 [
                     {'=/=', Var, {const, S}}

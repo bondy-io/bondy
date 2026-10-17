@@ -101,7 +101,6 @@ random_strategy_distributes() ->
     Chosen = capture_chosen_peers(Inst, 60),
     Unique = lists:usort(Chosen),
     ?assert(length(Unique) > 1),
-    %% Every chosen peer was one of the offered.
     ?assertEqual([], Unique -- Peers),
     bondy_oplog:stop_instance(Inst).
 
@@ -118,7 +117,6 @@ round_robin_strategy_advances() ->
     %% may have advanced it under a different instance id; this id
     %% is fresh per call so the counter starts at 0).
     Chosen = capture_chosen_peers(Inst, 7),
-    %% First three: full sweep. Then wraps.
     ?assertEqual([p1, p2, p3, p1, p2, p3, p1], Chosen),
     bondy_oplog:stop_instance(Inst).
 

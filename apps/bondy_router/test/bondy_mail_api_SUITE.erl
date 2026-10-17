@@ -40,36 +40,27 @@ suite() ->
 
 all() ->
     [
-        %% Dispatch
         unknown_mail_procedure_is_reported,
-        %% Send
         send_returns_an_id_and_a_status,
         send_async_returns_queued,
         send_reports_a_rejected_recipient,
         send_reports_an_unknown_relay,
         send_reports_an_unpermitted_sender,
-        %% Realm
         realm_is_taken_from_the_session,
         naming_the_session_realm_is_accepted,
         naming_another_realm_is_refused,
         master_realm_may_act_for_another_realm,
-        %% Status
         status_reports_a_sent_message,
         status_is_unknown_for_another_realm,
         mail_families_reach_the_prometheus_exposition,
         status_rejects_a_non_binary_id,
-        %% Relays
         relay_list_hides_unpermitted_relays,
         relay_list_never_exposes_relay_internals,
-        %% Test procedure
         test_is_refused_outside_the_master_realm,
         test_sends_through_the_relay,
-        %% Arity
         too_many_arguments_is_reported,
         too_few_arguments_is_reported,
-        %% Authorization
         granting_the_uri_is_what_gates_the_call,
-        %% Dormancy
         dormant_node_reports_mail_not_configured
     ].
 

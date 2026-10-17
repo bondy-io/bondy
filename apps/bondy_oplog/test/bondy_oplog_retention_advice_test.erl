@@ -201,7 +201,6 @@ advice_against_idle_instance_returns_none() ->
         ?assertEqual(none, maps:get(recommended_action, Advice)),
         Inputs = maps:get(inputs, Advice),
         Pressure = maps:get(pressure, Inputs),
-        %% Idle instance — both ratios should be at or near zero.
         ?assert(maps:get(bytes_ratio, Pressure) < 0.1),
         ?assertEqual(0, maps:get(bootstrap_consumers, Inputs)),
         ?assertEqual(false, maps:get(has_snapshot, Inputs)),

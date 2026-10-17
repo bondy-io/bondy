@@ -22,7 +22,6 @@ Dispatches on the `action` key in the handler state:
 
 -export([init/2]).
 
-%% Default post-login redirect
 -define(DEFAULT_REDIRECT, <<"/">>).
 
 %% =============================================================================
@@ -87,7 +86,6 @@ do_login_redirect(Req0, State, RealmUri, Provider, Config) ->
 
     #{redirect_uri := RedirectUri} = Config,
 
-    %% Store state for the callback
     QsVals0 = cowboy_req:parse_qs(Req0),
     SpaRedirect = proplists:get_value(
         <<"redirect_uri">>, QsVals0, ?DEFAULT_REDIRECT
@@ -109,7 +107,6 @@ do_login_redirect(Req0, State, RealmUri, Provider, Config) ->
         DeviceId
     ),
 
-    %% Get client context and create redirect URL
     case bondy_oidc_provider:get_client_context(RealmUri, Provider) of
         {ok, ClientCtx} ->
             Scopes = maps:get(scopes, Config, [<<"openid">>]),
@@ -354,7 +351,6 @@ handle_token_success(
                 IdClaims
         end,
 
-    %% Extract authid from configured claim
     AuthidClaim = maps:get(authid_claim, Config, <<"preferred_username">>),
     Authid = maps:get(
         AuthidClaim,
@@ -376,7 +372,6 @@ handle_token_success(
             ),
             {ok, Req1, State};
         true ->
-            %% Extract roles from userinfo + token claims
             Authroles = extract_roles(AllClaims, AccessToken, Config),
             do_issue_ticket(
                 Req0,
@@ -415,7 +410,6 @@ do_issue_ticket(
     %% authroles and RBAC context.
     ValidAuthroles = filter_valid_groups(RealmUri, Authid, Authroles),
 
-    %% Optionally provision a local user record
     case maps:get(auto_provision, Config, false) of
         true ->
             ok = ensure_user(RealmUri, Authid, ValidAuthroles);
@@ -423,7 +417,6 @@ do_issue_ticket(
             ok
     end,
 
-    %% Build OIDC tokens map for the ticket
     OidcTokensMap = build_oidc_tokens_map(
         IdTokenJWT, AccessToken, RefreshToken
     ),

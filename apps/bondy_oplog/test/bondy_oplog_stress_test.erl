@@ -75,7 +75,6 @@ run_one(N) ->
             {0, 0},
             lists:seq(1, Steps)
         ),
-    %% Final convergence round.
     {ok, _} = bondy_oplog:sync(A, B),
     {ok, _} = bondy_oplog:sync(B, A),
     {Ka, Kb} = Counts,
@@ -122,7 +121,6 @@ hlc_seeds_from_persisted_watermark() ->
     {ok, {compacted, Watermark, _}} = bondy_oplog_test_helpers:compact_among(
         Id, [Id, {peer, dummy_hlc}]
     ),
-    %% Stop and re-open with same path.
     ok = bondy_oplog:stop_instance(Id),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id, Opts),
     ?assertEqual(Watermark, bondy_oplog:current_watermark(Id)),
@@ -134,8 +132,6 @@ hlc_seeds_from_persisted_watermark() ->
     bondy_oplog_peer_state:forget_peer({peer, dummy_hlc}),
     _ = file:del_dir_r(Tmp),
     ok.
-
-%% Helpers
 
 originated_opts() ->
     #{origin => bondy_oplog_origin:new()}.

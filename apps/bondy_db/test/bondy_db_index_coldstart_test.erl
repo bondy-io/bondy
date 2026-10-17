@@ -136,7 +136,6 @@ cleanup(Dirs) ->
 %% =============================================================================
 
 clean_restart_trusts(Dirs) ->
-    %% --- First lifetime: write + index two entries, flush, close. ---
     {Db0, _} = open(Dirs),
     {ok, T0} = open_table(Db0),
     write(T0, <<"u1">>, <<"active">>),
@@ -148,7 +147,6 @@ clean_restart_trusts(Dirs) ->
     ),
     close(Db0),
 
-    %% --- Second lifetime: count rebuilds across the reopen. ---
     Ctr = counters:new(1, []),
     attach_rebuild_counter(Ctr),
     {Db1, _} = open(Dirs),

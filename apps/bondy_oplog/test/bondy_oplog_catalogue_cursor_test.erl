@@ -120,7 +120,6 @@ two_cursors_are_independent() ->
     ok = bondy_oplog_catalogue_cursor:discard(C2).
 
 cursor_distinct_per_mint() ->
-    %% 50 mints should yield 50 distinct cursors.
     Cursors = [
         bondy_oplog_catalogue_cursor:mint(
             mk_id(), n, primary, 0, <<>>, 0

@@ -99,8 +99,6 @@ prop_encode_state_roundtrip() ->
         ?MOD:decode_state(?MOD:encode_state(State)) =:= State
     end).
 
-%% Enable-wins semantics oracle: the flag is true iff some enable has a dot
-%% that NO disable observed.
 prop_enable_wins_oracle() ->
     ?FORALL(Cmds, cmds_gen(), begin
         {_PerOrigin, Log} = simulate(Cmds),

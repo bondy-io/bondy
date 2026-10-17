@@ -12,40 +12,29 @@
 
 all() ->
     [
-        %% Original test (preserved)
         test,
 
-        %% Challenge behaviour
         challenge_returns_false,
 
-        %% Successful anonymous auth
         anonymous_auth_succeeds,
         anonymous_auth_returns_empty_extra,
 
-        %% Named user cannot use anonymous
         named_user_cannot_use_anon,
 
-        %% Method selection
         anon_not_available_when_not_in_realm,
         invalid_method_rejected,
         method_not_allowed_for_anon,
 
-        %% CIDR filtering
         anonymous_from_any_ip,
 
-        %% allow_anonymous_user policy (off | local | on)
         anonymous_local_policy_scopes_by_source_ip,
 
-        %% Error cases
         nonexistent_realm_error,
 
-        %% Context
         context_user_id_is_anonymous,
 
-        %% Coexistence with other methods
         anon_coexists_with_password,
 
-        %% Security disabled
         security_disabled_allows_anon
     ].
 
@@ -289,7 +278,6 @@ named_user_cannot_use_anon(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
 
-    %% A named user should not have anonymous in available methods
     {ok, Ctxt} = bondy_auth:init(
         SessionId, RealmUri, <<"named_user">>, [], {127, 0, 0, 1}
     ),
@@ -302,7 +290,6 @@ named_user_cannot_use_anon(Config) ->
 %% =============================================================================
 
 anon_not_available_when_not_in_realm(_Config) ->
-    %% Create a realm that only allows PASSWORD_AUTH
     RealmUri = <<"com.example.test.no_anon_realm">>,
     _ = bondy_realm:create(#{
         uri => RealmUri,
@@ -321,7 +308,6 @@ anon_not_available_when_not_in_realm(_Config) ->
         SessionId, RealmUri, anonymous, undefined, {127, 0, 0, 1}
     ),
 
-    %% Anonymous method should not be available since realm doesn't allow it
     ?assertNot(
         lists:member(?WAMP_ANON_AUTH, bondy_auth:available_methods(Ctxt))
     ).
@@ -423,8 +409,6 @@ anon_coexists_with_password(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
 
-    %% When anonymous user connects to a realm with both anon and password,
-    %% only anon should be available
     {ok, AnonCtxt} = bondy_auth:init(
         SessionId, RealmUri, anonymous, [], {127, 0, 0, 1}
     ),
@@ -432,7 +416,6 @@ anon_coexists_with_password(Config) ->
     ?assert(lists:member(?WAMP_ANON_AUTH, AnonMethods)),
     ?assertNot(lists:member(?PASSWORD_AUTH, AnonMethods)),
 
-    %% When named user connects, password should be available but not anon
     {ok, NamedCtxt} = bondy_auth:init(
         SessionId, RealmUri, <<"named_user">>, [], {127, 0, 0, 1}
     ),

@@ -29,7 +29,6 @@
 %% Generators
 %% =============================================================================
 
-%% Generate a valid timestamp (milliseconds since Unix epoch)
 %% We limit the range to reasonable values (year 1970 to ~year 10000)
 timestamp() ->
     %% Up to year 9999
@@ -40,7 +39,6 @@ small_timestamp() ->
     %% Roughly 2001 to 2033
     range(1000000000000, 2000000000000).
 
-%% Generate a list of ordered timestamps
 ordered_timestamps() ->
     ?LET(
         Base,
@@ -74,7 +72,6 @@ invalid_uuid() ->
                 range(0, 4095),
                 range(0, 4611686018427387903)
             },
-            %% Version 6 instead of 7
             <<Ts:48, 6:4, A:12, 2:2, B:62>>
         ),
         %% Wrong variant (not 2)
@@ -85,7 +82,6 @@ invalid_uuid() ->
                 range(0, 4095),
                 range(0, 4611686018427387903)
             },
-            %% Variant 0 instead of 2
             <<Ts:48, 7:4, A:12, 0:2, B:62>>
         ),
         %% Wrong size
@@ -208,14 +204,12 @@ prop_monotonic_ordering() ->
                 bondy_connect_uuidv7:from_timestamp(Ts)
              || Ts <- lists:reverse(Timestamps)
             ],
-            %% Check that UUIDs are monotonically increasing (as binaries)
             %% Note: Due to random bits, this is only guaranteed for timestamps
             %% that differ by more than the random component can affect ordering
             check_monotonic_timestamps(UUIDs)
         end
     ).
 
-%% Helper: Check that extracted timestamps are monotonically increasing
 check_monotonic_timestamps([]) ->
     true;
 check_monotonic_timestamps([_]) ->

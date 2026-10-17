@@ -107,21 +107,17 @@ realm_and_entities(Config) ->
         })
     ]),
 
-    %% The realm itself, with the declared properties.
     {ok, Realm} = bondy_realm:lookup(Uri),
     ?assertEqual(<<"A declared realm">>, bondy_realm:description(Realm)),
     ?assert(bondy_realm:is_security_enabled(Realm)),
 
-    %% Groups.
     ?assertEqual(
         [<<"grp1">>, <<"grp2">>],
         declared_groups(Uri)
     ),
 
-    %% Users.
     ?assertMatch({ok, _}, bondy_rbac_user:lookup(Uri, <<"usr1">>)),
 
-    %% Sources — declared for the named user under the declared method.
     ?assertMatch(
         [_ | _],
         [
@@ -131,7 +127,6 @@ realm_and_entities(Config) ->
         ]
     ),
 
-    %% Grants.
     ?assertMatch([_ | _], bondy_realm:grants(Uri)).
 
 user_group_membership(Config) ->
@@ -289,7 +284,6 @@ reconciles_membership_change(Config) ->
     ),
     {ok, V0} = bondy_rbac_user:token_version(Uri, <<"usr1">>),
 
-    %% Gaining a group.
     ok = apply_config(Config, [
         realm(Uri, Base#{
             <<"users">> => [user(<<"usr1">>, [<<"grp1">>, <<"grp2">>])]
@@ -304,7 +298,6 @@ reconciles_membership_change(Config) ->
     {ok, V1} = bondy_rbac_user:token_version(Uri, <<"usr1">>),
     ?assert(V1 > V0),
 
-    %% Losing a group.
     ok = apply_config(Config, [
         realm(Uri, Base#{<<"users">> => [user(<<"usr1">>, [<<"grp2">>])]})
     ]),

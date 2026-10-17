@@ -82,9 +82,6 @@ encode(Message0, Enc) when is_tuple(Message0) ->
     case bondy_wamp_message:partial(Message0) of
         undefined ->
             encode(pack(Message0), Enc);
-        %% We currently only support JSON and CBOR partials
-        %% Here is where the magic happens, we just encode the Head and
-        %% append the Tail (which contains the payload).
         {Enc, Tail} ->
             Head = pack(Message0),
             case Enc of
@@ -102,10 +99,8 @@ encode(Message, erl = Enc) when is_list(Message) ->
 encode(Message, json = Enc) when is_list(Message) ->
     encode(Message, Enc, opts(Enc, encode));
 encode(Message, cbor = Enc) when is_list(Message) ->
-    %% We want binary keys always
     encode(Message, cbor, opts(Enc, encode));
 encode(Message, msgpack = Enc) when is_list(Message) ->
-    %% We want binary keys always
     encode(Message, msgpack, opts(Enc, encode));
 encode(Message, bert = Enc) when is_list(Message) ->
     encode(Message, bert, opts(Enc, encode));
@@ -248,7 +243,6 @@ pack(_) ->
     error(badarg).
 
 pack_generic(Type, M) when is_tuple(M) ->
-    %% All other message types are straight forward
     [_H | T] = tuple_to_list(M),
     [Type | T].
 
@@ -436,7 +430,6 @@ unpack([?YIELD, ReqId, Options, Args, KWArgs]) ->
         KWArgs
     );
 unpack({Head, {json, _} = Partial}) ->
-    %% For now we support just json partial coding
     M = unpack(Head),
     bondy_wamp_message:set_partial(M, Partial);
 unpack({Head, {cbor, _} = Partial}) ->

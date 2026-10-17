@@ -59,7 +59,6 @@ reap_origins_is_value_preserving_test() ->
     ),
     Value0 = ?MOD:to_value(State1),
     {State2, Reaped} = ?MOD:reap_origins(State1, [<<"b">>]),
-    %% "b" never wrote anything -- nothing to reap, value unchanged.
     ?assertEqual([], Reaped),
     ?assertEqual(Value0, ?MOD:to_value(State2)).
 
@@ -96,9 +95,7 @@ stabilize_folds_stable_field_runs_test() ->
     {_Schema, Fields, _CC, _Hlc} = Reduced,
     ?assertEqual(2, map_size(maps:get(count, Fields))),
     ?assertEqual(1, map_size(maps:get(tag, Fields))),
-    %% The reduced state round-trips through the frame encoding.
     ?assertEqual(Reduced, ?MOD:decode_state(?MOD:encode_state(Reduced))),
-    %% And a second pass at the same cut has nothing left to fold.
     ?assertEqual(keep, ?MOD:stabilize(100, Reduced)).
 
 stabilize_fold_then_suffix_equals_full_replay_test() ->

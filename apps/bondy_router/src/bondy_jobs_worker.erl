@@ -85,7 +85,6 @@ init([PoolName, Index]) ->
     Queue = ?QUEUE_NAME(Index),
     ok = jobs:add_queue(Queue, QOpts),
 
-    %% We connect this worker to the pool worker name
     WorkerName = ?SERVER_NAME(Index),
     true = gproc_pool:connect_worker(PoolName, WorkerName),
 

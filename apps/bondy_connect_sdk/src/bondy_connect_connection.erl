@@ -475,29 +475,22 @@ established(enter, _Old, Data0) ->
     _ = process_flag(sensitive, false),
     HSup = bondy_connect_conn_sup:handler_sup(Data0#data.conn_sup),
     Data1 = Data0#data{handler_sup = HSup},
-    %% On a re-establish (we have established before) replay the declared
-    %% REGISTER/SUBSCRIBE set against the fresh session.
     Data2 =
         case Data1#data.established_once of
             true -> replay_declared(Data1);
             false -> Data1
         end,
     Data3 = reply_waiters(ok, Data2#data{established_once = true}),
-    %% A successful establish resets the reconnect budget and arms keepalive.
     Data4 = reset_reconnect_retry(Data3),
     {keep_state, Data4,
         bondy_connect_keepalive:idle_actions(Data4#data.keepalive)};
 established({timeout, ping_idle}, ping_idle, Data) ->
-    %% The idle timer fired — send a ping (arming its deadline), or reconnect
-    %% once the attempts are exhausted.
     case bondy_connect_keepalive:on_idle(Data#data.keepalive) of
         disabled -> {keep_state, Data};
         give_up -> on_transport_failure(ping_timeout, Data);
         {ping, Deadline} -> arm_ping(Deadline, Data)
     end;
 established({timeout, ping}, ping_timeout, Data) ->
-    %% A ping went unanswered within its deadline — fail it and try again, or
-    %% tear the link down (and reconnect) once the attempts are exhausted.
     case bondy_connect_keepalive:on_ping_timeout(Data#data.keepalive) of
         disabled ->
             {keep_state, Data};

@@ -136,7 +136,6 @@ merge_event_fires_on_remote_write(Config) ->
     NS = erpc:call(N2, ?MODULE, do_namespace, [?USERS_TABLE]),
     ok = erpc:call(N2, ?MODULE, start_collector, [NS]),
 
-    %% Remote write on node 1 → converges on node 2 AND delivers a merge event.
     RKey = <<"merge_hook_remote">>,
     RVal = #{username => RKey, marker => <<"merge_hook">>},
     ok = apply_on(N1, ?USERS_TABLE, ?REALM, RKey, RVal),
@@ -224,7 +223,6 @@ concurrent_membership_adds_both_survive(Config) ->
     ok = erpc:call(N1, ?MODULE, do_add_member, [Uri, User, <<"g_a">>]),
     ok = erpc:call(N2, ?MODULE, do_add_member, [Uri, User, <<"g_b">>]),
 
-    %% Both facts converge everywhere.
     [
         ok = wait_member_converge(N, Uri, User, [<<"g_a">>, <<"g_b">>])
      || N <- [N1, N2, N3]
@@ -253,17 +251,13 @@ rib_summary_converges_to_stub(Config) ->
     %% cast to the partition server, so poll).
     ok = wait_rib_cell(N1, Uri, Proc, N1Str),
 
-    %% Stage 2 — the cell rode AAE into N2's projection.
     ok = wait_rib_cell(N2, Uri, Proc, N1Str),
 
-    %% Stage 3 — N2's merge reactor compiled it into a stub.
     ok = wait_rib_stub_count(N2, Uri, Proc, N1Str, 1),
 
-    %% The dual-write consistency gate holds on both nodes once converged.
     ok = wait_rib_check_empty(N1, Uri),
     ok = wait_rib_check_empty(N2, Uri),
 
-    %% The unregister clears the cell; the stub follows.
     ok = erpc:call(N1, ?MODULE, do_remove_registration, [Uri, Proc]),
     ok = wait_rib_stub_count(N2, Uri, Proc, N1Str, 0),
     ok = wait_rib_check_empty(N2, Uri),
@@ -363,7 +357,6 @@ rib_write_mode_cluster(Config) ->
         ]),
         W1Str = erpc:call(W1, bondy_config, nodestring, []),
 
-        %% The summaries replicate...
         ok = wait_rib_stub_count(W2, Uri, Proc, W1Str, 1),
         ok = wait_rib_sub_node(W2, Uri, TopicA, W1),
         ok = wait_rib_sub_node(W2, Uri, TopicB, W1),
@@ -372,13 +365,11 @@ rib_write_mode_cluster(Config) ->
         %% full-entry bondy_db table left to hold anything anywhere, so the
         %% property is now structurally true rather than empirically observed.
 
-        %% Cross-node CALL on summaries alone.
         ?assertMatch(
             #result{args = [<<"pong">>]},
             erpc:call(W2, ?MODULE, do_rib_call, [Uri, Proc])
         ),
 
-        %% Cross-node pub/sub on summaries alone.
         ok = erpc:call(W2, ?MODULE, do_rib_publish, [Uri, TopicA, [<<"a">>]]),
         ok = erpc:call(W2, ?MODULE, do_rib_publish, [Uri, TopicB, [<<"b">>]]),
         ok = wait_probe_args(W1, [<<"a">>, <<"b">>]),
@@ -475,15 +466,11 @@ remote_user_delete_closes_peer_sessions(Config) ->
     Uri = <<"com.bondy.aae_userdel">>,
     User = <<"victim">>,
 
-    %% Realm + user on node 1.
     ok = erpc:call(N1, ?MODULE, do_create_user_realm, [Uri, User]),
 
-    %% Record close_sessions on node 2, then converge the user there.
     ok = erpc:call(N2, ?MODULE, do_arm_close_recorder, []),
     try
         ok = wait_user_exists(N2, Uri, User),
-        %% Delete on node 1 → the `clear` rides AAE → node 2's react_user closes
-        %% the user's sessions for the realm (recorded here).
         ok = erpc:call(N1, ?MODULE, do_delete_user, [Uri, User]),
         ok = wait_close_recorded(N2, Uri, User)
     after
@@ -536,7 +523,6 @@ token_version_rejected_cross_node(Config) ->
     %% bondy_auth_oauth2_SUITE.)
     [ok = erpc:call(N, ?MODULE, do_set_max_lag, [5000]) || N <- [N1, N2]],
 
-    %% Create the realm + user authoritatively on node 1.
     ok = erpc:call(N1, ?MODULE, do_create_auth_realm, [Uri, User, Pass]),
 
     %% token_version observed by node 1 == node 2 (the user cell converged with
@@ -564,7 +550,6 @@ token_version_rejected_cross_node(Config) ->
     {ok, TV1} = erpc:call(N1, bondy_rbac_user, token_version, [Uri, User]),
     ?assert(TV1 > TV0),
 
-    %% Wait for the bump to converge to node 2.
     ok = wait_token_version(N2, Uri, User, TV1),
 
     %% Node 2 now REJECTS the old JWT: its embedded tv (TV0) no longer matches
@@ -592,7 +577,6 @@ concurrent_token_issues_cross_node_both_survive(Config) ->
     {ok, TV0} = erpc:call(N1, bondy_rbac_user, token_version, [Uri, User]),
     [ok = wait_token_version(N, Uri, User, TV0) || N <- [N2, N3]],
 
-    %% Concurrent issues on two nodes, two scopes.
     Parent = self(),
     Issuers = [
         spawn_link(fun() ->
@@ -608,13 +592,11 @@ concurrent_token_issues_cross_node_both_survive(Config) ->
         end
      || Pid <- Issuers
     ],
-    %% Both tokens converge to every node.
     [
         ok = wait_token_state(N, Uri, User, D, present)
      || N <- [N1, N2, N3], D <- [<<"d1">>, <<"d2">>]
     ],
 
-    %% Revoke on node 1 while node 2 issues a third scope.
     Revoker = spawn_link(fun() ->
         Parent !
             {self(), erpc:call(N1, bondy_oauth_token, revoke_all, [Uri, User])}
@@ -709,7 +691,6 @@ stale_peer_rejoin_durable_converges(Config) ->
         ok = apply_on(R1, ?USERS_TABLE, ?REALM, Only1, Only1V),
         _ = erpc:call(R1, ?MODULE, do_compact_all, []),
 
-        %% R2 returns on its own data directory and rejoins.
         S2b = bondy_ct:restart_node(
             S2, 2, [{[partisan, peer_port], 18195}], Config
         ),
@@ -1275,7 +1256,6 @@ wait_converge(Node, Table, Band, Key, Expected) ->
 
 %% @private
 wait_converge_loop(Node, Table, Band, Key, Expected, Deadline) ->
-    %% Nudge the scheduler on the reading node to pull now.
     _ =
         try
             erpc:call(Node, bondy_oplog_sync_scheduler, trigger, [])

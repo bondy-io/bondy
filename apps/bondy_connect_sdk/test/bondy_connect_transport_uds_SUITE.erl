@@ -45,7 +45,6 @@ end_per_suite(_) ->
 %% TESTS
 %% =============================================================================
 
-%% A full register→call works over the Unix domain socket transport.
 connect_missing_path_fails(_) ->
     Result = bondy_connect_client:connect(#{
         transport => uds,

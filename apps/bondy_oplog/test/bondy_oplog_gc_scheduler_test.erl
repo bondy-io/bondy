@@ -1,6 +1,3 @@
-%% Stage-3 gc-scheduler tests. Stage 3 only verifies the trigger
-%% plumbing; the actual compaction body lands in Stage 5.
-
 -module(bondy_oplog_gc_scheduler_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -103,7 +100,6 @@ trigger_for_single_instance() ->
     after 1000 ->
         error(no_trigger)
     end,
-    %% Should not have triggered for B.
     receive
         {Ref, B} -> error(unexpected_trigger_for_b)
     after 100 ->
@@ -137,7 +133,6 @@ trigger_error_does_not_crash() ->
     after 1000 ->
         error(no_trigger)
     end,
-    %% The scheduler must still be alive after the callback raised.
     Pid = whereis(bondy_oplog_gc_scheduler),
     ?assert(is_pid(Pid)),
     ?assert(is_process_alive(Pid)),
@@ -177,7 +172,6 @@ named_second_scheduler_is_independent() ->
             )
         ),
 
-        %% The named scheduler ticks ITS trigger, not the default's...
         bondy_oplog_gc_scheduler:trigger(Name),
         receive
             {RefN, Inst} -> ok
@@ -188,7 +182,6 @@ named_second_scheduler_is_independent() ->
         after 100 -> ok
         end,
 
-        %% ...and the default ticks only its own.
         bondy_oplog_gc_scheduler:trigger(),
         receive
             {RefD, Inst} -> ok

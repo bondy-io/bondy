@@ -138,12 +138,10 @@ Options:
 """.
 -spec start(map()) -> {ok, pos_integer()}.
 start(Opts) ->
-    %% Ensure cowboy and its deps are running
     {ok, _} = application:ensure_all_started(cowboy),
 
     start_ets_owner(),
 
-    %% Initialize defaults
     init_defaults(),
 
     Port = maps:get(port, Opts, 0),
@@ -364,8 +362,6 @@ init(Req, {Scheme, Action} = State) ->
             handle(Scheme, Action, Req, State)
     end.
 
-%% --- OAuth2 client_credentials ---
-
 handle(oauth2, token, Req0, State) ->
     {ok, RawBody, Req} = cowboy_req:read_body(Req0),
     Params = cow_qs:parse_qs(RawBody),
@@ -408,8 +404,6 @@ handle(oauth2, token, Req0, State) ->
             ),
             reply_json(400, RespBody, Req, State)
     end;
-%% --- OIDC discovery ---
-
 handle(oidc, discovery, Req, State) ->
     Base = base_url(),
     Doc = iolist_to_binary(
@@ -436,8 +430,6 @@ handle(oidc, discovery, Req, State) ->
         })
     ),
     reply_json(200, Doc, Req, State);
-%% --- OIDC JWKS ---
-
 handle(oidc, jwks, Req, State) ->
     %% Static placeholder JWKS. The gateway doesn't validate JWTs
     %% itself — it just passes tokens through — so a stub is fine.
@@ -460,8 +452,6 @@ handle(oidc, jwks, Req, State) ->
         })
     ),
     reply_json(200, JWKS, Req, State);
-%% --- OIDC token ---
-
 handle(oidc, token, Req0, State) ->
     {ok, RawBody, Req} = cowboy_req:read_body(Req0),
     Params = cow_qs:parse_qs(RawBody),
@@ -503,8 +493,6 @@ handle(oidc, token, Req0, State) ->
             ),
             reply_json(400, RespBody, Req, State)
     end;
-%% --- OIDC userinfo ---
-
 handle(oidc, userinfo, Req, State) ->
     RespBody = iolist_to_binary(
         json:encode(#{
@@ -514,8 +502,6 @@ handle(oidc, userinfo, Req, State) ->
         })
     ),
     reply_json(200, RespBody, Req, State);
-%% --- GIS custom scheme ---
-
 handle(gis, token, Req0, State) ->
     {ok, RawBody, Req} = cowboy_req:read_body(Req0),
     Params = cow_qs:parse_qs(RawBody),
@@ -533,7 +519,6 @@ handle(gis, token, Req0, State) ->
                     <<"expires">> => Expires
                 })
             ),
-            %% GIS always returns 200 for the token endpoint
             reply_json(200, RespBody, Req, State);
         {error, Msg} ->
             %% GIS returns 200 with error in body (not an HTTP error)
@@ -548,8 +533,6 @@ handle(gis, token, Req0, State) ->
             ),
             reply_json(200, RespBody, Req, State)
     end;
-%% --- Upstream echo ---
-
 handle(upstream, echo, Req0, State) ->
     case ets:lookup(?TABLE, upstream_response) of
         [{upstream_response, {StatusCode, Body}}] ->

@@ -214,7 +214,6 @@ Also initialises the proxy protocol and extracts the source IP.
 """.
 is_authorized(Req0, St0) ->
     try
-        %% We validate realm exists
         _Realm = bondy_realm:fetch(maps:get(realm_uri, St0)),
 
         %% We have to do this here and not in the forbidden call
@@ -484,7 +483,6 @@ is_authorized(_, Req, #{security := Security} = St) ->
 authenticate(Token, Ctxt0, Req0, St0) ->
     case bondy_auth:authenticate(?OAUTH2_AUTH, Token, #{}, Ctxt0) of
         {ok, Claims, _Ctxt1} when is_map(Claims) ->
-            %% The token claims
             Ctxt = update_context(
                 {security, Claims}, maps:get(api_context, St0)
             ),
@@ -594,7 +592,6 @@ the configured action
 do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     Method = method(Req0),
     try
-        %% We now read the body from the request into the context
         {ok, Req1, St1} = read_body(Req0, St0),
         case perform_action(Method, maps:get(Method, Spec), St1) of
             {ok, Response, St2} ->
@@ -723,12 +720,6 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 %% Records the WHOLE upstream error against the request id, so a spec author
 %% has something to render that support can trace — `{{action.error.id}}` —
 %% instead of the error map itself.
-%%
-%% Before this, nothing on the error path logged: the only way to see why an
-%% endpoint was failing was to interpolate `{{action.error}}` into the response,
-%% which is exactly how internal detail reaches a client and stays there. The
-%% detail an author needs is real; what was missing was somewhere else to put
-%% it.
 %%
 %% The id is `request.id`, already a trace id minted by `init_context/1`, not a
 %% second identifier: a response, this log record and the request's trace name
@@ -895,8 +886,6 @@ perform_action(
         <<"headers">> := Headers,
         <<"timeout">> := T,
         <<"connect_timeout">> := CT,
-        % <<"retries">> := R,
-        % <<"retry_timeout">> := RT,
         <<"body">> := Body
     } = Act1 = mops_eval(Act, Ctxt0),
 
@@ -1376,7 +1365,6 @@ log(Level, Msg0, #{api_context := Ctxt} = St) when is_map(Msg0) ->
         <<"scheme">> := Scheme,
         <<"peername">> := Peername,
         <<"path">> := Path,
-        % <<"headers">> := Headers,
         <<"query_string">> := QueryString,
         <<"bindings">> := Bindings,
         <<"body_length">> := Len

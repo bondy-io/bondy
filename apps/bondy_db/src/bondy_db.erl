@@ -897,7 +897,6 @@ apply(
     is_binary(Realm), is_binary(Key)
 ->
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
-    %% G-1: fold the realm into the storage key (see cell_key/3).
     SKey = cell_key(Topology, Realm, Key),
     %% Strategy-aware shard placement: pick the shard from the
     %% table's partition strategy (`aggregate` co-locates a subject's facts;
@@ -1612,7 +1611,6 @@ read(
     is_binary(Realm), is_binary(Key)
 ->
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
-    %% G-1: fold the realm into the storage key (see cell_key/3).
     SKey = cell_key(Topology, Realm, Key),
     %% Force the read onto the same shard the write chose: under any
     %% non-`entity` strategy the shard is NOT `phash2({Bucket, SKey})`, so the
@@ -1674,8 +1672,6 @@ range(
     is_map(Opts)
 ->
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
-    %% G-1: fold the realm into the bounds (no-op for realm-in-bucket
-    %% topologies, so their shard formula `phash2({Bucket, Low})` is preserved).
     Lo = cell_key(Topology, Realm, Low),
     Hi = fold_high(Topology, Realm, High),
     %% Single-shard scan: default to the shard holding `Low` under the table's
@@ -1917,8 +1913,6 @@ range_all(
     is_map(Opts)
 ->
     Bucket = primary_bucket(Table, Realm),
-    %% G-1: fold the realm into both bounds (no-op for realm-in-bucket
-    %% topologies, so their scan stays inside the realm's bucket).
     Lo = cell_key(Topology, Realm, Low),
     Hi = fold_high(Topology, Realm, High),
     case bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {Lo, Hi}, Opts) of

@@ -58,7 +58,6 @@ init_per_testcase(_TC, Config) ->
     bondy_http_connector_mock_auth:reset_call_count(),
     bondy_http_connector_mock_auth:set_token(<<"default-token">>),
 
-    %% Create a fresh gproc pool for this test
     _ =
         try
             gproc_pool:force_delete(?POOL_NAME)
@@ -76,7 +75,6 @@ init_per_testcase(_TC, Config) ->
     Config.
 
 end_per_testcase(_TC, _Config) ->
-    %% Stop the worker if alive
     case whereis(?WORKER_NAME) of
         undefined -> ok;
         Pid -> stop_worker(Pid)
@@ -94,7 +92,6 @@ end_per_testcase(_TC, _Config) ->
             end
     end,
 
-    %% Remove the pool
     _ =
         try
             gproc_pool:force_delete(?POOL_NAME)
@@ -267,7 +264,6 @@ meta_expires_in_overrides_default_ttl(_Config) ->
     %% Wait for preemptive refresh at 1s + margin
     timer:sleep(1500),
     {ok, T2} = get_token(Pid, Conf),
-    %% Token should have been refreshed due to short expires_in
     ?assertNotEqual(<<"meta-tok-1">>, T2),
     ?assert(atomics:get(Counter, 1) >= 2),
     stop_worker(Pid).

@@ -333,7 +333,6 @@ ets_owner_survives_caller_death() ->
     ?assertNotEqual(Caller, Owner),
     ?assertEqual(Owner, ets:info(Tid, owner)),
     ?assertEqual(Owner, ets:info(CacheTid, owner)),
-    %% Kill the caller.
     exit(Caller, kill),
     receive
         {'DOWN', MRef, process, Caller, _} -> ok

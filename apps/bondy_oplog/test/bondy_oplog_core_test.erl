@@ -57,7 +57,6 @@ read_returns_shard_not_registered_for_unknown_shard() ->
     %% with shard_count=4 but only putting shard 0 in the registry.
     NS = mk_ns(),
     {Setup, _} = setup_shard(NS, primary, 0, 4, lww_register),
-    %% Find a key whose phash2 lands on shard 1..3.
     Key = pick_key_for_shard(NS, primary, 1),
     ?assertEqual(
         {error, shard_not_registered},
@@ -80,12 +79,10 @@ read_honours_shard_override() ->
         lww_register, {set, <<"v">>, 42}, 42
     ),
     ok = bondy_oplog_projection_ets:put_batch(PH, [{?B, Key, Frame}]),
-    %% No override: hashes to shard 1 (unregistered).
     ?assertEqual(
         {error, shard_not_registered},
         bondy_oplog_core:read(NS, primary, Key)
     ),
-    %% Override to shard 0 (registered): resolves there, returns the value.
     ?assertEqual(
         {<<"v">>, 42},
         bondy_oplog_core:read(NS, primary, ?B, Key, #{shard => 0})
@@ -118,12 +115,10 @@ read_merges_overlay_with_projection() ->
     NS = mk_ns(),
     {Setup, #{projection := PH, overlay := OV}} =
         setup_shard(NS, primary, 0, 1, lww_register),
-    %% Projection at HLC=10 → state {set, <<"old">>, 10}.
     OldFrame = bondy_oplog_test_helpers:frame(
         lww_register, {set, <<"old">>, 10}, 10
     ),
     ok = bondy_oplog_projection_ets:put_batch(PH, [{?B, <<"k">>, OldFrame}]),
-    %% Overlay carries a newer event at HLC=20.
     Event = mk_event(20, <<"o">>, 0, {set, 20, <<"new">>}),
     ok = bondy_oplog_db_overlay:insert(OV, ?B, <<"k">>, Event),
     ?assertEqual(
@@ -171,7 +166,6 @@ write_through_invalidates_existing_cache_entry() ->
         setup_shard(NS, primary, 0, 1, lww_register),
     %% Pre-populate the cache. The write-through path invalidates rather
     %% than folding (§3.6); the next read repopulates via HEAD.
-    %% `apply_value_delta/2`); the next read repopulates via HEAD.
     ok = bondy_oplog_cache_ets:fill(
         CH, ?B, <<"k">>, {<<"v1">>, 5}, bondy_oplog_cache_ets:ticket(CH)
     ),
@@ -186,7 +180,6 @@ write_through_skips_when_key_not_cached() ->
         setup_shard(NS, primary, 0, 1, lww_register),
     Event = mk_event(10, <<"o">>, 0, {set, 10, <<"v">>}),
     ok = bondy_oplog_core:write_through(NS, primary, <<"k">>, Event),
-    %% Still cold.
     ?assertEqual(not_found, bondy_oplog_cache_ets:get(CH, ?B, <<"k">>)),
     teardown_shard(Setup).
 

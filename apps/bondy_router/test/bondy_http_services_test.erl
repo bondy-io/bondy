@@ -157,12 +157,6 @@ api_gateway_and_admin_api_do_not_share_a_carrier_test() ->
     %% sources: `api_gateway` from storage, `admin_api` from `priv/`. Keeping
     %% them separate is what lets an operator offer stored specs without also
     %% offering realm, user, grant and backup administration.
-    %%
-    %% They used to share a `rest` carrier, and a carrier's protocol set is built
-    %% from `service_spec/1`'s `protocol` field, which is `undefined` for both —
-    %% so nothing about the carrier distinguished them and `routes/3` had to read
-    %% `services` to decide which route set to fetch. One carrier each removes
-    %% the question.
     #{carrier := Gateway} = bondy_listener_config:service_spec(api_gateway),
     #{carrier := Admin} = bondy_listener_config:service_spec(admin_api),
     ?assertEqual(api_gateway, Gateway),
@@ -284,10 +278,6 @@ wildcard_routes_are_replicated_into_every_named_host_test() ->
     %% `{error, notfound, path}` (`cowboy_router.erl:253`, cowboy 2.17). So a
     %% route that lives only under `'_'` is unreachable on any request whose Host
     %% header matches a named entry, and `/ping` would 404 on `api.example.com`.
-    %%
-    %% This is what the pre-branch code did NOT do: `dispatch_table/2` put base
-    %% routes under their own `'_'` host, so the host field "worked" and left
-    %% Bondy's own endpoints unreachable on any host that used it.
     with_vhost_carrier(fun() ->
         Dispatch = bondy_http_services:dispatch(listener([admin, vhost])),
         {_, Named} = lists:keyfind(<<"api.example.com">>, 1, Dispatch),

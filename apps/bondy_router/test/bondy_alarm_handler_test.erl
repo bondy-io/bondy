@@ -83,10 +83,6 @@ tuple_alarm_ids_dedupe_per_service_test() ->
     ?assertEqual(2, length(alarms(S1))),
     ?assertEqual([B], alarms(clear(element(1, A), S1))).
 
-%% =============================================================================
-%% TESTS — the record (increment 1)
-%% =============================================================================
-
 %% A raw OTP `{Id, Desc}` set — the spelling five producers use today
 %% (`bondy_http_connector_http_pool`, `bondy_mail_relay`, `bondy_oplog_applier`,
 %% `bondy_oplog_origin_bans`, `bondy_oplog_responder`) — must still land, with
@@ -170,10 +166,6 @@ list_is_newest_raise_first_test() ->
     S1 = set({?OTHER, <<"b">>}, S0),
     ?assertEqual([?OTHER, ?ID], [maps:get(id, A) || A <- list_(S1)]).
 
-%% =============================================================================
-%% TESTS — the history ring (increment 1)
-%% =============================================================================
-
 %% THE load-bearing case. `bondy_oplog_responder` and `bondy_oplog_applier`
 %% set their alarms once per offending item, so if an identical restatement
 %% entered the ring one busy alarm would evict every other transition and the
@@ -229,10 +221,6 @@ cleared_event_carries_the_alarms_severity_test() ->
         maps:with([action, id, severity], E)
     ).
 
-%% =============================================================================
-%% TESTS — swap adoption (increment 1)
-%% =============================================================================
-
 %% `bondy_degraded_boot_SUITE` asserts alarms raised BEFORE the swap survive
 %% into `get_alarms/0`. They must arrive as full records, not as the raw OTP
 %% pairs — otherwise `list/0` returns two different shapes depending on when
@@ -275,10 +263,6 @@ swap_adoption_drops_unkeyable_entries_test() ->
         {[], {alarm_handler, [{?ID, <<"a">>}, not_a_pair]}}
     ),
     ?assertEqual([?ID], [maps:get(id, A) || A <- list_(S)]).
-
-%% =============================================================================
-%% TESTS — catalogue-declared classification (increment 4)
-%% =============================================================================
 
 %% Every producer in the tree raises through the OTP 2-tuple, so without this
 %% join an `integration` alarm would report `class = node` and a `warning` one
@@ -339,10 +323,6 @@ invalid_opt_falls_through_to_the_catalogue_test() ->
     [A] = list_(S),
     ?assertEqual(warning, maps:get(severity, A)),
     ?assertEqual(realm, maps:get(class, A)).
-
-%% =============================================================================
-%% TESTS — readiness (increment 2)
-%% =============================================================================
 
 %% An alarm takes the node out of rotation only by asking to. Every producer in
 %% the tree today raises through the OTP 2-tuple, so this is the answer for all

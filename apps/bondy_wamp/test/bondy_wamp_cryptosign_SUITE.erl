@@ -58,7 +58,6 @@ generate_key_shape(_) ->
     #{public := Pub, secret := Sec} = bondy_wamp_cryptosign:generate_key(),
     ?assertEqual(32, byte_size(Pub)),
     ?assertEqual(32, byte_size(Sec)),
-    %% Two key pairs differ
     ?assertNotEqual(
         bondy_wamp_cryptosign:generate_key(),
         bondy_wamp_cryptosign:generate_key()

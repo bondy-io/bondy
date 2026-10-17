@@ -209,24 +209,20 @@ wildcard_subdomain_with_port(_Config) ->
     ).
 
 wildcard_subdomain_mixed_with_exact(_Config) ->
-    %% Mix of wildcard subdomain and exact origin
     Allowed = [<<"*.example.com">>, <<"https://other.com">>],
     Config = config(#{allowed_origins => Allowed}),
-    %% Subdomain match
     Req1 = fake_req(<<"https://app.example.com">>),
     Headers1 = bondy_http_cors:headers(Req1, Config),
     ?assertEqual(
         <<"https://app.example.com">>,
         maps:get(<<"access-control-allow-origin">>, Headers1)
     ),
-    %% Exact match
     Req2 = fake_req(<<"https://other.com">>),
     Headers2 = bondy_http_cors:headers(Req2, Config),
     ?assertEqual(
         <<"https://other.com">>,
         maps:get(<<"access-control-allow-origin">>, Headers2)
     ),
-    %% No match
     Req3 = fake_req(<<"https://nope.com">>),
     ?assertEqual(#{}, bondy_http_cors:headers(Req3, Config)).
 

@@ -139,7 +139,6 @@ init(Config) ->
 
         {ok, _} = application:ensure_all_started(email),
 
-        %% set the email sender in the context for the action using mops
         case lists:keyfind(email_sender, 1, Config) of
             false ->
                 error({invalid_config, Config});

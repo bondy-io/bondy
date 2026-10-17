@@ -33,7 +33,6 @@ from_modules_prefers_crdt_test() ->
     ?assertEqual({crdt, ?LWW}, ?K:from_modules(lww_register, ?LWW)).
 
 from_modules_resolves_fold_label_test() ->
-    %% A former `fold_module` label resolves to its native CRDT twin.
     ?assertEqual({crdt, ?LWW}, ?K:from_modules(lww_register, undefined)),
     ?assertEqual(
         {crdt, ?LWW}, ?K:from_modules(bondy_oplog_fold_lww_register, undefined)
@@ -111,7 +110,6 @@ crdt_apply_sets_value_test() ->
     ?assertEqual(10, Hlc),
     ?assertEqual(?LWW:encode_state(NewState), StateBytes),
     ?assertEqual(false, VES),
-    %% The value column is term_to_binary(to_value(NewState)).
     ?assertEqual(term_to_binary(<<"v1">>), ValueBytes).
 
 crdt_apply_threads_old_state_test() ->

@@ -47,11 +47,6 @@ invalid_entries_skipped_test() ->
     ?assert(?M:is_trusted_peer({10, 0, 0, 1}, Opts)),
     ?assertNot(?M:is_trusted_peer({8, 8, 8, 8}, Opts)).
 
-%% =============================================================================
-%% G-2 refinement: rightmost-untrusted chain selection
-%% =============================================================================
-
-%% Helper: the trusted-proxy CIDR list used by the chain tests.
 proxies() ->
     ?M:trusted_proxies(#{trusted_proxies => "10.0.0.0/8"}).
 

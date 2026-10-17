@@ -25,7 +25,6 @@ init_per_suite(Config) ->
     [{realm_uri, RealmUri} | Config].
 
 end_per_suite(Config) ->
-    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 no_sources(Config) ->

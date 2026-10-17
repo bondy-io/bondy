@@ -82,13 +82,11 @@ truncates_and_preserves_reads() ->
         ),
         ?assert(bondy_oplog:size(InstId) >= 3),
 
-        %% A peer converged to exactly our tree: frontier = whole tree.
         Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
             bondy_oplog_instance:compact(InstId, [Witness])
         ),
-        %% MST is bounded — the stable prefix is gone.
         ?assertEqual(0, bondy_oplog:size(InstId)),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(InstId)),
 
@@ -105,8 +103,6 @@ truncates_and_preserves_reads() ->
             {<<"v-c">>, 30}, bondy_oplog_core:read(NS, primary, <<"c">>)
         ),
 
-        %% The instance is fully functional after compaction: a new
-        %% write lands in the projection and is readable.
         ok = append_cell(InstId, <<"d">>, 40, <<"v-d">>),
         _ = bondy_oplog_instance:await_apply(InstId),
         ?assertEqual(
@@ -131,7 +127,6 @@ idempotent_after_truncation() ->
         {ok, {compacted, W1, _}} =
             bondy_oplog_instance:compact(InstId, [Witness]),
         ?assertEqual(0, bondy_oplog:size(InstId)),
-        %% Nothing new to compact ⇒ no_change, watermark unchanged.
         ?assertEqual(
             {ok, no_change},
             bondy_oplog_instance:compact(InstId, [Witness])
@@ -173,12 +168,10 @@ crdt_kernel_compaction_matches_from_scratch() ->
         {<<"z">>, undefined}
     ],
 
-    %% Instance A — compacts to truncation.
     AId = mk_id(),
     ANS = ns_of(AId),
     {AC, AP} = register_shard_crdt(ANS, primary, 0, lww_register, ?CRDT),
     {ok, _} = open_instance(AId, ANS, bondy_oplog_origin:new()),
-    %% Instance B — from scratch, never compacted.
     BId = mk_id(),
     BNS = ns_of(BId),
     {BC, BP} = register_shard_crdt(BNS, primary, 0, lww_register, ?CRDT),
@@ -201,8 +194,6 @@ crdt_kernel_compaction_matches_from_scratch() ->
         ?assertEqual(0, bondy_oplog:size(AId)),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(AId)),
 
-        %% Every cell reads identically on the compacted (A) and
-        %% from-scratch (B) instances, and equals the interpret_cog winner.
         lists:foreach(
             fun({K, Want}) ->
                 ARead = bondy_oplog_core:read(ANS, primary, K),
@@ -240,17 +231,13 @@ remote_event_survives_catalogue_compaction() ->
     {ok, _} = open_instance(AId, ANS, bondy_oplog_origin:new()),
     {ok, _} = open_instance(BId, BNS, bondy_oplog_origin:new()),
     try
-        %% A local event on A.
         append_cell(AId, <<"l">>, 60, <<"lval">>),
         _ = bondy_oplog_instance:await_apply(AId),
-        %% A remote event authored on B.
         append_cell(BId, <<"r">>, 50, <<"rval">>),
         _ = bondy_oplog_instance:await_apply(BId),
-        %% A pulls B's r-event into its MST (B-origin → remote on A).
         {ok, _} = bondy_oplog:sync(AId, BId),
         ok = compact_until_empty(AId, 200),
 
-        %% Both cells read back from A's projection post-truncation.
         ?assertEqual(
             {<<"rval">>, 50}, bondy_oplog_core:read(ANS, primary, <<"r">>)
         ),
@@ -304,7 +291,6 @@ compaction_makes_no_synchronous_applier_call() ->
         end,
         Called = lists:usort(collect_applier_calls([])),
         ?assertEqual([{advance_replayed_root, 2}], Called),
-        %% And the remote event survived the truncate.
         ?assertEqual(
             {<<"rval">>, 50}, bondy_oplog_core:read(ANS, primary, <<"r">>)
         )

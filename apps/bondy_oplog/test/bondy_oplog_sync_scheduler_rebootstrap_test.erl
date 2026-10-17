@@ -81,8 +81,6 @@ unavailable_flags_and_rebootstraps() ->
         #{instance_id := Inst, peer := ?PEER} =
             await([bondy_oplog, sync_scheduler, rebootstrap_scheduled], Inst),
 
-        %% The flag is consumed by a bootstrap dispatch, not another live
-        %% sync.
         bondy_oplog_sync_scheduler:trigger(),
         Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
         ?assertMatch(#{peer := ?PEER}, Meta)
@@ -131,13 +129,11 @@ gap_two_strikes_rebootstraps_fused() ->
         %% immediately instead of waiting out the poll window.
         _ = bondy_oplog:append(Inst, {op, two_strikes}),
         ok = bondy_oplog_instance:await_apply(Inst),
-        %% Strike 2: same pair, same verdict → the remedy.
         bondy_oplog_sync_scheduler:trigger(),
         #{instance_id := Inst, peer := ?PEER, reason := frontier_gap} =
             await(
                 [bondy_oplog, sync_scheduler, rebootstrap_scheduled], Inst
             ),
-        %% The flag is consumed by a bootstrap dispatch.
         bondy_oplog_sync_scheduler:trigger(),
         Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
         ?assertMatch(#{peer := ?PEER}, Meta)

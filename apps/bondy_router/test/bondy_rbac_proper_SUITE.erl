@@ -138,7 +138,6 @@ prop_reserved_names_complete(_) ->
     Reserved = [all, anonymous, any, on, to, from],
     ReservedBins = [atom_to_binary(A) || A <- Reserved],
 
-    %% All known reserved names return true
     lists:foreach(
         fun(Name) ->
             ?assert(bondy_rbac:is_reserved_name(Name))
@@ -146,7 +145,6 @@ prop_reserved_names_complete(_) ->
         Reserved ++ ReservedBins
     ),
 
-    %% Random alphanumeric binaries that aren't reserved return false
     Prop = ?FORALL(
         Bin,
         ?SUCHTHAT(
@@ -189,7 +187,6 @@ prop_normalise_name_lowercase(_) ->
         begin
             try
                 Normalised = bondy_rbac:normalise_name(Bin),
-                %% Result should equal its own casefold
                 Normalised =:= string:casefold(Normalised)
             catch
                 _:_ -> true
@@ -307,7 +304,6 @@ prop_grant_revoke_symmetry(_) ->
                 <<"roles">> => [GroupName]
             },
 
-            %% Grant
             ok = bondy_rbac:grant(Uri, GrantData),
 
             C1 = bondy_rbac:get_context(Uri, Username),
@@ -323,7 +319,6 @@ prop_grant_revoke_symmetry(_) ->
                 UniquePerms
             ),
 
-            %% Revoke
             ok = bondy_rbac:revoke(Uri, GrantData),
 
             C2 = bondy_rbac:get_context(Uri, Username),

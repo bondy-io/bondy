@@ -15,16 +15,6 @@
 %% (ETS-backed) MST and seeds the SeqRef atomic from
 %% `max_local_seq(MST, Origin)`. With an empty MST this returns
 %% `undefined`, so SeqRef stays at 0 (or `seq_seed`).
-%%
-%% Pre-PR-J1, `install_fast_events/2` updated
-%% `#state.max_local_installed_seq` but **not** the SeqRef atomic, so
-%% a concurrent local `append_fast/3` mid-replay would allocate a
-%% colliding seq for a value that already lives in the WAL.
-%%
-%% PR-J2 closes the same gap on the slow batch and peer-loopback
-%% paths by centralising the bump in `install_event/5` (the shared
-%% install hook used by both paths). The fast batch path retains its
-%% end-of-batch bump for efficiency.
 %% =============================================================================
 -module(bondy_oplog_instance_seq_atomic_test).
 
@@ -65,8 +55,6 @@ install_local_batch_bumps_seq_atomic() ->
     ok = gen_server:cast(Pid, {install_local_batch, Events}),
     ok = bondy_oplog:await_apply(Id),
 
-    %% New local append. Pre-fix this would allocate seq=1 (the
-    %% SeqRef atomic stayed at 0). Post-fix it must allocate seq=6.
     NewKey = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(100)),
     ?assertEqual(6, bondy_oplog_event:key_seq(NewKey)),
 
@@ -109,8 +97,6 @@ peer_loopback_foreign_origin_does_not_bump_seq() ->
     Synthetic = synth_event(70, PeerOrigin, 42),
     ok = gen_server:call(Pid, {install_remote, Synthetic}),
 
-    %% Next local append must still be seq=1 — foreign-origin install
-    %% did not advance our counter.
     NewKey = bondy_oplog:append(Id, bondy_oplog_test_projection:cell_op(100)),
     ?assertEqual(1, bondy_oplog_event:key_seq(NewKey)),
     ?assertEqual(Origin, bondy_oplog_event:key_origin(NewKey)),

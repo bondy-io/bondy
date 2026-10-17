@@ -194,7 +194,6 @@ mint_before_the_wal_tail_is_replayed(Dir) ->
         {ok, _} = open_pack_instance(InstId, NS, Dir, Origin, #{
             drain_gated => true
         }),
-        %% Still nothing applied: the frontier and the MST know no own seq.
         ?assertEqual(
             #{}, maps:with([Origin], bondy_oplog_registry:frontier(InstId))
         ),
@@ -237,7 +236,6 @@ mint_after_the_instance_is_killed(Dir) ->
         ],
         MaxSeq = lists:max([bondy_oplog_event:key_seq(K) || K <- Keys]),
         ?assertEqual(N, MaxSeq),
-        %% Premise: no checkpoint exists, nothing was applied.
         ?assertEqual([], checkpoint_files_lenient(Dir, InstId)),
         ?assertEqual(undefined, mst_last_key(InstId)),
 

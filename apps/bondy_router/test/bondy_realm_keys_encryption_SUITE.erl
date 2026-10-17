@@ -121,7 +121,6 @@ plaintext_when_disabled(_Config) ->
     Uri = new_realm(<<"plain">>),
     Vals = sensitive_values(raw_keys(Uri)),
     ?assert(Vals =/= []),
-    %% None of the stored private keys is enc-tagged.
     ?assertEqual([], [V || V <- Vals, is_encrypted(V)]).
 
 ciphertext_when_enabled(_Config) ->
@@ -173,13 +172,10 @@ store_is_idempotent_encrypted(_Config) ->
     ?assertEqual(Before, After).
 
 migrates_plaintext_on_enable(_Config) ->
-    %% Create with encryption OFF → plaintext keys.
     Uri = new_realm(<<"migrate">>),
     Plain = sensitive_values(raw_keys(Uri)),
     ?assertEqual([], [V || V <- Plain, is_encrypted(V)]),
 
-    %% Enable encryption and trigger a store (a benign update). Existing
-    %% plaintext keys migrate to ciphertext.
     enable_encryption(),
     _ = bondy_realm:update(Uri, #{description => <<"now encrypted">>}),
     Migrated = sensitive_values(raw_keys(Uri)),
@@ -189,12 +185,10 @@ migrates_plaintext_on_enable(_Config) ->
         "plaintext keys must be migrated to ciphertext on the next store"
     ),
 
-    %% Idempotent afterwards: a further no-op store does not re-write.
     Snap = raw_keys(Uri),
     _ = bondy_realm:update(Uri, #{description => <<"again">>}),
     ?assertEqual(Snap, raw_keys(Uri)),
 
-    %% Still usable: sign/verify round-trips through the migrated keys.
     Realm = bondy_realm:fetch(Uri),
     {Kid, PrivKey} = bondy_realm:get_random_private_key(Realm),
     JWT = bondy_oauth_jwt:encode(#{<<"sub">> => <<"bob">>}, PrivKey),

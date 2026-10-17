@@ -92,7 +92,6 @@ apply_observing_the_remove_survives_test() ->
         inc, 5
     }),
     Entries1 = ?M:rmv(Entries0, <<"k">>, {<<"b">>, 1}),
-    %% c's apply observed b's remove dot.
     Entries2 = ?M:put_nested(
         Entries1, <<"k">>, {<<"c">>, 1}, [{<<"b">>, 1}], ?COUNTER, 3, {
             inc, 7

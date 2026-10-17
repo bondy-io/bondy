@@ -46,14 +46,6 @@ all() ->
     ].
 
 init_per_suite(Config) ->
-    %% A booted node, not the leaner ranch+cowboy environment this suite
-    %% originally declared: the mounting proof rides the real handler's
-    %% realm check (`no_such_realm`), and the manager mounts the cowboy
-    %% metrics stream handler whose per-request emission reads prometheus
-    %% families a booted node declares — measured 2026-08-26: standalone
-    %% (suite first in a fresh VM) both crash, and every green battery
-    %% run had ridden a previous suite's booted node. The case comments
-    %% below were already written for the shared-node reality.
     bondy_ct:start_bondy(),
     {ok, _} = application:ensure_all_started(ranch),
     {ok, _} = application:ensure_all_started(cowboy),

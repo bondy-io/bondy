@@ -483,10 +483,8 @@ auth_claims(Pid) when is_pid(Pid) ->
 init([TransportId, RealmUri, SessionId, Opts]) ->
     process_flag(trap_exit, true),
 
-    %% Register with gproc
     true = bondy_gproc:register({http_transport, TransportId}),
 
-    %% Initialise the transport queue
     case
         bondy_http_transport_queue:init_transport(
             TransportId, RealmUri, SessionId
@@ -509,7 +507,6 @@ init([TransportId, RealmUri, SessionId, Opts]) ->
             ok = schedule_inactivity_check(State),
             {ok, State};
         {error, already_exists} ->
-            %% Clean up gproc and fail
             true = bondy_gproc:unregister({http_transport, TransportId}),
             {stop, {error, already_exists}}
     end.
@@ -797,7 +794,6 @@ terminate(Reason, #state{transport_id = TransportId} = State) ->
     %% a subsequent cleanup step raises unexpectedly.
     ok = bondy_http_transport_queue:delete_transport(TransportId),
 
-    %% Reply to any pending longpoll caller
     case State#state.poll_from of
         undefined ->
             ok;
@@ -809,7 +805,6 @@ terminate(Reason, #state{transport_id = TransportId} = State) ->
             _ = erlang:cancel_timer(State#state.poll_timer)
     end,
 
-    %% Terminate WAMP protocol state if initialised
     case State#state.protocol_state of
         undefined ->
             ok;
@@ -828,7 +823,6 @@ terminate(Reason, #state{transport_id = TransportId} = State) ->
             end
     end,
 
-    %% Signal SSE stream to close if connected
     case State#state.sse_pid of
         undefined ->
             ok;
@@ -836,7 +830,6 @@ terminate(Reason, #state{transport_id = TransportId} = State) ->
             SsePid ! {stop_stream, []}
     end,
 
-    %% Cleanup gproc registration
     try
         true = bondy_gproc:unregister({http_transport, TransportId})
     catch

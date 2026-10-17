@@ -89,8 +89,6 @@ append1(Pid, HLC, Seq) ->
     E = mk_event(Hlc, Seq),
     bondy_oplog_wal:append(Pid, E).
 
-%% Attach a telemetry handler that forwards events to `self()` so the
-%% test can assert on the emitted measurements/metadata.
 attach_capture(Events) ->
     Ref = make_ref(),
     Pid = self(),
@@ -160,12 +158,9 @@ bytes_total_recomputed_on_reopen_test() ->
         [{ok, _, _} = append1(P1, HLC, S) || S <- lists:seq(0, 4)],
         BytesA = maps:get(bytes_total, bondy_oplog_wal:info(P1)),
         ok = bondy_oplog_wal:close(P1),
-        %% Reopen
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         try
             BytesB = maps:get(bytes_total, bondy_oplog_wal:info(P2)),
-            %% Reopen recomputes from disk; should match (or be very
-            %% close to) the pre-close total.
             ?assertEqual(BytesA, BytesB)
         after
             ok = bondy_oplog_wal:close(P2)
@@ -312,7 +307,6 @@ wal_full_telemetry_debounced_test() ->
             ]
         end),
         Events = recv_events(Ref, 10, []),
-        %% Debounce: only the first refusal in the window emits.
         ?assertEqual(1, length(Events))
     after
         detach(HandlerId)

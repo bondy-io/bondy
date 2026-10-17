@@ -47,7 +47,6 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(Config) ->
-    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 gen_uri() ->
@@ -357,7 +356,6 @@ migration(_) ->
     Table = bondy_namespace_catalog:table(?BONDY_DB_REALM_TAB),
     ok = bondy_db:apply(Table, <<>>, Uri, {set, Old}),
 
-    %% We should now have a migrated realm
     New = bondy_realm:fetch(Uri),
 
     ?assertMatch(

@@ -67,7 +67,6 @@ delete_and_sweep(Db) ->
     ok = bondy_db:apply(T, <<"r1">>, <<"doomed">>, enable),
     ok = bondy_db:apply(T, <<"r1">>, <<"keeper">>, enable),
 
-    %% delete/3 now works on a flag table (was {error, {no_removal_op, _}}).
     ok = bondy_db:delete(T, <<"r1">>, <<"doomed">>),
     ?assertEqual(false, read_value(T, <<"doomed">>)),
 

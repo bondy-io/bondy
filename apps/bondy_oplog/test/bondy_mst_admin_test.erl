@@ -3,8 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% EUnit suite for `bondy_mst_admin` (PR-BACKUP, TaskList #239).
-%%
 %% Covers:
 %% 1. backup/2 on a plain directory tree — manifest written, files copied.
 %% 2. verify/1 — happy path; reports missing / corrupted / oversized files.
@@ -88,7 +86,6 @@ backup_writes_manifest() ->
         ?assertEqual(3, maps:get(file_count, Manifest)),
         Total = maps:get(total_bytes, Manifest),
         ?assert(Total > 8000),
-        %% Files are present at the expected relative paths.
         ?assert(filelib:is_regular(filename:join(Dst, "a.bin"))),
         ?assert(filelib:is_regular(filename:join([Dst, "sub", "b.bin"]))),
         ?assert(
@@ -373,12 +370,10 @@ roundtrip_with_live_instance() ->
         {ok, W1, S1} = bondy_oplog:compaction_checkpoint(Id),
         ok = bondy_oplog:stop_instance(Id),
 
-        %% Phase 2: back up.
         {ok, Manifest} = bondy_mst_admin:backup(Storage, Backup),
         ?assert(maps:get(file_count, Manifest) >= 1),
         ?assertMatch({ok, _}, bondy_mst_admin:verify(Backup)),
 
-        %% Phase 3: wipe + restore.
         ok = file:del_dir_r(Storage),
         ok = filelib:ensure_path(Storage),
         ?assertMatch(
@@ -393,7 +388,6 @@ roundtrip_with_live_instance() ->
             )
         ),
 
-        %% Phase 4: bring instance back up + assert state matches.
         %% The compacted-state assertion that proves the backup is
         %% sound is the checkpoint round-trip: same watermark, same
         %% folded CRDT state. The HLC must seed from the restored

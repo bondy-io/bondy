@@ -118,13 +118,10 @@ a client will read in order.
 -define(BYTES_SLOT, 2).
 -define(LAST_DEQUEUE_SEQ_SLOT, 3).
 
-%% Number of entries to evict per batch
 -define(EVICTION_BATCH_SIZE, 100).
 
-%% persistent_term key for the partition ring
 -define(RING_KEY, {?MODULE, ring}).
 
-%% persistent_term key for the meta table name
 -define(META_TAB, bondy_http_transport_queue_meta).
 
 -record(bondy_http_transport_queue_entry, {
@@ -282,7 +279,6 @@ Removes all queue entries and the metadata entry for a transport.
 delete_transport(TransportId) when is_binary(TransportId) ->
     Tab = locate_table(TransportId),
 
-    %% Delete all entries for this transport using a match spec
     MS = [
         {
             #bondy_http_transport_queue_entry{
@@ -295,7 +291,6 @@ delete_transport(TransportId) when is_binary(TransportId) ->
     ],
     _ = ets:select_delete(Tab, MS),
 
-    %% Delete the metadata entry
     _ = ets:delete(?META_TAB, TransportId),
     ok.
 
@@ -314,7 +309,6 @@ Checks bounds before inserting and evicts oldest entries if the queue exceeds
 enqueue(TransportId, Message, _Opts) when
     is_binary(TransportId)
 ->
-    %% 1. Locate the metadata entry (cached atomics ref)
     case lookup_meta(TransportId) of
         {ok, Meta} ->
             do_enqueue(TransportId, Message, Meta);
@@ -416,7 +410,6 @@ size_of(Message) ->
 do_enqueue(TransportId, Message, Meta) ->
     #bondy_http_transport_queue_meta{atomics = AtomicsRef} = Meta,
 
-    %% Compute message size
     MsgSize = size_of(Message),
 
     %% Allocate a sequence number (scheduler-local, zero contention)
@@ -429,7 +422,6 @@ do_enqueue(TransportId, Message, Meta) ->
     CurrentCount = atomics:get(AtomicsRef, ?COUNT_SLOT),
     CurrentBytes = atomics:get(AtomicsRef, ?BYTES_SLOT),
 
-    %% Evict oldest if bounds are exceeded
     case CurrentCount >= MaxMessages orelse CurrentBytes + MsgSize > MaxBytes of
         true ->
             evict_oldest(TransportId, AtomicsRef, MsgSize);
@@ -437,7 +429,6 @@ do_enqueue(TransportId, Message, Meta) ->
             ok
     end,
 
-    %% Insert the entry
     Tab = locate_table(TransportId),
     Entry = #bondy_http_transport_queue_entry{
         key = {TransportId, Seq},
@@ -447,7 +438,6 @@ do_enqueue(TransportId, Message, Meta) ->
     },
     ets:insert(Tab, Entry),
 
-    %% Update counters (atomic)
     atomics:add(AtomicsRef, ?COUNT_SLOT, 1),
     atomics:add(AtomicsRef, ?BYTES_SLOT, MsgSize),
     ok.
@@ -469,7 +459,6 @@ evict_oldest(TransportId, AtomicsRef, _NeededBytes) ->
         }
     ],
 
-    %% Fetch a small batch of oldest entries
     case ets:select(Tab, MS, ?EVICTION_BATCH_SIZE) of
         '$end_of_table' ->
             ok;

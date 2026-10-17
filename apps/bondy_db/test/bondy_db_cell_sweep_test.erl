@@ -5,11 +5,6 @@
 %%
 %% `bondy_db:delete/3` and the cell sweeper.
 %%
-%% Until now a removal left a tombstone that nothing ever reclaimed, so cell
-%% count grew with every key ever written — the plum_db outcome the oplog
-%% rewrite set out to escape. Reclaiming the op log does not reclaim the
-%% projection.
-%%
 %% `delete/3` issues the removal operation the table's CRDT declares; the cell
 %% becomes invisible to readers at once but is retained while a concurrent
 %% lower-HLC write could still arrive. `sweep_stable_cells/2` reclaims it once
@@ -69,8 +64,6 @@ cell_sweep_test_() ->
             end}
         ]
     end}.
-
-%% -----------------------------------------------------------------------------
 
 delete_hides_but_retains(T) ->
     K = <<"doomed">>,

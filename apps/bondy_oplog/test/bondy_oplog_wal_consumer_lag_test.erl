@@ -93,11 +93,9 @@ committed_positions_test() ->
             head_offset := HeadOff
         } = bondy_oplog_wal:info(Pid),
 
-        %% At the head: nothing owed.
         ok = commit_at(Dir, {HeadSeg, HeadOff}),
         ?assertEqual(0, lag(Pid)),
 
-        %% At the start of the 4th frame: exactly the remaining bytes.
         {MidSeg, MidOff} = lists:nth(4, Positions),
         ?assertEqual(HeadSeg, MidSeg),
         ok = commit_at(Dir, {MidSeg, MidOff}),
@@ -115,7 +113,6 @@ rotated_segments_test() ->
             current_segment := HeadSeg,
             head_offset := HeadOff
         } = bondy_oplog_wal:info(Pid),
-        %% Pick a committed position in a PRIOR segment.
         {CSeg, COff} = lists:last([P || {S, _} = P <- Positions, S < HeadSeg]),
         ?assert(CSeg < HeadSeg),
         ok = commit_at(Dir, {CSeg, COff}),

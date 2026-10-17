@@ -368,7 +368,6 @@ remove(RealmUri, Name, _Opts) ->
         ok = bondy_rbac_user:remove_group_from_members(RealmUri, Name),
         ok = remove_group(RealmUri, all, Name),
 
-        %% Delete the group and fire the local delete side-effect.
         ok = bondy_db:apply(table(), RealmUri, Name, clear),
         do_on_delete(RealmUri, Name)
     catch

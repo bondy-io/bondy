@@ -1,6 +1,5 @@
 %% =============================================================================
 %% Tests for the per-shard overlay ETS primitive
-%% (`MST_DB_DESIGN.md` §4, wired in D2).
 %%
 %% Pins the key shape `{{Bucket, Key}, EventHlc, EventKey}`, the
 %% HLC-windowed select helpers, the range scan, and the post-projection
@@ -86,7 +85,6 @@ events_for_isolates_by_bucket_test() ->
 
 events_for_orders_by_hlc_then_origin_then_seq_test() ->
     Tab = bondy_oplog_db_overlay:new(),
-    %% Same HLC, different origins — must come out in origin order.
     E_b = mk_event(<<"k">>, 5, <<"b-origin">>, 0),
     E_a = mk_event(<<"k">>, 5, <<"a-origin">>, 0),
     %% Insert out of order to verify the ordered_set sort.
@@ -124,7 +122,6 @@ range_filters_by_hlc_window_test() ->
     Eb = mk_event(<<"b">>, 15, <<"o">>, 1),
     bondy_oplog_db_overlay:insert(Tab, ?B, <<"a">>, Ea),
     bondy_oplog_db_overlay:insert(Tab, ?B, <<"b">>, Eb),
-    %% HLC > 10 ⇒ only Eb survives.
     ?assertEqual(
         [{<<"b">>, Eb}],
         bondy_oplog_db_overlay:range(Tab, ?B, <<"a">>, <<"z">>, 10)
@@ -178,7 +175,6 @@ evict_to_preserves_higher_hlc_at_same_cell_test() ->
 
 evict_to_uses_event_key_tiebreaker_at_same_hlc_test() ->
     Tab = bondy_oplog_db_overlay:new(),
-    %% Same HLC, two origins.
     Ea = mk_event(<<"k">>, 10, <<"a">>, 0),
     Eb = mk_event(<<"k">>, 10, <<"b">>, 0),
     bondy_oplog_db_overlay:insert(Tab, ?B, <<"k">>, Ea),

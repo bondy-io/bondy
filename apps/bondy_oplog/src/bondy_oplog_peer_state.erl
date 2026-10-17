@@ -389,7 +389,6 @@ handle_cast({touch_peer, Peer, Now}, State) ->
     ],
     {noreply, State};
 handle_cast({forget_peer, Peer}, State) ->
-    %% select_delete with match-spec; never tab2list+filter.
     MatchSpec = [
         {
             #peer_instance_state{

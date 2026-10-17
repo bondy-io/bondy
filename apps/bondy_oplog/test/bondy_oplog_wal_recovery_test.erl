@@ -142,7 +142,6 @@ reopen_continues_appending_test() ->
         {ok, _, _} = bondy_oplog_wal:append(P1, E2),
         ok = bondy_oplog_wal:close(P1),
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        %% Continue appending after reopen.
         E3 = mk_event(bondy_connect_hlc:now(HLC), 3),
         {ok, _, _} = bondy_oplog_wal:append(P2, E3),
         ?assertEqual([E1, E2, E3], read_all(P2)),
@@ -163,7 +162,6 @@ reopen_across_rotation_test() ->
         ok = bondy_oplog_wal:close(P1),
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         ?assertEqual(Events, read_all(P2)),
-        %% Verify head segment carries on incrementing.
         E7 = mk_event(bondy_connect_hlc:now(HLC), 7),
         {ok, _, _} = bondy_oplog_wal:append(P2, E7),
         ?assertEqual(Events ++ [E7], read_all(P2)),
@@ -436,7 +434,6 @@ orphan_tmp_files_removed_on_open_test() ->
         Opts = #{dir => Dir, origin => origin()},
         {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
         ok = bondy_oplog_wal:close(P1),
-        %% Sprinkle some orphan files in the instance directory.
         ok = file:write_file(
             filename:join(InstDir, ?BONDY_OPLOG_WAL_MANIFEST_TMP_FILENAME),
             <<"stale">>
@@ -513,12 +510,10 @@ sealed_qidx_rebuilt_when_missing_test() ->
         ),
         ?assert(filelib:is_regular(Seg0Idx)),
         ok = file:delete(Seg0Idx),
-        %% Reopen. Recovery should rebuild segment 0's .qidx.
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         ?assert(filelib:is_regular(Seg0Idx)),
         {ok, Entries} = bondy_log_idx:read_file(Seg0Idx),
         ?assert(length(Entries) >= 1),
-        %% And HLC seek into the rebuilt index works.
         Target = lists:nth(2, Hlcs),
         {ok, Iter} = bondy_log_reader:open(P2, {key, Target}),
         {ok, [First], _, _, _} = bondy_log_reader:next(Iter),
@@ -546,7 +541,6 @@ sealed_qidx_rebuilt_when_corrupt_test() ->
         %% Corrupt the .qidx — bad magic header.
         ok = file:write_file(Seg0Idx, <<0:128>>),
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        %% After recovery the .qidx is rewritten with a valid header.
         {ok, _Entries} = bondy_log_idx:read_file(Seg0Idx),
         ok = bondy_oplog_wal:close(P2)
     after
@@ -578,7 +572,6 @@ consumer_offset_clamped_to_last_valid_test() ->
         HeadOffset = maps:get(head_offset, InfoBeforeClose),
         ok = bondy_oplog_wal:close(P1),
         InstDir = instance_dir(Dir),
-        %% Write a fake commit at a wildly-past-EOF offset.
         CO = bondy_log_state:with_position(
             bondy_log_state:new_consumer_offset(), 0, 1_000_000
         ),
@@ -597,7 +590,6 @@ consumer_offset_clamped_to_last_valid_test() ->
         ValidOffsets =
             [?SEG_HEADER, HeadOffset | [Off || {_, Off} <- Positions]],
         ?assert(lists:member(ClampedOff, ValidOffsets)),
-        %% Past-EOF input → clamp must land within the file.
         ?assert(ClampedOff =< HeadOffset)
     after
         rmrf(Dir)
@@ -968,7 +960,6 @@ recovery_scanned_bytes_reports_head_walked_test() ->
     Detach = attach_recovery_handler(Tag),
     try
         Opts = #{dir => Dir, origin => origin()},
-        %% Setup: append a known event volume, close cleanly.
         {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
         Events = generate_events(HLC, 8, 1),
         [{ok, _, _} = bondy_oplog_wal:append(P1, E) || E <- Events],
@@ -979,7 +970,6 @@ recovery_scanned_bytes_reports_head_walked_test() ->
                 bondy_log_segment:filename(0)
             )
         ),
-        %% Exercise: reopen; capture the recovery telemetry event.
         {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
         {Measurements, Metadata} = recv_recovery_event(Tag),
         ok = bondy_oplog_wal:close(P2),

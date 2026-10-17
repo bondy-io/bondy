@@ -56,9 +56,6 @@ cap_honoured_within_a_tick() ->
         bondy_oplog_peer_source_static, #{peers => [p1]}
     ),
     Counts = run_one_tick_and_count(Insts),
-    %% Across the 3 instances on a single tick:
-    %%   - 2 dispatched (each gets a session pid spawned)
-    %%   - 1 capped
     ?assertEqual(2, maps:get(dispatched, Counts)),
     ?assertEqual(1, maps:get(capped, Counts)),
     [bondy_oplog:stop_instance(I) || I <- Insts],
@@ -83,7 +80,6 @@ info_reports_cap_and_current() ->
     Info = bondy_oplog_sync_scheduler:info(),
     ?assertEqual(7, maps:get(max_inflight_bootstraps, Info)),
     ?assert(maps:is_key(current_inflight_bootstraps, Info)),
-    %% Reset.
     ok = bondy_oplog_config:set_max_inflight_bootstraps(4).
 
 zero_cap_disables_dispatch() ->
@@ -95,7 +91,6 @@ zero_cap_disables_dispatch() ->
     Counts = run_one_tick_and_count([Inst]),
     ?assertEqual(0, maps:get(dispatched, Counts)),
     ?assertEqual(1, maps:get(capped, Counts)),
-    %% Restore to the default for downstream tests.
     ok = bondy_oplog_config:set_max_inflight_bootstraps(4),
     bondy_oplog:stop_instance(Inst).
 

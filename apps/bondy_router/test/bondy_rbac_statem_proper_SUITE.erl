@@ -162,7 +162,6 @@ gen_test_uri(#model{granted_resources = Granted}) ->
         vector(3, elements(?URI_PARTS)),
         iolist_to_binary(lists:join(<<".">>, Parts))
     ),
-    %% Extract concrete URIs from granted resources to reuse
     ConcreteUris = [
         Uri
      || {Uri, _} <- Granted,
@@ -253,7 +252,6 @@ command(#model{} = S) ->
     HasUsers = UserNames =/= [],
     HasRoles = HasGroups orelse HasUsers,
 
-    %% Always available: add new entities
     Base = [
         {8,
             {call, ?MODULE, sut_add_group, [
@@ -265,7 +263,6 @@ command(#model{} = S) ->
             ]}}
     ],
 
-    %% Need at least one role for grant/revoke
     Grant =
         case HasRoles of
             true ->
@@ -289,7 +286,6 @@ command(#model{} = S) ->
                 []
         end,
 
-    %% Need at least one user for authorization checks
     Auth =
         case HasUsers of
             true ->
@@ -332,7 +328,6 @@ command(#model{} = S) ->
                 []
         end,
 
-    %% Need both users and groups for membership changes
     Membership =
         case HasUsers andalso HasGroups of
             true ->
@@ -348,7 +343,6 @@ command(#model{} = S) ->
                 []
         end,
 
-    %% Destructive
     Remove = lists:append([
         case HasGroups of
             true ->
@@ -486,19 +480,15 @@ next_state(S, _Res, {call, _, sut_add_user_to_group, [_, Username, GroupName]}) 
     NewGroups = lists:usort([GroupName | CurrentGroups]),
     S#model{users = maps:put(Username, NewGroups, S#model.users)};
 next_state(S, _Res, {call, _, sut_remove_group, [_, Name]}) ->
-    %% Remove the group itself
     NewGroups0 = maps:remove(Name, S#model.groups),
-    %% Remove from other groups' parent lists
     NewGroups = maps:map(
         fun(_K, Parents) -> Parents -- [Name] end,
         NewGroups0
     ),
-    %% Remove from users' group lists
     NewUsers = maps:map(
         fun(_K, Grps) -> Grps -- [Name] end,
         S#model.users
     ),
-    %% Remove grants for this group
     NewGrants = maps:remove({group, Name}, S#model.grants),
     S#model{groups = NewGroups, users = NewUsers, grants = NewGrants};
 next_state(S, _Res, {call, _, sut_remove_user, [_, Username]}) ->
@@ -671,14 +661,11 @@ model_resolve_groups([Name | Rest], GroupsMap, Seen) ->
 model_effective_grants(Username, #model{
     groups = GroupsMap, users = Users, grants = Grants
 }) ->
-    %% 1. 'all' group grants
     AllGrants = maps:get({group, all}, Grants, #{}),
 
-    %% 2. User's group memberships → transitive closure
     UserGroups = maps:get(Username, Users, []),
     ReachableGroups = model_resolve_groups(UserGroups, GroupsMap),
 
-    %% 3. Accumulate grants from all reachable groups
     GroupGrantsAcc = lists:foldl(
         fun(GroupName, Acc) ->
             GGrants = maps:get({group, GroupName}, Grants, #{}),
@@ -688,7 +675,6 @@ model_effective_grants(Username, #model{
         ReachableGroups
     ),
 
-    %% 4. Direct user grants
     UserGrants = maps:get({user, Username}, Grants, #{}),
     merge_grant_maps(GroupGrantsAcc, UserGrants).
 
@@ -709,13 +695,10 @@ merge_grant_maps(Map1, Map2) ->
 model_effective_grants_explicit(Username, ExplicitGroups, #model{
     groups = GroupsMap, grants = Grants
 }) ->
-    %% 1. 'all' group grants
     AllGrants = maps:get({group, all}, Grants, #{}),
 
-    %% 2. Transitive closure of explicit groups
     ReachableGroups = model_resolve_groups(ExplicitGroups, GroupsMap),
 
-    %% 3. Accumulate grants from all reachable groups
     GroupGrantsAcc = lists:foldl(
         fun(GroupName, Acc) ->
             GGrants = maps:get({group, GroupName}, Grants, #{}),
@@ -725,7 +708,6 @@ model_effective_grants_explicit(Username, ExplicitGroups, #model{
         ReachableGroups
     ),
 
-    %% 4. Direct user grants
     UserGrants = maps:get({user, Username}, Grants, #{}),
     merge_grant_maps(GroupGrantsAcc, UserGrants).
 
@@ -902,7 +884,6 @@ prop_normalization_transparency(_Config) ->
                 ]
             }),
 
-            %% Grant using a mixed-case group name
             ok = bondy_rbac:grant(RealmUri, #{
                 <<"permissions">> => UniquePerms,
                 <<"uri">> => <<"com.norm.test">>,
@@ -910,7 +891,6 @@ prop_normalization_transparency(_Config) ->
                 <<"roles">> => [MixedGroup]
             }),
 
-            %% Authorize with the normalized (lowercase) username
             C1 = bondy_rbac:get_context(RealmUri, LowerUser),
             Results = lists:map(
                 fun(Perm) ->
@@ -926,7 +906,6 @@ prop_normalization_transparency(_Config) ->
                 UniquePerms
             ),
 
-            %% All permissions should be authorized
             lists:all(fun(R) -> R end, Results)
         end
     ),
@@ -967,7 +946,6 @@ prop_grant_monotonicity(_Config) ->
                 <<"roles">> => [GroupName]
             },
 
-            %% Grant first set of permissions
             ok = bondy_rbac:grant(
                 RealmUri, GrantBase#{<<"permissions">> => P1}
             ),
@@ -985,7 +963,6 @@ prop_grant_monotonicity(_Config) ->
              || P <- P1
             ],
 
-            %% Grant additional permissions
             ok = bondy_rbac:grant(
                 RealmUri, GrantBase#{<<"permissions">> => P2}
             ),
@@ -1003,7 +980,6 @@ prop_grant_monotonicity(_Config) ->
              || P <- P1
             ],
 
-            %% Everything authorized before must still be authorized
             lists:all(
                 fun({B, A}) -> (not B) orelse A end,
                 lists:zip(Before, After)
@@ -1037,7 +1013,6 @@ prop_all_group_universality(_Config) ->
                 users => [#{username => U} || U <- UserNames]
             }),
 
-            %% Grant to 'all' group
             ok = bondy_rbac:grant(RealmUri, #{
                 <<"permissions">> => UniquePerms,
                 <<"uri">> => <<"com.allg.">>,
@@ -1045,7 +1020,6 @@ prop_all_group_universality(_Config) ->
                 <<"roles">> => <<"all">>
             }),
 
-            %% Every user must be authorized
             lists:all(
                 fun(Username) ->
                     C = bondy_rbac:get_context(RealmUri, Username),
@@ -1085,7 +1059,6 @@ prop_prototype_inheritance(_Config) ->
             ProtoUri = <<"com.test.proto.", (integer_to_binary(N))/binary>>,
             ChildUri = <<"com.test.child.", (integer_to_binary(N))/binary>>,
 
-            %% Create prototype with a group and grant
             _ = bondy_realm:create(#{
                 uri => ProtoUri,
                 is_prototype => true,
@@ -1101,7 +1074,6 @@ prop_prototype_inheritance(_Config) ->
                 <<"roles">> => [<<"inherited_grp">>]
             }),
 
-            %% Create child realm using prototype
             _ = bondy_realm:create(#{
                 uri => ChildUri,
                 prototype_uri => ProtoUri,
@@ -1115,7 +1087,6 @@ prop_prototype_inheritance(_Config) ->
                 ]
             }),
 
-            %% User should have inherited permissions
             C1 = bondy_rbac:get_context(ChildUri, <<"proto_user">>),
             InheritedOk = lists:all(
                 fun(P) ->
@@ -1137,7 +1108,6 @@ prop_prototype_inheritance(_Config) ->
                 bondy_rbac_group:new(#{name => <<"inherited_grp">>})
             ),
 
-            %% After override, inherited permissions should be gone
             C2 = bondy_rbac:get_context(ChildUri, <<"proto_user">>),
             OverrideOk = lists:all(
                 fun(P) ->
@@ -1191,7 +1161,6 @@ prop_explicit_groups_normalization(_Config) ->
 
             MixedGroupName = apply_case_style(CaseStyle, GroupName),
 
-            %% Context with normalized group name
             C1 = bondy_rbac:get_context(
                 RealmUri, <<"ext_user">>, [GroupName]
             ),
@@ -1207,7 +1176,6 @@ prop_explicit_groups_normalization(_Config) ->
              || P <- UniquePerms
             ],
 
-            %% Context with mixed-case group name
             C2 = bondy_rbac:get_context(
                 RealmUri, <<"ext_user">>, [MixedGroupName]
             ),
@@ -1223,7 +1191,6 @@ prop_explicit_groups_normalization(_Config) ->
              || P <- UniquePerms
             ],
 
-            %% Both must give identical results
             R1 =:= R2
         end
     ),
@@ -1258,14 +1225,12 @@ ensure_realm(RealmUri) ->
 
 %% @private
 cleanup_realm(RealmUri) ->
-    %% Remove all grants (user and group)
     _ =
         try
             bondy_rbac:remove_all(RealmUri, #{})
         catch
             _:_ -> ok
         end,
-    %% Remove all custom users
     lists:foreach(
         fun(User) ->
             try
@@ -1282,7 +1247,6 @@ cleanup_realm(RealmUri) ->
             _:_ -> []
         end
     ),
-    %% Remove all custom groups
     lists:foreach(
         fun(Group) ->
             try

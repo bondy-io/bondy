@@ -26,7 +26,6 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(Config) ->
-    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 mg_comparator(_) ->

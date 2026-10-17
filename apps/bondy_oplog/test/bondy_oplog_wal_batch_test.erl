@@ -116,7 +116,6 @@ append_batch_returns_one_entry_per_event_test() ->
         %% All entries share the same `Pos`: it's the frame start.
         Positions = [Pos || {_Hlc, Pos} <- Entries],
         ?assertEqual([hd(Positions)], lists:usort(Positions)),
-        %% HLCs in the entries match the events' HLCs in order.
         EventHlcs = [
             bondy_oplog_event:key_hlc(bondy_oplog_event:key(E))
          || E <- Events
@@ -171,7 +170,6 @@ non_monotonic_hlcs_rejected_test() ->
             {error, {invalid_batch, key_not_monotonic}},
             bondy_oplog_wal:append_batch(Pid, [E1, E1])
         ),
-        %% Writer still healthy.
         ?assertMatch(
             {ok, [{_, _}, {_, _}]},
             bondy_oplog_wal:append_batch(Pid, [E1, E2])
@@ -202,7 +200,6 @@ oversize_batch_rejected_test() ->
             {error, batch_too_large},
             bondy_oplog_wal:append_batch(Pid, Events)
         ),
-        %% Writer is still alive and accepts a smaller batch.
         Small = mk_batch(HLC, 11, 1),
         ?assertMatch({ok, [{_, _}]}, bondy_oplog_wal:append_batch(Pid, Small)),
         ok

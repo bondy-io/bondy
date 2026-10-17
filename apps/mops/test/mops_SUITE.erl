@@ -380,10 +380,6 @@ boolean_8_test(_) ->
     true = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
 
 subexpression_1_test(_) ->
-    %% NOTE: this test previously bound an `Expected` map that nothing
-    %% asserted against -- a leftover from `subexpression_2_test` below, which
-    %% is commented out. The assertion this test actually makes is the one on
-    %% the interpolated string, and it is complete.
     Ctxt = #{<<"x">> => #{<<"a">> => 0, <<"b">> => 1}},
     Expr = <<"\" {{x.a}} and {{x.b |> integer}} \"">>,
     ?assertEqual(<<" 0 and 1 ">>, mops:eval(Expr, Ctxt)).

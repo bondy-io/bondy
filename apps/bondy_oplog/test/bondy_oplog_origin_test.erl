@@ -144,7 +144,6 @@ load_or_create_survives_simulated_restart_test() ->
     Path = filename:join(Dir, "origin"),
     try
         {ok, OriginA} = bondy_oplog_origin:load_or_create(Path),
-        %% Simulate "fresh VM, same on-disk state".
         {ok, OriginB} = bondy_oplog_origin:load_or_create(Path),
         ?assertEqual(OriginA, OriginB)
     after

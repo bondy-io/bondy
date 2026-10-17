@@ -56,7 +56,6 @@ prop_eager_equals_group() ->
         Eager =:= ?MOD:interpret_cog(Log, ?MOD:init())
     end).
 
-%% interpret_cog is invariant under any arrival permutation of the log.
 prop_permutation_invariant() ->
     ?FORALL(Cmds, cmds_gen(), begin
         Log = build_log(Cmds),
@@ -66,7 +65,6 @@ prop_permutation_invariant() ->
         end)
     end).
 
-%% Re-delivering every event a second time changes nothing.
 prop_idempotent_redelivery() ->
     ?FORALL(Cmds, cmds_gen(), begin
         Log = build_log(Cmds),
@@ -124,7 +122,6 @@ apply_event(Event, State) ->
         bondy_oplog_event:key(Event)
     ).
 
-%% A length-stable shuffle generator: permute the given list.
 shuffle_gen(L) ->
     ?LET(Keys, vector(length(L), integer()), begin
         [E || {_, E} <- lists:sort(lists:zip(Keys, L))]

@@ -81,7 +81,6 @@ compressible_body_actually_compresses_test() ->
         ),
     ?assertEqual(?FLAG, Flags),
     ?assert(iolist_size(Encoded) < byte_size(Body)),
-    %% First byte is the algorithm id (1 = zlib).
     EncodedBin = iolist_to_binary(Encoded),
     <<Algo:8, _/binary>> = EncodedBin,
     ?assertEqual(?BONDY_LOG_CODEC_ALGO_ZLIB, Algo).
@@ -233,7 +232,6 @@ decompress_telemetry_emits() ->
 
 no_event_for_noop() ->
     Ref = attach([bondy_log, codec, compress], compress_noop),
-    %% Below threshold → no-op.
     {0, _} = bondy_log_codec:encode_body(
         <<"tiny">>, #{
             body_compression => zlib,
@@ -305,7 +303,6 @@ encrypt_sets_flag_and_envelope_header() ->
     {Flags, Encoded} = bondy_log_codec:encode_body(Body, Opts),
     ?assertEqual(?EFLAG, Flags),
     EncodedBin = iolist_to_binary(Encoded),
-    %% First byte must be the AES-256-GCM cipher id.
     <<Algo:8, KeyId:16/big-unsigned, IV:12/binary, Tag:16/binary,
         _Ciphertext/binary>> = EncodedBin,
     ?assertEqual(?BONDY_LOG_CODEC_CIPHER_AES_256_GCM, Algo),

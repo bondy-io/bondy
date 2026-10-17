@@ -1,6 +1,3 @@
-%% Unit tests for bondy_oplog_bootstrap_lifecycle (PR-1 / catalogue
-%% expansion plan §2).
-%%
 %% The lifecycle module is exercised here in isolation. Integration
 %% with the applier (the gate) and the sync-session (the transition)
 %% is exercised in bondy_oplog_bootstrap_lifecycle_e2e_test.
@@ -74,7 +71,6 @@ persistent_existing_flag_overrides_seed_false_test() ->
     Tmp = mk_tmp_dir(),
     try
         Id = <<"p3">>,
-        %% Plant a flag file as if a previous bootstrap had completed.
         ok = filelib:ensure_dir(filename:join([Tmp, Id, "x"])),
         Flag = filename:join([Tmp, Id, "lifecycle.live"]),
         ok = file:write_file(Flag, <<>>),
@@ -180,7 +176,6 @@ mark_live_idempotent_test() ->
             path_layout => flat
         }),
         ok = ?MODL:mark_live(H),
-        %% Calling again must not error.
         ok = ?MODL:mark_live(H),
         ?assertEqual(live, ?MODL:state(H))
     after
@@ -218,7 +213,6 @@ restart_without_mark_live_sees_pre_bootstrap_test() ->
             path_layout => flat
         },
         _H1 = ?MODL:open(Id, Opts),
-        %% Drop the handle without calling mark_live, then "restart".
         H2 = ?MODL:open(Id, Opts),
         ?assertEqual(pre_bootstrap, ?MODL:state(H2))
     after

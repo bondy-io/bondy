@@ -166,7 +166,6 @@ all_returns_every_metric() ->
             maps:get(name, R) =:= Name2
     ],
     ?assertEqual(2, length(Matching)),
-    %% Verify the shape: each entry has name, label, type, value.
     lists:foreach(
         fun(R) ->
             ?assert(maps:is_key(name, R)),

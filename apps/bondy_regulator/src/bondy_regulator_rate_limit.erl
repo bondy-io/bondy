@@ -33,9 +33,6 @@
 -type t() :: #?MODULE{}.
 -type key() :: any().
 -type algorithm() :: token_bucket.
-%% | fixed_window
-%% | sliding_window
-%% | leaky_bucket.
 -type opts() :: #{
     capacity => pos_integer(),
     window_ms => pos_integer(),
@@ -188,7 +185,6 @@ allow(#?MODULE{} = T, Increment) when is_integer(Increment); Increment > 0 ->
             _ = atomics:exchange(T#?MODULE.atomics, 1, Tokens),
             _ = atomics:exchange(T#?MODULE.atomics, 2, Now),
 
-            %% Next token availability
             ResetsIn =
                 case Tokens >= Increment of
                     true ->

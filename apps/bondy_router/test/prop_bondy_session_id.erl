@@ -57,7 +57,6 @@ setup() ->
 %% Generators
 %% =============================================================================
 
-%% Generate a valid WAMP external ID (1 to 2^53)
 external_id() ->
     range(1, ?MAX_EXT_ID).
 
@@ -120,7 +119,6 @@ prop_new_shape() ->
         )
     ).
 
-%% Property: new/0 produces valid session IDs
 prop_new_is_type() ->
     ?WITH_CFG(
         ?FORALL(
@@ -144,7 +142,6 @@ prop_node_prefix_present() ->
         )
     ).
 
-%% Property: new/1 with external ID produces valid session ID with that external ID
 prop_new_with_external_id_roundtrip() ->
     ?WITH_CFG(
         ?FORALL(
@@ -157,7 +154,6 @@ prop_new_with_external_id_roundtrip() ->
         )
     ).
 
-%% Property: to_external always returns a value in the valid range
 prop_new_with_external_id_in_range() ->
     ?WITH_CFG(
         ?FORALL(
@@ -171,7 +167,6 @@ prop_new_with_external_id_in_range() ->
         )
     ).
 
-%% Property: external ID is preserved through encode/decode (past the prefix)
 prop_external_id_preserved() ->
     ?WITH_CFG(
         ?FORALL(
@@ -189,7 +184,6 @@ prop_external_id_preserved() ->
 %% Properties: Uniqueness
 %% =============================================================================
 
-%% Property: Multiple calls to new/0 produce unique session IDs
 prop_uniqueness() ->
     ?WITH_CFG(
         ?FORALL(
@@ -207,7 +201,6 @@ prop_uniqueness() ->
 %% Properties: Type Checking
 %% =============================================================================
 
-%% Property: is_type accepts valid session IDs
 prop_is_type_accepts_valid() ->
     ?WITH_CFG(
         ?FORALL(
@@ -217,7 +210,6 @@ prop_is_type_accepts_valid() ->
         )
     ).
 
-%% Property: is_type rejects invalid terms
 prop_is_type_rejects_invalid() ->
     ?FORALL(
         Invalid,
@@ -250,7 +242,6 @@ prop_segments_charset() ->
         )
     ).
 
-%% Helper: Check if all characters are valid base62
 is_valid_base62(Bin) when is_binary(Bin) ->
     Base62Chars =
         <<"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz">>,

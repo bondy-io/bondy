@@ -53,7 +53,6 @@ start_link() ->
 init(_) ->
     process_flag(trap_exit, true),
 
-    %% Initialise the sharded queue tables
     ok = bondy_http_transport_queue:init(),
 
     Interval = bondy_config:get(

@@ -36,7 +36,6 @@ end_per_suite(Config) ->
     {save_config, Config}.
 
 init_per_testcase(_TestCase, Config) ->
-    %% Set small bounds for testing
     bondy_config:set([http_transport, queue, max_messages], 10),
     bondy_config:set([http_transport, queue, max_bytes], 10485760),
     bondy_config:set([http_transport, queue, message_ttl], 300000),
@@ -54,7 +53,6 @@ init_and_delete_transport(_Config) ->
     RealmUri = <<"com.test.realm">>,
     SessionId = rand:uniform(1 bsl 53),
 
-    %% Init creates meta
     ok = bondy_http_transport_queue:init_transport(
         TransportId, RealmUri, SessionId
     ),
@@ -62,7 +60,6 @@ init_and_delete_transport(_Config) ->
     %% Verify meta exists via count returning 0 (not from error path)
     ?assertEqual(0, bondy_http_transport_queue:count(TransportId)),
 
-    %% Double init returns error
     ?assertEqual(
         {error, already_exists},
         bondy_http_transport_queue:init_transport(
@@ -70,16 +67,13 @@ init_and_delete_transport(_Config) ->
         )
     ),
 
-    %% Enqueue a message
     Msg = make_event(1),
     ok = bondy_http_transport_queue:enqueue(TransportId, Msg, #{}),
     ?assertEqual(1, bondy_http_transport_queue:count(TransportId)),
 
-    %% Delete removes all entries + meta
     ok = bondy_http_transport_queue:delete_transport(TransportId),
     ?assertEqual(0, bondy_http_transport_queue:count(TransportId)),
 
-    %% Enqueue after delete fails (no meta)
     ?assertEqual(
         {error, transport_not_found},
         bondy_http_transport_queue:enqueue(TransportId, Msg, #{})
@@ -91,7 +85,6 @@ enqueue_dequeue_ordering(_Config) ->
         TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
     ),
 
-    %% Enqueue 5 messages with distinct payloads
     Msgs = [make_event(I) || I <- lists:seq(1, 5)],
     lists:foreach(
         fun(Msg) ->
@@ -102,15 +95,12 @@ enqueue_dequeue_ordering(_Config) ->
 
     ?assertEqual(5, bondy_http_transport_queue:count(TransportId)),
 
-    %% Dequeue all — should come back in insertion order
     Dequeued = bondy_http_transport_queue:dequeue_batch(TransportId, 100),
     ?assertEqual(5, length(Dequeued)),
     ?assertEqual(Msgs, Dequeued),
 
-    %% Queue should be empty now
     ?assertEqual(0, bondy_http_transport_queue:count(TransportId)),
 
-    %% Cleanup
     ok = bondy_http_transport_queue:delete_transport(TransportId).
 
 max_messages_bound(_Config) ->
@@ -120,7 +110,6 @@ max_messages_bound(_Config) ->
     ),
 
     %% max_messages is 10 (set in init_per_testcase)
-    %% Enqueue 15 messages
     _Msgs = [
         begin
             Msg = make_event(I),
@@ -143,7 +132,6 @@ max_messages_bound(_Config) ->
         )
     ),
 
-    %% Dequeue and verify we get the newest messages (oldest were evicted)
     Dequeued = bondy_http_transport_queue:dequeue_batch(TransportId, 100),
     ?assert(length(Dequeued) =< 10),
 
@@ -163,7 +151,6 @@ max_messages_bound(_Config) ->
         Dequeued
     ),
 
-    %% Cleanup
     ok = bondy_http_transport_queue:delete_transport(TransportId).
 
 max_bytes_bound(_Config) ->
@@ -172,8 +159,6 @@ max_bytes_bound(_Config) ->
         TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
     ),
 
-    %% Set a small byte limit
-    %% First, compute the size of one message
     SampleMsg = make_event(1),
     MsgSize = erlang:external_size(SampleMsg),
 
@@ -183,7 +168,6 @@ max_bytes_bound(_Config) ->
     %% Set max_messages high so it doesn't interfere
     bondy_config:set([http_transport, queue, max_messages], 1000),
 
-    %% Enqueue 6 messages
     lists:foreach(
         fun(I) ->
             ok = bondy_http_transport_queue:enqueue(
@@ -193,7 +177,6 @@ max_bytes_bound(_Config) ->
         lists:seq(1, 6)
     ),
 
-    %% Byte size should be bounded
     ByteSize = bondy_http_transport_queue:byte_size(TransportId),
     ?assert(
         ByteSize =< MaxBytes,
@@ -204,7 +187,6 @@ max_bytes_bound(_Config) ->
         )
     ),
 
-    %% Cleanup
     ok = bondy_http_transport_queue:delete_transport(TransportId).
 
 ttl_expiry_dequeue(_Config) ->
@@ -213,17 +195,13 @@ ttl_expiry_dequeue(_Config) ->
         TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
     ),
 
-    %% Set a very short TTL (1ms)
     bondy_config:set([http_transport, queue, message_ttl], 1),
 
-    %% Enqueue a message
     ok = bondy_http_transport_queue:enqueue(TransportId, make_event(1), #{}),
     ?assertEqual(1, bondy_http_transport_queue:count(TransportId)),
 
-    %% Wait for the message to expire
     timer:sleep(10),
 
-    %% Dequeue should skip expired messages and return empty
     Dequeued = bondy_http_transport_queue:dequeue_batch(TransportId, 100),
     ?assertEqual([], Dequeued),
 
@@ -231,7 +209,6 @@ ttl_expiry_dequeue(_Config) ->
     %% remove expired entries (that's the sweep's job)
     %% The atomics counter may still show 1
 
-    %% Cleanup
     ok = bondy_http_transport_queue:delete_transport(TransportId).
 
 ttl_expiry_sweep(_Config) ->
@@ -240,10 +217,8 @@ ttl_expiry_sweep(_Config) ->
         TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
     ),
 
-    %% Set a very short TTL (1ms)
     bondy_config:set([http_transport, queue, message_ttl], 1),
 
-    %% Enqueue messages
     lists:foreach(
         fun(I) ->
             ok = bondy_http_transport_queue:enqueue(
@@ -255,17 +230,13 @@ ttl_expiry_sweep(_Config) ->
 
     ?assertEqual(5, bondy_http_transport_queue:count(TransportId)),
 
-    %% Wait for messages to expire
     timer:sleep(10),
 
-    %% Run the eviction sweep
     ok = bondy_http_transport_queue:evict_expired_all(),
 
-    %% All messages should have been removed
     ?assertEqual(0, bondy_http_transport_queue:count(TransportId)),
     ?assertEqual(0, bondy_http_transport_queue:byte_size(TransportId)),
 
-    %% Cleanup
     ok = bondy_http_transport_queue:delete_transport(TransportId).
 
 concurrent_enqueue(_Config) ->
@@ -277,7 +248,6 @@ concurrent_enqueue(_Config) ->
     %% Raise the limit so eviction doesn't interfere
     bondy_config:set([http_transport, queue, max_messages], 10000),
 
-    %% Spawn N processes that each enqueue M messages
     N = 10,
     M = 50,
     Parent = self(),
@@ -297,7 +267,6 @@ concurrent_enqueue(_Config) ->
      || ProcIdx <- lists:seq(1, N)
     ],
 
-    %% Wait for all processes to finish
     lists:foreach(
         fun(Pid) ->
             receive
@@ -307,38 +276,31 @@ concurrent_enqueue(_Config) ->
         Pids
     ),
 
-    %% Verify total count matches N * M
     ExpectedCount = N * M,
     ?assertEqual(
         ExpectedCount,
         bondy_http_transport_queue:count(TransportId)
     ),
 
-    %% Dequeue all and verify we get exactly N * M messages
     Dequeued = bondy_http_transport_queue:dequeue_batch(
         TransportId, ExpectedCount + 100
     ),
     ?assertEqual(ExpectedCount, length(Dequeued)),
 
-    %% Counter should be 0 after dequeue
     ?assertEqual(0, bondy_http_transport_queue:count(TransportId)),
 
-    %% Cleanup
     ok = bondy_http_transport_queue:delete_transport(TransportId).
 
 dequeue_empty(_Config) ->
-    %% Dequeue from nonexistent transport returns []
     FakeId = make_transport_id(),
     ?assertEqual([], bondy_http_transport_queue:dequeue_batch(FakeId, 10)),
 
-    %% Dequeue from empty but initialised transport returns []
     TransportId = make_transport_id(),
     ok = bondy_http_transport_queue:init_transport(
         TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
     ),
     ?assertEqual([], bondy_http_transport_queue:dequeue_batch(TransportId, 10)),
 
-    %% Cleanup
     ok = bondy_http_transport_queue:delete_transport(TransportId).
 
 multiple_transports_isolation(_Config) ->
@@ -352,7 +314,6 @@ multiple_transports_isolation(_Config) ->
         TransportB, <<"com.test.realm">>, rand:uniform(1 bsl 53)
     ),
 
-    %% Enqueue different messages to each transport
     MsgsA = [make_event(I) || I <- lists:seq(1, 3)],
     MsgsB = [make_event(I) || I <- lists:seq(101, 105)],
 
@@ -369,19 +330,15 @@ multiple_transports_isolation(_Config) ->
         MsgsB
     ),
 
-    %% Counts are independent
     ?assertEqual(3, bondy_http_transport_queue:count(TransportA)),
     ?assertEqual(5, bondy_http_transport_queue:count(TransportB)),
 
-    %% Dequeue from A only gets A's messages
     DequeuedA = bondy_http_transport_queue:dequeue_batch(TransportA, 100),
     ?assertEqual(3, length(DequeuedA)),
     ?assertEqual(MsgsA, DequeuedA),
 
-    %% B is unaffected
     ?assertEqual(5, bondy_http_transport_queue:count(TransportB)),
 
-    %% Dequeue from B only gets B's messages
     DequeuedB = bondy_http_transport_queue:dequeue_batch(TransportB, 100),
     ?assertEqual(5, length(DequeuedB)),
     ?assertEqual(MsgsB, DequeuedB),
@@ -395,7 +352,6 @@ multiple_transports_isolation(_Config) ->
     ok = bondy_http_transport_queue:delete_transport(TransportA),
     ?assertEqual(0, bondy_http_transport_queue:count(TransportB)),
 
-    %% Cleanup
     ok = bondy_http_transport_queue:delete_transport(TransportB).
 
 init_is_idempotent(_Config) ->
@@ -405,7 +361,6 @@ init_is_idempotent(_Config) ->
     RingBefore = persistent_term:get({bondy_http_transport_queue, ring}),
     MetaBefore = ets:info(bondy_http_transport_queue_meta, size),
 
-    %% Put some state in so we can verify it survives
     TransportId = make_transport_id(),
     ok = bondy_http_transport_queue:init_transport(
         TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
@@ -413,17 +368,14 @@ init_is_idempotent(_Config) ->
     ok = bondy_http_transport_queue:enqueue(TransportId, make_event(1), #{}),
     ?assertEqual(1, bondy_http_transport_queue:count(TransportId)),
 
-    %% Re-run init/0
     ok = bondy_http_transport_queue:init(),
 
     %% Ring is the same map (same TIDs for every bucket)
     RingAfter = persistent_term:get({bondy_http_transport_queue, ring}),
     ?assertEqual(RingBefore, RingAfter),
 
-    %% Meta table still exists
     ?assertNotEqual(undefined, ets:info(bondy_http_transport_queue_meta, size)),
 
-    %% Queued message survived
     ?assertEqual(1, bondy_http_transport_queue:count(TransportId)),
     [Msg] = bondy_http_transport_queue:dequeue_batch(TransportId, 10),
     ?assertEqual(make_event(1), Msg),
@@ -461,7 +413,6 @@ partitions_survive_manager_crash(_Config) ->
         TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
     ),
 
-    %% Enqueue a message the crashed manager would have been responsible for
     Msg = make_event(42),
     ok = bondy_http_transport_queue:enqueue(TransportId, Msg, #{}),
     ?assertEqual(1, bondy_http_transport_queue:count(TransportId)),
@@ -482,16 +433,13 @@ partitions_survive_manager_crash(_Config) ->
         error(manager_did_not_die)
     end,
 
-    %% Wait for the supervisor to bring a new manager up
     NewPid = wait_for_manager(10, 100),
     ?assert(is_pid(NewPid)),
     ?assertNotEqual(ManagerPid, NewPid),
 
-    %% Ring is unchanged — same TIDs
     RingAfter = persistent_term:get({bondy_http_transport_queue, ring}),
     ?assertEqual(RingBefore, RingAfter),
 
-    %% The queued message is still there and still dequeue-able
     ?assertEqual(1, bondy_http_transport_queue:count(TransportId)),
     [Dequeued] = bondy_http_transport_queue:dequeue_batch(TransportId, 10),
     ?assertEqual(Msg, Dequeued),

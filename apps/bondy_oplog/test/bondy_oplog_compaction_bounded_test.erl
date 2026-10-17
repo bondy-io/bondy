@@ -2,13 +2,6 @@
 %% Compaction keeps the MST BOUNDED under sustained writes — the end-to-end
 %% validation of the O(diff) read-only stability frontier (task #34).
 %%
-%% The "runaway" was: each compaction cycle cost O(N) (the O(N) set-LCP
-%% frontier fold), so under sustained writes the tree outgrew compaction and
-%% the MST grew without bound. With the frontier now O(diff) (and read-only —
-%% it walks `bondy_mst:diff_to_list/2`, which no longer mutates the store), the
-%% per-cycle cost is governed by the working set, so compaction keeps up and
-%% the live MST stays bounded no matter how many events flow through.
-%%
 %% Two tests:
 %%   1. `bounded_under_sustained_load` — many append→compact cycles; assert the
 %%      live size never exceeds one batch though far more events flow through.
@@ -41,8 +34,6 @@ cleanup(_) ->
     ],
     ok.
 
-%% -----------------------------------------------------------------------------
-
 bounded_under_sustained_load_test_() ->
     {setup, fun setup/0, fun cleanup/1,
         {timeout, 60, fun bounded_under_sustained_load/0}}.
@@ -59,7 +50,6 @@ bounded_under_sustained_load() ->
             fun(I, AccMax) ->
                 append_batch(InstId, I, Batch),
                 _ = bondy_oplog_instance:await_apply(InstId),
-                %% Live size after a batch, before compaction.
                 SizeBefore = bondy_oplog:size(InstId),
                 %% A peer converged to exactly our tree ⇒ frontier = whole
                 %% tree ⇒ the stable prefix is dropped each cycle.
@@ -75,8 +65,6 @@ bounded_under_sustained_load() ->
             lists:seq(1, Iters)
         ),
         TotalAppended = Iters * Batch,
-        %% The tree never accumulated more than one batch, though far more
-        %% events flowed through — i.e. compaction kept up (no runaway).
         ?assert(MaxSize =< Batch + 1),
         ?assert(MaxSize * 5 =< TotalAppended),
         ?assertEqual(500, TotalAppended)
@@ -85,8 +73,6 @@ bounded_under_sustained_load() ->
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
         close_shard(Cache, Proj)
     end.
-
-%% -----------------------------------------------------------------------------
 
 diff_frontier_bounds_to_recent_batch_test_() ->
     {setup, fun setup/0, fun cleanup/1,
@@ -109,9 +95,6 @@ diff_frontier_bounds_to_recent_batch() ->
         _ = bondy_oplog_instance:await_apply(InstId),
         ?assertEqual(2 * Batch, bondy_oplog:size(InstId)),
 
-        %% The diff-frontier against the lagging peer root descends the
-        %% read-only diff to the first unconfirmed (batch-2) event and
-        %% truncates exactly the confirmed batch-1 prefix.
         ?assertMatch(
             {ok, {compacted, _, _}},
             bondy_oplog_instance:compact(InstId, [Witness])
@@ -123,8 +106,6 @@ diff_frontier_bounds_to_recent_batch() ->
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
         close_shard(Cache, Proj)
     end.
-
-%% -----------------------------------------------------------------------------
 
 watermark_reanchored_on_truncated_root_test_() ->
     {setup, fun setup/0, fun cleanup/1,
@@ -188,8 +169,6 @@ watermark_reanchored_on_truncated_root() ->
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
         close_shard(Cache, Proj)
     end.
-
-%% -----------------------------------------------------------------------------
 
 %% =============================================================================
 %% Helpers

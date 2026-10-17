@@ -463,7 +463,6 @@ do_add(RealmUri, Keyword, #{type := source} = Source, Opts) when
     Key = {Keyword, Masked, Authmethod},
     store(RealmUri, Key, Source, Opts);
 do_add(RealmUri, Usernames, #{type := source} = Source, Opts) ->
-    %% We validate all usernames exist
     Unknown = bondy_rbac_user:unknown(RealmUri, Usernames),
     [] =:= Unknown orelse throw({no_such_users, Unknown}),
 

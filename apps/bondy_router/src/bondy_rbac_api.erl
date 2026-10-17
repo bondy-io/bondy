@@ -396,13 +396,6 @@ handle_call(?BONDY_RBAC_AUTHORIZE, #call{} = M, Ctxt) ->
     %% keeps working: with one argument missing the validator prepends the
     %% caller's own realm, which for a tenant session is the only realm it
     %% could have named anyway.
-    %%
-    %% It used to take three arguments with the realm read from the context,
-    %% and `AuthId` therefore sat in the slot the validator reads as a realm
-    %% URI. A username never equals a realm URI, so every tenant session was
-    %% refused and only a master session got through — able to ask solely about
-    %% master-realm principals. The procedure could not do the job its own
-    %% reference page describes, for anybody.
     [RealmUri, AuthId, Permission, Resource] =
         bondy_wamp_api_utils:validate_call_args(M, Ctxt, 4),
     RBACCtxt = bondy_rbac:get_context(RealmUri, AuthId),

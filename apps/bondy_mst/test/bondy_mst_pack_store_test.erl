@@ -600,7 +600,6 @@ auto_seal_survives_close_reopen_with_same_opts_test() ->
             ?assertEqual([1], pack_ids(S3)),
             ?assertEqual(P1, bondy_mst_store:get(S3, H1)),
             ?assertEqual(P2, bondy_mst_store:get(S3, H2)),
-            %% Two more puts on the reopened store trigger another seal.
             P3 = mk_page(0, undefined, [{c, 3, undefined}]),
             P4 = mk_page(0, undefined, [{d, 4, undefined}]),
             {_, S4} = bondy_mst_store:put(S3, P3),
@@ -669,7 +668,6 @@ tombstone_persists_across_reopen_test() ->
         ?assertEqual([], bondy_mst_store:list(S3)),
         ?assertEqual(P, bondy_mst_store:get(S3, Hash)),
         ?assertEqual(ok, bondy_mst_store:close(S3)),
-        %% The file is there.
         ?assert(
             filelib:is_regular(
                 bondy_mst_pack_tombstones:path(Dir)
@@ -811,7 +809,6 @@ gc_prunes_and_persists_tombstones_test() ->
             {ok, S} ->
                 ?assertEqual(0, sets:size(S))
         end,
-        %% Reopen and verify H1 is still gone, H2 still present.
         S6 = open_store(Dir),
         try
             ?assertEqual(undefined, bondy_mst_store:get(S6, H1)),
@@ -1123,7 +1120,6 @@ gc_persists_across_reopen_test() ->
         {ok, S3} = bondy_mst_pack_store_seal(S2),
         {S4, _} = bondy_mst_store:gc(S3, [H1]),
         ok = bondy_mst_store:close(S4),
-        %% Reopen and confirm only H1 survives.
         S5 = open_store(Dir),
         try
             ?assertEqual([2], pack_ids(S5)),

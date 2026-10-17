@@ -174,7 +174,6 @@ ping_keepalive_survives_idle(_) ->
     %% Idle ~7x the ping interval — several ping/pong cycles must occur.
     timer:sleep(2000),
     ?assertEqual(established, bondy_connect_client:status(Conn)),
-    %% And it still works.
     {ok, _} = bondy_connect_client:register(
         Conn, <<"com.example.res.ka">>, ok_handler()
     ),
@@ -247,7 +246,6 @@ reconnect_replays_registration(_) ->
     {ok, R0} = bondy_connect_client:call(Caller, Proc, [<<"a">>]),
     ?assertEqual([<<"a">>], maps:get(args, R0)),
 
-    %% Abrupt server-side drop.
     true = is_process_alive(CalleeServer),
     _ = exit(CalleeServer, kill),
 
@@ -333,7 +331,6 @@ malformed_frame_triggers_reconnect(_) ->
 %% because a revocation is scoped to the current session (Bondy has no durable
 %% sessions) a later reconnect replays the declared registration and the
 %% procedure is callable again — the revocation must NOT survive the reconnect
-%%.
 revocation_keeps_declared_replays_on_reconnect(_) ->
     Proc = <<"com.example.res.revoked">>,
     {Callee, CalleeServer} = connect_and_server(#{}),
@@ -489,10 +486,6 @@ initial_connect_fails_fast(_) ->
 %% back. This is the FIRST connect, where `retry_initial_connect` defaults to
 %% `false` — the exception is deliberate (a transient abort is the opposite of a
 %% misconfiguration, which is what fail-fast exists for).
-%%
-%% Before the fix the abort short-circuited out of `process_records/3` straight
-%% into a gen_statem stop, never reaching `is_retriable/1` at all, so EVERY
-%% abort killed the connection for good.
 %%
 %% The gate is closed deterministically rather than by generating real load:
 %% suspend the sampler so it cannot re-evaluate (it re-samples every 100ms and
@@ -898,13 +891,10 @@ serve_silent(Sock) ->
 %% the HELLO frame, then send an anonymous WELCOME. Shared by the silent and the
 %% drop mock servers.
 serve_welcome(Sock) ->
-    %% 1. Raw handshake: echo the client's 4-octet request.
     {ok, <<16#7F, _:8, 0:16>> = Req} = gen_tcp:recv(Sock, 4, 5000),
     ok = gen_tcp:send(Sock, Req),
-    %% 2. Read the HELLO frame (4-octet header + Len-octet payload); ignored.
     {ok, <<_:8, Len:24>>} = gen_tcp:recv(Sock, 4, 5000),
     {ok, _Hello} = gen_tcp:recv(Sock, Len, 5000),
-    %% 3. Send an anonymous WELCOME so the client establishes the session.
     Welcome = bondy_wamp_message:welcome(erlang:unique_integer([positive]), #{
         realm => ?REALM,
         roles => #{dealer => #{}, broker => #{}},

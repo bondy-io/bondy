@@ -204,9 +204,6 @@ register_shard(NS, Index, Shard) ->
     }),
     {Cache, Proj}.
 
-%% Common setup: fresh instance id, fresh namespace, fresh shard with
-%% ETS cache + projection, instance started with cell_apply_target
-%% pointing at the freshly registered shard.
 setup_instance() ->
     Id = mk_id(),
     NS = ns_of(Id),

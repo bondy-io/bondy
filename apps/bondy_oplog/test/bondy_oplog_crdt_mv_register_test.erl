@@ -64,7 +64,6 @@ sequential_writes_dominate_test() ->
 %% context): both values survive as concurrent siblings.
 concurrent_writes_are_siblings_test() ->
     S0 = ?MOD:init(),
-    %% Both stamp the SAME (empty) context — they are concurrent.
     Ea = mk_event(10, <<"a">>, 1, <<"va">>, ?MOD:context_of(S0)),
     Eb = mk_event(11, <<"b">>, 1, <<"vb">>, ?MOD:context_of(S0)),
     S1 = apply_event(apply_event(S0, Ea), Eb),
@@ -88,7 +87,6 @@ resolving_write_collapses_siblings_test() ->
     Eb = mk_event(11, <<"b">>, 1, <<"vb">>, ?MOD:context_of(S0)),
     S1 = apply_event(apply_event(S0, Ea), Eb),
     ?assertEqual([<<"va">>, <<"vb">>], ?MOD:to_value(S1)),
-    %% `a` now observes the full context and writes vc.
     S2 = write(S1, 20, <<"a">>, 2, <<"vc">>),
     ?assertEqual([<<"vc">>], ?MOD:to_value(S2)).
 
@@ -104,7 +102,6 @@ duplicate_delivery_is_idempotent_test() ->
 %% under permutation of the event list.
 interpret_cog_matches_eager_and_permutation_invariant_test() ->
     S0 = ?MOD:init(),
-    %% Two concurrent writes then a resolving write from `a`.
     Ea = mk_event(10, <<"a">>, 1, <<"va">>, ?MOD:context_of(S0)),
     Eb = mk_event(11, <<"b">>, 1, <<"vb">>, ?MOD:context_of(S0)),
     SConc = apply_event(apply_event(S0, Ea), Eb),
@@ -113,7 +110,6 @@ interpret_cog_matches_eager_and_permutation_invariant_test() ->
     Events = [Ea, Eb, Ec],
     Group = ?MOD:interpret_cog(Events, S0),
     ?assertEqual(Eager, Group),
-    %% Permutation invariance of interpret_cog.
     ?assertEqual(Group, ?MOD:interpret_cog([Ec, Ea, Eb], S0)),
     ?assertEqual(Group, ?MOD:interpret_cog([Eb, Ec, Ea], S0)),
     ?assertEqual([<<"vc">>], ?MOD:to_value(Group)).

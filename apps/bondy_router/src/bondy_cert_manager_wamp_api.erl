@@ -54,10 +54,6 @@ handle_call(?BONDY_CERT_RELOAD_CACERTS, #call{} = M, Ctxt) ->
     R = bondy_wamp_message:result(M#call.request_id, #{}, []),
     {reply, R};
 handle_call(?BONDY_CERT_ROTATE_ALL, #call{} = M, Ctxt) ->
-    %% FOUND 2026-08-31: this clause validated NOTHING — it ignored the
-    %% context and rotated every listener's certificate for any caller the
-    %% dealer let through, while its four siblings below were master-realm
-    %% only. The check is the same one they make.
     [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
     ok = bondy_cert_manager:rotate_all_listeners(),
     R = bondy_wamp_message:result(M#call.request_id, #{}, []),

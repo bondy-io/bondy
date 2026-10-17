@@ -71,7 +71,6 @@ cleanup(Dirs) ->
 %% =============================================================================
 
 mv_register_survives_restart(Dirs) ->
-    %% --- First lifetime: write v1, read it back. ---
     {Db0, Sup0} = open(?MV, Dirs),
     {ok, T0} = bondy_db:open_table(Db0, items, #{}),
     ?assertEqual(tier_2, maps:get(causal_tier, bondy_db:info(T0))),
@@ -94,7 +93,6 @@ mv_register_survives_restart(Dirs) ->
     end.
 
 aw_map_survives_restart(Dirs) ->
-    %% --- First lifetime: put color=red. ---
     {Db0, Sup0} = open(?AW, Dirs),
     {ok, T0} = bondy_db:open_table(Db0, items, #{}),
     ok = bondy_db:apply(T0, ?R, ?K, {put, <<"color">>, <<"red">>}),
@@ -103,7 +101,6 @@ aw_map_survives_restart(Dirs) ->
     ),
     close(Db0, Sup0),
 
-    %% --- Second lifetime. ---
     {Db1, Sup1} = open(?AW, Dirs),
     {ok, T1} = bondy_db:open_table(Db1, items, #{}),
     try

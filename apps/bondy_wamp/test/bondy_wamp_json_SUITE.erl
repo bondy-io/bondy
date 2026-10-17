@@ -215,7 +215,6 @@ test_key_value_list(_) ->
     KVList = [{<<"key1">>, <<"value1">>}, {<<"key2">>, <<"value2">>}],
     Result = bondy_wamp_json:encode(KVList),
 
-    %% Decode back and verify
     Decoded = bondy_wamp_json:decode(Result),
     ?assertEqual(
         #{<<"key1">> => <<"value1">>, <<"key2">> => <<"value2">>}, Decoded
@@ -412,8 +411,6 @@ test_validate_opts(_) ->
     ?assertEqual([{float_format, [{scientific, 249}]}], Result).
 
 test_roundtrip(_) ->
-    %% Test encode/decode roundtrip for various data structures
-
     %% Basic types
     ?assertEqual(1, bondy_wamp_json:decode(bondy_wamp_json:encode(1))),
     ?assertEqual(

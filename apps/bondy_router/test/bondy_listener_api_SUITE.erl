@@ -43,17 +43,13 @@ suite() ->
 
 all() ->
     [
-        %% Dispatch
         unknown_listener_procedure_is_reported,
-        %% Arguments
         suspend_rejects_an_unknown_phase,
         resume_rejects_an_unknown_phase,
         suspend_rejects_a_non_binary_phase,
         too_many_arguments_is_reported,
         no_arguments_is_refused_rather_than_defaulted,
-        %% Authorization
         a_non_master_realm_is_refused,
-        %% Effect
         suspending_normal_refuses_new_connections,
         resume_is_idempotent
     ].

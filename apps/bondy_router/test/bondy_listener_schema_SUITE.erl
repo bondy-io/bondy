@@ -270,11 +270,6 @@ widened_datatypes_accept_raw_socket_values(Config) ->
     ).
 
 partial_cors_and_security_header_blocks_are_not_completed(Config) ->
-    %% This section used to hand the consumers a TOTAL `cors' and
-    %% `security_headers' map, restating all ten of their default values,
-    %% because `bondy_http_cors:build_headers/2' reads its members with
-    %% `maps:get/2' and a partial map raised `badkey' on the request path.
-    %%
     %% Both consumers now merge their own `default_config/0' UNDER whatever
     %% arrives (`bondy_http_cors:config_from_req/1',
     %% `bondy_http_security_headers:init/1'), so restating the values here is a
@@ -409,9 +404,6 @@ carrier_and_deflate_keys_reach_their_legacy_paths(Config) ->
     ]),
     ?assertEqual(true, key_value:get([websocket, compress], Spec)),
     ?assertEqual(9, key_value:get([websocket, deflate_opts, level], Spec)),
-    %% `bytesize', copied verbatim from `wamp.websocket.max_frame_size'. That
-    %% mapping does not accept `infinity' either, and widening it here was not
-    %% part of this change.
     ?assertEqual(
         8388608, key_value:get([websocket, max_frame_size], Spec)
     ),

@@ -232,9 +232,7 @@ batched_await_durable_blocks_then_sync_wakes_it_test() ->
         timer:sleep(50),
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(1, maps:get(waiter_count, Info)),
-        %% Trigger durability via sync.
         ?assertEqual(ok, bondy_oplog_wal:sync(Pid)),
-        %% Waiter should reply ok now.
         receive
             {Waiter, Result} -> ?assertEqual(ok, Result)
         after 2000 ->
@@ -278,7 +276,6 @@ batched_await_durable_timeout_returns_error_test() ->
             {error, timeout},
             bondy_oplog_wal:await_durable(Pid, EndPos, 50)
         ),
-        %% Waiter must be removed from the pending list after timeout.
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(0, maps:get(waiter_count, Info))
     end).
@@ -312,7 +309,6 @@ batched_multiple_waiters_woken_in_order_test() ->
         {_, _, EndPos2} = append_one(Pid, HLC, 2),
         {_, _, EndPos3} = append_one(Pid, HLC, 3),
         Parent = self(),
-        %% Register all three waiters concurrently.
         Pids = [
             spawn_link(fun() ->
                 R = bondy_oplog_wal:await_durable(Pid, P, 5000),
@@ -409,7 +405,6 @@ batched_rotation_wakes_waiters_in_old_segment_test() ->
         ?assertEqual(
             1, maps:get(waiter_count, bondy_oplog_wal:info(Pid))
         ),
-        %% Trigger rotation by appending again.
         _ = append_one(Pid, HLC, 2),
         receive
             {Waiter, R} -> ?assertEqual(ok, R)

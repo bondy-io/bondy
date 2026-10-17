@@ -149,11 +149,9 @@ client_tickets_list_in_one_cell() ->
      || I <- lists:seq(1, N)
     ],
 
-    %% Exactly ONE cell for (erin, app1), regardless of device count.
     Rows = rows_for(T, Authid),
     ?assertEqual(1, length(Rows)),
 
-    %% And that one cell holds a LIST of N tickets (one per device).
     [{_Key, Value, _Hlc}] = Rows,
     ?assert(is_list(Value)),
     ?assertEqual(N, length(Value)),

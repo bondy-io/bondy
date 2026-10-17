@@ -3,8 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% The A3 property on which the entire Canteen→POLog upgrade rests:
-%%
 %%   After delivering an event with HLC `h`, every subsequently created local
 %%   event has HLC `> h` — on EVERY delivery path.
 %%

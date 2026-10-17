@@ -328,9 +328,6 @@ compute_one_cell(
         #{instance_id => Id}
     ),
     ApplyT0 = erlang:monotonic_time(microsecond),
-    %% The cell kernel ({fold, _} legacy or {crdt, _} operation-based)
-    %% applies one operation and returns every frame component. The
-    %% fold-vs-CRDT branch lives in `bondy_oplog_cell_kernel`, not here.
     {NewState, Hlc, NewStateBytes, NewValueBytes, ValueEqualsState} =
         bondy_oplog_cell_kernel:apply(
             Kernel, OldState, OldValueOpt, FoldEvent, Meta, Context
@@ -346,7 +343,6 @@ compute_one_cell(
         #{duration_us => erlang:monotonic_time(microsecond) - ApplyT0},
         #{instance_id => Id}
     ),
-    %% Term-diff the cell's old vs new value into secondary index ops.
     IdxOps = index_ops_for_cell(
         SecIdx,
         Id,

@@ -1,5 +1,3 @@
-%% Stage 4: anti-entropy sync tests.
-
 -module(bondy_oplog_sync_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -43,11 +41,9 @@ pull_converges_two_replicas() ->
     B = mk_inst(),
     {ok, _} = bondy_oplog_test_projection:start_instance(A, originated_opts()),
     {ok, _} = bondy_oplog_test_projection:start_instance(B, originated_opts()),
-    %% Distinct events on each side
     [bondy_oplog:append(A, {a, N}) || N <- lists:seq(1, 10)],
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 5)],
     BSizeBefore = bondy_oplog:size(B),
-    %% A pulls from B
     {ok, _} = bondy_oplog:sync(A, B),
     %% After the pull, A's missing_set against B's CURRENT root must be
     %% empty. Using B's current root (not a pre-captured one) avoids
@@ -57,7 +53,6 @@ pull_converges_two_replicas() ->
         [],
         bondy_oplog_instance:missing_set(A, RootBNow)
     ),
-    %% B's logical content is unchanged (count of events).
     ?assertEqual(BSizeBefore, bondy_oplog:size(B)).
 
 pull_is_idempotent() ->
@@ -84,7 +79,6 @@ bidirectional_sync_full_convergence() ->
         bondy_oplog:root_hash(A),
         bondy_oplog:root_hash(B)
     ),
-    %% And total event count is the union (20 events).
     ?assertEqual(20, bondy_oplog:size(A)),
     ?assertEqual(20, bondy_oplog:size(B)).
 
@@ -115,7 +109,6 @@ sync_records_peer_state() ->
     ?assertMatch(
         [#{peer := B}], bondy_oplog_peer_state:get_instance_peer_states(A, 0)
     ),
-    %% Cross-check: get_known_peers(A, 0) lists B.
     ?assert(
         lists:member(B, bondy_oplog_peer_state:get_known_peers(A, 0))
     ).
@@ -135,7 +128,6 @@ multi_instance_independence() ->
     [bondy_oplog:append(B1, {b1, N}) || N <- lists:seq(1, 5)],
     [bondy_oplog:append(B2, {b2, N}) || N <- lists:seq(1, 7)],
     {ok, _} = bondy_oplog:sync(A1, B1),
-    %% A2 still empty since we didn't sync it.
     ?assertEqual(0, bondy_oplog:size(A2)),
     ?assertEqual(5, bondy_oplog:size(A1)).
 
@@ -174,14 +166,11 @@ missing_set_excludes_locally_present_pages() ->
     [bondy_oplog:append(B, X) || X <- lists:seq(1, 30)],
     ok = bondy_oplog:await_apply(B),
     RootB = bondy_oplog:root_hash(B),
-    %% Before sync, A is missing all of B's pages (root + descendants).
     BeforeMissing = bondy_oplog_instance:missing_set(A, RootB),
     ?assertNotEqual([], BeforeMissing),
     {ok, _} = bondy_oplog:sync(A, B),
     AfterMissing = bondy_oplog_instance:missing_set(A, RootB),
     ?assertEqual([], AfterMissing).
-
-%% Helpers
 
 mk_inst() ->
     list_to_binary(

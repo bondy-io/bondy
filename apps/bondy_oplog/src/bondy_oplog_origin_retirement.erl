@@ -432,7 +432,6 @@ init([]) ->
             %% Periodic pass: origin-epoch turnover WITHOUT a membership
             %% change (e.g. a K8s pod that loses its volume and rejoins under
             %% the same name) fires no event anywhere else in the cluster.
-            %% Idempotent + fail-closed, so the tick is safe by construction.
             schedule_periodic()
         end,
     {ok, #state{enabled = Enabled, worker = undefined}}.
@@ -935,7 +934,6 @@ retirement_skipped(Reason) ->
 %% @private
 %% Same transport source as AAE (`sync_session_opts`). With the default
 %% inline transport a remote member cannot be addressed and the pass aborts
-%% — fail-closed by construction.
 transport_config() ->
     Opts = application:get_env(bondy_oplog, sync_session_opts, #{}),
     {

@@ -94,9 +94,6 @@ end_per_suite(Config) ->
 %% The documented three-argument call. The realm argument is optional, so a
 %% tenant session keeps calling exactly as the reference page describes and the
 %% validator prepends the only realm it could have named.
-%%
-%% This is the case that was BROKEN: it answered `not_authorized` for every
-%% tenant session.
 a_tenant_session_may_check_its_own_realm(_) ->
     ?assertEqual(
         true, call(?REALM_A, [?USER_A, ~"wamp.call", ?PROC])

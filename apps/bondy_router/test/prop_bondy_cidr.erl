@@ -29,11 +29,9 @@
 %% Generators
 %% =============================================================================
 
-%% Generate a valid IPv4 octet
 ipv4_octet() ->
     range(0, 255).
 
-%% Generate a valid IPv4 address tuple
 ipv4_address() ->
     ?LET(
         {A, B, C, D},
@@ -41,11 +39,9 @@ ipv4_address() ->
         {A, B, C, D}
     ).
 
-%% Generate a valid IPv4 maskbits (0-32)
 ipv4_maskbits() ->
     range(0, 32).
 
-%% Generate a valid IPv4 CIDR tuple
 ipv4_cidr() ->
     ?LET(
         {Addr, Maskbits},
@@ -53,7 +49,6 @@ ipv4_cidr() ->
         {Addr, Maskbits}
     ).
 
-%% Generate a valid IPv4 CIDR as binary string
 ipv4_cidr_binary() ->
     ?LET(
         {{A, B, C, D}, Maskbits},
@@ -63,11 +58,9 @@ ipv4_cidr_binary() ->
         )
     ).
 
-%% Generate a valid IPv6 segment (16-bit)
 ipv6_segment() ->
     range(0, 65535).
 
-%% Generate a valid IPv6 address tuple
 ipv6_address() ->
     ?LET(
         {A, B, C, D, E, F, G, H},
@@ -84,11 +77,9 @@ ipv6_address() ->
         {A, B, C, D, E, F, G, H}
     ).
 
-%% Generate a valid IPv6 maskbits (0-128)
 ipv6_maskbits() ->
     range(0, 128).
 
-%% Generate a valid IPv6 CIDR tuple
 ipv6_cidr() ->
     ?LET(
         {Addr, Maskbits},
@@ -96,7 +87,6 @@ ipv6_cidr() ->
         {Addr, Maskbits}
     ).
 
-%% Generate a valid IPv6 CIDR as binary string
 ipv6_cidr_binary() ->
     ?LET(
         {{A, B, C, D, E, F, G, H}, Maskbits},
@@ -109,11 +99,9 @@ ipv6_cidr_binary() ->
         )
     ).
 
-%% Generate any valid CIDR tuple
 any_cidr() ->
     oneof([ipv4_cidr(), ipv6_cidr()]).
 
-%% Generate invalid CIDR representations
 invalid_cidr_term() ->
     oneof([
         %% Invalid maskbits for IPv4
@@ -138,7 +126,6 @@ invalid_cidr_term() ->
 %% Properties: Parsing
 %% =============================================================================
 
-%% Property: parse accepts valid IPv4 CIDR strings
 prop_parse_valid_ipv4_cidr() ->
     ?FORALL(
         CIDRBin,
@@ -151,7 +138,6 @@ prop_parse_valid_ipv4_cidr() ->
         end
     ).
 
-%% Property: parse accepts valid IPv6 CIDR strings
 prop_parse_valid_ipv6_cidr() ->
     ?FORALL(
         CIDRBin,
@@ -168,7 +154,6 @@ prop_parse_valid_ipv6_cidr() ->
 %% Properties: Type Checking
 %% =============================================================================
 
-%% Property: is_type accepts valid CIDR tuples
 prop_is_type_accepts_valid() ->
     ?FORALL(
         CIDR,
@@ -176,7 +161,6 @@ prop_is_type_accepts_valid() ->
         bondy_cidr:is_type(CIDR)
     ).
 
-%% Property: is_type rejects invalid terms
 prop_is_type_rejects_invalid() ->
     ?FORALL(
         Invalid,
@@ -188,7 +172,6 @@ prop_is_type_rejects_invalid() ->
 %% Properties: Mask Operations
 %% =============================================================================
 
-%% Property: mask for IPv4 produces values within bounds
 prop_mask_ipv4_bounds() ->
     ?FORALL(
         CIDR,
@@ -196,12 +179,10 @@ prop_mask_ipv4_bounds() ->
         begin
             {_Addr, Maskbits} = CIDR,
             Mask = bondy_cidr:mask(CIDR),
-            %% Mask should fit in Maskbits bits
             Mask >= 0 andalso Mask < (1 bsl Maskbits)
         end
     ).
 
-%% Property: mask for IPv6 produces values within bounds
 prop_mask_ipv6_bounds() ->
     ?FORALL(
         CIDR,
@@ -209,7 +190,6 @@ prop_mask_ipv6_bounds() ->
         begin
             {_Addr, Maskbits} = CIDR,
             Mask = bondy_cidr:mask(CIDR),
-            %% Mask should fit in Maskbits bits
             Mask >= 0 andalso Mask < (1 bsl Maskbits)
         end
     ).
@@ -227,7 +207,6 @@ prop_anchor_mask_idempotent() ->
         end
     ).
 
-%% Property: anchor_mask preserves maskbits
 prop_anchor_mask_preserves_maskbits() ->
     ?FORALL(
         CIDR,
@@ -255,7 +234,6 @@ prop_match_reflexive() ->
         end
     ).
 
-%% Property: match requires same maskbits
 prop_match_same_maskbits_required() ->
     ?FORALL(
         {CIDR1, CIDR2},
@@ -268,7 +246,6 @@ prop_match_same_maskbits_required() ->
                     %% When maskbits are equal, match depends on the mask
                     true;
                 false ->
-                    %% When maskbits differ, match should return false
                     not bondy_cidr:match(CIDR1, CIDR2)
             end
         end

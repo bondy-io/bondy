@@ -63,7 +63,6 @@ duplicate_subscribe_is_idempotent() ->
     ok = bondy_oplog_core_events:subscribe(Topic),
     ?assertEqual([self()], bondy_oplog_core_events:subscribers(Topic)),
     ok = bondy_oplog_core_events:notify(Topic, payload_dup),
-    %% Only one message delivered.
     ?assertEqual(payload_dup, expect_event(Topic, 200)),
     ?assertEqual(timeout, try_expect_event(Topic, 100)),
     bondy_oplog_core_events:unsubscribe(Topic).
@@ -82,7 +81,6 @@ subscriber_down_auto_removes() ->
         {subscribed, Sub} -> ok
     after 200 -> error(no_subscribe_ack)
     end,
-    %% Subscriber is in the table.
     ?assert(lists:member(Sub, bondy_oplog_core_events:subscribers(Topic))),
     Sub ! die,
     receive

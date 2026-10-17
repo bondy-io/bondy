@@ -285,7 +285,6 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
         alias => security,
         required => true,
         allow_null => false,
-        % datatype => map,
         default => #{}
     },
     <<"body_max_bytes">> => #{
@@ -312,7 +311,6 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
     <<"timeout">> => #{
         alias => timeout,
         required => true,
-        % datatype => timeout,
         default => ?DEFAULT_TIMEOUT
     },
     <<"connect_timeout">> => #{
@@ -323,7 +321,6 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
     <<"retries">> => #{
         alias => retries,
         required => true,
-        % datatype => integer,
         default => ?DEFAULT_RETRIES
     },
     <<"retry_timeout">> => #{
@@ -859,9 +856,6 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
         datatype =>
             {in, [
                 <<"wamp_call">>
-                %% ,
-                %% <<"wamp_register">>,
-                %% <<"wamp_unregister">>
             ]}
     },
     <<"timeout">> => #{
@@ -918,9 +912,6 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
         datatype =>
             {in, [
                 <<"wamp_publish">>
-                %% ,
-                %% <<"wamp_subscribe">>,
-                %% <<"wamp_unsubscribe">>
             ]}
     },
     <<"timeout">> => #{
@@ -1191,7 +1182,6 @@ build_dispatch_table(L, RulesToAdd, OnMissingRealm) ->
     ]),
     R1 = leap_relation:union(R0, A0),
 
-    %% We project the desired output
     PMS = {function, collect, [?VAR(path), ?VAR(mod), ?VAR(state)]},
     Proj1 = {?VAR(scheme), ?VAR(host), {as, PMS, ?VAR(pms)}},
 
@@ -1281,7 +1271,6 @@ parse_host(Host0, Ctxt0) ->
         )
     },
 
-    %% parse all versions
     Vs0 = maps:get(<<"versions">>, Host3),
     Fun = fun(_, V) -> parse_version(V, Ctxt1) end,
     Vs1 = maps:map(Fun, Vs0),
@@ -1291,18 +1280,14 @@ parse_host(Host0, Ctxt0) ->
 %% @private
 -spec parse_version(map(), map()) -> map().
 parse_version(V0, Ctxt0) ->
-    %% We merge variables and defaults
     {V1, Ctxt1} = merge_eval_vars(V0, Ctxt0),
-    %% We then validate the resulting version
     V2 = maps_utils:validate(V1, ?API_VERSION),
     %% We merge again in case the validation added defaults
     {V3, Ctxt2} = merge_eval_vars(V2, Ctxt1),
-    %% We parse the status_codes and merge them into ctxt
     {Codes1, V4} = maps:take(?STATUS_CODES_KEY, V3),
     Codes0 = maps:get(?STATUS_CODES_KEY, Ctxt1),
     Ctxt3 = maps:put(?STATUS_CODES_KEY, maps:merge(Codes0, Codes1), Ctxt2),
 
-    %% Finally we parse the contained paths
     Fun = fun(Uri, P) ->
         try
             parse_path(P, Ctxt3)
@@ -1339,9 +1324,7 @@ parse_path(P0, Ctxt0) ->
     %% The path should have at least one HTTP method
     %% otherwise this will fail with an error
     L = allowed_methods(P0),
-    %% We merge path spec with gateway default spec
     P1 = maps:merge(?DEFAULT_PATH, P0),
-    %% We merge path's variables and defaults into context
     {P2, Ctxt1} = merge_eval_vars(P1, eval_vars(Ctxt0)),
 
     Ctxt2 = Ctxt1,
@@ -1349,13 +1332,11 @@ parse_path(P0, Ctxt0) ->
 
     P4 = parse_path_elements(P3, Ctxt2),
 
-    %% Finally we validate the resulting path
     P5 = maps_utils:validate(P4, ?API_PATH),
     %% HTTP (and COWBOY) requires uppercase method names
     P6 = maps:put(<<"allowed_methods">>, to_uppercase(L), P5),
     P7 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P6),
 
-    %% Now we evaluate each request type spec
     PFun = fun(Method, IPath) ->
         Sec0 = maps:get(Method, IPath),
         try
@@ -1563,13 +1544,11 @@ exposing_refs(Which, Expr) ->
 %% @private
 -doc "Lower level variables and defaults override previous ones.".
 merge_eval_vars(Spec0, Ctxt0) ->
-    %% We merge (override) ctxt variables and defaults
     VVars = maps:get(?VARS_KEY, Spec0, #{}),
     MVars = maps:merge(maps:get(?VARS_KEY, Ctxt0), VVars),
     VDefs = maps:get(?DEFAULTS_KEY, Spec0, #{}),
     MDefs = maps:merge(maps:get(?DEFAULTS_KEY, Ctxt0), VDefs),
 
-    %% We update the API section
     Spec1 = Spec0#{?VARS_KEY => MVars, ?DEFAULTS_KEY => MDefs},
     %% We also update the ctxt as we use it as an accumulator
     Ctxt1 = maps:update(?VARS_KEY, MVars, Ctxt0),
@@ -1624,7 +1603,6 @@ eval_vars(S0, Ctxt0) ->
     end,
     Ctxt1 = maps:fold(VFun, Ctxt0, Vars),
 
-    %% We evaluate defaults
     DFun = fun(Var, Val, ICtxt) ->
         IDefs1 = maps:update(
             Var, mops_eval(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)
@@ -1912,7 +1890,6 @@ content_types_accepted(<<"application/json; charset=utf-8">>) ->
         from_json
     };
 content_types_accepted(<<"application/json">>) ->
-    % {<<"application/json">>, from_json};
     {
         {<<"application">>, <<"json">>, '*'},
         from_json
@@ -1923,7 +1900,6 @@ content_types_accepted(<<"application/msgpack; charset=utf-8">>) ->
         from_msgpack
     };
 content_types_accepted(<<"application/msgpack">>) ->
-    % {<<"application/msgpack">>, from_msgpack}.
     {{<<"application">>, <<"msgpack">>, '*'}, from_msgpack};
 content_types_accepted(<<"application/x-www-form-urlencoded">>) ->
     {
@@ -1937,7 +1913,6 @@ content_types_accepted(Bin) ->
 content_types_provided(L) when is_list(L) ->
     [X || {_, X} <- lists:ukeysort(1, [content_types_provided(T) || T <- L])];
 content_types_provided(<<"application/json">>) ->
-    % {<<"application/json">>, to_json};
     T = {
         {<<"application">>, <<"json">>, '*'},
         to_json
@@ -1954,7 +1929,6 @@ content_types_provided(<<"application/json; charset=utf-8">>) ->
     %% when no content-type was requested by the user
     {1, T};
 content_types_provided(<<"application/msgpack">>) ->
-    % {<<"application/msgpack">>, to_msgpack};
     T = {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack},
     {2, T};
 content_types_provided(<<"application/msgpack; charset=utf-8">>) ->

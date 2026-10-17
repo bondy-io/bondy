@@ -205,8 +205,6 @@ longpoll_session_death_ends_the_held_poll(_) ->
 %% to the kill sits unread — leaving the send path as the only possible
 %% detector. The first call's send hits `transport_not_found` and errors;
 %% that same failure must reconnect and replay, so a later call succeeds.
-%% Before the fix the connection stayed `established` on the dead link and
-%% every call failed forever.
 longpoll_send_failure_fails_the_connection(_) ->
     Before = http_session_pids(),
     Conn = connect(),

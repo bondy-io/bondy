@@ -63,11 +63,9 @@ swap_records_each_sides_frontier() ->
     ?assertMatch({ok, _}, bondy_oplog:sync(A, B)),
     ok = bondy_oplog_peer_state:sync(),
 
-    %% A recorded B's frontier...
     ?assertEqual(
         20, maps:get(bondy_oplog_instance:origin(B), recorded_for(A), 0)
     ),
-    %% ...and B recorded A's, because A reported it.
     ?assertEqual(
         1,
         maps:get(bondy_oplog_instance:origin(A), recorded_for(B), 0),

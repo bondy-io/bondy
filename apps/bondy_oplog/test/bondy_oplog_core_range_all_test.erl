@@ -121,11 +121,8 @@ multi_shard_propagates_include_overlay_false() ->
     %% caller asks for projection-only data.
     NS = mk_ns(),
     Setups = setup_n_shards(NS, primary, 2, 2, lww_register),
-    %% Shard 0: projection cell.
     place(Setups, 0, <<"a">>, 10),
-    %% Shard 1: overlay-only cell.
     overlay_place(Setups, 1, <<"b">>, 20),
-    %% With include_overlay=true both surface.
     {ok, With} = bondy_oplog_core:range_all(
         NS,
         primary,
@@ -134,7 +131,6 @@ multi_shard_propagates_include_overlay_false() ->
         #{include_overlay => true}
     ),
     ?assertEqual([<<"a">>, <<"b">>], [K || {K, _, _} <- With]),
-    %% With include_overlay=false the overlay cell is excluded.
     {ok, Without} = bondy_oplog_core:range_all(
         NS,
         primary,
@@ -152,7 +148,6 @@ multi_shard_propagates_fence() ->
     Setups = setup_n_shards(NS, primary, 2, 2, lww_register),
     overlay_place(Setups, 0, <<"a">>, 5),
     overlay_place(Setups, 1, <<"b">>, 15),
-    %% Fence = 10 excludes the HLC=15 event in shard 1.
     {ok, R} = bondy_oplog_core:range_all(
         NS,
         primary,

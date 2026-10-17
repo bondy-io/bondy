@@ -11,7 +11,6 @@ timestamp extraction, validation, string formatting (hex or URL-safe) and
 parsing.
 """.
 
-%% UUIDv7 constants
 -define(VERSION, 16#7).
 %% 10 in binary (RFC 4122 variant)
 -define(VARIANT, 16#2).
@@ -52,20 +51,12 @@ Generate UUIDv7 from specific timestamp in milliseconds.
 -spec from_timestamp(timestamp()) -> uuid_binary().
 
 from_timestamp(Ts0) ->
-    %% 48-bit timestamp (milliseconds since Unix epoch)
     Ts = Ts0 band 16#FFFFFFFFFFFF,
 
-    %% Generate 10 bytes of random data (80 bits total)
     %% We need 74 bits of randomness (12 + 62), so 10 bytes gives us plenty
     Bytes = crypto:strong_rand_bytes(10),
     <<ABits:12, BBits:62, _:6>> = Bytes,
 
-    %% Construct the UUID according to UUIDv7 specification:
-    %% - 48 bits: timestamp (milliseconds)
-    %% - 4 bits: version (0111 = 7)
-    %% - 12 bits: random data A
-    %% - 2 bits: variant (10)
-    %% - 62 bits: random data B
     <<Ts:48, ?VERSION:4, ABits:12, ?VARIANT:2, BBits:62>>.
 
 -doc """

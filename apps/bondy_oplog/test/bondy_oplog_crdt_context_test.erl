@@ -3,10 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PR-B: the kernel/contract extension threads the write's causal context
-%% (the event `meta`) to a tier_2 CRDT's `apply_op/4`, while tier_0 CRDTs
-%% (which export only `apply_op/3`) stay byte-identical.
-
 -module(bondy_oplog_crdt_context_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -50,7 +46,6 @@ interpret_cog_threads_event_meta_test() ->
         ev(20, <<"n2">>, 1, opB, ctxB)
     ],
     S = ?PROBE:interpret_cog(Events, ?PROBE:init()),
-    %% Recorded in key order with each event's own meta as context.
     ?assertEqual([{opA, ctxA}, {opB, ctxB}], ?PROBE:to_value(S)).
 
 %% =============================================================================
@@ -65,7 +60,6 @@ kernel_apply6_threads_context_test() ->
         ),
     ?assertEqual([{op1, ctx1}], NewState).
 
-%% apply/5 (context-free) == apply/6 with undefined context.
 kernel_apply5_is_apply6_undefined_test() ->
     Kernel = {crdt, ?PROBE},
     R5 = ?K:apply(Kernel, ?PROBE:init(), undefined, op1, ek(1, <<"n">>, 1)),
@@ -76,7 +70,6 @@ kernel_apply5_is_apply6_undefined_test() ->
     {NewState, _, _, _, _} = R5,
     ?assertEqual([{op1, undefined}], NewState).
 
-%% tier_0 (lww) is byte-identical under apply/6 regardless of context.
 kernel_tier0_byte_identical_test() ->
     Kernel = {crdt, ?LWW},
     Old = ?K:init(Kernel),

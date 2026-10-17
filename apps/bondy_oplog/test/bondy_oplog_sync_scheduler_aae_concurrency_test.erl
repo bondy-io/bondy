@@ -86,7 +86,6 @@ rotate_round_robin() ->
     ?assertEqual([b, c, d, a], bondy_oplog_sync_scheduler:rotate(L, 1)),
     ?assertEqual([c, d, a, b], bondy_oplog_sync_scheduler:rotate(L, 2)),
     ?assertEqual([d, a, b, c], bondy_oplog_sync_scheduler:rotate(L, 3)),
-    %% Wraps cleanly.
     ?assertEqual([a, b, c, d], bondy_oplog_sync_scheduler:rotate(L, 4)),
     ?assertEqual([b, c, d, a], bondy_oplog_sync_scheduler:rotate(L, 5)),
     ?assertEqual([], bondy_oplog_sync_scheduler:rotate([], 7)),

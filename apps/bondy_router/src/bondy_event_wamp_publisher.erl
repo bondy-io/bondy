@@ -221,10 +221,6 @@ async_handle_event({[bondy, cluster, connection, Type], Node}, Ref) when
         bondy_broker:publish(ReqId, #{}, Topic, [MyNode, Node], #{}, Ctxt)
     end,
     {ok, {Fun, undefined}};
-%% NOTE: the emitted event path is `[bondy, realm, Action]` (see
-%% bondy_realm on_create/on_update/on_delete). A previous version of
-%% this clause matched `[bondy, realm, created, Type]`, which never
-%% matched, so the realm meta events were silently never published.
 async_handle_event({[bondy, realm, Type], Uri}, Ref) when
     Type == created; Type == updated; Type == deleted
 ->
@@ -399,11 +395,5 @@ async_handle_event(
         bondy_broker:publish(ReqId, #{}, Topic, [File], #{}, Ctxt)
     end,
     {ok, {Fun, undefined}};
-%% REGISTRATION META API
-
-%% NOTE: the registration/subscription meta events no longer ride this
-%% handler — they are demand-gated and enqueued directly by
-%% `bondy_meta_events` at the `bondy_dealer`/`bondy_broker` emission
-%% sites (see METRICS_GAP_ANALYSIS.md Part III).
 async_handle_event(_, _) ->
     ok.

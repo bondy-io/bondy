@@ -1293,7 +1293,6 @@ reopen_with_unflushed_root_sees_prior_disk_root_test() ->
         %% First call: records=1 threshold flushes immediately.
         {ok, W1} = bondy_mst_pack_writer:set_root(W0, Persisted),
         ?assertEqual(Persisted, disk_root(Dir)),
-        %% Now reopen with a high threshold to debounce.
         ok = bondy_mst_pack_writer:close(W1),
         {ok, W2} = open_writer_root(Dir, 1000, infinity),
         {ok, _W3} = bondy_mst_pack_writer:set_root(W2, Staged),

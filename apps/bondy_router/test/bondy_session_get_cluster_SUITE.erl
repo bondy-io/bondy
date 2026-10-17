@@ -40,7 +40,6 @@ suite() ->
 
 init_per_suite(Config) ->
     Nodes = bondy_ct:start_cluster(?NODE_NAMES, Config),
-    %% Make this module's helpers callable on every peer.
     _ = [push_module(Node, ?MODULE) || {_, Node, _} <- Nodes],
     [{cluster, Nodes} | Config].
 

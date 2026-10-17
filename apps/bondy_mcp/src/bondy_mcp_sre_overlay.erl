@@ -121,12 +121,6 @@ read_tools() ->
             "Read one alarm by its wire id, with the trace of the occurrence "
             "that raised it when the raising path carried one."
         >>},
-        %% FOUND 2026-09-01: this said "recorded on each node", which was
-        %% false — the procedure answered for the serving node only. A tool
-        %% description is prompt, so an agent believed it had a cluster-wide
-        %% view and would have read a short history as "nothing happened
-        %% elsewhere". The procedure is now a cluster-wide paginated walk, and
-        %% the description says what a page actually is.
         {?BONDY_ALARM_HISTORY, [], history_kwargs(), <<
             "The most recent alarm transitions, newest first. A restatement "
             "of an alarm already raised is not a transition, so a condition "

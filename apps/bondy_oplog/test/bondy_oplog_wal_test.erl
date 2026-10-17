@@ -150,7 +150,6 @@ expect_open_error(Expected, Fun) ->
     try
         Got = Fun(),
         ?assertEqual({error, Expected}, Got),
-        %% Drain any linked EXIT delivered by the failing gen_server.
         receive
             {'EXIT', _, _} -> ok
         after 0 -> ok
@@ -169,7 +168,6 @@ reopen_recovers_clean_wal_test() ->
     try
         Opts = #{dir => Dir, origin => origin()},
         {ok, P1} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        %% Append a handful of events, capture HLCs.
         Hlcs = [
             begin
                 E = mk_event(bondy_connect_hlc:now(HLC), Seq),
@@ -198,7 +196,6 @@ reopen_recovers_clean_wal_test() ->
             maps:get(last_key, InfoBefore),
             maps:get(last_key, InfoAfter)
         ),
-        %% Continue appending after reopen; new HLC must be > all prior.
         E2 = mk_event(bondy_connect_hlc:now(HLC), 6),
         {ok, H6, _} = bondy_oplog_wal:append(P2, E2),
         ?assert(H6 > lists:last(Hlcs)),
@@ -256,7 +253,6 @@ single_append_test() ->
         ?assertEqual(1, maps:get(append_count, Info)),
         ?assertEqual(1, maps:get(first_key, Info)),
         ?assertEqual(1, maps:get(last_key, Info)),
-        %% Raw scan confirms the frame is on disk and decodes.
         Events = scan_segment(Dir, 0),
         ?assertEqual([E], Events)
     end).
@@ -267,7 +263,6 @@ append_1000_events_test() ->
         Events = generate_events(HLC, 1000, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
         ?assertEqual(1000, length(Results)),
-        %% Every append succeeded; HLCs are strictly increasing.
         Hlcs = [Hlc || {ok, Hlc, _} <- Results],
         ?assertEqual(1000, length(Hlcs)),
         ?assert(is_strictly_increasing(Hlcs)),
@@ -276,7 +271,6 @@ append_1000_events_test() ->
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(0, maps:get(current_segment, Info)),
         ?assertEqual(1000, maps:get(append_count, Info)),
-        %% Raw scan recovers the events in order.
         Scanned = scan_segment(Dir, 0),
         ?assertEqual(1000, length(Scanned)),
         ?assertEqual(Events, Scanned)
@@ -312,12 +306,10 @@ rotation_creates_new_segment_test() ->
     with_wal(#{max_segment_bytes => 200}, fun(Pid, Dir) ->
         Events = generate_events(HLC, 4, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
-        %% Each event lands in its own segment (0, 1, 2, 3).
         Segs = [Seg || {ok, _, {Seg, _}} <- Results],
         ?assertEqual([0, 1, 2, 3], Segs),
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(3, maps:get(current_segment, Info)),
-        %% Four .qdata files on disk.
         [
             ?assert(
                 filelib:is_regular(
@@ -332,7 +324,6 @@ rotation_creates_new_segment_test() ->
             )
          || S <- [0, 1, 2, 3]
         ],
-        %% Each segment holds exactly one event.
         [
             ?assertEqual([lists:nth(S + 1, Events)], scan_segment(Dir, S))
          || S <- [0, 1, 2, 3]

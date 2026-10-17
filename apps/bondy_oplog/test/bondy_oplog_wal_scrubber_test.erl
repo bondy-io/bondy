@@ -105,7 +105,6 @@ drop_stub_rows() ->
 is_stub_id(<<"scrubber-test-", _/binary>>) -> true;
 is_stub_id(_) -> false.
 
-%% The stand-in for the instance gen_server: acknowledges every call.
 scrubber_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {timeout, 15, fun clean_walk_no_alert/0},
@@ -289,12 +288,10 @@ clean_walk_no_alert() ->
             {ok, Summary} = bondy_log_scrubber:scrub_now(SPid),
             ?assertEqual(0, maps:get(alerts_raised, Summary)),
             Events = collect_scrub_events(clean_walk_no_alert),
-            %% Every emitted event must be `ok`.
             [
                 ?assertEqual(ok, maps:get(outcome, Md))
              || {_M, Md} <- Events
             ],
-            %% No alerts in info/1.
             ?assertEqual(
                 [], maps:get(scrubber_alerts, bondy_oplog_wal:info(Pid))
             )
@@ -313,7 +310,6 @@ bit_flip_raises_bad_crc() ->
     %% Close the writer so the segment fd is fully flushed and the file
     %% is safe to overwrite from another process.
     ok = bondy_oplog_wal:close(Pid),
-    %% Corrupt segment 0's first frame body.
     [{SegId0, Off0} | _] = Positions,
     corrupt_frame_body(seg_path(Dir, Id, SegId0), Off0),
     %% Reopen the writer so the scrubber can resolve its pid and mark.
@@ -327,7 +323,6 @@ bit_flip_raises_bad_crc() ->
             {ok, Summary} = bondy_log_scrubber:scrub_now(SPid),
             ?assert(maps:get(alerts_raised, Summary) >= 1),
             Events = collect_scrub_events(bit_flip_raises_bad_crc),
-            %% Find the alert event for SegId0.
             Alerts = [
                 {M, Md}
              || {M, Md} <- Events,
@@ -336,7 +331,6 @@ bit_flip_raises_bad_crc() ->
             ?assert(length(Alerts) >= 1),
             [{M, _Md} | _] = Alerts,
             ?assert(maps:get(bad_crc, M) >= 1),
-            %% Manifest carries the alert.
             Alerts2 = maps:get(scrubber_alerts, bondy_oplog_wal:info(Pid1)),
             ?assert(lists:keymember(SegId0, 1, Alerts2))
         after
@@ -398,7 +392,6 @@ alert_persists_across_restart() ->
     ?assert(lists:keymember(SegId0, 1, Alerts1)),
     bondy_log_scrubber:stop(SPid1),
     ok = bondy_oplog_wal:close(Pid1),
-    %% Restart the writer; the manifest must still carry the alert.
     {ok, Pid2} = bondy_oplog_wal:start_link(
         Id, (base_opts())#{dir => Dir, recovery_mode => strict}
     ),
@@ -422,9 +415,7 @@ already_alerted_segment_is_skipped() ->
     try
         SPid = start_scrubber(Id),
         try
-            %% First pass marks the alert.
             {ok, _} = bondy_log_scrubber:scrub_now(SPid),
-            %% Second pass should report a skipped outcome for SegId0.
             H = attach_telemetry(already_alerted_segment_is_skipped),
             {ok, _} = bondy_log_scrubber:scrub_now(SPid),
             Events = collect_scrub_events(already_alerted_segment_is_skipped),
@@ -436,7 +427,6 @@ already_alerted_segment_is_skipped() ->
                 maps:get(outcome, Md) =:= skipped
             ],
             ?assertEqual(1, length(Skipped)),
-            %% The skipped event must NOT carry alert counters > 0.
             [SkipMd] = Skipped,
             ?assertEqual(skipped, maps:get(outcome, SkipMd))
         after
@@ -553,7 +543,6 @@ manual_trigger_emits_run_event() ->
             ?assertEqual(manual, maps:get(trigger, Md)),
             ?assertEqual(Id, maps:get(instance_id, Md)),
             ?assertEqual(0, maps:get(alerts_raised, M)),
-            %% Three sealed segments under the seed config.
             ?assert(maps:get(segments_walked, M) >= 1),
             ?assert(maps:get(frames_checked, M) >= 1),
             ?assert(maps:get(bytes_checked, M) > 0),

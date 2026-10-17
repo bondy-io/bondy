@@ -27,7 +27,6 @@ end_per_suite(_) ->
 %% HELPER FUNCTIONS
 %% =============================================================================
 
-%% Helper to create a partial message via encode/decode
 create_partial(Message) ->
     Bin = iolist_to_binary(bondy_wamp_encoding:encode(Message, json)),
     {[PartialMsg], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
@@ -35,9 +34,6 @@ create_partial(Message) ->
 
 %% =============================================================================
 %% PARTIAL ENCODING/DECODING TESTS
-%% Tests that partial messages can be encoded/decoded correctly
-%% Note: These tests follow the existing pattern from bondy_wamp_encoding_SUITE
-%% and test the encode -> decode (partial) -> re-encode cycle
 %% =============================================================================
 
 partial_call_simple_test(_) ->
@@ -53,7 +49,6 @@ partial_call_simple_test(_) ->
     ?assertEqual(undefined, M1#call.kwargs),
     ?assertMatch({json, _}, bondy_wamp_message:partial(M1)),
 
-    %% Re-encode should match original
     ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 

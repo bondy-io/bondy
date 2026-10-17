@@ -202,7 +202,6 @@ publish(ReqId, Opts, TopicUri, Args, KWArgs, Ctxt) when
         _:{not_authorized, _Reason} = Reason ->
             {error, Reason};
         _:{no_such_realm, RealmUri} = Reason ->
-            %% Realm doesn't exist
             {error, Reason};
         Class:Reason:Stacktrace ->
             SessionId = bondy_context:session_id(Ctxt),
@@ -256,7 +255,6 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     ),
     resulto:map(Result, fun(Pid) -> {Id, Pid} end);
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
-    %% Add a local subscription
     subscribe(RealmUri, Opts, Topic, bondy_ref:new(internal, Pid));
 subscribe(RealmUri, Opts, Topic, Ref) ->
     bondy_ref:is_type(Ref) orelse error({badarg, Ref}),
@@ -411,8 +409,6 @@ forward(#publish{} = M, undefined, FwdOpts) ->
 
     MatchResult = match_subscriptions(TopicUri, RealmUri, MatchOpts),
 
-    %% We create a high order fun that will generate the event for each
-    %% subscription_id
     %% @TODO we should accept a 2nd argument with the subscription options to
     %% remove unwanted info in Details
     MakeEvent = fun(SubsId) ->
@@ -635,7 +631,6 @@ do_publish(#publish{} = M, Ctxt) ->
     TopicUri = M#publish.topic_uri,
     Opts = M#publish.options,
 
-    %% We find matching subscriptions
     MatchOpts = make_match_opts(SessionId, Opts),
     T0 = erlang:monotonic_time(microsecond),
     Subscriptions = match_subscriptions_for_publish(
@@ -643,7 +638,6 @@ do_publish(#publish{} = M, Ctxt) ->
     ),
     MatchUs = erlang:monotonic_time(microsecond) - T0,
 
-    %% We generate a new publication id
     PubId = bondy_message_id:global(),
 
     %% Prepare details, we will use them for the local event creation and also
@@ -818,8 +812,6 @@ make_match_opts(SessionId, Opts) ->
             true ->
                 lists:append(
                     [
-                        %% We get the protocol (WAMP) session identifier from the
-                        %% session identifier
                         bondy_session_id:to_external(S)
                      || S <- [SessionId], S =/= undefined
                     ],

@@ -201,9 +201,6 @@ sync_dir(Dir) ->
     end.
 
 %% @private
-%% Top-level orchestration. Each step `case`s on the previous step's
-%% return so a single failure short-circuits cleanly without leaving
-%% partially-recovered state visible.
 run_pipeline(Dir, InstanceId, Opts0, Manifest) ->
     Opts = apply_opt_defaults(Opts0),
     IdxIntervalBytes = maps:get(idx_interval_bytes, Opts),
@@ -244,7 +241,6 @@ run_pipeline(Dir, InstanceId, Opts0, Manifest) ->
     end.
 
 %% @private
-%% Fills in defaults for any unspecified key in `recovery_opts()`.
 %% Centralised so production callers (the writer) and tests reach the
 %% same baseline.
 apply_opt_defaults(Opts) ->
@@ -468,7 +464,6 @@ classify_data_file(Name, LiveIds) ->
                 {ok, Id} ->
                     classify_by_membership(Id, LiveIds, orphan_qidx);
                 not_a_match ->
-                    %% Unknown extension — leave alone.
                     keep
             end
     end.
@@ -481,8 +476,6 @@ classify_by_membership(Id, LiveIds, Reason) ->
     end.
 
 %% @private
-%% Parse "000000042.qdata" → {ok, 42}; "000000042.qidx" → {ok, 42};
-%% anything else → not_a_match.
 parse_segment_id(Name, Suffix) when is_list(Name) ->
     case lists:suffix(Suffix, Name) of
         false ->
@@ -502,9 +495,6 @@ parse_segment_id(Name, Suffix) when is_list(Name) ->
 %% -----------------------------------------------------------------------------
 
 %% @private
-%% Validates and (if necessary) rebuilds the `.qidx` for every sealed
-%% segment in the manifest. The head segment is handled separately by
-%% `recover_head_segment/5`.
 verify_sealed_segments(
     Dir,
     Adapter,
@@ -565,8 +555,6 @@ verify_sealed_segment(Dir, SegId, Adapter, Ctx, Interval, BodyEnc) ->
     end.
 
 %% @private
-%% Returns `ok` if the on-disk `.qidx` is loadable. Otherwise rebuilds
-%% by scanning the segment's frame stream and writes the new file.
 ensure_sealed_idx(Dir, SegId, Fd, Interval, BodyEnc) ->
     IdxPath = filename:join(Dir, bondy_log_idx:filename(SegId)),
     case bondy_log_idx:read_file(IdxPath) of
@@ -711,10 +699,6 @@ scan_loop_for_index(R0, Off, Acc, BodyEnc) ->
 }).
 
 %% @private
-%% Opens the head segment R/W, validates its header, scans forward,
-%% and (in rescan mode) rewrites the segment to drop corrupt frames
-%% before returning. Returns the recovered state needed to install in
-%% the writer.
 recover_head_segment(Dir, Adapter, Ctx, Opts, Manifest) ->
     SegId = bondy_log_manifest:current_segment(Manifest),
     SegPath = filename:join(Dir, bondy_log_segment:filename(SegId)),
@@ -825,11 +809,6 @@ head_result(Fd, SegId, LastValid, TruncatedBytes, S) ->
     }.
 
 %% @private
-%% Forward scan of the head segment. In strict mode the first decode
-%% failure marks the truncation point; in rescan mode each failure is
-%% logged, the bytes are counted as skipped, and the scan resumes
-%% from the next frame magic (or the end of the corrupted frame, if
-%% the header parsed cleanly).
 scan_head_loop(R0, Off, S) ->
     case peek_frame_header(R0, Off, S#head_scan.body_encryption) of
         {{ok, FrameLen}, R} ->
@@ -950,11 +929,6 @@ handle_rescan_resume(R, Off, FrameLen, Reason, {ok, NextOff}, S) ->
     scan_head_loop(R, NextOff, S1).
 
 %% @private
-%% Picks the offset to resume the scan at after a corruption event.
-%% Header-level corruption: scan byte-by-byte from Off+1 for the next
-%% magic. Body-level corruption: probe at Off+FrameLen first (the
-%% common case where only the body is torn but the framing is intact
-%% per CRC-unverified header); if no magic there, byte-by-byte scan.
 next_resume_offset(Fd, Off, undefined, MagicBin) ->
     find_next_magic(Fd, Off + 1, MagicBin);
 next_resume_offset(Fd, Off, FrameLen, MagicBin) ->
@@ -1076,9 +1050,6 @@ rewrite_head_compact(SrcFd, SegId, Header, Dir, S) ->
     end.
 
 %% @private
-%% Writes the segment header into the tmp file, then copies each
-%% accepted frame from `SrcFd` to `DstFd` in order, rebuilding the
-%% idx accumulator with the new (compacted) offsets.
 copy_frames_to_tmp(SrcFd, DstFd, HeaderBin, S) ->
     case prim_file:write(DstFd, HeaderBin) of
         ok ->
@@ -1228,7 +1199,6 @@ clamp_offset_within_segment(CO, Seg, Off, HeadInfo, Dir, Ctx) ->
             _ ->
                 sealed_segment_size(Dir, Seg)
         end,
-    %% Clamp magnitude to ≤ Bound; then clamp to a frame boundary.
     ClampedToBound = min(Off, Bound),
     Aligned = align_to_frame_boundary(
         Dir, Seg, ClampedToBound, HeadInfo, Ctx
@@ -1321,8 +1291,6 @@ walk_to_boundary(R0, Off, Target, Best, Ctx) when Off =< Target ->
                 Next =< Target ->
                     walk_to_boundary(R, Next, Target, Next, Ctx);
                 true ->
-                    %% The next frame would overshoot Target; current
-                    %% frame's start is the largest boundary ≤ Target.
                     Off
             end;
         _ ->

@@ -162,7 +162,6 @@ roundtrip_across_rotations_test() ->
     with_wal(#{max_segment_bytes => 200}, fun(Pid, _Dir) ->
         Events = generate_events(HLC, 8, 1),
         Results = [bondy_oplog_wal:append(Pid, E) || E <- Events],
-        %% Sanity: each frame went into its own segment.
         Segs = [Seg || {ok, _, {Seg, _}} <- Results],
         ?assertEqual(lists:seq(0, 7), Segs),
         {ok, Iter} = bondy_log_reader:open(Pid, beginning),
@@ -181,8 +180,6 @@ read_from_offset_resumes_at_frame_boundary_test() ->
             end
          || E <- Events
         ],
-        %% Open at the 3rd event's start position. Expect to read
-        %% events 3, 4, 5 in order.
         {Seg, Off} = lists:nth(3, Positions),
         {ok, Iter} = bondy_log_reader:open(Pid, {offset, Seg, Off}),
         {ok, Read} = drain_reader(Iter),
@@ -312,7 +309,6 @@ reader_survives_rotation_test() ->
         E1 = mk_event(bondy_connect_hlc:now(HLC), 1),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
         {ok, Iter} = bondy_log_reader:open(Pid, beginning),
-        %% Trigger rotation by writing one more event.
         E2 = mk_event(bondy_connect_hlc:now(HLC), 2),
         {ok, _, {1, _}} = bondy_oplog_wal:append(Pid, E2),
         {ok, Read} = drain_reader(Iter),
@@ -361,7 +357,6 @@ truncated_sealed_segment_surfaces_error_test() ->
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E2),
         {ok, _, {1, _}} = bondy_oplog_wal:append(Pid, E3),
-        %% Segment 0 is now sealed (writer has rotated to segment 1).
         SegPath = filename:join(
             [
                 Dir,
@@ -370,13 +365,10 @@ truncated_sealed_segment_surfaces_error_test() ->
             ]
         ),
         {ok, #file_info{size = Size}} = file:read_file_info(SegPath),
-        %% Trim 5 bytes off the end so frame 2 straddles EOF.
         {ok, Fd} = file:open(SegPath, [read, write, raw, binary]),
         {ok, _} = file:position(Fd, Size - 5),
         ok = file:truncate(Fd),
         ok = file:close(Fd),
-        %% Drain via the reader and expect a corruption error on the
-        %% second frame.
         {ok, Iter0} = bondy_log_reader:open(Pid, beginning),
         {ok, B1, _, _, Iter1} = bondy_log_reader:next(Iter0),
         ?assertEqual([E1], B1),
@@ -415,8 +407,6 @@ hlc_seek_within_head_segment_returns_first_ge_t_test() ->
             end
          || E <- Events
         ],
-        %% Pick the 6th event's HLC as the seek target. The reader must
-        %% return the 6th event first.
         Target = lists:nth(6, Results),
         {ok, Iter} = bondy_log_reader:open(Pid, {key, Target}),
         {ok, [First], [Hlc1], _, _Iter1} =
@@ -474,9 +464,6 @@ hlc_seek_into_head_segment_via_in_memory_index_test() ->
             end
          || E <- Events
         ],
-        %% Pick a target HLC that the writer has rotated past so it
-        %% lands in the head segment. We confirm by reading the
-        %% writer's current_segment first.
         #{current_segment := Head} = bondy_oplog_wal:info(Pid),
         ?assert(Head > 0),
         %% Target = HLC of the second-to-last event; it must be in the
@@ -504,9 +491,6 @@ hlc_seek_into_sealed_segment_via_disk_index_test() ->
             end
          || E <- Events
         ],
-        %% Target the 5th event's HLC; depending on rotation, this may
-        %% land in segment 1. The reader must still return event 5 as
-        %% the first batch.
         Target = lists:nth(5, Hlcs),
         {ok, Iter} = bondy_log_reader:open(Pid, {key, Target}),
         {ok, Read} = drain_reader(Iter),
@@ -561,7 +545,6 @@ key_upper_bound_truncates_drain_test() ->
             end
          || E <- Events
         ],
-        %% Cut off at the 5th event's HLC inclusive. Expect events 1..5.
         Bound = lists:nth(5, Hlcs),
         {ok, Iter} = bondy_log_reader:open(
             Pid, beginning, [{key_upper_bound, Bound}]
@@ -590,7 +573,6 @@ hlc_range_yields_slice_test() ->
             Pid, {key, Lo}, [{key_upper_bound, Hi}]
         ),
         {ok, Read} = drain_reader(Iter),
-        %% items 3..7 inclusive
         Expected = lists:sublist(Events, 3, 5),
         ?assertEqual(Expected, Read)
     end).
@@ -603,7 +585,6 @@ qidx_is_flushed_to_disk_on_rotation_test() ->
         E1 = mk_event(bondy_connect_hlc:now(HLC), 1),
         E2 = mk_event(bondy_connect_hlc:now(HLC), 2),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
-        %% This second event forces rotation (segment 0 is full).
         {ok, _, {1, _}} = bondy_oplog_wal:append(Pid, E2),
         Seg0Idx = filename:join(
             [
@@ -682,7 +663,6 @@ qidx_not_written_for_empty_head_after_rotation_test() ->
             max_segment_bytes => 200
         },
         {ok, Pid} = bondy_oplog_wal:start_link(instance_id(), Opts),
-        %% Two events, second triggers rotation into segment 1.
         E1 = mk_event(bondy_connect_hlc:now(HLC), 1),
         E2 = mk_event(bondy_connect_hlc:now(HLC), 2),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
@@ -728,15 +708,9 @@ hlc_seek_falls_back_when_qidx_missing_test() ->
         Seg0Idx = filename:join(
             [Dir, instance_id(), bondy_log_idx:filename(0)]
         ),
-        %% Sanity: the .qidx exists after rotation.
         ?assert(filelib:is_regular(Seg0Idx)),
-        %% Delete it.
         ok = file:delete(Seg0Idx),
         ?assertNot(filelib:is_regular(Seg0Idx)),
-        %% Pick a target that lives somewhere in segment 0 (the very
-        %% first HLC always does). Reader must fall back to the
-        %% segment-header linear scan and still return the right event
-        %% as the first batch.
         Target = lists:nth(2, Hlcs),
         {ok, Iter} = bondy_log_reader:open(Pid, {key, Target}),
         {ok, [First], _, _, _} = bondy_log_reader:next(Iter),

@@ -13,7 +13,6 @@ ITC provides a causality tracking mechanism for dynamic distributed systems
 where processes/replicas can be created or retired in a decentralized fashion.
 """.
 
-%% Type definitions
 -type id_tree() :: 0 | 1 | {id_tree(), id_tree()}.
 -type event_tree() ::
     non_neg_integer()
@@ -69,7 +68,6 @@ event({Id, Event}) ->
         Event ->
             {Event1, _Cost} = grow(Id, Event),
             {Id, Event1};
-        %% Fill succeeded
         Event1 ->
             {Id, Event1}
     end.
@@ -110,12 +108,10 @@ is_valid({Id, Event}) ->
 %% API ID Tree Operations
 %% =============================================================================
 
-%% Normalize an ID tree
 norm_id({0, 0}) -> 0;
 norm_id({1, 1}) -> 1;
 norm_id(Id) -> Id.
 
-%% Split an ID tree for forking
 split_id(0) ->
     {0, 0};
 split_id(1) ->
@@ -129,7 +125,6 @@ split_id({I, 0}) ->
 split_id({I1, I2}) ->
     {{I1, 0}, {0, I2}}.
 
-%% Sum two ID trees
 sum_id(0, Id) -> Id;
 sum_id(Id, 0) -> Id;
 sum_id({L1, R1}, {L2, R2}) -> norm_id({sum_id(L1, L2), sum_id(R1, R2)}).
@@ -138,7 +133,6 @@ sum_id({L1, R1}, {L2, R2}) -> norm_id({sum_id(L1, L2), sum_id(R1, R2)}).
 %% Event Tree Operations
 %% =============================================================================
 
-%% Normalize an event tree
 norm_event(N) when is_integer(N) -> N;
 norm_event({N, M, M}) when is_integer(M) -> N + M;
 norm_event({N, E1, E2}) ->
@@ -170,7 +164,6 @@ join_event({N1, L1, R1}, {N2, L2, R2}) ->
             join_event(R1, lift_event(R2, Diff))}
     ).
 
-%% Compare event trees for less-than-or-equal
 leq_event(N1, N2) when is_integer(N1), is_integer(N2) ->
     N1 =< N2;
 leq_event(N1, {N2, _L2, _R2}) when is_integer(N1) ->
@@ -204,7 +197,6 @@ fill({Il, Ir}, {N, El, Er}) ->
     norm_event({N, fill(Il, El), fill(Ir, Er)}).
 
 %% Grow operation - inflates event tree minimizing growth cost
-%% Large constant for cost calculation
 -define(GROW_COST_CONSTANT, 1000000).
 
 grow(1, N) when is_integer(N) ->
@@ -326,7 +318,6 @@ decode_event(<<0:1, Type:2, Rest/bitstring>>) ->
             {Er, Rest2} = decode_event(Rest1),
             {{0, El, Er}, Rest2};
         3 ->
-            %% Extended format
             decode_event_extended(Rest)
     end.
 

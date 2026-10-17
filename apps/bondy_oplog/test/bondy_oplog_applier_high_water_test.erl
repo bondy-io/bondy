@@ -81,8 +81,6 @@ older_cell_does_not_regress_watermark() ->
         Id, {cell_apply, ?B, <<"k1">>, {set, 100, <<"new">>}}
     ),
     ok = bondy_oplog_test_projection:drain(Id),
-    %% Older HLC on a different key: the new cell's frame HLC is 3, but
-    %% the high-water atomic should NOT regress.
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k2">>, {set, 3, <<"old">>}}),
     ok = bondy_oplog_test_projection:drain(Id),
     ?assertEqual(
@@ -92,8 +90,6 @@ older_cell_does_not_regress_watermark() ->
     teardown(NS).
 
 watermark_is_per_shard() ->
-    %% Two distinct shards in the same namespace. cell_apply against
-    %% shard 0 must not move shard 1's watermark.
     {Id, NS, _Cache0, _Proj0} = setup_instance(),
     {_Cache1, _Proj1} = register_shard(NS, primary, 1),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k">>, {set, 77, <<"v">>}}),

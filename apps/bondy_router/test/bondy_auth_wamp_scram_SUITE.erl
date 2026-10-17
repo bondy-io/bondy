@@ -19,41 +19,30 @@
 
 all() ->
     [
-        %% Original test (preserved)
         missing_client_nonce,
 
-        %% Full SCRAM flow (was commented out, now enabled)
         test_1,
 
-        %% Password protocol verification
         password_protocol_is_scram,
 
-        %% Challenge extra keys
         challenge_extra_has_required_keys,
 
-        %% Wrong signatures
         wrong_signature_fails,
         short_proof_is_rejected_not_crash,
         long_proof_is_rejected_not_crash,
 
-        %% CIDR filtering
         user1_allowed_from_any_ip,
         user2_rejected_outside_cidr,
 
-        %% Method selection
         method_mismatch_after_challenge,
         invalid_method_rejected,
 
-        %% User without password
         user_without_password_excluded,
 
-        %% Server verifier
         server_verifier_in_auth_extra,
 
-        %% Error cases
         nonexistent_user_error,
 
-        %% Nonce validation
         nonce_mismatch_rejected
     ].
 
@@ -346,7 +335,6 @@ challenge_extra_has_required_keys(Config) ->
     RealmUri = ?config(realm_uri, Config),
     {_, _, Extra, _} = do_challenge(RealmUri, ?U1),
 
-    %% SCRAM challenge extra must contain these fields
     ?assert(maps:is_key(nonce, Extra)),
     ?assert(maps:is_key(salt, Extra)),
     ?assert(maps:is_key(kdf, Extra)),
@@ -371,7 +359,6 @@ wrong_signature_fails(Config) ->
         <<"channel_binding">> => undefined
     },
 
-    %% Signature computed with wrong password
     WrongSig = client_signature_with_password(
         ?U1, ?P2, ClientNonce, ChallengeExtra
     ),
@@ -474,7 +461,6 @@ method_mismatch_after_challenge(Config) ->
         <<"channel_binding">> => undefined
     },
 
-    %% After SCRAM challenge, trying another method should fail
     ?assertMatch(
         {error, invalid_method},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, AuthExtra, Ctxt1)
@@ -528,7 +514,6 @@ server_verifier_in_auth_extra(Config) ->
         ?WAMP_SCRAM_AUTH, Signature, AuthExtra0, Ctxt1
     ),
 
-    %% SCRAM auth extra should contain the server verifier with "v=" prefix
     ?assert(maps:is_key(verifier, AuthExtra)),
     Verifier = maps:get(verifier, AuthExtra),
     ?assertMatch(<<"v=", _/binary>>, Verifier).
@@ -556,7 +541,6 @@ nonce_mismatch_rejected(Config) ->
 
     Signature = client_signature(?U1, ClientNonce, ChallengeExtra),
 
-    %% Send a wrong nonce in the Extra map
     WrongNonce = base64:encode(crypto:strong_rand_bytes(32)),
     AuthExtra = #{
         <<"nonce">> => WrongNonce,

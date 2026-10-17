@@ -107,6 +107,5 @@ do_gc() ->
      || P <- L, {status, waiting} == process_info(P, status)
     ],
 
-    %% We gc ourselves
     erlang:garbage_collect(),
     ok.

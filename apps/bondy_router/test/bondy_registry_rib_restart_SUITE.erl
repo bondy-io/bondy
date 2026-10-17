@@ -145,7 +145,6 @@ rib_consistent_after_node_rebuild(Config) ->
         ok = wait_rib_clean(N2, ?REALM, ?CONVERGE_MS, true),
         ct:pal("precondition: check/1 == [] on both nodes"),
 
-        %% ---- the event under test -------------------------------------
         %% N2 goes down and returns with an EMPTY projection (see the header
         %% note on why this is wiped rather than merely restarted). The
         %% cluster is quiet: nothing writes a registry entry while it is
@@ -200,11 +199,6 @@ rib_consistent_after_node_rebuild(Config) ->
 %% because the two differ in what ELSE is empty: here `main` survives, so the
 %% node is `pre_bootstrap` only for the registry. Covering the wipe alone
 %% would leave the reported scenario untested.
-%%
-%% Before the fix this was FLAKY, not merely failing: `check/1` is vacuously
-%% `[]` on an empty projection, so whether it caught the divergence depended
-%% on whether cells had landed yet. The `wait_rib_cells/2` gate below removes
-%% that race, and the fix removes the divergence.
 %% -----------------------------------------------------------------------------
 rib_consistent_after_plain_restart(Config) ->
     N2Env = [{[partisan, peer_port], ?P2_PEER_PORT}],

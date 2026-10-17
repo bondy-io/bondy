@@ -1062,9 +1062,6 @@ cancel_flush_timer(#state{flush_timer = TRef} = S) when is_reference(TRef) ->
     S#state{flush_timer = undefined}.
 
 %% @private
-%% Cancel any active periodic retention timer; idempotent. Used on
-%% terminate and on rearm (where the just-fired tick is already
-%% accounted for in the caller).
 cancel_retention_timer(#state{retention_timer = undefined} = S) ->
     S;
 cancel_retention_timer(#state{retention_timer = TRef} = S) when
@@ -1164,8 +1161,6 @@ open_after_identity_encoded(InstanceId, Identity, Opts) ->
     end.
 
 %% @private
-%% Validate `min_live_segments` (pos int) and `retention_sweep_interval`
-%% (pos int ms). Both are init-time opts; defaults are applied later.
 validate_retention_opts(Opts) ->
     case maps:find(min_live_segments, Opts) of
         {ok, M} when is_integer(M), M >= 1 ->
@@ -1188,9 +1183,6 @@ validate_retention_sweep_interval(Opts) ->
     end.
 
 %% @private
-%% Validate `max_total_wal_size` and `max_live_segments` (both pos ints).
-%% These are the hard backpressure limits; crossing either causes
-%% `append`/`append_batch` to return `{error, wal_full}`.
 validate_backpressure_opts(Opts) ->
     case maps:find(max_total_wal_size, Opts) of
         {ok, T} when is_integer(T), T >= 1 ->
@@ -1213,9 +1205,6 @@ validate_max_live_segments(Opts) ->
     end.
 
 %% @private
-%% Validate `recovery_mode`: must be `strict` (default) or `rescan`.
-%% In `rescan`, head-segment recovery skips corrupt frames and emits a
-%% telemetry event with the skipped byte range; opt-in per instance.
 validate_recovery_mode(Opts) ->
     case maps:find(recovery_mode, Opts) of
         {ok, M} when M =:= strict; M =:= rescan ->
@@ -1313,7 +1302,6 @@ validate_group_commit_opts(Opts) ->
     end.
 
 %% @private
-%% Validate `max_batch_bytes`: must be a positive integer if supplied.
 %% The cap is a memory bound on a single atomic batch's encoded body;
 %% it is intentionally orthogonal to `max_segment_bytes` (the writer
 %% pre-rotates before any batch that wouldn't fit in the current
@@ -1329,8 +1317,6 @@ validate_batch_opts(Opts) ->
     end.
 
 %% @private
-%% Validate `max_segment_bytes`: a positive integer, or `infinity` for a
-%% log rotated only through `rotate/1`.
 validate_segment_opts(Opts) ->
     case maps:find(max_segment_bytes, Opts) of
         {ok, Max} when is_integer(Max), Max >= 1 ->
@@ -1493,15 +1479,6 @@ open_after_opts_validated(InstanceId, {Adapter, Ctx, SegIdentity}, Opts) ->
     end.
 
 %% @private
-%% Branches on whether the WAL directory has been used before:
-%%
-%% - No manifest: this is a fresh WAL. Create the directory and the
-%%   first segment (`bootstrap/1`).
-%% - Manifest exists: this WAL has prior state. Run the recovery
-%%   procedure (`bondy_log_recovery`) to validate the manifest,
-%%   clean orphans, scan and truncate the head segment, rebuild missing
-%%   `.qidx` files, and clamp the consumer offset to a real frame
-%%   boundary.
 open_or_recover(
     Dir,
     InstanceId,
@@ -1742,9 +1719,6 @@ use_group_commit(#state{}) ->
     false.
 
 %% @private
-%% The non-group-commit append path (batched mode, or group commit
-%% disabled). Write + per-call durability + reply. Behaviour identical to
-%% the historical `handle_call({append_batch, …})`.
 handle_inline_append(State0, Events) ->
     case do_append_batch(State0, Events) of
         {ok, Entries, State1} ->
@@ -2179,9 +2153,6 @@ open_next_segment(
     end.
 
 %% @private
-%% Commit point of rotation: update the cached manifest in memory and
-%% atomically rewrite the on-disk file. On success the new manifest is
-%% returned so the caller can install it in state.
 commit_rotation(
     #state{manifest = M0, dir = Dir} = State, NewSegId, PrevSegmentFirstKey
 ) ->
@@ -2314,8 +2285,6 @@ do_advance_snapshot_watermark(#state{dir = Dir} = State, NewKey) ->
     end.
 
 %% @private
-%% Stub setter for `committed_segment` used until the consumer-commit
-%% machinery lands. Monotonic; refuses to move backwards.
 do_set_committed_segment(
     #state{committed_segment = Cur}, NewSeg
 ) when NewSeg < Cur ->
@@ -2401,7 +2370,6 @@ do_retention_sweep(#state{} = State0) ->
     end.
 
 %% @private
-%% Compute the deletable segment ids.
 compute_deletable(#state{
     manifest = M,
     first_key = HeadFirstKey,
@@ -2505,7 +2473,6 @@ walk_watermark([_This | Rest], Watermark, Best) ->
     walk_watermark(Rest, Watermark, Best).
 
 %% @private
-%% Second phase of the sweep: rewrite the manifest, then unlink the files.
 apply_deletable(#state{manifest = M, dir = Dir} = State0, Deletable) ->
     Live0 = bondy_log_manifest:live_segments(M),
     Survivors = [
@@ -2605,9 +2572,6 @@ delete_or_log(Path, Kind) ->
 %% =============================================================================
 
 %% @private
-%% Fsync the head fd and advance the durable boundary. Used by
-%% `sync/1`, by per_write append, and by batched-mode fsyncs (size and
-%% timer-triggered via `maybe_batched_fsync/1`).
 do_fsync_head(
     #state{
         head_fd = Fd,
@@ -2663,9 +2627,6 @@ drop_unnamed_segment(SegPath) ->
     end.
 
 %% @private
-%% Try a size-triggered fsync. Returns the original state if the
-%% threshold has not been crossed; otherwise fsyncs and advances
-%% durable.
 maybe_size_trigger_fsync(
     #state{pending_fsync_bytes = P, batched_fsync_bytes = T} = State
 ) when P >= T ->
@@ -2696,9 +2657,6 @@ maybe_arm_flush_timer(#state{batched_fsync_interval = Ms} = S) ->
     S#state{flush_timer = TRef}.
 
 %% @private
-%% Advance the durable position to `{Seg, Off}`. Publishes to the
-%% atomics ref, resets the batched-mode bookkeeping, and wakes any
-%% `await_durable/3` waiters at or below the new position.
 advance_durable(
     #state{durable_segment_id = DSeg, durable_offset = DOff} = State,
     Seg,
@@ -2753,10 +2711,6 @@ satisfy_waiters_up_to(DurablePos, Waiters) ->
     Pending.
 
 %% @private
-%% Handles a `{await_durable, Pos, Timeout}` gen_server call. Replies
-%% immediately if already durable; otherwise registers a waiter and
-%% returns `{noreply, _}` so the caller blocks until satisfied or the
-%% timer fires.
 handle_await_durable(
     {Seg, Off},
     _Timeout,
@@ -3103,9 +3057,6 @@ publish_head_pos(Ref, SegId, Offset) ->
     ok = atomics:put(Ref, 2, Offset).
 
 %% @private
-%% Publishes a new head offset within the current head segment. No
-%% segment-id update — that's only done on rotation via
-%% `publish_head_pos/3`.
 publish_head_offset(undefined, _Offset) -> ok;
 publish_head_offset(Ref, Offset) -> ok = atomics:put(Ref, 2, Offset).
 

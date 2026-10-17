@@ -283,7 +283,6 @@ handle_call({open, Session0, EnqueuedAt}, _From, State0) ->
     ServiceStart = erlang:monotonic_time(microsecond),
     QueueUs = ServiceStart - EnqueuedAt,
 
-    %% We store the session
     {ok, Session} = bondy_session:store(Session0),
 
     %% We init the session-scoped counters
@@ -301,7 +300,6 @@ handle_call({open, Session0, EnqueuedAt}, _From, State0) ->
     %% This must be safe to avoid crashing the server as this acts as a
     %% session supervisor
     try
-        %% We register WAMP procedures
         ok = register_procedures(Session),
         Refs = State0#state.monitor_refs,
         State = State0#state{monitor_refs = Refs#{Id => Ref, Ref => Id}},

@@ -77,7 +77,6 @@ concurrent_put_are_siblings_test() ->
     S1 = apply_event(apply_event(S0, Ea), Eb),
     ?assertEqual(#{<<"k">> => [<<"va">>, <<"vb">>]}, ?MOD:to_value(S1)).
 
-%% Sibling merge is order-independent.
 concurrent_put_order_independent_test() ->
     S0 = ?MOD:init(),
     Ea = mk_event(
@@ -90,7 +89,6 @@ concurrent_put_order_independent_test() ->
     Sba = apply_event(apply_event(S0, Eb), Ea),
     ?assertEqual(Sab, Sba).
 
-%% A remove that observed the put removes the key.
 observed_remove_removes_key_test() ->
     S0 = ?MOD:init(),
     S1 = write(S0, 10, <<"a">>, 1, {put, <<"k">>, <<"v">>}),
@@ -101,9 +99,7 @@ observed_remove_removes_key_test() ->
 %% put's dot) survives.
 add_wins_concurrent_put_survives_remove_test() ->
     S0 = ?MOD:init(),
-    %% `a` puts k=va, dot {a,1}.
     Sa1 = write(S0, 10, <<"a">>, 1, {put, <<"k">>, <<"va">>}),
-    %% `b`'s concurrent put observed only the empty S0.
     Eb = mk_event(
         11, <<"b">>, 1, {put, <<"k">>, <<"vb">>}, ?MOD:context_of(S0)
     ),
@@ -139,7 +135,6 @@ distinct_keys_independent_test() ->
     S3 = write(S2, 30, <<"a">>, 3, {rmv, <<"k2">>}),
     ?assertEqual(#{<<"k1">> => [<<"va">>]}, ?MOD:to_value(S3)).
 
-%% Duplicate / replayed delivery is idempotent.
 duplicate_delivery_is_idempotent_test() ->
     S0 = ?MOD:init(),
     E = mk_event(10, <<"a">>, 1, {put, <<"k">>, <<"v">>}, ?MOD:context_of(S0)),
@@ -170,7 +165,6 @@ interpret_cog_matches_eager_and_permutation_invariant_test() ->
     ?assertEqual(Eager, Group),
     ?assertEqual(Group, ?MOD:interpret_cog([Ek2, Erm, Ea, Eb], S0)),
     ?assertEqual(Group, ?MOD:interpret_cog([Eb, Ek2, Ea, Erm], S0)),
-    %% `b`'s concurrent put to k survives the remove; k2 is present.
     ?assertEqual(
         #{<<"k">> => [<<"vb">>], <<"k2">> => [<<"vc">>]},
         ?MOD:to_value(Group)

@@ -168,8 +168,6 @@ cas(Ref, Step) ->
     end.
 
 %% @private
-%% Local tick: pick the larger of OldPhys and Wall; bump logical when the
-%% physical did not advance, otherwise reset logical to zero.
 local_next(Old, Wall) ->
     {OldPhys, OldLog} = decode(Old),
     case Wall > OldPhys of
@@ -197,8 +195,6 @@ peer_next(Old, Wall, Peer) ->
     end.
 
 %% @private
-%% Increment the logical counter, advancing physical on overflow so that
-%% the result still strictly dominates `(Phys, Log)`.
 bump_logical(Phys, Log) when Log < ?BONDY_HLC_LOGICAL_MAX ->
     encode(Phys, Log + 1);
 bump_logical(Phys, _) ->

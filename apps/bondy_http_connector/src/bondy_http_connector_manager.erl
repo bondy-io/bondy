@@ -118,7 +118,6 @@ init([]) ->
 
 -doc false.
 handle_continue(resolve_secrets, #state{services = []} = State) ->
-    %% No services defined
     {noreply, State};
 handle_continue(resolve_secrets, State0) ->
     {Services, PendingSecrets0} = resolve_secrets(State0#state.services),

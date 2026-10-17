@@ -1,5 +1,3 @@
-%% Stage 5: GC / compaction tests.
-
 -module(bondy_oplog_compaction_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -131,7 +129,6 @@ idempotent_compact() ->
     ok = append_cells(B, 5, 8),
     ok = converge(A, B),
     {ok, {compacted, W1, _}} = bondy_oplog_test_helpers:compact_among(A, [A, B]),
-    %% Second compact with no new events ⇒ no_change.
     ?assertEqual(
         {ok, no_change}, bondy_oplog_test_helpers:compact_among(A, [A, B])
     ),

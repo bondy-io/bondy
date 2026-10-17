@@ -85,8 +85,6 @@ projection_and_overlay_merge_per_key() ->
     NS = mk_ns(),
     {Setup, #{projection := PH, overlay := OV}} =
         setup_shard(NS, primary, 0, 1, lww_register),
-    %% Projection has a at HLC=5, c at HLC=15. Overlay has a (newer) at
-    %% HLC=30 and b (new key) at HLC=20.
     materialise(PH, <<"a">>, {set, <<"old-a">>, 5}, 5),
     materialise(PH, <<"c">>, {set, <<"old-c">>, 15}, 15),
     overlay_insert(OV, <<"a">>, 30, {set, 30, <<"new-a">>}),

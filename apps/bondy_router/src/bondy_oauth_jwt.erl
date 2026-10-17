@@ -124,7 +124,6 @@ do_verify(RealmUri, JWT, Spec) ->
 
         AuthRealm = bondy_realm:fetch(AuthRealmUri),
 
-        %% Finally we try to verify the JWT
         case bondy_realm:get_public_key(AuthRealm, Kid) of
             undefined ->
                 {error, oauth2_invalid_grant};

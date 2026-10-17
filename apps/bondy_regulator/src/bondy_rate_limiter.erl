@@ -197,7 +197,6 @@ allow_new(Key, RateOpts, Increment) ->
 %% @private
 sweep(Ttl) ->
     Cutoff = now_ms() - Ttl,
-    %% Collect idle keys, then delete each (registry row + regulator bucket).
     MS = [{{'$1', '$2', '$3'}, [{'<', '$3', Cutoff}], [{{'$1', '$2'}}]}],
     Idle = ets:select(?TAB, MS),
     lists:foreach(

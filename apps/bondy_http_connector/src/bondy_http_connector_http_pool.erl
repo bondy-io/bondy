@@ -200,14 +200,12 @@ request(Pool, Method, Url, Headers, Body, Overrides) ->
 init([Name, Endpoint, Opts]) ->
     process_flag(trap_exit, true),
 
-    %% Translate our opts -> hackney_pool opts
     PoolOpts = [
         {max_connections, maps:get(size, Opts, 50)},
         {timeout, maps:get(idle_timeout, Opts, 150_000)},
         {checkout_timeout, maps:get(checkout_timeout, Opts, 10_000)}
     ],
 
-    %% Translate our opts -> hackney request opts
     ReqOpts = request_opts(Name, Opts),
 
     RetryOpts = maps:get(retry_opts, Opts, #{

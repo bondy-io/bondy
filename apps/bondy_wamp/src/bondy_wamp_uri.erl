@@ -134,7 +134,6 @@ components(Uri) ->
             Domain = <<TopLevelDomain/binary, $., AppName/binary>>,
             [Domain | Rest];
         _Other ->
-            %% Invalid Uri
             error({?WAMP_INVALID_URI, Uri})
     end.
 

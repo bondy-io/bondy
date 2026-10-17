@@ -19,36 +19,28 @@
 
 all() ->
     [
-        %% Original test (preserved)
         test_1,
 
-        %% Full challenge-response flow
         full_cra_flow,
         challenge_extra_has_required_keys,
 
-        %% Wrong signatures
         wrong_signature_fails,
         empty_signature_fails,
         random_binary_signature_fails,
 
-        %% Source / CIDR
         user1_allowed_from_any_ip,
         user2_rejected_outside_cidr,
         user2_allowed_within_cidr,
 
-        %% Method selection
         method_mismatch_after_challenge,
         password_auth_not_in_cra_only_realm,
         invalid_method_rejected,
 
-        %% User without password
         user_without_password_excluded,
 
-        %% Error cases
         nonexistent_user_error,
         nonexistent_realm_error,
 
-        %% Context after challenge
         context_method_set_after_challenge
     ].
 
@@ -233,19 +225,15 @@ full_cra_flow(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Step 1: Challenge
     {true, Extra, Ctxt1} = bondy_auth:challenge(?WAMP_CRA_AUTH, #{}, Ctxt0),
 
-    %% Step 2: Compute correct signature and authenticate
     Signature = compute_signature(?P1, Extra),
     {ok, AuthExtra, Ctxt2} = bondy_auth:authenticate(
         ?WAMP_CRA_AUTH, Signature, undefined, Ctxt1
     ),
 
-    %% CRA returns empty extra on success
     ?assertEqual(#{}, AuthExtra),
 
-    %% Method is set in context
     ?assertEqual(?WAMP_CRA_AUTH, bondy_auth:method(Ctxt2)).
 
 challenge_extra_has_required_keys(Config) ->
@@ -257,17 +245,13 @@ challenge_extra_has_required_keys(Config) ->
     ),
     {true, Extra, _} = bondy_auth:challenge(?WAMP_CRA_AUTH, #{}, Ctxt0),
 
-    %% Challenge extra must contain all required CRA fields
     ?assert(maps:is_key(challenge, Extra)),
     ?assert(maps:is_key(salt, Extra)),
     ?assert(maps:is_key(keylen, Extra)),
     ?assert(maps:is_key(iterations, Extra)),
 
-    %% Challenge is a JSON-encoded binary
     ?assert(is_binary(maps:get(challenge, Extra))),
-    %% Salt is a binary
     ?assert(is_binary(maps:get(salt, Extra))),
-    %% keylen and iterations are positive integers
     ?assert(is_integer(maps:get(keylen, Extra))),
     ?assert(maps:get(keylen, Extra) > 0),
     ?assert(is_integer(maps:get(iterations, Extra))),
@@ -286,7 +270,6 @@ wrong_signature_fails(Config) ->
     ),
     {true, Extra, Ctxt1} = bondy_auth:challenge(?WAMP_CRA_AUTH, #{}, Ctxt0),
 
-    %% Signature computed with wrong password
     WrongSig = compute_signature(?P2, Extra),
     ?assertMatch(
         {error, bad_signature},
@@ -368,7 +351,6 @@ user2_allowed_within_cidr(Config) ->
         lists:member(?WAMP_CRA_AUTH, bondy_auth:available_methods(Ctxt0))
     ),
 
-    %% Full flow within CIDR
     {true, Extra, Ctxt1} = bondy_auth:challenge(?WAMP_CRA_AUTH, #{}, Ctxt0),
     Signature = compute_signature(?P1, Extra),
     ?assertMatch(
@@ -389,8 +371,6 @@ method_mismatch_after_challenge(Config) ->
     ),
     {true, _, Ctxt1} = bondy_auth:challenge(?WAMP_CRA_AUTH, #{}, Ctxt0),
 
-    %% After challenge with CRA, trying to authenticate with a different
-    %% method should fail
     ?assertMatch(
         {error, invalid_method},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
@@ -478,10 +458,8 @@ context_method_set_after_challenge(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Before challenge, method is not set
     ?assertEqual(error, maps:find(method, Ctxt0)),
 
-    %% After challenge, method is set
     {true, _, Ctxt1} = bondy_auth:challenge(?WAMP_CRA_AUTH, #{}, Ctxt0),
     ?assertEqual(?WAMP_CRA_AUTH, bondy_auth:method(Ctxt1)),
     ?assertEqual(RealmUri, bondy_auth:realm_uri(Ctxt1)),

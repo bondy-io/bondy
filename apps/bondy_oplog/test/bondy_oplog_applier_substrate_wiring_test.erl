@@ -43,8 +43,6 @@ wiring_test_() ->
 %% =============================================================================
 
 publish_default_is_noop() ->
-    %% Subscribe to a namespace, start an instance with no publish opts,
-    %% append an event, and assert no delivery happens.
     Id = mk_id(),
     NS = ns_of(Id),
     {ok, SubRef} = bondy_oplog_core:subscribe(NS, all),
@@ -89,7 +87,6 @@ publish_skip_suppresses_delivery() ->
     Id = mk_id(),
     NS = ns_of(Id),
     {ok, SubRef} = bondy_oplog_core:subscribe(NS, all),
-    %% Only set-events publish; clear-events skip.
     Fun = fun(E) ->
         case bondy_oplog_event:op(E) of
             {set, _, _} = Op -> {<<"k">>, Op};

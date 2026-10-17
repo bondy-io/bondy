@@ -79,7 +79,6 @@ ensure_fresh_reports_all_stale_namespaces() ->
     NS2 = mk_ns(),
     {S1, _} = setup_shard(NS1, primary, 0, 1, lww_register),
     {S2, _} = setup_shard(NS2, primary, 0, 1, lww_register),
-    %% Neither bumped. Both should appear in the stale list, sorted.
     ?assertEqual(
         {stale, lists:sort([NS1, NS2])},
         bondy_oplog_core:ensure_fresh([NS1, NS2], 100)
@@ -110,10 +109,8 @@ ensure_fresh_for_keys_only_checks_touched_shards() ->
     {S0, _} = setup_shard(NS, primary, 0, 2, lww_register),
     {S1, _} = setup_shard(NS, primary, 1, 2, lww_register),
     ok = bondy_oplog_core_registry:bump_ae(NS, primary, 0),
-    %% Find one key per shard.
     K0 = find_key_for_shard(NS, primary, 0),
     K1 = find_key_for_shard(NS, primary, 1),
-    %% Keys hitting only shard 0 are fresh.
     ?assertEqual(
         ok,
         bondy_oplog_core:ensure_fresh_for_keys(
@@ -121,7 +118,6 @@ ensure_fresh_for_keys_only_checks_touched_shards() ->
             1_000_000
         )
     ),
-    %% Keys hitting shard 1 surface NS as stale.
     ?assertEqual(
         {stale, [NS]},
         bondy_oplog_core:ensure_fresh_for_keys(
@@ -236,8 +232,6 @@ explicit_owner_decouples_from_caller() ->
     receive
         ready -> ok
     end,
-    %% Register from the test process, with Owner as the registry's
-    %% monitor target.
     {ok, CH} = bondy_oplog_cache_ets:init(NS, primary, 0, #{}),
     {ok, PH} = bondy_oplog_projection_ets:open(NS, primary, 0, #{}),
     OV = bondy_oplog_db_overlay:new(),
@@ -251,9 +245,7 @@ explicit_owner_decouples_from_caller() ->
         fold_module => lww_register,
         owner => Owner
     }),
-    %% Test process is still alive; row exists.
     ?assertMatch({ok, _}, bondy_oplog_core_registry:lookup(NS, primary, 0)),
-    %% Kill Owner — the registry must tear the row down.
     Owner ! go_down,
     receive
         {'DOWN', OwnerMon, process, Owner, _} -> ok
@@ -277,7 +269,6 @@ register_missing_required_field_returns_error() ->
         {error, {missing_required_field, _}},
         bondy_oplog_core_registry:register(NS, primary, 0, Config)
     ),
-    %% Registry is still alive and serving.
     ?assert(is_pid(whereis(bondy_oplog_core_registry))).
 
 %% The row a crashed registry comes back with is the one registered before,
@@ -340,7 +331,6 @@ owner_down_does_not_call_adapter_close() ->
         {'DOWN', Mon, process, Owner, _} -> ok
     end,
     _ = sys:get_state(bondy_oplog_core_registry),
-    %% Row removed by the registry on DOWN.
     ?assertEqual(not_found, bondy_oplog_core_registry:lookup(NS, primary, 0)),
     %% BUT close was NOT called — the substrate does not invoke close
     %% on adapters when owners die. ETS adapters self-clean via Erlang
@@ -389,9 +379,6 @@ re_register_demonitors_previous_owner() ->
     receive
         registered1 -> ok
     end,
-    %% Re-register from this process (the test process). This must
-    %% demonitor Owner1's reference so its exit no longer takes down
-    %% the row.
     {ok, CH2} = bondy_oplog_cache_ets:init(NS, primary, 0, #{}),
     {ok, PH2} = bondy_oplog_projection_ets:open(NS, primary, 0, #{}),
     OV2 = bondy_oplog_db_overlay:new(),
@@ -409,7 +396,6 @@ re_register_demonitors_previous_owner() ->
         {'DOWN', Mon1, process, Owner1, _} -> ok
     end,
     _ = sys:get_state(bondy_oplog_core_registry),
-    %% Registration must still exist, owned by us.
     ?assertMatch({ok, _}, bondy_oplog_core_registry:lookup(NS, primary, 0)),
     ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
     ok = bondy_oplog_cache_ets:close(CH2),
@@ -426,7 +412,6 @@ mk_ns() ->
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ).
 
-%% Generate keys until we find one that hashes to the wanted shard.
 find_key_for_shard(NS, Index, WantedShard) ->
     find_key_for_shard(NS, Index, WantedShard, 0).
 

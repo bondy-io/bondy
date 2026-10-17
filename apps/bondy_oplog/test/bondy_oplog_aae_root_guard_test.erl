@@ -68,7 +68,6 @@ healthy_advertises_real_root(Dir) ->
     StartOpts = start_opts(NS, Dir),
     {ok, _} = bondy_oplog:start_instance(InstId, StartOpts),
     try
-        %% Empty: nothing to serve, advertise undefined.
         ?assertEqual(undefined, bondy_oplog_instance:root_hash(InstId)),
         ?assertEqual(undefined, bondy_oplog_instance:aae_root(InstId)),
 
@@ -138,9 +137,7 @@ dangling_root_not_advertised(Dir) ->
     GatedOpts = StartOpts#{applier => Applier0#{drain_gated => true}},
     {ok, _} = bondy_oplog:start_instance(InstId, GatedOpts),
     try
-        %% Local view still reports the real (dangling) root...
         ?assertEqual(TopHash, bondy_oplog_instance:root_hash(InstId)),
-        %% ...but AAE refuses to advertise it.
         ?assertEqual(undefined, bondy_oplog_instance:aae_root(InstId)),
         %% diagnose_root classifies the missing child as genuinely absent
         %% (never written) rather than tombstoned — i.e. it names the store,
@@ -180,19 +177,14 @@ hold_keeps_frontier_off_an_unseen_prefix(Dir) ->
     {Cache, Proj} = register_shard(LocalNS, primary, 0, lww_register),
     {ok, _} = bondy_oplog:start_instance(LocalId, start_opts(LocalNS, Dir)),
     try
-        %% The peer holds the origin's whole prefix.
         _ = [
             ok = bondy_oplog:append_remote(PeerId, hole_event(Origin, N))
          || N <- [1, 2, 3]
         ],
         ok = bondy_oplog:await_apply(PeerId),
 
-        %% This replica saw only seq 3, so its applied frontier reads 3 for
-        %% the origin while 1 and 2 are a hole below that maximum.
         ok = bondy_oplog:append_remote(LocalId, hole_event(Origin, 3)),
         ok = bondy_oplog:await_apply(LocalId),
-        %% The peer saw the whole prefix, so its frontier records the
-        %% origin's maximum.
         ?assertEqual(
             #{Origin => 3}, bondy_oplog_instance:frontier(PeerId)
         ),
@@ -204,7 +196,6 @@ hold_keeps_frontier_off_an_unseen_prefix(Dir) ->
         ?assertEqual(#{}, bondy_oplog_instance:frontier(LocalId)),
         ?assertEqual(1, bondy_oplog:size(LocalId)),
 
-        %% Pull the missing prefix from the peer.
         {ok, _} = bondy_oplog_sync_session:run(
             LocalId,
             PeerId,

@@ -75,8 +75,6 @@ request_carries_self_id_and_root() ->
     PageReqs = [R || R <- Reqs, is_tuple(R), element(1, R) == get_pages],
     ?assertNotEqual([], PageReqs, "no page requests were issued"),
 
-    %% Every page request carries the requester's id and root, not the bare
-    %% hash list.
     lists:foreach(
         fun(R) ->
             ?assertMatch({get_pages, _Self, _Root, _Hashes}, R),
@@ -99,7 +97,6 @@ request_carries_self_id_and_root() ->
 unavailable_is_distinct_from_empty() ->
     {A, _B} = two_instances(),
 
-    %% Ask for hashes the instance certainly does not hold.
     Bogus = [crypto:strong_rand_bytes(32), crypto:strong_rand_bytes(32)],
 
     ?assertEqual(
@@ -135,7 +132,6 @@ legacy_two_tuple_still_served() ->
     Missing = bondy_oplog_instance:missing_set(A, bondy_oplog:root_hash(B)),
     ?assertEqual([], Missing),
 
-    %% Serve a page we definitely hold, via the legacy shape.
     Root = bondy_oplog:root_hash(B),
     ?assertMatch(
         {ok, Pages} when map_size(Pages) > 0,
@@ -146,8 +142,6 @@ legacy_two_tuple_still_served() ->
 %% Helpers
 %% -----------------------------------------------------------------------------
 
-%% Drives one page-fetch round against an instance that cannot serve, through
-%% the real session code path.
 pull_bogus(Instance, Hashes) ->
     Transport = bondy_oplog_transport_inline,
     case Transport:request(Instance, Instance, {get_pages, Hashes}, #{}) of

@@ -386,8 +386,6 @@ subscribe(State0) ->
     %% dispatch tables on any spec change cluster-wide.
     State1 = subscribe_oplog(State0),
 
-    %% We subscribe to WAMP events
-    %% We will handle then in handle_cast/2
     {ok, Id} = bondy_broker:subscribe(
         ?MASTER_REALM_URI,
         #{

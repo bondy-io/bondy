@@ -324,7 +324,6 @@ store(#session{} = S0) ->
             external_id = bondy_session_id:to_external(NewId)
         },
 
-        %% Finally we store the updated session
         true == ets:insert_new(Tab, S) orelse
             error({integrity_constraint_violation, Id}),
 
@@ -370,15 +369,12 @@ close(#session{} = S, Reason) when
     ExtId = S#session.external_id,
     RealmUri = S#session.realm_uri,
 
-    %% Cleanup session
     Tab1 = tuplespace:locate_table(?SESSION_SPACE, Id),
     true = ets:delete(Tab1, Id),
 
-    %% Cleanup index
     Tab2 = tuplespace:locate_table(?SESSION_SPACE, ExtId),
     true = ets:delete(Tab2, ExtId),
 
-    %% Cleanup counters
     ok = bondy_message_id:purge_session(RealmUri, Id),
 
     %% Closing a session revokes no credential; a client revokes its ticket

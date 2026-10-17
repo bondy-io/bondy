@@ -123,7 +123,6 @@ common(MaskA, MaskB) -> MaskA band MaskB.
 -spec combined(integer(), integer()) -> integer().
 combined(MaskA, MaskB) -> MaskA bor MaskB.
 
-%%  True when every bit set in RequiredMask is also set in PeerMask.
 -spec compatible(integer(), integer()) -> boolean().
 compatible(RequiredMask, PeerMask) ->
     (RequiredMask band PeerMask) =:= RequiredMask.

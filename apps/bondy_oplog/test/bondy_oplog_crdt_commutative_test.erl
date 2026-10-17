@@ -61,7 +61,6 @@ interpret_cog_is_set_function_test() ->
     [First | Rest] =
         [?HELPER:interpret_cog(?CRDT, P, Init) || P <- perms(Es)],
     ?assert(lists:all(fun(R) -> R =:= First end, Rest)),
-    %% And the value is the canonical key-ordered result.
     ?assertEqual([<<"a">>, <<"b">>, <<"c">>], ?CRDT:to_value(First)).
 
 %% =============================================================================

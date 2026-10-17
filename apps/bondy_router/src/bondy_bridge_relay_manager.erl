@@ -448,7 +448,6 @@ load_bridges(State0) ->
     %% override those in the store.
     _ = [bondy_bridge_relay:remove(K) || K <- CommonKeys],
 
-    %% We merge overriding the common keys
     Bridges = maps:merge(Permanent, Transient),
 
     State0#state{bridges = Bridges}.
@@ -457,7 +456,6 @@ start_all(State) ->
     maps:fold(
         fun
             (_Name, #{enabled := true} = Bridge, Acc) ->
-                %% We only start the enabled bridges
                 try
                     do_start_bridge(Bridge, Acc)
                 catch

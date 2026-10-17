@@ -338,7 +338,6 @@ websocket_info({?BONDY_REQ, Pid, _RealmUri, M}, State) when
 websocket_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using bondy_router_peer:send/2,3
-    %% ok = bondy_router_peer:ack(Pid, Ref),
     timed_outbound(State#state.frame_type, M, State);
 websocket_info(
     {timeout, Ref, ping_idle_timeout}, #state{ping_tref = Ref} = State
@@ -759,7 +758,6 @@ reset_ping(#state{ping_tref = undefined} = State) ->
 reset_ping(#state{} = State) ->
     ok = cancel_timer(State#state.ping_tref),
 
-    %% Reset retry state
     {_, Retry} = bondy_connect_retry:succeed(State#state.ping_retry),
 
     Time = State#state.ping_idle_timeout,
@@ -815,7 +813,6 @@ maybe_send_ping(Limit, State) when
     }),
     {[close], State};
 maybe_send_ping(_Time, #state{} = State0) ->
-    %% We schedule the next retry
     Ref = bondy_connect_retry:fire(State0#state.ping_retry),
     State = State0#state{
         ping_tref = Ref,

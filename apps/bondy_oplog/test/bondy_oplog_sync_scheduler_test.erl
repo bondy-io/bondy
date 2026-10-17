@@ -1,5 +1,3 @@
-%% Stage-3 sync-scheduler tests.
-
 -module(bondy_oplog_sync_scheduler_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -14,7 +12,6 @@ setup() ->
     %% every later test in this module. Starting from a clean slate makes each
     %% test independent of its predecessors' fate.
     _ = [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
-    %% Reset state before each test:
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_sync_scheduler:set_peer_source(
         bondy_oplog_peer_source_static, #{peers => []}
@@ -113,7 +110,6 @@ no_dispatch_when_dispatch_unset() ->
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     Inst = mk_inst(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
-    %% Should not crash even though no dispatch is set.
     bondy_oplog_sync_scheduler:trigger(),
     timer:sleep(50),
     ok = bondy_oplog:stop_instance(Inst).
@@ -121,8 +117,6 @@ no_dispatch_when_dispatch_unset() ->
 peer_source_supplies_peers() ->
     Self = self(),
     Ref = make_ref(),
-    %% Per-instance peer mapping handled by the static source's `peers`
-    %% — verify it ends up in the dispatch.
     Peers = [{peer, x}, {peer, y}, {peer, z}],
     bondy_oplog_sync_scheduler:set_peer_source(
         bondy_oplog_peer_source_static, #{peers => Peers}
@@ -159,7 +153,6 @@ sample_source_picks_subset() ->
     ),
     ?assertEqual(5, length(Got)),
     ?assert(lists:all(fun(X) -> lists:member(X, Pool) end, Got)),
-    %% No duplicates.
     ?assertEqual(length(Got), length(lists:usort(Got))),
     %% When count >= pool size, returns the whole pool.
     All = bondy_oplog_peer_source_sample:peers_for(

@@ -45,7 +45,6 @@ init_per_testcase(_, Config) ->
     Config.
 
 end_per_suite(Config) ->
-    %% bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 put(Config0) ->

@@ -174,10 +174,8 @@ do_verify(#{variant := ?VARIANT2, id := IdBin}, SecretKey) ->
     IdPart = base64_decode(IdBin),
     byte_size(IdPart) == 32 orelse throw(invalid_token),
 
-    %% UUID (16) + HMAC (16)
     <<UUID:16/binary, ReceivedHMAC:16/binary>> = IdPart,
 
-    %% Verify HMAC
     ExpectedHMAC = crypto:mac(hmac, sha256, SecretKey, UUID),
     ExpectedHMACTruncated = binary:part(ExpectedHMAC, 0, 16),
 
@@ -198,15 +196,12 @@ do_verify(#{variant := ?VARIANT2, id := IdBin}, SecretKey) ->
 %% TEST FIXTURES
 %% =============================================================================
 
-%% Test secret key for HMAC testing
 test_secret_key() ->
     <<"test_secret_key_for_hmac_verification">>.
 
-%% Alternative secret key for negative testing
 wrong_secret_key() ->
     <<"wrong_secret_key_for_testing">>.
 
-%% Sample keys for testing
 test_binary_key() ->
     <<"test_binary_key">>.
 
@@ -219,7 +214,6 @@ test_atom_key() ->
 test_number_key() ->
     42.
 
-%% Helper to extract variant from token
 extract_variant(Token) ->
     case Token of
         <<"bondy:rtoken:", Variant:1/binary, ":", _/binary>> ->
@@ -228,7 +222,6 @@ extract_variant(Token) ->
             undefined
     end.
 
-%% Helper to extract scheme from token
 extract_scheme(Token) ->
     case Token of
         <<"bondy:rtoken:", _/binary>> ->
@@ -249,19 +242,15 @@ new_with_binary_key_test() ->
     Key = test_binary_key(),
     {Id, Token} = bondy_oauth_refresh_token:new(Key),
 
-    %% Check that we get proper return values
     ?assert(is_binary(Id)),
     ?assert(is_binary(Token)),
     ?assert(byte_size(Id) > 0),
     ?assert(byte_size(Token) > 0),
 
-    %% Check token starts with correct scheme
     ?assertEqual(<<"bondy:rtoken:">>, extract_scheme(Token)),
 
-    %% Check variant is 1
     ?assertEqual(?VARIANT1, extract_variant(Token)),
 
-    %% Token should be valid
     ?assert(bondy_oauth_refresh_token:is_valid(Token)).
 
 new_with_term_key_test() ->
@@ -299,11 +288,9 @@ new_generates_unique_tokens_test() ->
     {Id1, Token1} = bondy_oauth_refresh_token:new(Key),
     {Id2, Token2} = bondy_oauth_refresh_token:new(Key),
 
-    %% Should generate different IDs and tokens even with same key
     ?assertNotEqual(Id1, Id2),
     ?assertNotEqual(Token1, Token2),
 
-    %% Both should be valid
     ?assert(bondy_oauth_refresh_token:is_valid(Token1)),
     ?assert(bondy_oauth_refresh_token:is_valid(Token2)).
 
@@ -321,10 +308,8 @@ new_with_secret_key_binary_key_test() ->
     ?assertEqual(<<"bondy:rtoken:">>, extract_scheme(Token)),
     ?assertEqual(?VARIANT2, extract_variant(Token)),
 
-    %% Should be valid with correct secret
     ?assert(bondy_oauth_refresh_token:is_valid(Token, SecretKey)),
 
-    %% Should be invalid with wrong secret
     ?assertNot(bondy_oauth_refresh_token:is_valid(Token, wrong_secret_key())).
 
 new_with_secret_key_term_key_test() ->
@@ -343,11 +328,9 @@ new_with_secret_generates_unique_tokens_test() ->
     {Id1, Token1} = bondy_oauth_refresh_token:new(Key, SecretKey),
     {Id2, Token2} = bondy_oauth_refresh_token:new(Key, SecretKey),
 
-    %% Should generate different tokens even with same key and secret
     ?assertNotEqual(Id1, Id2),
     ?assertNotEqual(Token1, Token2),
 
-    %% Both should be valid with the secret
     ?assert(bondy_oauth_refresh_token:is_valid(Token1, SecretKey)),
     ?assert(bondy_oauth_refresh_token:is_valid(Token2, SecretKey)).
 
@@ -386,19 +369,16 @@ parse_invalid_scheme_test() ->
     ?assertEqual({error, invalid_token}, Result).
 
 parse_invalid_variant_test() ->
-    %% Create token with invalid variant (99)
     InvalidToken = <<"bondy:rtoken:99:invalid_data">>,
     Result = bondy_oauth_refresh_token:parse(InvalidToken),
     ?assertEqual({error, invalid_token}, Result).
 
 parse_malformed_token_no_dot_test() ->
-    %% Token without dot separator
     InvalidToken = <<"bondy:rtoken:1:nodot">>,
     Result = bondy_oauth_refresh_token:parse(InvalidToken),
     ?assertEqual({error, invalid_token}, Result).
 
 parse_malformed_token_multiple_dots_test() ->
-    %% Token with multiple dots
     InvalidToken = <<"bondy:rtoken:1:part1.part2.part3">>,
     Result = bondy_oauth_refresh_token:parse(InvalidToken),
     ?assertEqual({error, invalid_token}, Result).
@@ -408,7 +388,6 @@ parse_empty_token_test() ->
     ?assertEqual({error, invalid_token}, Result).
 
 parse_truncated_token_test() ->
-    %% Token with correct scheme but truncated
     TruncatedToken = <<"bondy:rtoken:">>,
     Result = bondy_oauth_refresh_token:parse(TruncatedToken),
     ?assertEqual({error, invalid_token}, Result).
@@ -460,7 +439,6 @@ is_valid_with_wrong_secret_test() ->
     ?assertNot(bondy_oauth_refresh_token:is_valid(Token, wrong_secret_key())).
 
 is_valid_variant1_token_with_secret_test() ->
-    %% Variant 1 token should be invalid when checked with secret
     Key = test_binary_key(),
     {_Id, Token} = bondy_oauth_refresh_token:new(Key),
     SecretKey = test_secret_key(),
@@ -498,7 +476,6 @@ verify_valid_token_wrong_secret_test() ->
     ?assertEqual({error, invalid_hmac}, Result).
 
 verify_variant1_token_test() ->
-    %% Variant 1 token should fail verification
     Key = test_binary_key(),
     {_Id, Token} = bondy_oauth_refresh_token:new(Key),
     SecretKey = test_secret_key(),
@@ -514,7 +491,6 @@ verify_invalid_token_test() ->
     ?assertEqual({error, invalid_token}, Result).
 
 verify_malformed_variant2_token_test() ->
-    %% Create malformed variant 2 token
     MalformedToken = <<"bondy:rtoken:", 2:8, "malformed_data">>,
     SecretKey = test_secret_key(),
 
@@ -522,7 +498,6 @@ verify_malformed_variant2_token_test() ->
     ?assertEqual({error, invalid_token}, Result).
 
 verify_variant2_token_no_dot_test() ->
-    %% Variant 2 token without dot separator
     InvalidToken = <<"bondy:rtoken:", 2:8, "nodot">>,
     SecretKey = test_secret_key(),
 
@@ -539,14 +514,11 @@ token_components_consistency_test() ->
 
     {ok, Components} = bondy_oauth_refresh_token:parse(Token),
 
-    %% Check that parsed ID matches returned ID
     ParsedId = maps:get(id, Components),
     ?assertEqual(Id, ParsedId),
 
-    %% Check variant
     ?assertEqual(?VARIANT1, maps:get(variant, Components)),
 
-    %% Key should be present
     ?assert(maps:is_key(key, Components)).
 
 token_components_consistency_variant2_test() ->
@@ -556,14 +528,11 @@ token_components_consistency_variant2_test() ->
 
     {ok, Components} = bondy_oauth_refresh_token:verify(Token, SecretKey),
 
-    %% Check that parsed ID matches returned ID
     ParsedId = maps:get(id, Components),
     ?assertEqual(Id, ParsedId),
 
-    %% Check variant
     ?assertEqual(?VARIANT2, maps:get(variant, Components)),
 
-    %% Key should be present
     ?assert(maps:is_key(key, Components)).
 
 %% -----------------------------------------------------------------------------
@@ -577,7 +546,6 @@ key_roundtrip_binary_test() ->
     {ok, Components} = bondy_oauth_refresh_token:parse(Token),
     ParsedKey = maps:get(key, Components),
 
-    %% For binary keys, the key should be preserved
     ?assertEqual(Key, ParsedKey).
 
 key_roundtrip_term_test() ->
@@ -587,8 +555,6 @@ key_roundtrip_term_test() ->
     {ok, Components} = bondy_oauth_refresh_token:parse(Token),
     ParsedKey = maps:get(key, Components),
 
-    %% For term keys, they should be encoded/decoded properly
-    %% Note: The actual implementation might encode terms as binaries
     ?assert(not is_binary(ParsedKey)).
 
 key_roundtrip_atom_test() ->
@@ -618,16 +584,13 @@ hmac_security_test() ->
     SecretKey = test_secret_key(),
     {_Id, Token} = bondy_oauth_refresh_token:new(Key, SecretKey),
 
-    %% Token should verify with correct secret
     ?assertMatch({ok, _}, bondy_oauth_refresh_token:verify(Token, SecretKey)),
 
-    %% Token should fail with wrong secret
     ?assertEqual(
         {error, invalid_hmac},
         bondy_oauth_refresh_token:verify(Token, wrong_secret_key())
     ),
 
-    %% Token should fail with empty secret
     ?assertEqual(
         {error, invalid_hmac}, bondy_oauth_refresh_token:verify(Token, <<>>)
     ).
@@ -637,17 +600,14 @@ token_tampering_resistance_test() ->
     SecretKey = test_secret_key(),
     {_Id, Token} = bondy_oauth_refresh_token:new(Key, SecretKey),
 
-    %% Original token should verify
     ?assertMatch({ok, _}, bondy_oauth_refresh_token:verify(Token, SecretKey)),
 
-    %% Tampered token should fail verification
     TamperedToken = <<Token/binary, "x">>,
     ?assertEqual(
         {error, invalid_token},
         bondy_oauth_refresh_token:verify(TamperedToken, SecretKey)
     ),
 
-    %% Flipped bit should fail verification
     <<Prefix:8/binary, Byte:8, Rest/binary>> = Token,
     FlippedToken = <<Prefix/binary, (Byte bxor 1):8, Rest/binary>>,
     Result = bondy_oauth_refresh_token:verify(FlippedToken, SecretKey),
@@ -660,7 +620,6 @@ token_tampering_resistance_test() ->
 %% -----------------------------------------------------------------------------
 
 edge_case_empty_key_test() ->
-    %% Test with empty binary key
     Key = <<>>,
     {Id, Token} = bondy_oauth_refresh_token:new(Key),
 
@@ -669,7 +628,6 @@ edge_case_empty_key_test() ->
     ?assert(bondy_oauth_refresh_token:is_valid(Token)).
 
 edge_case_large_key_test() ->
-    %% Test with large key
     Key = crypto:strong_rand_bytes(1024),
     {Id, Token} = bondy_oauth_refresh_token:new(Key),
 
@@ -678,7 +636,6 @@ edge_case_large_key_test() ->
     ?assert(bondy_oauth_refresh_token:is_valid(Token)).
 
 edge_case_unicode_key_test() ->
-    %% Test with unicode binary key
     Key = <<"こんにちは世界"/utf8>>,
     {Id, Token} = bondy_oauth_refresh_token:new(Key),
 
@@ -687,7 +644,6 @@ edge_case_unicode_key_test() ->
     ?assert(bondy_oauth_refresh_token:is_valid(Token)).
 
 edge_case_complex_term_key_test() ->
-    %% Test with complex nested term
     Key = {complex, [term, {with, nested}, <<"data">>], #{map => value}},
     {Id, Token} = bondy_oauth_refresh_token:new(Key),
 
@@ -700,22 +656,17 @@ edge_case_complex_term_key_test() ->
 %% -----------------------------------------------------------------------------
 
 entropy_test() ->
-    %% Generate multiple tokens and ensure they're all different
     Key = test_binary_key(),
     Tokens = [bondy_oauth_refresh_token:new(Key) || _ <- lists:seq(1, 100)],
 
-    %% Extract IDs and tokens
     {Ids, TokenStrings} = lists:unzip(Tokens),
 
-    %% All IDs should be unique
     UniqueIds = sets:from_list(Ids),
     ?assertEqual(100, sets:size(UniqueIds)),
 
-    %% All tokens should be unique
     UniqueTokens = sets:from_list(TokenStrings),
     ?assertEqual(100, sets:size(UniqueTokens)),
 
-    %% All tokens should be valid
     lists:foreach(
         fun({_Id, Token}) ->
             ?assert(bondy_oauth_refresh_token:is_valid(Token))
@@ -724,7 +675,6 @@ entropy_test() ->
     ).
 
 entropy_with_hmac_test() ->
-    %% Generate multiple HMAC tokens and ensure they're all different
     Key = test_binary_key(),
     SecretKey = test_secret_key(),
     Tokens = [
@@ -732,18 +682,14 @@ entropy_with_hmac_test() ->
      || _ <- lists:seq(1, 50)
     ],
 
-    %% Extract IDs and tokens
     {Ids, TokenStrings} = lists:unzip(Tokens),
 
-    %% All IDs should be unique
     UniqueIds = sets:from_list(Ids),
     ?assertEqual(50, sets:size(UniqueIds)),
 
-    %% All tokens should be unique
     UniqueTokens = sets:from_list(TokenStrings),
     ?assertEqual(50, sets:size(UniqueTokens)),
 
-    %% All tokens should be valid with secret
     lists:foreach(
         fun({_Id, Token}) ->
             ?assert(bondy_oauth_refresh_token:is_valid(Token, SecretKey))
@@ -756,67 +702,50 @@ entropy_with_hmac_test() ->
 %% -----------------------------------------------------------------------------
 
 full_lifecycle_variant1_test() ->
-    %% Test complete lifecycle: create -> parse -> validate
     Key = {user, 123, <<"session">>},
 
-    %% Create token
     {Id, Token} = bondy_oauth_refresh_token:new(Key),
 
-    %% Validate token
     ?assert(bondy_oauth_refresh_token:is_valid(Token)),
 
-    %% Parse token
     {ok, Components} = bondy_oauth_refresh_token:parse(Token),
 
-    %% Verify components
     ?assertEqual(Id, maps:get(id, Components)),
     ?assertEqual(?VARIANT1, maps:get(variant, Components)),
     ?assert(maps:is_key(key, Components)).
 
 full_lifecycle_variant2_test() ->
-    %% Test complete lifecycle with HMAC: create -> verify -> parse
     Key = {user, 456, <<"secure_session">>},
     SecretKey = test_secret_key(),
 
-    %% Create token
     {Id, Token} = bondy_oauth_refresh_token:new(Key, SecretKey),
 
-    %% Validate with secret
     ?assert(bondy_oauth_refresh_token:is_valid(Token, SecretKey)),
 
-    %% Verify token
     {ok, Components1} = bondy_oauth_refresh_token:verify(Token, SecretKey),
 
-    %% Parse token (should also work)
     {ok, Components2} = bondy_oauth_refresh_token:parse(Token),
 
-    %% Both should return same components
     ?assertEqual(Components1, Components2),
     ?assertEqual(Id, maps:get(id, Components1)),
     ?assertEqual(?VARIANT2, maps:get(variant, Components1)).
 
 cross_variant_test() ->
-    %% Ensure variant 1 and variant 2 tokens are handled correctly
     Key = test_binary_key(),
     SecretKey = test_secret_key(),
 
-    %% Create both variants
     {_Id1, Token1} = bondy_oauth_refresh_token:new(Key),
     {_Id2, Token2} = bondy_oauth_refresh_token:new(Key, SecretKey),
 
-    %% Both should parse successfully
     ?assertMatch({ok, _}, bondy_oauth_refresh_token:parse(Token1)),
     ?assertMatch({ok, _}, bondy_oauth_refresh_token:parse(Token2)),
 
-    %% Both should be valid without secret
     ?assert(bondy_oauth_refresh_token:is_valid(Token1)),
     ?assert(bondy_oauth_refresh_token:is_valid(Token2)),
 
-    %% Only variant 2 should be valid with secret
     ?assertNot(bondy_oauth_refresh_token:is_valid(Token1, SecretKey)),
     ?assert(bondy_oauth_refresh_token:is_valid(Token2, SecretKey)),
 
-    %% Only variant 2 should verify
     ?assertEqual(
         {error, invalid_token},
         bondy_oauth_refresh_token:verify(Token1, SecretKey)
@@ -828,7 +757,6 @@ cross_variant_test() ->
 %% -----------------------------------------------------------------------------
 
 token_format_property_test() ->
-    %% Test that all generated tokens follow the expected format
     TestKeys = [
         test_binary_key(),
         test_term_key(),
@@ -840,14 +768,12 @@ token_format_property_test() ->
 
     lists:foreach(
         fun(Key) ->
-            %% Test variant 1
             {Id1, Token1} = bondy_oauth_refresh_token:new(Key),
             ?assert(is_binary(Id1)),
             ?assert(is_binary(Token1)),
             ?assertEqual(<<"bondy:rtoken:">>, extract_scheme(Token1)),
             ?assertEqual(?VARIANT1, extract_variant(Token1)),
 
-            %% Test variant 2
             SecretKey = test_secret_key(),
             {Id2, Token2} = bondy_oauth_refresh_token:new(Key, SecretKey),
             ?assert(is_binary(Id2)),
@@ -859,18 +785,15 @@ token_format_property_test() ->
     ).
 
 consistency_property_test() ->
-    %% Test that parse and verify return consistent results
     Key = test_term_key(),
     SecretKey = test_secret_key(),
     {_Id, Token} = bondy_oauth_refresh_token:new(Key, SecretKey),
 
-    %% Both parse and verify should succeed
     {ok, ParsedComponents} = bondy_oauth_refresh_token:parse(Token),
     {ok, VerifiedComponents} = bondy_oauth_refresh_token:verify(
         Token, SecretKey
     ),
 
-    %% Should return identical components
     ?assertEqual(ParsedComponents, VerifiedComponents).
 
 -endif.

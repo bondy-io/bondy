@@ -705,12 +705,10 @@ convert({inconsistency_error, Keys, Description}) when is_list(Keys) ->
     });
 convert({inconsistency_error, Key}) ->
     convert({inconsistency_error, [Key]});
-%% Identity
 convert({no_such_realm, Uri}) ->
     new(no_such_realm, #{details => #{realm_uri => Uri}});
 convert({no_such_user, Authid}) ->
     new(no_such_user, #{details => #{authid => Authid}});
-%% Decoding and request framing
 convert({badarg, {decoding, Format}}) ->
     new(invalid_data, #{details => #{format => Format}});
 convert({badarg, {body_max_bytes_exceeded, Max}}) ->
@@ -957,7 +955,6 @@ to_causes(_) ->
 %% =============================================================================
 
 %% @private
-%% Replaces every `%{key}` in Template with the corresponding entry of Details.
 interpolate(Template, Details) when
     is_binary(Template) andalso is_map(Details)
 ->

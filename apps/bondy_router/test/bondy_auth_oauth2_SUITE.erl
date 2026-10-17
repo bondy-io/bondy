@@ -92,42 +92,32 @@
 
 all() ->
     [
-        %% Original tests (preserved)
         resource_owner_password,
         client_credentials,
 
-        %% OAuth2 method availability
         oauth2_method_available,
 
-        %% Challenge step
         challenge_returns_true_empty_extra,
 
-        %% Token issuance
         password_grant_jwt_has_required_claims,
         client_credentials_grant_issues_token,
         custom_expiry_in_token,
 
-        %% Full auth flow
         full_oauth2_auth_flow,
         wrong_user_token_rejected,
         invalid_jwt_rejected,
         jwt_alg_confusion_rejected,
 
-        %% Source / CIDR
         user2_rejected_outside_cidr,
         user2_allowed_within_cidr,
 
-        %% Method selection
         method_mismatch_after_challenge,
         invalid_method_rejected,
 
-        %% User without password
         user_without_password_excluded,
 
-        %% Error cases
         nonexistent_user_error,
 
-        %% Context
         context_method_set_after_auth,
 
         %% CP-for-security (§9.2) — AAE-phase fence gating
@@ -309,7 +299,6 @@ challenge_returns_true_empty_extra(Config) ->
         ?WAMP_OAUTH2_AUTH, #{}, Ctxt0
     ),
 
-    %% OAuth2 challenge returns true with empty extra
     ?assertEqual(#{}, Extra).
 
 %% =============================================================================
@@ -322,7 +311,6 @@ password_grant_jwt_has_required_claims(Config) ->
 
     {ok, Claims} = bondy_oauth_jwt:verify(RealmUri, JWT),
 
-    %% Required top-level claims
     ?assert(maps:is_key(<<"id">>, Claims)),
     ?assert(maps:is_key(<<"vsn">>, Claims)),
     ?assert(maps:is_key(<<"exp">>, Claims)),
@@ -344,7 +332,6 @@ password_grant_jwt_has_required_claims(Config) ->
     ?assert(is_integer(TV) andalso TV >= 0),
     ?assertEqual({ok, TV}, bondy_rbac_user:token_version(RealmUri, ?U1)),
 
-    %% auth.scope must have realm, client_id, device_id
     Auth = maps:get(<<"auth">>, Claims),
     ?assert(maps:is_key(<<"scope">>, Auth)),
     Scope = maps:get(<<"scope">>, Auth),
@@ -477,25 +464,20 @@ full_oauth2_auth_flow(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
 
-    %% Step 1: Init auth context
     {ok, Ctxt0} = bondy_auth:init(
         SessionId, RealmUri, ?U1, [<<"group_1">>], {127, 0, 0, 1}
     ),
 
-    %% Step 2: Challenge
     {true, #{}, Ctxt1} = bondy_auth:challenge(
         ?WAMP_OAUTH2_AUTH, #{}, Ctxt0
     ),
 
-    %% Step 3: Issue token (simulating client already has one)
     JWT = issue_jwt(RealmUri, ?U1, [<<"group_1">>]),
 
-    %% Step 4: Authenticate
     {ok, AuthExtra, Ctxt2} = bondy_auth:authenticate(
         ?WAMP_OAUTH2_AUTH, JWT, #{}, Ctxt1
     ),
 
-    %% AuthExtra contains the JWT claims
     ?assert(is_map(AuthExtra)),
     ?assertEqual(?U1, maps:get(<<"sub">>, AuthExtra)),
     ?assertEqual(?WAMP_OAUTH2_AUTH, bondy_auth:method(Ctxt2)).
@@ -504,7 +486,6 @@ wrong_user_token_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
 
-    %% Issue JWT for U1
     JWT = issue_jwt(RealmUri, ?U1, [<<"group_1">>]),
 
     %% Try to authenticate as U2 with U1's token (from within U2's CIDR)
@@ -575,7 +556,6 @@ method_mismatch_after_challenge(Config) ->
         ?WAMP_OAUTH2_AUTH, #{}, Ctxt0
     ),
 
-    %% After oauth2 challenge, trying password auth should fail
     ?assertMatch(
         {error, invalid_method},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?PASS, undefined, Ctxt1)

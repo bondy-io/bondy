@@ -304,11 +304,6 @@ do_open(Writer, Start, Opts) ->
     end.
 
 %% @private
-%% All branches return `{ok, SegId, Offset, SeekTarget}` on success
-%% where `SeekTarget` is `undefined` except for `{key, T}` starts. The
-%% reader's `next/1` filters frames whose first key is `< SeekTarget`
-%% until it lands on the first qualifying frame, then clears the
-%% target.
 resolve_start(beginning, View) ->
     case live_segment_ids(View) of
         [] ->
@@ -438,10 +433,6 @@ select_segment_for_key(Live, T) ->
     end.
 
 %% @private
-%% Seeks within a segment using either the on-disk `.qidx` (sealed
-%% segment) or the writer's in-memory accumulator (head segment).
-%% Returns the same shape as `bondy_log_idx:seek/2`, except
-%% additionally `{error, Reason}` from a non-enoent file-open failure.
 index_seek(SegId, T, View, CurrentSeg) when SegId =:= CurrentSeg ->
     Entries = maps:get(head_idx_entries, View, []),
     Handle = bondy_log_idx:from_entries(Entries),
@@ -463,9 +454,6 @@ index_seek(SegId, T, View, _CurrentSeg) ->
     end.
 
 %% @private
-%% Opens a segment file read-only and verifies its header identity
-%% through the adapter. Returns the open fd or closes-and-returns on
-%% any header / verify failure.
 open_segment(Dir, Adapter, Ctx, SegId) ->
     Path = filename:join(Dir, bondy_log_segment:filename(SegId)),
     case prim_file:open(Path, [read, raw, binary]) of
@@ -488,9 +476,6 @@ open_segment(Dir, Adapter, Ctx, SegId) ->
     end.
 
 %% @private
-%% Single-entry dispatch. Walks the bound first to know whether we're
-%% on the head segment or behind it, then decides on read / poll /
-%% advance based on whether the current offset is below the bound.
 do_next(#iter{} = Iter0) ->
     {Kind, Bound, Iter} = bound(Iter0),
     case {Iter#iter.offset < Bound, Kind} of
@@ -503,10 +488,6 @@ do_next(#iter{} = Iter0) ->
     end.
 
 %% @private
-%% Returns `{Kind, Bound, Iter}` where `Kind` is `head` or `sealed`,
-%% `Bound` is the highest byte position the reader may read up to (and
-%% not including), and `Iter` is the iter possibly updated with a
-%% newly-cached `sealed_size` so we don't re-syscall on every frame.
 bound(#iter{head_pos_ref = Ref, segment_id = MySeg} = Iter) ->
     HeadSeg = atomics:get(Ref, 1),
     if
@@ -543,8 +524,6 @@ cached_sealed_bound(#iter{fd = Fd} = Iter) ->
     {sealed, Size, Iter#iter{sealed_size = Size}}.
 
 %% @private
-%% On the head segment with nothing new to read. In `follow=true` we
-%% sleep and retry; otherwise we report `end_of_log`.
 await_head_or_end(#iter{follow = false}) ->
     end_of_log;
 await_head_or_end(#iter{follow = true} = Iter) ->

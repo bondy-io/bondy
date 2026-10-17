@@ -50,14 +50,11 @@ add_anonymous_creates_table(_Config) ->
     %% The returned identifier is an opaque TID, not an atom
     ?assert(is_reference(Tab) orelse is_integer(Tab)),
 
-    %% Table is usable
     true = ets:insert(Tab, {hello, world}),
     ?assertEqual([{hello, world}], ets:lookup(Tab, hello)),
 
-    %% Registry contains the mapping
     ?assertEqual({ok, Tab}, bondy_connect_table_manager:lookup_anonymous(Key)),
 
-    %% Cleanup
     true = bondy_connect_table_manager:delete_anonymous(Key).
 
 add_anonymous_rejects_duplicate_key(_Config) ->
@@ -81,10 +78,8 @@ get_or_create_anonymous_is_idempotent(_Config) ->
         Key, [ordered_set, public]
     ),
 
-    %% Second call returns the SAME table identifier
     ?assertEqual(Tab1, Tab2),
 
-    %% Data persists across the idempotent call
     true = ets:insert(Tab1, {persist, check}),
     ?assertEqual([{persist, check}], ets:lookup(Tab2, persist)),
 
@@ -98,15 +93,12 @@ delete_anonymous_removes_table_and_registry(_Config) ->
     Key = {?MODULE, del, erlang:unique_integer([positive])},
     {ok, Tab} = bondy_connect_table_manager:add_anonymous(Key, [set, public]),
 
-    %% Table is alive
     ?assertNotEqual(undefined, ets:info(Tab, size)),
 
     true = bondy_connect_table_manager:delete_anonymous(Key),
 
-    %% Registry entry is gone
     ?assertEqual(error, bondy_connect_table_manager:lookup_anonymous(Key)),
 
-    %% Underlying ETS table is gone
     ?assertEqual(undefined, ets:info(Tab, size)).
 
 delete_anonymous_returns_false_for_missing_key(_Config) ->
@@ -166,7 +158,6 @@ anonymous_table_survives_caller_death(_Config) ->
         ),
         true = ets:insert(Tab, {alive, yes}),
         Parent ! {ok, Tab},
-        %% Wait to be killed
         receive
             die -> ok
         end
@@ -178,7 +169,6 @@ anonymous_table_survives_caller_death(_Config) ->
         after 2000 -> error(timeout)
         end,
 
-    %% Kill the caller
     MRef = erlang:monitor(process, Pid),
     exit(Pid, kill),
     receive
@@ -186,7 +176,6 @@ anonymous_table_survives_caller_death(_Config) ->
     after 1000 -> error(timeout)
     end,
 
-    %% Table and registry must still be intact
     ?assertEqual({ok, Tab}, bondy_connect_table_manager:lookup_anonymous(Key)),
     ?assertEqual([{alive, yes}], ets:lookup(Tab, alive)),
 

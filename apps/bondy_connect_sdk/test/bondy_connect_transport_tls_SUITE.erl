@@ -53,7 +53,6 @@ end_per_suite(_) ->
 %% TESTS
 %% =============================================================================
 
-%% A full register→call works over the TLS transport.
 add_anon_realm(RealmUri) ->
     Cfg = #{
         uri => RealmUri,

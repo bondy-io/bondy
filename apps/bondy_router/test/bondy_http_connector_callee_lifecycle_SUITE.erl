@@ -154,7 +154,6 @@ session_open_failure_stops_callee(_Config) ->
         BadRealm, make_service(BadRealm, <<"com.example.bad.proc">>), test_pool
     ),
     ?assertMatch({error, {shutdown, {session_open_failed, _}}}, Result),
-    %% Drain any propagated EXIT for cleanliness
     receive
         {'EXIT', _, _} -> ok
     after 100 -> ok

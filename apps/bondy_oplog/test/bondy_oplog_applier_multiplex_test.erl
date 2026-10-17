@@ -58,14 +58,12 @@ cleanup(_) ->
 two_tables_one_instance_project_independently() ->
     {Id, NsA, NsB, HA, HB} = setup_two_tables(),
 
-    %% Append cells for BOTH tables through the SAME instance.
     _ = bondy_oplog:append(
         Id, {cell_apply, ?BUCKET_A, <<"k">>, {set, 1, <<"va">>}}
     ),
     _ = bondy_oplog:append(
         Id, {cell_apply, ?BUCKET_B, <<"k">>, {set, 1, <<"vb">>}}
     ),
-    %% A key shared by the two tables must NOT collide — distinct buckets.
     _ = bondy_oplog:append(
         Id, {cell_apply, ?BUCKET_A, <<"shared">>, {set, 2, <<"a2">>}}
     ),
@@ -74,7 +72,6 @@ two_tables_one_instance_project_independently() ->
     ),
     ok = bondy_oplog_test_projection:drain(Id),
 
-    %% Each table's cells materialise in its OWN projection.
     ?assertEqual(
         {<<"va">>, 1}, bondy_oplog_core:read(NsA, primary, ?BUCKET_A, <<"k">>)
     ),
@@ -90,7 +87,6 @@ two_tables_one_instance_project_independently() ->
         bondy_oplog_core:read(NsB, primary, ?BUCKET_B, <<"shared">>)
     ),
 
-    %% No cross-contamination: a namespace never sees the other's bucket.
     ?assertEqual(
         undefined, bondy_oplog_core:read(NsA, primary, ?BUCKET_B, <<"k">>)
     ),
@@ -137,8 +133,6 @@ siblings_self_heal_from_registry() ->
     NsB = binary_to_atom(<<"sh_b_", Id/binary>>, utf8),
     HA = register_shard(NsA, Id, ?BUCKET_A),
     HB = register_shard(NsB, Id, ?BUCKET_B),
-    %% Founding table A seeds via `cell_apply_bucket`; table B is NOT registered
-    %% at runtime — it is recovered from its registry entry by the init rebuild.
     {ok, _} = bondy_oplog:start_instance(Id, #{
         applier => #{
             cell_apply_target => {NsA, primary, 0},
@@ -155,7 +149,6 @@ siblings_self_heal_from_registry() ->
     ?assertEqual(
         {<<"va">>, 1}, bondy_oplog_core:read(NsA, primary, ?BUCKET_A, <<"k">>)
     ),
-    %% Table B projected with NO register_table call — recovered from the registry.
     ?assertEqual(
         {<<"vb">>, 1}, bondy_oplog_core:read(NsB, primary, ?BUCKET_B, <<"k">>)
     ),
@@ -183,8 +176,6 @@ gated_drain_defers_until_siblings_register() ->
     Id = mk_id(),
     NsA = binary_to_atom(<<"gate_a_", Id/binary>>, utf8),
     NsB = binary_to_atom(<<"gate_b_", Id/binary>>, utf8),
-    %% Only table A is registered at founding time — exactly the cold-boot
-    %% window where the sibling has not provisioned yet.
     HA = register_shard(NsA, Id, ?BUCKET_A),
     {ok, _} = bondy_oplog:start_instance(Id, #{
         applier => #{
@@ -194,8 +185,6 @@ gated_drain_defers_until_siblings_register() ->
         }
     }),
 
-    %% Write cells for BOTH the founding table and the not-yet-registered
-    %% sibling B into the shared WAL.
     _ = bondy_oplog:append(
         Id, {cell_apply, ?BUCKET_A, <<"k">>, {set, 1, <<"va">>}}
     ),
@@ -209,20 +198,15 @@ gated_drain_defers_until_siblings_register() ->
         undefined, bondy_oplog_core:read(NsA, primary, ?BUCKET_A, <<"k">>)
     ),
 
-    %% Sibling B provisions: durable registry entry + runtime bucket
-    %% registration — the state the orchestrator reaches before releasing.
     HB = register_shard(NsB, Id, ?BUCKET_B),
     ApplierPid = bondy_oplog_registry:applier_pid(Id),
     ok = bondy_oplog_applier:register_table(
         ApplierPid, ?BUCKET_B, {NsB, primary, 0}, #{}
     ),
 
-    %% Release the gate; the deferred drain replays the whole WAL now that the
-    %% routing directory is complete.
     ok = bondy_oplog:open_drain_gate(Id),
     ok = bondy_oplog_test_projection:drain(Id),
 
-    %% Both cells projected — B's cell was held across the gate, not skipped.
     ?assertEqual(
         {<<"va">>, 1}, bondy_oplog_core:read(NsA, primary, ?BUCKET_A, <<"k">>)
     ),
@@ -332,19 +316,16 @@ install_catalogue_batch_routes_by_bucket() ->
     ),
     ok = bondy_oplog_test_projection:drain(SrcId),
 
-    %% The whole-shard snapshot (`init/1`) genuinely spans BOTH tables' buckets.
     Cells = pull_snapshot(SrcId),
     Buckets = lists:usort([B || {B, _K, _F} <- Cells]),
     ?assertEqual([?BUCKET_A, ?BUCKET_B], Buckets),
     ?assertEqual(4, length(Cells)),
 
-    %% Install onto a fresh target multiplexed instance.
     {TgtId, TgtNsA, TgtNsB, TgtHA, TgtHB} = setup_two_tables(),
     TgtApplier = bondy_oplog_registry:applier_pid(TgtId),
     {ok, Counts} = bondy_oplog_test_helpers:applier_install(TgtApplier, Cells),
     ?assertEqual(length(Cells), maps:get(installed, Counts)),
 
-    %% Each bucket's cells materialised in its OWN table's projection.
     ?assertEqual(
         {<<"va">>, 5},
         bondy_oplog_core:read(TgtNsA, primary, ?BUCKET_A, <<"ka">>)
@@ -361,7 +342,6 @@ install_catalogue_batch_routes_by_bucket() ->
         {<<"b_shared">>, 9},
         bondy_oplog_core:read(TgtNsB, primary, ?BUCKET_B, <<"shared">>)
     ),
-    %% No misrouting: the B cell never leaked into table A's projection.
     ?assertEqual(
         undefined,
         bondy_oplog_core:read(TgtNsA, primary, ?BUCKET_B, <<"kb">>)
@@ -512,8 +492,6 @@ adoption_survives_any_batching() ->
 %% Helpers
 %% =============================================================================
 
-%% Pull the complete whole-shard catalogue snapshot (every table on the shard)
-%% off a collapsed instance.
 pull_snapshot(Id) ->
     {ok, {_W, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(Id),
     pull_snapshot_loop(Id, Cursor, []).
@@ -535,15 +513,12 @@ setup_two_tables() ->
     %% the full set of tables on the shard from the registry alone.
     HA = register_shard(NsA, Id, ?BUCKET_A),
     HB = register_shard(NsB, Id, ?BUCKET_B),
-    %% Founding table A seeds the cell-apply directory (dir-mode via
-    %% `cell_apply_bucket`).
     {ok, _} = bondy_oplog:start_instance(Id, #{
         applier => #{
             cell_apply_target => {NsA, primary, 0},
             cell_apply_bucket => ?BUCKET_A
         }
     }),
-    %% Table B joins the SAME instance at runtime.
     ApplierPid = bondy_oplog_registry:applier_pid(Id),
     ok = bondy_oplog_applier:register_table(
         ApplierPid, ?BUCKET_B, {NsB, primary, 0}, #{}
@@ -617,7 +592,6 @@ partial_install_does_not_adopt_the_peer_frontier() ->
     ?assertNotEqual(PeerFrontier, Withheld),
     [{Origin, PeerSeq}] = maps:to_list(PeerFrontier),
     ?assert(maps:get(Origin, Withheld, 0) < PeerSeq),
-    %% ...and the bootstrap still completed: what COULD be routed is here.
     ?assertEqual(
         {<<"va">>, 5},
         bondy_oplog_core:read(TgtNsA, primary, ?BUCKET_A, <<"ka">>)

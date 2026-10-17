@@ -38,20 +38,16 @@ issuer-trust check rather than failing earlier on user resolution.
 
 all() ->
     [
-        %% The shared predicate every verifier delegates to.
         is_trusted_issuer_predicate,
 
-        %% JWT (oauth2) end-to-end.
         sso_token_accepted_by_issuing_member,
         sso_token_accepted_by_sibling_member,
         sso_token_accepted_by_issuer_realm,
         sso_token_rejected_by_unrelated_realm,
 
-        %% Ticket end-to-end.
         sso_ticket_rejected_by_unrelated_realm,
         sso_ticket_accepted_by_sibling_member,
 
-        %% Revocation must follow tickets into the SSO bucket they live in.
         revoke_all_user_reaches_the_sso_bucket,
         revoke_all_realm_spares_sibling_realms,
         token_revoke_all_realm_spares_sibling_realms

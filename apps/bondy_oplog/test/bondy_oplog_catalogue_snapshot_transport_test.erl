@@ -58,12 +58,10 @@ next_batch_then_done_wire_envelope() ->
     ok = bondy_oplog_test_projection:drain(Id),
     {ok, {init, {_W, Cursor, _}}} =
         ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
-    %% First call returns a batch.
     ?assertMatch(
         {ok, {batch, {Cursor, [_ | _]}}},
         ?T:request(Id, Id, {get_catalogue_snapshot_next, Cursor}, #{})
     ),
-    %% Second call returns done.
     ?assertMatch(
         {ok, {done, []}},
         ?T:request(Id, Id, {get_catalogue_snapshot_next, Cursor}, #{})
@@ -104,9 +102,7 @@ oversized_cell_ships_in_parts_and_reassembles() ->
         {Cells, Pending, Rounds} = drain(Id, Cursor, [], #{}, 0),
         %% More than one round, or nothing was actually chunked.
         ?assert(Rounds > 1),
-        %% Nothing left half-assembled: the stream ended cleanly.
         ?assertEqual(#{}, Pending),
-        %% The oversized cell arrived, byte-identical after reassembly.
         Frames = [F || {_B, <<"big">>, F} <- Cells],
         ?assertMatch([_], Frames),
         [Frame] = Frames,
@@ -126,8 +122,6 @@ oversized_cell_is_never_advanced_past() ->
     with_ceiling(4000, fun() ->
         {ok, {init, {_W, Cursor, _}}} =
             ?T:request(Id, Id, get_catalogue_snapshot_init, #{}),
-        %% First chunked round must NOT be `done`, and must carry parts of
-        %% part 1 of the big cell only.
         {ok, {chunked_batch, {_, [], Parts}}} =
             ?T:request(Id, Id, {get_catalogue_snapshot_next, Cursor}, #{}),
         ?assert(Parts =/= []),
@@ -139,7 +133,6 @@ oversized_cell_is_never_advanced_past() ->
         %% reassembly can never complete — the test would then be measuring
         %% its own dropped parts rather than the protocol's.
         {Done0, Pending0} = bondy_oplog_sync_session:absorb_chunks(Parts, #{}),
-        %% Drain the rest: both cells must arrive.
         {Cells, Pending, _} = drain(Id, Cursor, Done0, Pending0, 0),
         ?assertEqual(#{}, Pending),
         Keys = lists:sort([Key || {_, Key, _} <- Cells]),

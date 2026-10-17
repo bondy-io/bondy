@@ -381,9 +381,6 @@ silent_member_holds_compaction_and_rejoins(Config) ->
 do_stale_rejoin([N1, N2, N3] = Nodes) ->
     Bands = [stale_band(B) || B <- lists:seq(1, ?STALE_BANDS)],
 
-    %% ---------------------------------------------------------------------
-    %% 1. SEED on all three nodes; converge via manual full-mesh pulls.
-    %% ---------------------------------------------------------------------
     Seed = [
         {Band, stale_key(Tag), stale_val(Band, Tag)}
      || Band <- Bands, Tag <- [<<"s1">>, <<"s2">>, <<"s3">>]
@@ -406,11 +403,9 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
      || N <- Nodes, P <- Nodes, P =/= N
     ],
 
-    %% ---------------------------------------------------------------------
     %% 2. SILENCE. N3 stops syncing entirely (its dispatch is already off and
     %%    it is simply excluded from the manual rounds) and writes UNIQUE
     %%    keys no other node will ever pull while it is silent.
-    %% ---------------------------------------------------------------------
     Unique = [
         {Band, stale_key(<<"unique">>), stale_val(Band, <<"unique">>)}
      || Band <- Bands
@@ -420,10 +415,8 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
      || {Band, K, V} <- Unique
     ],
 
-    %% ---------------------------------------------------------------------
     %% 3. The live pair keeps working: post-silence writes + mutual sync
     %%    rounds, so N1/N2 confirm each other's FULL history.
-    %% ---------------------------------------------------------------------
     Post = [
         {Band, stale_key(<<"post">>), stale_val(Band, <<"post">>)}
      || Band <- Bands
@@ -441,11 +434,9 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ?assertEqual({error, not_found}, stale_read(N3, PB, PK)),
     ?assertEqual({error, not_found}, stale_read(N1, UB, UK)),
 
-    %% ---------------------------------------------------------------------
     %% 4. COMPACT through the production entry on both live nodes. N3 has
     %%    confirmed only the seed, so the watermarks advance over the seed
     %%    and stay below everything N3 has not received.
-    %% ---------------------------------------------------------------------
     W1Before = erpc:call(N1, ?MODULE, do_stale_watermarks_main, []),
     W2Before = erpc:call(N2, ?MODULE, do_stale_watermarks_main, []),
     Compact1 = erpc:call(N1, ?MODULE, do_stale_sync_and_compact_main, [N2]),
@@ -463,10 +454,8 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ?assert(length(Advanced1) >= 1),
     ?assert(length(Advanced2) >= 1),
 
-    %% ---------------------------------------------------------------------
     %% 5. REJOIN through the PRODUCTION schedulers on every node, with the
     %%    default peer timeout restored.
-    %% ---------------------------------------------------------------------
     _ = [
         ok = erpc:call(N, ?MODULE, do_restore_sync_defaults, [])
      || N <- Nodes
@@ -515,9 +504,7 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
         end
     ),
 
-    %% ---------------------------------------------------------------------
     %% 6. Nothing was truncated past N3, so no node needed a re-bootstrap.
-    %% ---------------------------------------------------------------------
     Rebootstraps = [
         {N, maps:with([instance_id, reason], Meta)}
      || N <- Nodes,
@@ -526,9 +513,6 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ],
     ?assertEqual([], Rebootstraps),
 
-    %% ---------------------------------------------------------------------
-    %% 7. Full agreement everywhere on every key this case ever wrote.
-    %% ---------------------------------------------------------------------
     _ = [
         ?assertEqual({ok_val, V}, stale_read(N, Band, K), {N, Band, K})
      || N <- Nodes, {Band, K, V} <- Seed ++ Post ++ Unique
@@ -750,10 +734,8 @@ hole_scenario([N1, N2, N3] = Nodes) ->
         ]
     end,
 
-    %% ---------------------------------------------------------------------
     %% 1. SEED on N1; converge all three so N3 is a fully-confirmed member
     %%    with real history, not a fresh joiner.
-    %% ---------------------------------------------------------------------
     Seed = Triples(<<"hole_seed">>, 1),
     _ = [
         ok = erpc:call(N1, ?MODULE, do_stale_apply, [Band, K, V])
@@ -761,10 +743,8 @@ hole_scenario([N1, N2, N3] = Nodes) ->
     ],
     ok = stale_converge_all(Nodes, Seed),
 
-    %% ---------------------------------------------------------------------
     %% 2. SILENCE. N3 is excluded from every round from here on. N1 writes
     %%    the EARLY batch and confirms it with N2 only.
-    %% ---------------------------------------------------------------------
     Early = Triples(<<"hole_early">>, ?HOLE_TAGS_PER_BAND),
     _ = [
         ok = erpc:call(N1, ?MODULE, do_stale_apply, [Band, K, V])
@@ -774,7 +754,6 @@ hole_scenario([N1, N2, N3] = Nodes) ->
     [{EB, EK, _} | _] = Early,
     ?assertEqual({error, not_found}, stale_read(N3, EB, EK)),
 
-    %% ---------------------------------------------------------------------
     %% 3. TRUNCATE past EARLY on both live nodes, with the live peer as the
     %%    only witness: the cut a recency filter makes past a silent member.
     %%    The production rule never makes it on a durable instance; it is
@@ -786,7 +765,6 @@ hole_scenario([N1, N2, N3] = Nodes) ->
     %%    sets) the rejoining node's second round pulls the early prefix
     %%    from whichever peer still ships it, filling every gap the first
     %%    round held and dissolving the scenario under test.
-    %% ---------------------------------------------------------------------
     {Advanced1, Advanced2} = truncate_main_until_common(N1, N2, [], [], 5),
     Common = [I || I <- Advanced1, lists:member(I, Advanced2)],
     ct:pal(
@@ -797,12 +775,10 @@ hole_scenario([N1, N2, N3] = Nodes) ->
     ?assert(length(Advanced1) >= 1),
     ?assert(length(Advanced2) >= 1),
 
-    %% ---------------------------------------------------------------------
     %% 4. LATE batch, written AFTER the truncation so it survives in the
     %%    shippable tree. This is what makes the two maxima meet: the live
     %%    pair's frontier for N1's origin now sits at the LATE sequences,
     %%    with the EARLY ones truncated out from under it.
-    %% ---------------------------------------------------------------------
     Late = Triples(<<"hole_late">>, ?HOLE_TAGS_PER_BAND),
     _ = [
         ok = erpc:call(N1, ?MODULE, do_stale_apply, [Band, K, V])

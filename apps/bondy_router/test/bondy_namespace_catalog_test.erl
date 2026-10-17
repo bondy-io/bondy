@@ -312,7 +312,6 @@ provisions_all() ->
             end,
             ExpectedFields
         ),
-        %% info/0 summary.
         Info = ?CAT:info(),
         ?assertMatch(#{main := #{kind := db}}, Info),
         %% info/0's tables map covers the main DB tables only.

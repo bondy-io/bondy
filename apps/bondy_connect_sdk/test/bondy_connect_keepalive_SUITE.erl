@@ -64,10 +64,8 @@ ping_timeouts_exhaust_to_give_up(_) ->
 %% on_activity restores the full budget before the next give-up.
 activity_resets_budget(_) ->
     KA0 = bondy_connect_keepalive:new(enabled()),
-    %% Burn two failures (still pinging, not yet given up).
     {ping, _, KA1} = bondy_connect_keepalive:on_ping_timeout(KA0),
     {ping, _, KA2} = bondy_connect_keepalive:on_ping_timeout(KA1),
-    %% Activity resets the counter.
     KA3 = bondy_connect_keepalive:on_activity(KA2),
     %% The budget to give up is now the full budget again, not the 1-2 remaining.
     {Decisions, _} = drain_timeouts(KA3, 0),

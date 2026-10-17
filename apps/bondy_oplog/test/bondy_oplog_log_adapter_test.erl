@@ -84,7 +84,6 @@ verify_identity_origin_mismatch_test() ->
         )
     ).
 
-%% Both fields wrong: the origin is named, as before the seam existed.
 verify_identity_names_the_origin_first_test() ->
     {ok, Identity} = bondy_oplog_log_adapter:encode_identity(ctx()),
     Other = <<16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1>>,

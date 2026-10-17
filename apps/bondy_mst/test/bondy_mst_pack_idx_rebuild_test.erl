@@ -346,7 +346,6 @@ multi_pack_rebuild_test() ->
         Dir = mk_tmp_dir(),
         InstanceId = mk_instance_id(),
         try
-            %% Seal three times to get three sealed packs.
             S0 = open_pack_store(Dir, InstanceId),
             S1 = seal_after_puts(S0, [{<<"a">>, <<"1">>}]),
             S2 = seal_after_puts(S1, [{<<"b">>, <<"2">>}]),
@@ -354,7 +353,6 @@ multi_pack_rebuild_test() ->
             PackIds = bondy_mst_pack_store:sealed_pack_ids(S3),
             ?assertEqual(3, length(PackIds)),
             ok = bondy_mst_pack_store:close(S3),
-            %% Wipe every .idx.
             lists:foreach(
                 fun(Id) -> ok = file:delete(idx_path(Dir, Id)) end,
                 PackIds

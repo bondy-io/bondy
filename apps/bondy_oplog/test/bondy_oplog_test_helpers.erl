@@ -125,7 +125,6 @@ instance_pid(Id) ->
         _:_ -> undefined
     end.
 
-%% Resolve a `fold_module` label to its native CRDT twin (PR-Z).
 crdt_mod(Strategy) ->
     {crdt, Mod} = bondy_oplog_cell_kernel:from_modules(Strategy, undefined),
     Mod.

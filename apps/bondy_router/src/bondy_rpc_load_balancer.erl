@@ -76,7 +76,6 @@ Sampling [See references](https://pdfs.semanticscholar.org/b9a9/52ed1b8bfae2e976
             ]},
         validator => fun
             (?INVOKE_ROUND_ROBIN) ->
-                %% We are picky with style
                 {ok, round_robin};
             (Val) when is_binary(Val) ->
                 {ok, binary_to_existing_atom(Val, utf8)};
@@ -435,7 +434,6 @@ next_queue_least_loaded(
 
     case bondy_registry_entry:is_local(H) of
         true ->
-            %% The pid of the connection process
             Pid = bondy_registry_entry:pid(H),
 
             case erlang:process_info(Pid, [message_queue_len]) of

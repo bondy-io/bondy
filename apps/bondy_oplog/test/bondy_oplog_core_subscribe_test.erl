@@ -221,7 +221,6 @@ subscriber_down_cleans_up_subscription() ->
     receive
         {'DOWN', Mon, process, Pid, _} -> ok
     end,
-    %% Give the dispatcher a brief moment to process the DOWN.
     ok = sync_with_dispatcher(),
     After = bondy_oplog_core_dispatcher:subscription_count(),
     ?assertEqual(Before - 1, After).
@@ -239,7 +238,6 @@ ns_isolation_other_ns_events_not_delivered() ->
     ok = bondy_oplog_core:unsubscribe(Ref).
 
 multiple_subscribers_all_receive_matching() ->
-    %% Two subscribers, both `all` on the same NS — both must receive.
     %% Use spawned subscribers so we can collect from them independently.
     NS = some_ns(),
     Parent = self(),
@@ -280,7 +278,6 @@ multiple_subscribers_all_receive_matching() ->
     ok.
 
 unsubscribe_unknown_ref_is_idempotent() ->
-    %% Unsubscribing a ref that was never registered is a no-op.
     ?assertEqual(ok, bondy_oplog_core:unsubscribe(erlang:make_ref())).
 
 %% =============================================================================

@@ -71,13 +71,10 @@ new(ExternalId) when
     PayloadSize = trunc((?LEN - ?EXT_LEN) / 8),
     Payload = crypto:strong_rand_bytes(PayloadSize),
 
-    %% We append first and second part
     <<Id:?LEN/integer>> = <<ExternalIdBin/binary, Payload/binary>>,
 
-    %% We encode using base62
     Base62 = base62:encode(Id),
 
-    %% We pad to 27 chars
     Existing = iolist_to_binary(string:pad(Base62, ?ENCODED_LEN, leading, $0)),
 
     %% We prepend the OWNING NODE's hash as a distinct, dot-separated segment.
@@ -123,7 +120,6 @@ to_external(Id) when is_binary(Id) ->
     %% in its first 56 bits — the node-hash prefix is not part of the WAMP id.
     Bin = base62:decode(existing_part(Id)),
 
-    %% We extract the first segment (56-bits) as an integer
     <<ExternalId:?EXT_LEN/integer, _/binary>> = <<Bin:?LEN/integer>>,
 
     ExternalId.

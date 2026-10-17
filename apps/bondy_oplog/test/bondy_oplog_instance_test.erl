@@ -361,11 +361,9 @@ divergent_remote_events_are_quarantined() ->
         {error, equivocation_detected},
         bondy_oplog:append_remote(Id, E2)
     ),
-    %% E1 is preserved; E2 is rejected.
     {ok, Stored} = bondy_oplog:get(Id, Key),
     ?assertEqual(value_a, bondy_oplog_event:op(Stored)),
     ?assertEqual(1, bondy_oplog:size(Id)),
-    %% Quarantine row was recorded.
     ok = bondy_oplog_peer_state:sync(),
     {ok, Q} = wait_until_value(
         fun() -> bondy_oplog_quarantine:lookup(Id, Key) end,
@@ -406,10 +404,8 @@ refresh_validator_rotates_applier_snapshot() ->
         validator => bondy_oplog_test_refreshable_validator,
         validator_opts => #{rule_table => Tab}
     }),
-    %% Pre-refresh: only op_a is accepted.
     ?assertEqual(ok, append_peer_event(Id, op_a, 1)),
     ?assertEqual({error, refused}, append_peer_event(Id, op_b, 2)),
-    %% Rotate the rule and trigger refresh.
     true = ets:insert(Tab, {allow_op, op_b}),
     ok = bondy_oplog_instance:refresh_validator(Id, test_rotation),
     %% Drain the cast so the applier's snapshot is swapped before we
@@ -419,7 +415,6 @@ refresh_validator_rotates_applier_snapshot() ->
     ApplierPid = bondy_oplog_registry:applier_pid(Id),
     ?assert(is_pid(ApplierPid)),
     _ = sys:get_state(ApplierPid),
-    %% Post-refresh: only op_b is accepted; the old rule is gone.
     ?assertEqual(ok, append_peer_event(Id, op_b, 3)),
     ?assertEqual({error, refused}, append_peer_event(Id, op_a, 4)),
     ok = bondy_oplog:stop_instance(Id),
@@ -437,7 +432,6 @@ refresh_validator_noop_when_callback_not_exported() ->
         ok,
         bondy_oplog_instance:refresh_validator(Id, no_op_check)
     ),
-    %% Validator is still alive and still rejecting.
     ?assertEqual({error, refused}, append_peer_event(Id, anything, 1)),
     ok = bondy_oplog:stop_instance(Id).
 
@@ -504,8 +498,6 @@ refresh_validator_in_flight_keeps_old_snapshot() ->
         validator => bondy_oplog_test_blocking_validator,
         validator_opts => #{coordinator => Self, verdict => ok}
     }),
-    %% Spawn a helper that issues append_remote for event A. The
-    %% helper will block until the test releases worker A.
     ResultA = make_ref(),
     HelperA = spawn_link(fun() ->
         Reply = append_peer_event(Id, op_alpha, 1),
@@ -581,8 +573,6 @@ start_instance_idempotent() ->
     ?assertEqual(Pid1, Pid2),
     ok = bondy_oplog:stop_instance(Id).
 
-%% Helpers
-
 mk_id() ->
     list_to_binary(
         "inst_" ++ integer_to_list(erlang:unique_integer([positive, monotonic]))
@@ -640,7 +630,6 @@ rejects_append_when_full() ->
         origin => bondy_oplog_origin:new()
     }),
     [bondy_oplog:append(Id, X) || X <- lists:seq(1, 3)],
-    %% Cap reached.
     ?assertEqual(
         {error, working_set_full},
         bondy_oplog:append(Id, x)
@@ -665,7 +654,6 @@ append_many_atomic_under_cap() ->
         max_working_set => 5,
         origin => bondy_oplog_origin:new()
     }),
-    %% Fits.
     Items3 = [{op_a, undefined}, {op_b, undefined}, {op_c, undefined}],
     Keys = bondy_oplog:append_many(Id, Items3),
     ?assertEqual(3, length(Keys)),
@@ -675,6 +663,5 @@ append_many_atomic_under_cap() ->
         {error, working_set_full},
         bondy_oplog:append_many(Id, Items5)
     ),
-    %% Atomic — no partial insert.
     ?assertEqual(3, bondy_oplog:size(Id)),
     ok = bondy_oplog:stop_instance(Id).

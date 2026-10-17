@@ -269,8 +269,6 @@ eval_list(List, Ctxt, Opts) ->
     {'$mops_proxy', function()} | any() | no_return().
 
 eval_expr(<<>>, #state{is_ground = true, is_string = true} = St) ->
-    %% The end of a string (quoted) expression
-    %% We reverse the list of terms and turn them into iolist()
     Fun = fun(X, Acc) ->
         [term_to_iolist(X) | Acc]
     end,
@@ -278,7 +276,6 @@ eval_expr(<<>>, #state{is_ground = true, is_string = true} = St) ->
         lists:foldl(Fun, [], St#state.acc)
     );
 eval_expr(<<>>, #state{is_ground = false, is_string = true} = St) ->
-    %% The end of a string (quoted) expression
     %% We have functions so we wrap the iolist in a function receiving
     %% a future context as an argument
 
@@ -308,18 +305,13 @@ eval_expr(<<>>, #state{is_ground = false, is_string = true} = St) ->
 eval_expr(Bin0, #state{acc = [], is_string = false} = St0) when
     is_binary(Bin0)
 ->
-    %% We start parsing a binary
     Bin1 = maybe_trim(Bin0),
     case binary:match(Bin1, St0#state.sp) of
         nomatch ->
-            %% No mustaches found so this is not a mop expression,
-            %% we return and finish
             Bin0;
         {Pos, 2} ->
-            %% Maybe a mop expression as we found the left moustache
             St1 = St0#state{is_open = true},
             Len = byte_size(Bin1),
-            %% We first find out if this is a string (quoted) expression
             case binary:matches(Bin1, St0#state.dqp) of
                 [] when Pos =:= 0 ->
                     %% Not a string so we should have a single
@@ -348,7 +340,6 @@ eval_expr(Bin0, #state{acc = [], is_string = false} = St0) when
 eval_expr(Bin, #state{is_open = true, is_string = true} = St0) when
     is_binary(Bin)
 ->
-    %% We continue evaluating a string (quoted) expression
     %% Split produces a list of binaries that are all referencing Bin.
     %% This means that the data in Bin is not copied to new binaries,
     %% and that Bin cannot be garbage collected until the results of the split
@@ -358,13 +349,11 @@ eval_expr(Bin, #state{is_open = true, is_string = true} = St0) when
             St1 = St0#state{is_open = false},
             eval_expr(Rest, acc(St1, parse_expr(Expr, St1)));
         _ ->
-            %% We did not find matching closing mustaches
             error({badarg, Bin})
     end;
 eval_expr(Bin, #state{is_open = false, is_string = true} = St) when
     is_binary(Bin)
 ->
-    %% We continue evaluating a string (quoted) expression
     %% Split produces a list of binaries that are all referencing Bin.
     %% This means that the data in Bin is not copied to new binaries,
     %% and that Bin cannot be garbage collected until the results of the split
@@ -373,7 +362,6 @@ eval_expr(Bin, #state{is_open = false, is_string = true} = St) when
         [Pre, Rest] ->
             eval_expr(Rest, acc(St#state{is_open = true}, Pre));
         [Bin] ->
-            %% No more mustaches so we finish
             eval_expr(<<>>, acc(St, Bin))
     end.
 
@@ -407,8 +395,6 @@ parse_expr(Bin, #state{context = Ctxt} = St) ->
             %% TODO review the need for trim/1
             get_value(trim(Val), Ctxt);
         [Val | Ops] ->
-            %% A pipe expression
-            %% We evaluate the value and apply the ops in the pipe
             %% TODO review the need for trim/1
             apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt), Ctxt);
         _ ->
@@ -604,7 +590,6 @@ apply_op(<<"base64:encode">>, Val, _) when is_binary(Val) orelse is_list(Val) ->
     base64:encode(Val);
 apply_op(<<"base64:decode">>, Val, _) when is_binary(Val) orelse is_list(Val) ->
     base64:decode(Val);
-%% Custom ops
 apply_op(Bin, Val, Ctxt) ->
     apply_custom_op(Bin, Val, Ctxt).
 
@@ -809,7 +794,6 @@ maybe_eval(Term, Ctxt) when is_binary(Term) ->
     end;
 maybe_eval(Term, _Ctxt) ->
     Term.
-%% do_eval(Term, Ctxt).
 
 %% @private
 unquote(<<$', Rest/binary>>) ->

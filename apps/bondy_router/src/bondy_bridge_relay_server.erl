@@ -75,7 +75,6 @@ stateDiagram-v2
     start_ts :: pos_integer()
 }).
 
-% -type t()                   ::  #state{}.
 -type reg_indx() :: #{
     SessionId :: bondy_session_id:t() => proxy_map()
 }.
@@ -132,7 +131,6 @@ init({Ref, Transport, Opts}) ->
 
     AuthTimeout = key_value:get(auth_timeout, Opts, 5000),
     IdleTimeout = key_value:get(idle_timeout, Opts, infinity),
-    %% Shall we hibernate when we are idle?
     Hibernate = key_value:get(hibernate, Opts, idle),
 
     State0 = #state{
@@ -301,7 +299,6 @@ active(
         bondy_realm:allow_connections(Realm) orelse
             throw(connections_not_allowed),
 
-        %% We send the challenge
         State = challenge(Realm, Details, State0),
 
         %% We wait for response and timeout using auth_timeout again
@@ -449,12 +446,9 @@ idle(enter, active, State) ->
 idle({timeout, ping_idle_timeout}, ping_idle_timeout, State) ->
     maybe_send_ping(State);
 idle({timeout, ping_timeout}, ping_timeout, State0) ->
-    %% No ping response in time
     State = ping_fail(State0),
-    %% Try to send another one or stop if retry limit reached
     maybe_send_ping(State);
 idle(internal, {pong, Bin}, #state{ping_payload = Bin} = State0) ->
-    %% We got a response to our ping
     State = ping_succeed(State0),
     Actions = [
         {{timeout, ping_timeout}, cancel},
@@ -500,9 +494,7 @@ handle_event(cast, {forward_message, Msg}, _, State) ->
     ],
     {next_state, active, State, Actions};
 handle_event(internal, {ping, Data}, _, State) ->
-    %% The client is sending us a ping
     ok = send_message({pong, Data}, State),
-    %% We keep all timers
     keep_state_and_data;
 handle_event(info, {?BONDY_REQ, Pid, RealmUri, M}, _, State) ->
     %% A local bondy_router_peer:send(), we need to forward to client
@@ -947,7 +939,6 @@ full_sync(SessionId, RealmUri, Opts, State) ->
     %% This means that only non SSO Users can login.
     %% ALSO we are currently copying the CRA passwords which we shouldn't
 
-    %% Finally we sync the realm
     ok = do_full_sync(SessionId, RealmUri, Opts, State).
 
 %% @private
@@ -1124,10 +1115,8 @@ maybe_send_ping(#state{ping_retry = undefined} = State, Actions0) ->
 maybe_send_ping(#state{} = State, Actions0) ->
     case bondy_connect_retry:get(State#state.ping_retry) of
         Time when is_integer(Time) ->
-            %% We send a ping
             Bin = State#state.ping_payload,
             ok = send_message({ping, Bin}, State),
-            %% We set the timeout
             Actions = [
                 ping_timeout(Time),
                 maybe_hibernate(idle, State)

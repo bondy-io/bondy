@@ -81,11 +81,9 @@ lww_converges_across_three_nodes() ->
         ok = setup_peer(NC),
         InstId = mk_id(),
         NS = ns_of(InstId),
-        %% Register a local shard on the controller and on each peer.
         {Cache, Proj} = register_shard(NS, primary, 0),
         ok = peer_register_shard_at(NB, NS, primary, 0),
         ok = peer_register_shard_at(NC, NS, primary, 0),
-        %% Open the same instance on all three with distinct origins.
         OriginA = bondy_oplog_origin:new(),
         OriginB = bondy_oplog_origin:new(),
         OriginC = bondy_oplog_origin:new(),
@@ -93,11 +91,9 @@ lww_converges_across_three_nodes() ->
         ok = peer_open_instance_at(NB, InstId, NS, OriginB),
         ok = peer_open_instance_at(NC, InstId, NS, OriginC),
         try
-            %% Each node writes one unique cell.
             ok = append_cell(InstId, <<"a">>, 10, <<"v-a">>),
             ok = peer_append_cell_at(NB, InstId, <<"b">>, 20, <<"v-b">>),
             ok = peer_append_cell_at(NC, InstId, <<"c">>, 30, <<"v-c">>),
-            %% Pre-sync each node only sees its own write.
             ?assertEqual(
                 {<<"v-a">>, 10},
                 bondy_oplog_core:read(NS, primary, <<"a">>)
@@ -106,7 +102,6 @@ lww_converges_across_three_nodes() ->
                 undefined,
                 bondy_oplog_core:read(NS, primary, <<"b">>)
             ),
-            %% Full mesh sync.
             sync_full_mesh(InstId, [{NB, NB}, {NC, NC}]),
             ok = peer_sync_from(NB, InstId, [node(), NC]),
             ok = peer_sync_from(NC, InstId, [node(), NB]),
@@ -118,7 +113,6 @@ lww_converges_across_three_nodes() ->
             _ = bondy_oplog_instance:await_apply(InstId),
             ok = peer_await_apply(NB, InstId),
             ok = peer_await_apply(NC, InstId),
-            %% Every node sees every cell.
             assert_all_three_cells(NS, fun bondy_oplog_core:read/3),
             assert_all_three_cells_remote(NB, NS),
             assert_all_three_cells_remote(NC, NS)
@@ -157,8 +151,6 @@ later_hlc_wins_after_sync() ->
         ok = peer_open_instance_at(NB, InstId, NS, OriginB),
         ok = peer_open_instance_at(NC, InstId, NS, OriginC),
         try
-            %% Three writes to the SAME key from three nodes, all with
-            %% different HLCs.
             ok = append_cell(InstId, <<"k">>, 1, <<"first">>),
             ok = peer_append_cell_at(NB, InstId, <<"k">>, 5, <<"latest">>),
             ok = peer_append_cell_at(NC, InstId, <<"k">>, 3, <<"middle">>),
@@ -211,7 +203,6 @@ new_node_catches_up_via_sync() ->
         {ok, _} = open_instance(InstId, NS, OriginA),
         ok = peer_open_instance_at(NB, InstId, NS, OriginB),
         try
-            %% A + B exchange events first.
             ok = append_cell(InstId, <<"x">>, 1, <<"vx">>),
             ok = peer_append_cell_at(NB, InstId, <<"y">>, 2, <<"vy">>),
             {ok, _} = bondy_oplog:sync(InstId, NB, sync_opts()),
@@ -226,15 +217,12 @@ new_node_catches_up_via_sync() ->
                 {<<"vy">>, 2},
                 remote_read(NB, NS, <<"y">>)
             ),
-            %% Now C joins the cluster.
             {ok, PC, NC} = start_peer_node("nc3"),
             try
                 ok = setup_peer(NC),
                 ok = peer_register_shard_at(NC, NS, primary, 0),
                 OriginC = bondy_oplog_origin:new(),
                 ok = peer_open_instance_at(NC, InstId, NS, OriginC),
-                %% C is empty; one sync from A must populate C's
-                %% projection with both x and y.
                 ok = peer_sync_from(NC, InstId, [node()]),
                 ok = peer_await_apply(NC, InstId),
                 ok = peer_replay(NC, InstId),

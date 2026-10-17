@@ -2531,7 +2531,6 @@ init({InstanceId, Opts}) ->
         ValidatorMod:init(InstanceId, maps:get(validator_opts, Opts, #{})),
     Backend = maps:get(backend, Opts, ets),
     MST = open_mst(InstanceId, Backend, Opts),
-    %% Compaction checkpoint + watermark recovery.
     %% Default backend resolution: prefer the file backend when the
     %% instance has any durable storage configured (`storage_path` or
     %% an explicit `compaction_checkpoint_opts.path`); otherwise fall
@@ -2945,7 +2944,6 @@ published_fingerprint(#state{} = S) ->
 
 %% @private
 do_handle_call({append, Op, Meta, Notify}, _From, State0) ->
-    %% Pressure check → WAL append (fsync) → overlay insert → reply.
     %% The reply happens inline as soon as the WAL is durable and
     %% the overlay row exists; the applier drains the WAL and casts
     %% `install_local_batch` back to this gen_server, which promotes

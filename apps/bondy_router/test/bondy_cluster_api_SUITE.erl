@@ -69,9 +69,6 @@ members_lists_this_node(_) ->
     Members = call(?BONDY_CLUSTER_MEMBERS, []),
     ?assert(lists:member(partisan:node(), Members)).
 
-%% `connections` was a stub refusing with `no_such_procedure` while being
-%% documented as reserved. It is a read of Partisan's own connection table and
-%% had no reason to be one.
 connections_answers_an_envelope(_) ->
     Reply = call(?BONDY_CLUSTER_CONNECTIONS, []),
     ?assertEqual(
@@ -193,9 +190,6 @@ a_spent_budget_makes_a_leave_unsafe(_) ->
         bondy_cluster_api:survey([], 0)
     ).
 
-%% `info` had no case at all until it was put behind the master realm on
-%% 2026-09-02. Gating a procedure nothing exercises would have been a change
-%% whose happy path stayed unobserved either side of it.
 info_answers_this_node_spec(_) ->
     Info = call(?BONDY_CLUSTER_INFO, []),
     ?assertEqual(

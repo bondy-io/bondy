@@ -55,26 +55,22 @@ end_per_testcase(_TestCase, _Config) ->
 %% =============================================================================
 
 subprotocol_validation(_Config) ->
-    %% wamp.2.json.sse should be valid
     ?assertMatch(
         {ok, {http_sse, text, json}},
         bondy_wamp_protocol:validate_subprotocol(<<"wamp.2.json.sse">>)
     ),
 
-    %% The tuple form should also validate
     ?assertMatch(
         {ok, {http_sse, text, json}},
         bondy_wamp_protocol:validate_subprotocol({http_sse, text, json})
     ),
 
-    %% Unsupported variants should fail
     ?assertMatch(
         {error, invalid_subprotocol},
         bondy_wamp_protocol:validate_subprotocol(<<"wamp.2.msgpack.sse">>)
     ).
 
 encoding_roundtrip(_Config) ->
-    %% Verify that the http_sse subprotocol can encode and decode WAMP messages
     Msg = #event{
         subscription_id = 100,
         publication_id = 200,
@@ -83,7 +79,6 @@ encoding_roundtrip(_Config) ->
         kwargs = undefined
     },
 
-    %% Encode using the json encoding
     Bin = bondy_wamp_encoding:encode(Msg, json),
     ?assert(is_binary(Bin)),
 
@@ -99,13 +94,11 @@ open_and_init_protocol(_Config) ->
     RealmUri = <<>>,
     SessionId = bondy_session_id:new(),
 
-    %% Start transport session
     {ok, Pid} = bondy_http_transport_session_sup:start_child(
         TransportId, RealmUri, SessionId
     ),
     ?assert(is_pid(Pid)),
 
-    %% Init protocol
     Subprotocol = {http_sse, text, json},
     Peer = {{127, 0, 0, 1}, 12345},
     ?assertEqual(
@@ -113,10 +106,8 @@ open_and_init_protocol(_Config) ->
         bondy_http_transport_session:init_protocol(Pid, Subprotocol, Peer)
     ),
 
-    %% Verify encoding
     ?assertEqual(json, bondy_http_transport_session:encoding(Pid)),
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 register_sse_stream(_Config) ->
@@ -128,15 +119,12 @@ register_sse_stream(_Config) ->
         TransportId, RealmUri, SessionId
     ),
 
-    %% Init protocol
     ok = bondy_http_transport_session:init_protocol(
         Pid, {http_sse, text, json}, {{127, 0, 0, 1}, 12345}
     ),
 
-    %% Register self as SSE stream
     ok = bondy_http_transport_session:register_sse_stream(Pid, self()),
 
-    %% Enqueue a message and verify drain_queue notification arrives
     Msg = make_event(1),
     ok = bondy_http_transport_queue:enqueue(TransportId, Msg, #{}),
     bondy_http_transport_session:notify_enqueue(TransportId),
@@ -148,7 +136,6 @@ register_sse_stream(_Config) ->
         ct:fail("Expected drain_queue message")
     end,
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 synchronous_reply_waits_in_the_queue(_Config) ->
@@ -160,13 +147,10 @@ synchronous_reply_waits_in_the_queue(_Config) ->
         TransportId, RealmUri, SessionId
     ),
 
-    %% Init protocol
     ok = bondy_http_transport_session:init_protocol(
         Pid, {http_sse, text, json}, {{127, 0, 0, 1}, 12345}
     ),
 
-    %% Send a HELLO before SSE stream is connected - the WELCOME/ABORT reply
-    %% should be buffered. We encode a HELLO message for the test realm.
     HelloBin = bondy_wamp_encoding:encode(
         #hello{
             realm_uri = <<"com.leapsight.test.sse_buffering">>,
@@ -180,7 +164,6 @@ synchronous_reply_waits_in_the_queue(_Config) ->
         json
     ),
 
-    %% Create the realm first
     RealmTestUri = <<"com.leapsight.test.sse_buffering">>,
     _ = bondy_realm:create(RealmTestUri),
     ok = bondy_realm:disable_security(RealmTestUri),
@@ -212,7 +195,6 @@ synchronous_reply_waits_in_the_queue(_Config) ->
         ct:fail("Expected the attached stream to be told to drain")
     end,
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 queue_notification_forwarding(_Config) ->
@@ -224,7 +206,6 @@ queue_notification_forwarding(_Config) ->
         TransportId, RealmUri, SessionId
     ),
 
-    %% Without SSE stream, notify_enqueue should not send any message
     bondy_http_transport_session:notify_enqueue(TransportId),
     receive
         drain_queue ->
@@ -233,10 +214,8 @@ queue_notification_forwarding(_Config) ->
         ok
     end,
 
-    %% Register SSE stream
     ok = bondy_http_transport_session:register_sse_stream(Pid, self()),
 
-    %% Now notify_enqueue should forward drain_queue to us
     bondy_http_transport_session:notify_enqueue(TransportId),
     receive
         drain_queue ->
@@ -245,7 +224,6 @@ queue_notification_forwarding(_Config) ->
         ct:fail("Expected drain_queue after notify_enqueue")
     end,
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 sse_stream_down_cleanup(_Config) ->
@@ -257,7 +235,6 @@ sse_stream_down_cleanup(_Config) ->
         TransportId, RealmUri, SessionId
     ),
 
-    %% Spawn a fake SSE stream process and register it
     FakeSse = spawn_link(fun() ->
         receive
             stop -> ok
@@ -265,12 +242,9 @@ sse_stream_down_cleanup(_Config) ->
     end),
     ok = bondy_http_transport_session:register_sse_stream(Pid, FakeSse),
 
-    %% Kill the fake SSE stream
     FakeSse ! stop,
     timer:sleep(200),
 
-    %% After SSE stream is down, notify_enqueue should not crash
-    %% and should not forward drain_queue
     bondy_http_transport_session:notify_enqueue(TransportId),
     receive
         drain_queue ->
@@ -279,10 +253,8 @@ sse_stream_down_cleanup(_Config) ->
         ok
     end,
 
-    %% Transport session itself should still be alive
     ?assert(erlang:is_process_alive(Pid)),
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 close_transport(_Config) ->
@@ -294,7 +266,6 @@ close_transport(_Config) ->
         TransportId, RealmUri, SessionId
     ),
 
-    %% Close by TransportId
     ok = bondy_http_transport_session:close(TransportId),
     timer:sleep(100),
 
@@ -307,13 +278,11 @@ close_transport(_Config) ->
 send_unknown_transport(_Config) ->
     FakeTransportId = <<"nonexistent-transport-id">>,
 
-    %% whereis should return undefined
     ?assertEqual(
         undefined,
         bondy_http_transport_session:whereis(FakeTransportId)
     ),
 
-    %% notify_enqueue should not crash
     ?assertEqual(
         ok,
         bondy_http_transport_session:notify_enqueue(FakeTransportId)

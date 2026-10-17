@@ -576,7 +576,6 @@ counter_value(Name, Label) ->
     end.
 
 %% @private
-%% @private
 start_metrics() ->
     case bondy_metrics:start_link() of
         {ok, Pid} -> {ok, Pid};

@@ -53,7 +53,6 @@ fresh_shard_init_returns_no_watermark_cursor() ->
     ?assertEqual(0, W),
     ?assert(is_binary(Cursor)),
     ?assertEqual(16, byte_size(Cursor)),
-    %% Immediate `next` should return done since there are no cells.
     ?assertEqual(
         {ok, {done, []}},
         bondy_oplog_catalogue_snapshot:next(Id, Cursor)
@@ -86,7 +85,6 @@ next_returns_batch_then_done() ->
     ?assertEqual(5, length(Cells)),
     ReturnedKeys = [K || {_B, K, _F} <- Cells],
     ?assertEqual(lists:sort(Keys), lists:sort(ReturnedKeys)),
-    %% Second `next` is the terminator.
     ?assertEqual(
         {ok, {done, []}},
         bondy_oplog_catalogue_snapshot:next(Id, Cursor)
@@ -94,7 +92,6 @@ next_returns_batch_then_done() ->
     teardown(Id).
 
 next_paginates_with_small_batch_size() ->
-    %% Force a tiny batch size so we observe pagination.
     application:set_env(bondy_oplog, catalogue_snapshot_batch_size, 2),
     try
         {Id, _NS, _, _} = setup_instance(),
@@ -140,7 +137,6 @@ cursor_for_other_instance_returns_expired() ->
     {Id1, _, _, _} = setup_instance(),
     {Id2, _, _, _} = setup_instance(),
     {ok, {_W1, Cursor1, _}} = bondy_oplog_catalogue_snapshot:init(Id1),
-    %% Using Cursor1 against Id2 must report expired.
     ?assertEqual(
         {error, cursor_expired},
         bondy_oplog_catalogue_snapshot:next(Id2, Cursor1)

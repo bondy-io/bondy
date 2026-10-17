@@ -463,11 +463,6 @@ take_parts(B, K, F, PB, Total, Idx, Max, Used, Acc) ->
 %% cells are already accumulated they are returned first and the oversized one
 %% is met again at the head of the next round. So the cursor never advances
 %% past a key that has not been shipped.
-%%
-%% This replaces the previous behaviour, which reported an oversized cell to
-%% metrics and ADVANCED PAST IT — losing it permanently while the bootstrap
-%% still adopted the peer's frontier, so the convergence oracle read CONVERGED
-%% over a record that could never replicate.
 cap_cells(InstanceId, Bucket, Pairs, MaxBytes) ->
     cap_cells(InstanceId, Bucket, Pairs, MaxBytes, 0, [], undefined).
 

@@ -143,9 +143,6 @@ leaves_an_unresolved_placeholder_test() ->
 %% from_term/1
 %% =============================================================================
 
-%% Both of these crashed with function_clause in the previous implementation,
-%% which had no binary() clause in its key formatter, and both are reachable
-%% from bondy_rbac.
 missing_required_value_with_a_binary_key_test() ->
     E = bondy_connect_error:from_term({missing_required_value, ~"match"}),
     ?assertEqual(missing_required_value, maps:get(type, E)),
@@ -531,8 +528,6 @@ format_includes_causes_test() ->
 %% format_error/2
 %% =============================================================================
 
-%% The previous implementations did maps:get(cause, ErrorInfo) with no default
-%% and crashed whenever error_info carried no cause.
 format_error_without_a_cause_test() ->
     Stacktrace = [{m, f, 1, [{error_info, #{module => m}}]}],
     ?assert(is_map(bondy_connect_error:format_error(badarg, Stacktrace))).

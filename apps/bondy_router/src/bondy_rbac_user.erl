@@ -591,7 +591,6 @@ update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
         Username = normalise_username(Username0),
 
-        %% Validations
         Username == anonymous andalso throw(not_allowed),
         ok = not_reserved_name_check(Username),
 
@@ -644,10 +643,8 @@ remove(RealmUri, Username0, _Opts) when is_binary(Username0) ->
         Aliases = maps:get(aliases, User, []),
         Table = table(),
 
-        %% We remove all aliases (if it has any)
         _ = [bondy_db:apply(Table, RealmUri, Alias, clear) || Alias <- Aliases],
 
-        %% We remove this user from sources
         ok = bondy_rbac_source:remove_all(RealmUri, Username),
 
         %% delete any associated grants, so if a user with the same name
@@ -1698,13 +1695,11 @@ do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0, Opts) when
 ->
     Username = maps:get(username, User0),
 
-    %% Key validations first
     %% We skip the existence check when applying declarative config (overwrite).
     Declarative = maps:get(declarative, Opts, false),
     Declarative == true orelse not_exists_check(RealmUri, Username),
     ok = groups_exists_check(RealmUri, maps:get(groups, User0, [])),
 
-    %% We split the user into LocalUser, SSOUser and Opts
     {UserOpts, User1} = maps_utils:split([password_opts], User0),
     User2 = apply_password(User1, password_opts(RealmUri, UserOpts)),
 
@@ -1721,19 +1716,16 @@ do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0, Opts) when
     Flag = Declarative == true orelse not exists(SSOUri, Username),
     ok = maybe_add_sso_user(Flag, RealmUri, SSOUri, SSOUser, Opts),
 
-    %% We finally add the local user to the realm
     store(RealmUri, LocalUser, Opts);
 do_add(RealmUri, User0, Opts) ->
     %% A local-only user
     Username = maps:get(username, User0),
 
-    %% Key validations first
     %% We skip the existence check when applying declarative config (overwrite).
     Declarative = maps:get(declarative, Opts, false),
     Declarative == true orelse not_exists_check(RealmUri, Username),
     ok = groups_exists_check(RealmUri, maps:get(groups, User0, [])),
 
-    %% We split the user into LocalUser, SSOUSer and Opts
     {UserOpts, User1} = maps_utils:split([sso_opts, password_opts], User0),
     User = apply_password(User1, password_opts(RealmUri, UserOpts)),
 
@@ -1746,7 +1738,6 @@ maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser, Opts) ->
 
     ok = groups_exists_check(SSOUri, maps:get(groups, SSOUser, [])),
 
-    %% We add the user to the SSO realm
     {ok, _} = maybe_throw(store(SSOUri, SSOUser, Opts)),
     ok;
 maybe_add_sso_user(false, _, _, _, _) ->
@@ -1826,7 +1817,6 @@ maybe_on_credentials_change(RealmUri, User, Data) ->
 do_local_update(RealmUri, User, Data0, Opts0) ->
     ok = groups_exists_check(RealmUri, maps:get(groups, Data0, [])),
 
-    %% We split the data into LocalUser and Opts
     {UserOpts, Data} = maps_utils:split([password_opts], Data0),
     Opts = maps:merge(UserOpts, Opts0),
     NewUser = merge(RealmUri, User, Data, Opts),
@@ -2116,7 +2106,6 @@ do_add_alias(_, #{username := anonymous}, _) ->
     {error, not_allowed};
 do_add_alias(RealmUri, User0, Alias0) ->
     try
-        %% We validate the value
         Alias = validate_alias(Alias0),
         Username = maps:get(username, User0),
         AliasEntry = #{type => ?ALIAS_TYPE, username => Username},

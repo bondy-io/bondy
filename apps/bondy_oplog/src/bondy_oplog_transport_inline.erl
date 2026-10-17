@@ -33,7 +33,6 @@ behaviour.
     map()
 ) -> bondy_oplog_transport:response() | {error, term()}.
 
-%% peer_id is treated as a local instance id.
 request(PeerInstanceId, _InstanceId, Request, _Opts) when
     is_binary(PeerInstanceId)
 ->

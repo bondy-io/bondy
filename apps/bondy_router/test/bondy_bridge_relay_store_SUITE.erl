@@ -45,14 +45,11 @@ catalogue_provisions_bridge_relay_test(_) ->
 crud_roundtrip_test(_) ->
     Name = <<"com.bondy.test.bridge_store.crud">>,
 
-    %% Absent to begin with.
     ?assertEqual(false, bondy_bridge_relay:exists(Name)),
     ?assertEqual({error, not_found}, bondy_bridge_relay:lookup(Name)),
 
-    %% add/1 writes the bridge to bondy_db, stamping the owning node.
     ok = bondy_bridge_relay:add(bridge(Name)),
 
-    %% exists + lookup see it.
     ?assert(bondy_bridge_relay:exists(Name)),
     {ok, Stored} = bondy_bridge_relay:lookup(Name),
     ?assertEqual(Name, maps:get(name, Stored)),
@@ -63,13 +60,10 @@ crud_roundtrip_test(_) ->
     ?assertEqual({"localhost", 18092}, maps:get(endpoint, Stored)),
     ?assertMatch([#{uri := <<"com.example.realm">>}], maps:get(realms, Stored)),
 
-    %% list/0 includes it.
     ?assert(has_bridge(Name, bondy_bridge_relay:list())),
 
-    %% add/1 of an existing name is rejected.
     ?assertEqual({error, already_exists}, bondy_bridge_relay:add(bridge(Name))),
 
-    %% remove clears the cell; the bridge is gone from every read.
     ok = bondy_bridge_relay:remove(Name),
     ?assertEqual(false, bondy_bridge_relay:exists(Name)),
     ?assertEqual({error, not_found}, bondy_bridge_relay:lookup(Name)),

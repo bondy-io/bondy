@@ -83,10 +83,8 @@ bootstrap_event_rebuilds_and_does_not_kill_the_gateway_test(_) ->
 
 %% load → lookup → list → delete, all through the bondy_db-backed store.
 crud_roundtrip_test(_) ->
-    %% Absent to begin with.
     ?assertEqual({error, not_found}, bondy_http_gateway:lookup(?SPEC_ID)),
 
-    %% Load writes the spec to bondy_db and rebuilds the dispatch tables.
     ok = bondy_http_gateway:load(spec(?SPEC_ID, ?REALM)),
 
     %% Lookup returns the stored SOURCE spec (with the `ts` field load adds).
@@ -95,10 +93,8 @@ crud_roundtrip_test(_) ->
     ?assertEqual(?SPEC_ID, maps:get(<<"id">>, Stored)),
     ?assert(maps:is_key(<<"ts">>, Stored)),
 
-    %% list/0 includes it.
     ?assert(has_spec(?SPEC_ID, bondy_http_gateway:list())),
 
-    %% Delete clears the cell and rebuilds; the spec is gone from both reads.
     ok = bondy_http_gateway:delete(?SPEC_ID),
     ?assertEqual({error, not_found}, bondy_http_gateway:lookup(?SPEC_ID)),
     ?assertEqual(false, has_spec(?SPEC_ID, bondy_http_gateway:list())).

@@ -346,8 +346,6 @@ keeps reads parallel.
 -export([shard_count/2]).
 -export([list/0]).
 
-%% Restart-recovery protocol.
-
 %% Diagnostic / invariant-checking helper.
 -export([snapshot_for_invariants/0]).
 

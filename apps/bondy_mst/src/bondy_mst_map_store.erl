@@ -166,8 +166,6 @@ free(#?MODULE{pages = Pages0} = T, Hash, _Page) ->
 -spec gc(t(), KeepRoots :: [hash()]) -> {T :: t(), Metadata :: map()}.
 
 gc(#?MODULE{pages = Pages0} = T, KeepRoots) when is_list(KeepRoots) ->
-    %% Folds the roots we want to keep and create a new map containing only
-    %% those roots and its descendants.
     Fun = fun(X, Acc) -> gc_aux(Acc, Pages0, X) end,
     Pages = lists:foldl(Fun, #{}, KeepRoots),
     %% `erts_debug:flat_size/1` reports words; convert to bytes (was

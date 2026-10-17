@@ -88,11 +88,9 @@ an_inherited_overclaim_is_not_laundered(Dir) ->
         ?assertEqual(7, maps:get(Remote, frontier(Id), 0)),
         ?assertEqual(1, alarm_count(Id)),
 
-        %% The laundering step: persist, and read the payload back.
         ok = bondy_oplog_instance:persist_frontier(Id),
         ?assertEqual([receipt_derived], stamps(Dir, Id)),
 
-        %% And it survives the restart, which is what the stamp is for.
         ok = bondy_oplog:stop_instance(Id),
         ?assertEqual(0, alarm_count(Id)),
         {ok, _} = open_instance(Id, NS, Dir, Origin),
@@ -133,9 +131,7 @@ an_own_only_frontier_is_silent(Dir) ->
         ok = rewrite_as_pre_stamp(Dir, Id, undefined, 0),
 
         {ok, _} = open_instance(Id, NS, Dir, Origin),
-        %% The value IS classified suspect ...
         ?assertEqual([receipt_derived], stamps_after_persist(Id, Dir)),
-        %% ... and still nothing is raised.
         ?assertEqual(0, alarm_count(Id))
     after
         cleanup_instance(Id, NS, Shard)

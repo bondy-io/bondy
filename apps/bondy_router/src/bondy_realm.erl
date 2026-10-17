@@ -155,7 +155,6 @@ connected to any realm.
     ?PASSWORD_AUTH,
     ?OAUTH2_AUTH,
     ?WAMP_CRA_AUTH,
-    % ?WAMP_SCRAM_AUTH,
     ?WAMP_TICKET_AUTH
 ]).
 
@@ -646,7 +645,6 @@ connected to any realm.
     authmethods => [
         ?TRUST_AUTH,
         ?WAMP_CRYPTOSIGN_AUTH,
-        % ?WAMP_SCRAM_AUTH,
         ?WAMP_CRA_AUTH,
         ?PASSWORD_AUTH
         %% ?WAMP_ANON_AUTH removed — the master realm is the administrative
@@ -765,14 +763,6 @@ connected to any realm.
                 >>
             }
         },
-        % #{
-        %     usernames => <<"all">>,
-        %     authmethod => ?WAMP_SCRAM_AUTH,
-        %     cidr => <<"127.0.0.0/8">>,
-        %     meta => #{
-        %         <<"description">> => <<"loopback only">>
-        %     }
-        % },
         #{
             usernames => [<<"admin">>],
             authmethod => ?TRUST_AUTH,
@@ -784,8 +774,6 @@ connected to any realm.
                 >>
             }
         }
-        %% The anonymous loopback source has been REMOVED — the master realm
-        %% no longer accepts anonymous connections.
     ]
 }).
 
@@ -1723,7 +1711,6 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             %% merges into its projection (`bondy_aae_reactor`).
             ok = bondy_db:apply(table(), ?REALM_BAND, Uri, clear),
 
-            %% We notify
             ok = on_delete(Uri),
 
             %% We order the removal of all associated data
@@ -1744,7 +1731,6 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
                 ok = bondy_ticket:revoke_all(Uri),
                 ok = bondy_oauth_token:revoke_all(Uri),
 
-                %% Delete all sources
                 bondy_rbac_source:remove_all(Uri),
 
                 %% Delete all retained messages. They are keyed by topic within
@@ -1752,10 +1738,8 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
                 %% of whatever realm next claims this URI.
                 _ = bondy_retained_message:remove_all(Uri),
 
-                %% Delete all groups
                 bondy_rbac_group:remove_all(Uri, Opts1),
 
-                %% Delete all users
                 bondy_rbac_user:remove_all(Uri, Opts1),
 
                 %% Everything above is a bondy_db write, so every node
@@ -2229,8 +2213,6 @@ maybe_warn_legacy_admin_password(#realm{uri = Uri}) ->
 validate(Map0, Spec) ->
     Map = maps_utils:validate(Map0, Spec),
 
-    %% Preconditions
-
     IsProto = maps:get(is_prototype, Map, false),
     Proto = maps:get(prototype_uri, Map, undefined),
 
@@ -2504,7 +2486,6 @@ merge_and_store(Realm0, Map, Opts) ->
     %% elements have been validated.
     RBACConfig = validate_rbac_config(Realm, Map),
 
-    %% We then create the realm
     Uri = Realm#realm.uri,
 
     %% Identity/config cell (key material stripped) + the separate key cell.
@@ -3099,7 +3080,6 @@ topsort(Realms) ->
 
 %% @private
 precedence_graph(Realms, Graph) ->
-    %% We first add all the realms as vertices in the graph
     Vertices = [
         begin
             R = validate_uris(R0),
@@ -3155,7 +3135,6 @@ precedence_graph_add_edge(Graph, A, B) ->
 %% @private we validate just the URIs that are needed to build the precedence
 %% graph
 validate_uris(Data) ->
-    %% We prevalidate the data
     Opts = #{keep_unknown => true},
     Validator = #{
         <<"uri">> => #{

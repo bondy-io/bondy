@@ -54,34 +54,28 @@ export_import_roundtrip(Config) ->
     BKey = <<"export_test_bridge">>,
     BVal = #{name => BKey, marker => <<"export_test">>},
 
-    %% Seed: a per-realm entry and a global-band (<<>>) entry.
     ok = bondy_db:apply(UsersTab, ?REALM, UKey, {set, UVal}),
     ok = bondy_db:apply(BridgeTab, <<>>, BKey, {set, BVal}),
     ?assertMatch({ok, {UVal, _}}, bondy_db:read(UsersTab, ?REALM, UKey)),
     ?assertMatch({ok, {BVal, _}}, bondy_db:read(BridgeTab, <<>>, BKey)),
 
-    %% Export the whole database.
     {ok, #{filename := File}} = bondy_export:export(#{path => Priv}),
     ok = wait_idle(100),
 
-    %% The file carries the new bondy_db export header.
     {ok, Head} = bondy_export:status(#{filename => File}),
     ?assertMatch(
         #{format := bondy_db_export, vsn := <<"2.0.0">>, status := ok},
         Head
     ),
 
-    %% Delete both entries.
     ok = bondy_db:apply(UsersTab, ?REALM, UKey, clear),
     ok = bondy_db:apply(BridgeTab, <<>>, BKey, clear),
     ?assertEqual({error, not_found}, bondy_db:read(UsersTab, ?REALM, UKey)),
     ?assertEqual({error, not_found}, bondy_db:read(BridgeTab, <<>>, BKey)),
 
-    %% Import the export file.
     {ok, _} = bondy_export:import(#{filename => File}),
     ok = wait_idle(100),
 
-    %% Both entries are restored byte-for-byte.
     ?assertMatch({ok, {UVal, _}}, bondy_db:read(UsersTab, ?REALM, UKey)),
     ?assertMatch({ok, {BVal, _}}, bondy_db:read(BridgeTab, <<>>, BKey)),
     ok.
@@ -133,7 +127,6 @@ membership_export_roundtrip(Config) ->
     {ok, _} = bondy_export:import(#{filename => File}),
     ok = wait_idle(100),
 
-    %% A backup must restore group membership.
     ?assertEqual(
         [G],
         bondy_rbac_user:groups(bondy_rbac_user:fetch(Realm, U))
@@ -188,9 +181,7 @@ legacy_user_membership_roundtrip(Config) ->
     {ok, _} = bondy_export:import(#{filename => File}),
     ok = wait_idle(100),
 
-    %% The user is restored...
     ?assertMatch({ok, _}, bondy_rbac_user:lookup(Realm, U)),
-    %% ...with the membership its record declared.
     ?assertEqual(
         [G], bondy_rbac_user:groups(bondy_rbac_user:fetch(Realm, U))
     ),
@@ -334,7 +325,6 @@ legacy_poison_record_is_skipped(Config) ->
     %% The record AFTER the poison one was still applied — the import skipped
     %% the bad record and carried on rather than dying on it.
     ?assertMatch({ok, _}, bondy_rbac_user:lookup(Realm, <<"sound_user">>)),
-    %% And the bad record was not applied.
     ?assertEqual(
         {error, not_found}, bondy_rbac_user:lookup(Realm, <<"poison_user">>)
     ),
@@ -361,7 +351,6 @@ legacy_token_refresh_roundtrip(_Config) ->
         issued_at => Now
     },
 
-    %% Import the legacy token.
     ?assertEqual(ok, bondy_oauth_token:import_legacy(Spec)),
 
     %% First refresh with the bare legacy string resolves via the pointer and
@@ -374,7 +363,6 @@ legacy_token_refresh_roundtrip(_Config) ->
     %% One-time: the legacy string no longer resolves (pointer cleared).
     ?assertMatch({error, _}, bondy_oauth_token:refresh(?TOKEN_REALM, Legacy)),
 
-    %% The upgraded token continues to work.
     ?assertMatch({ok, _}, bondy_oauth_token:refresh(?TOKEN_REALM, NewRefresh)),
     ok.
 

@@ -279,8 +279,6 @@ empty_summary(Extra) ->
     ).
 
 %% @private
-%% Snapshot the WAL's info, derive the sealed-segment list (live minus
-%% head minus already-alerted), and walk each in order.
 walk_all_segments(Prefix, InstanceId, WalPid) ->
     try bondy_log_wal:info(WalPid) of
         Info ->
@@ -365,11 +363,6 @@ zero_segment_measurements() ->
     }.
 
 %% @private
-%% Walk a single sealed segment. Opens read-only, scans frame-by-frame,
-%% emits one telemetry event with the outcome, and (on the first bad
-%% frame) marks the segment in the manifest. Returns
-%% `{ok | alert, Counts}` so the caller can aggregate without re-
-%% parsing telemetry.
 walk_one(Prefix, InstanceId, WalPid, Dir, Magic, SegId) ->
     Path = filename:join(Dir, bondy_log_segment:filename(SegId)),
     T0 = erlang:monotonic_time(microsecond),
@@ -413,10 +406,6 @@ walk_one(Prefix, InstanceId, WalPid, Dir, Magic, SegId) ->
     end.
 
 %% @private
-%% Frame-walk loop. Starts past the 48-byte segment header. Maintains
-%% counts of bad-frame classes so the caller can attach them to the
-%% emitted telemetry event. Stops on EOF (clean exit) or on the first
-%% bad frame (alert).
 walk_frames(Fd, Magic) ->
     walk_frames_loop(
         Fd,

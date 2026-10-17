@@ -66,5 +66,3 @@ init([]) ->
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.
-
-%% internal functions

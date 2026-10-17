@@ -260,7 +260,6 @@ remove(Type, EntryId, Ctxt, Task) when
         {[{_Key, Entry}], _Cont} ->
             maybe
                 ok ?= bondy_registry_partition:remove(Partition, Entry),
-                %% If Task is a fun, execute it
                 maybe_execute(maybe_fun(Task, Ctxt), Entry)
             end
     end.
@@ -798,7 +797,6 @@ maybe_add_sessionless_subscription(RealmUri, Uri, MP, Opts, Ref, Partition) ->
 
         case Matches of
             false ->
-                %% We continue
                 Acc;
             true ->
                 throw({break, [KV | Acc]})
@@ -886,7 +884,6 @@ add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
 
     case MatchResult of
         [] ->
-            %% No existing registrations for this URI
             Entry = new_registration(RealmUri, Ref, Uri, Opts),
             bondy_registry_partition:add(Partition, Entry);
         L ->

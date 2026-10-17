@@ -211,9 +211,6 @@ map returned by `Bridge:init/1`.
     nodestring :: binary(),
     broker_agent :: binary(),
     bridges = #{} :: #{module() => bridge()}
-    %% Cluster sync state
-    %% exchange_ref            ::  {pid(), reference()} | undefined,
-    %% updated_specs = []      ::  list()
 }).
 
 -type bridge() :: map().
@@ -325,7 +322,6 @@ init([]) ->
     %% every event was delivered once per generation.
     _ = process_flag(trap_exit, true),
 
-    %% We store the bridges configurations provided
     Bridges = application:get_env(bondy_broker_bridge, bridges, []),
     BridgesMap = maps:from_list(
         [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
@@ -519,7 +515,6 @@ get_bridge(Mod, State) ->
     maps:get(Mod, State#state.bridges, undefined).
 
 do_terminate(Reason, State) ->
-    %% ok = plum_db_unsubscribe(),
     _ = unsubscribe_all(State),
     _ = terminate_bridges(Reason, State),
     ok.
@@ -528,9 +523,7 @@ load_config(Map, State) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, Spec} ->
             #{<<"subscriptions">> := L} = Spec,
-            %% We make sure all subscriptions are unique
             Subscriptions = lists:usort(L),
-            %% We instantiate the subscribers
             {NewState, Failed} = lists:foldl(
                 fun do_load_subscription/2, {State, []}, Subscriptions
             ),
@@ -653,7 +646,6 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
         %% Everything but the event itself is resolved once, here, so the
         %% per-event path is a single map put.
         StaticCtxt = static_mops_ctxt(Bridge, State),
-        %% We build the fun that we will use for the subscriber
         Fun = fun(Topic1, #event{} = Event) when Topic1 == Topic ->
             CtxtEvent = bondy_broker_bridge_event:new(RealmUri, Topic, Event),
             Ctxt = StaticCtxt#{<<"event">> => CtxtEvent},

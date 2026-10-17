@@ -117,7 +117,6 @@ roll_run_complete_roundtrip_test() ->
         {ok, W0} = open_writer(Dir),
         {W1, Pairs} = append_all(W0, pages(5)),
 
-        %% Roll the incoming pack aside.
         {ok, Job, W2} = bondy_mst_pack_writer:roll_incoming(W1),
 
         %% Writer reset to a fresh empty incoming; the rolled snapshot is
@@ -238,7 +237,6 @@ roll_rejects_while_seal_in_flight_test() ->
         {ok, W0} = open_writer(Dir),
         {W1, _} = append_all(W0, pages(2)),
         {ok, _Job, W2} = bondy_mst_pack_writer:roll_incoming(W1),
-        %% Append again so pending is non-empty, then attempt a second roll.
         {ok, _, W3} = bondy_mst_pack_writer:append(W2, <<"more">>),
         ?assertEqual(
             {error, seal_in_flight}, bondy_mst_pack_writer:roll_incoming(W3)

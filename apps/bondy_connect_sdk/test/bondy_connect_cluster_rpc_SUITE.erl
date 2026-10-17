@@ -105,15 +105,6 @@ end_per_testcase(_, Config) ->
 %% The client listener each peer needs, declared in the INVENTORY rather than by
 %% re-enabling the legacy `bondy_router.wamp_tcp.*` keys.
 %%
-%% `bondy_ct:node_env/2` sets `[bondy_router, listeners]` for every cluster peer,
-%% which puts the peer on the configured listener path — and on that path only
-%% declared listeners exist, so a `wamp_tcp.enabled = true` written in the old
-%% spelling creates nothing and the peer answers `econnrefused` on the port
-%% below. Those keys no longer exist at all, which makes this a historical note
-%% rather than a live hazard. Verified directly: with the legacy keys, all nine cases in
-%% this suite fail with `{connect_failed, _, {shutdown, {connect_error,
-%% econnrefused}}}`.
-%%
 %% The name is kept as `wamp_tcp` so the peer still inherits that block's tuning
 %% from `bondy_ct`'s `?ENV` — `ping`, `proxy_protocol`, and the stream-socket
 %% options — since a listener's option block is read at `[Name, ...]`. The bind
@@ -168,7 +159,6 @@ progressive_across_cluster(Config) ->
         registration_not_visible_on_node1
     ),
 
-    %% Caller on node1.
     Caller = connect(?NODE1_WAMP_PORT),
     {ok, Token} = bondy_connect_client:call_async(Caller, ?PROC, [], #{}, #{
         receive_progress => true
@@ -596,7 +586,6 @@ progressive_input_remote_callee_death_errors_caller(Config) ->
         after 5000 -> ct:fail(no_worker)
         end,
 
-    %% Kill the callee mid-stream.
     ok = bondy_connect_client:disconnect(Callee),
 
     %% The caller must receive a terminal error, not hang.

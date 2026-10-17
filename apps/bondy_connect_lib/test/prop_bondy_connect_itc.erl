@@ -129,9 +129,7 @@ prop_fork_produces_disjoint_ids() ->
         stamp(),
         begin
             {S1, S2} = bondy_connect_itc:fork(S),
-            %% Joining forked stamps should reconstruct original event
             Joined = bondy_connect_itc:join(S1, S2),
-            %% The event component should be equal
             element(2, Joined) =:= element(2, S)
         end
     ).
@@ -159,10 +157,7 @@ prop_event_increases_stamp() ->
         non_anonymous_stamp(),
         begin
             S1 = bondy_connect_itc:event(S),
-            %% After event, S1 should be greater than or equal to S
             bondy_connect_itc:leq(S, S1) andalso
-                %% And S1 should NOT be less than or equal to S
-                %% (i.e., it's strictly greater or concurrent)
                 not bondy_connect_itc:leq(S1, S)
         end
     ).
@@ -197,9 +192,7 @@ prop_join_is_associative() ->
         {S1, S2, S3},
         stamp_triple(),
         begin
-            %% join(S1, join(S2, S3))
             J1 = bondy_connect_itc:join(S1, bondy_connect_itc:join(S2, S3)),
-            %% join(join(S1, S2), S3)
             J2 = bondy_connect_itc:join(bondy_connect_itc:join(S1, S2), S3),
             J1 =:= J2
         end
@@ -231,10 +224,8 @@ prop_leq_is_transitive() ->
         S,
         non_anonymous_stamp(),
         begin
-            %% Create a chain: S <= S' <= S''
             S1 = bondy_connect_itc:event(S),
             S2 = bondy_connect_itc:event(S1),
-            %% If S <= S1 and S1 <= S2, then S <= S2
             (bondy_connect_itc:leq(S, S1) andalso bondy_connect_itc:leq(S1, S2)) =:=
                 bondy_connect_itc:leq(S, S2)
         end
@@ -292,9 +283,7 @@ prop_peek_creates_anonymous() ->
         stamp(),
         begin
             {Anonymous, Original} = bondy_connect_itc:peek(S),
-            %% Anonymous stamp has Id = 0
             element(1, Anonymous) =:= 0 andalso
-                %% Original keeps the same Id
                 element(1, Original) =:= element(1, S)
         end
     ).
@@ -309,7 +298,6 @@ prop_operations_preserve_validity() ->
         S,
         non_anonymous_stamp(),
         begin
-            %% Test all operations
             {S1, S2} = bondy_connect_itc:fork(S),
             S3 = bondy_connect_itc:event(S),
             S4 = bondy_connect_itc:join(S1, S2),

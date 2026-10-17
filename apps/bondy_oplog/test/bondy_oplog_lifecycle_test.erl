@@ -90,12 +90,10 @@ stop_survives_missing_registry_row() ->
     {ok, _} = bondy_oplog_test_projection:start_instance(Id),
     ?assert(lists:member(Id, bondy_oplog:list_instances())),
 
-    %% Mint the zombie: drop the row, keep the subtree.
     ok = bondy_oplog_registry:unregister(Id),
     ?assertEqual(undefined, bondy_oplog_registry:sup_pid(Id)),
     ?assertNot(lists:member(Id, bondy_oplog:list_instances())),
 
-    %% Invisible, but still killable through the supervisor fallback.
     ?assertEqual(ok, bondy_oplog:stop_instance(Id)),
     ?assertNot(lists:member(Id, bondy_oplog:list_instances())),
     ?assertEqual({error, not_found}, bondy_oplog:stop_instance(Id)).

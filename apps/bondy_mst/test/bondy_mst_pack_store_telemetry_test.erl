@@ -10,10 +10,6 @@
 %%   [bondy_mst, page_store, seal_incoming]  — every non-noop seal
 %%   [bondy_mst, page_store, gc]             — every gc/2 call
 %%
-%% The `recovery` event in design §13 is deferred until the dedicated
-%% recovery module (QA item #1) lands; there is no current code path
-%% that performs a recovery.
-%%
 %% Each test wraps its body in `with_telemetry/1`, which attaches a
 %% handler that forwards events to the calling process via
 %% `self() ! {telemetry, ...}`. Handler is detached + mailbox drained

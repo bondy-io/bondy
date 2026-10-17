@@ -4,9 +4,6 @@
 %% and installs it in the MST, and `get` returns it through the
 %% registry-published MST handle.
 %%
-%% The crash scenarios are the supervision-flavour ones from the
-%% implementation plan:
-%%
 %% - kill the applier mid-replay; the subtree's one_for_all restart
 %%   brings everything back and the same events become readable again.
 %% - kill the WAL writer; the subtree restarts, recovery runs, the

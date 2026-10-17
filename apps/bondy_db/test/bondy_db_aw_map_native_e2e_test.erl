@@ -7,8 +7,6 @@
 %% (`bondy_oplog_crdt_aw_map`) through the real tier_2 substrate
 %% (`bondy_db:apply/4` → `apply_with_context` stamps the cell's observed
 %% causal context into the event `meta` → `aw_map:apply_op/4` consumes it).
-%% This is now the only aw_map: the former state-based fold and its
-%% server-side `resolve_event` round-trip were removed in this rollout.
 %%
 %% Each (Bucket, Key) cell holds an entire aw_map; ops are
 %% `{put, MapKey, V}` / `{rmv, MapKey}`. Exercises the seams the pure

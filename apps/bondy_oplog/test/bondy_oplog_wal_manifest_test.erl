@@ -126,8 +126,6 @@ rotation_preserves_existing_first_key_test() ->
     %% overwrite it.
     M0 = bondy_log_manifest:new(instance_id(), 0, []),
     M1 = bondy_log_manifest:with_current_segment(M0, 1, 1000),
-    %% Now rotate again from 1 to 2; the old "0" entry's first_hlc must
-    %% remain 1000 even though we pass a different value through.
     M2 = bondy_log_manifest:with_current_segment(M1, 2, 2000),
     Live = bondy_log_manifest:live_segments(M2),
     ?assertEqual({0, 1000}, lists:keyfind(0, 1, Live)),
@@ -165,8 +163,6 @@ write_creates_no_tmp_residue_on_success_test() ->
     end).
 
 write_overwrites_prior_manifest_test() ->
-    %% Atomic rename overwrites the prior file. After two writes, the
-    %% second one is what's read back; no tmp residue.
     with_dir(fun(Dir) ->
         M0 = bondy_log_manifest:new(instance_id(), 0, []),
         ok = bondy_log_manifest:write(Dir, M0),
@@ -189,7 +185,6 @@ crash_before_rename_recovers_test() ->
     with_dir(fun(Dir) ->
         M0 = bondy_log_manifest:new(instance_id(), 0, []),
         ok = bondy_log_manifest:write(Dir, M0),
-        %% Inject a partial tmp file alongside the good manifest.
         TmpPath = filename:join(
             Dir,
             ?BONDY_OPLOG_WAL_MANIFEST_TMP_FILENAME
@@ -197,7 +192,6 @@ crash_before_rename_recovers_test() ->
         ok = file:write_file(TmpPath, <<"partial garbage">>),
         {ok, M1} = bondy_log_manifest:read(Dir),
         ?assertEqual(0, bondy_log_manifest:current_segment(M1)),
-        %% A second successful write must overwrite the partial tmp.
         M2 = bondy_log_manifest:with_current_segment(M1, 1, 1000),
         ok = bondy_log_manifest:write(Dir, M2),
         {ok, M3} = bondy_log_manifest:read(Dir),

@@ -90,7 +90,6 @@ bignum_positive_test() ->
     Encoded = iolist_to_binary(bondy_cbor:encode(BigNum)),
     ?assertEqual(BigNum, bondy_cbor:decode(Encoded)).
 
-%% Negative integers
 negative_1_test() ->
     ?assertEqual(<<16#20>>, iolist_to_binary(bondy_cbor:encode(-1))),
     ?assertEqual(-1, bondy_cbor:decode(<<16#20>>)).
@@ -148,7 +147,6 @@ float_100000_0_test() ->
     ?assertEqual(100000.0, bondy_cbor:decode(Encoded)).
 
 float_3_4028234663852886e38_test() ->
-    %% Large float
     F = 3.4028234663852886e+38,
     Encoded = iolist_to_binary(bondy_cbor:encode(F)),
     ?assertEqual(F, bondy_cbor:decode(Encoded)).
@@ -161,7 +159,6 @@ float_neg_4_1_test() ->
     Encoded = iolist_to_binary(bondy_cbor:encode(-4.1)),
     ?assert(abs(-4.1 - bondy_cbor:decode(Encoded)) < 0.0001).
 
-%% Half-precision decoding
 half_float_0_test() ->
     %% Half-precision 0.0
     ?assertEqual(0.0, bondy_cbor:decode(<<16#F9, 16#00, 16#00>>)).
@@ -187,7 +184,6 @@ half_float_subnormal_test() ->
     Decoded = bondy_cbor:decode(<<16#F9, 16#00, 16#01>>),
     ?assert(abs(5.960464477539063e-8 - Decoded) < 1.0e-15).
 
-%% Single-precision decoding
 single_float_100000_test() ->
     %% Single-precision 100000.0
     ?assertEqual(
@@ -263,7 +259,6 @@ bytes_4_test() ->
         Bytes, bondy_cbor:decode(<<16#44, 16#01, 16#02, 16#03, 16#04>>)
     ).
 
-%% Indefinite-length byte string
 bytes_indefinite_test() ->
     %% h'0102030405' encoded as indefinite chunks
     CBOR = <<16#5F, 16#42, 16#01, 16#02, 16#43, 16#03, 16#04, 16#05, 16#FF>>,
@@ -314,7 +309,6 @@ text_emoji_test() ->
         bondy_cbor:decode(<<16#64, 16#F0, 16#90, 16#85, 16#91>>)
     ).
 
-%% Indefinite-length text string
 text_indefinite_test() ->
     %% "streaming" encoded as indefinite chunks
     CBOR = <<16#7F, 16#65, "strea", 16#64, "ming", 16#FF>>,
@@ -341,14 +335,12 @@ array_123_test() ->
     ?assertEqual([1, 2, 3], bondy_cbor:decode(<<16#83, 16#01, 16#02, 16#03>>)).
 
 array_nested_test() ->
-    %% [1, [2, 3], [4, 5]]
     Expected = [1, [2, 3], [4, 5]],
     CBOR = <<16#83, 16#01, 16#82, 16#02, 16#03, 16#82, 16#04, 16#05>>,
     ?assertEqual(CBOR, iolist_to_binary(bondy_cbor:encode(Expected))),
     ?assertEqual(Expected, bondy_cbor:decode(CBOR)).
 
 array_25_elements_test() ->
-    %% [1, 2, 3, ..., 25]
     List = lists:seq(1, 25),
     % array(25)
     CBOR =
@@ -358,7 +350,6 @@ array_25_elements_test() ->
             16#19>>,
     ?assertEqual(List, bondy_cbor:decode(CBOR)).
 
-%% Indefinite-length array
 array_indefinite_test() ->
     CBOR = <<16#9F, 16#01, 16#02, 16#03, 16#FF>>,
     ?assertEqual([1, 2, 3], bondy_cbor:decode(CBOR)).
@@ -379,7 +370,6 @@ map_empty_test() ->
     ?assertEqual(#{}, bondy_cbor:decode(<<16#A0>>)).
 
 map_simple_test() ->
-    %% {1: 2, 3: 4}
     Map = #{1 => 2, 3 => 4},
     Encoded = iolist_to_binary(bondy_cbor:encode(Map)),
     ?assertEqual(Map, bondy_cbor:decode(Encoded)).
@@ -404,7 +394,6 @@ map_mixed_keys_test() ->
     },
     ?assertEqual(Expected, bondy_cbor:decode(CBOR)).
 
-%% Indefinite-length map
 map_indefinite_test() ->
     %% {_ "a": 1, "b": [_ 2, 3]}
     CBOR =
@@ -470,7 +459,6 @@ tag_self_describe_test() ->
     ?assertEqual(<<"dIETF">>, bondy_cbor:decode(CBOR)).
 
 tag_custom_encode_test() ->
-    %% Custom tag encoding
     Encoded = iolist_to_binary(bondy_cbor:encode({tag, 100, <<"test">>})),
     {tag, 100, Value} = bondy_cbor:decode(Encoded),
     ?assertEqual(<<"test">>, Value).
@@ -555,9 +543,7 @@ deterministic_map_order_test() ->
     %% Keys should be sorted by encoded bytes
     Map = #{10 => <<"ten">>, 1 => <<"one">>, 100 => <<"hundred">>},
     Encoded = bondy_cbor:encode_deterministic(Map),
-    %% Verify determinism - same encoding every time
     ?assertEqual(Encoded, bondy_cbor:encode_deterministic(Map)),
-    %% Decode and verify content
     Decoded = bondy_cbor:decode(Encoded),
     ?assertEqual(Map, Decoded).
 
@@ -682,25 +668,21 @@ boundary_negative_test() ->
     ?assertEqual(-256, bondy_cbor:decode(<<16#38, 16#FF>>)).
 
 deeply_nested_test() ->
-    %% 10 levels of nesting
     Nested = lists:foldl(fun(N, Acc) -> [N, Acc] end, [], lists:seq(1, 10)),
     Encoded = iolist_to_binary(bondy_cbor:encode(Nested)),
     ?assertEqual(Nested, bondy_cbor:decode(Encoded)).
 
 large_array_test() ->
-    %% Array with 1000 elements
     Large = lists:seq(1, 1000),
     Encoded = iolist_to_binary(bondy_cbor:encode(Large)),
     ?assertEqual(Large, bondy_cbor:decode(Encoded)).
 
 large_map_test() ->
-    %% Map with 100 entries
     Large = maps:from_list([{N, N * 2} || N <- lists:seq(1, 100)]),
     Encoded = iolist_to_binary(bondy_cbor:encode(Large)),
     ?assertEqual(Large, bondy_cbor:decode(Encoded)).
 
 mixed_key_types_test() ->
-    %% Map with different key types
     Map = #{1 => <<"int">>, <<"a">> => <<"string">>, true => <<"bool">>},
     Encoded = iolist_to_binary(bondy_cbor:encode(Map)),
     ?assertEqual(Map, bondy_cbor:decode(Encoded)).

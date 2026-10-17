@@ -215,7 +215,6 @@ path_missing_var_throws(_Config) ->
     ).
 
 path_var_consumed_from_kwargs(_Config) ->
-    %% After interpolation, the used var should not be in remaining kwargs
     KWArgs = #{<<"id">> => <<"123">>},
     {_Path, Remaining} =
         bondy_http_connector_callee_handler:interpolate_path(
@@ -298,9 +297,7 @@ route_post_with_kwargs(_Config) ->
         <<"https://api.example.com/items">>,
         #{<<"name">> => <<"widget">>}
     ),
-    %% URL should not have query params
     ?assertEqual(<<"https://api.example.com/items">>, Url),
-    %% Body should be JSON
     Decoded = json:decode(Body),
     ?assertEqual(#{<<"name">> => <<"widget">>}, Decoded).
 
@@ -452,7 +449,6 @@ handle_call_ready_service(_Config) ->
     ),
 
     {ok, Vars} = bondy_http_connector_manager:service_readiness(ServiceName),
-    %% Both vars are returned
     ?assertEqual(<<"keep">>, maps:get(existing, Vars)),
     ?assertEqual(<<"from-secret">>, maps:get(client_id, Vars)).
 

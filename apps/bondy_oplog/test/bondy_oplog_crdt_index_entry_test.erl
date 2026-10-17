@@ -59,7 +59,6 @@ golden_bytes_test() ->
         <<0, 0:64/big-unsigned, 0:32/big-unsigned>>,
         ?CRDT:encode_state({dead, <<>>, 0})
     ),
-    %% And the decode is the exact inverse of those golden bytes.
     ?assertEqual(
         {live, <<"xy">>, 7},
         ?CRDT:decode_state(<<1, 7:64/big-unsigned, 2:32/big-unsigned, "xy">>)

@@ -85,7 +85,6 @@ gc_sweeps_idle() ->
     %% Age the entry past any TTL and drive a sweep cycle directly.
     true = ets:update_element(bondy_rate_limiter, K, {3, 0}),
     bondy_rate_limiter ! sweep,
-    %% Poll for the sweep to land.
     ok = wait_gone(bondy_rate_limiter, K, 50),
     ?assertEqual([], ets:lookup(bondy_rate_limiter, K)).
 

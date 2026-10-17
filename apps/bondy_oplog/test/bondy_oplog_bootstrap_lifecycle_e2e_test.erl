@@ -1,6 +1,3 @@
-%% Integration tests for the bootstrap-lifecycle gate (PR-1 /
-%% catalogue expansion plan §2).
-%%
 %% Exercises the applier gate against a persistent instance: events
 %% appended while `pre_bootstrap` must NOT be installed into the MST
 %% by the applier; once `mark_live/1` flips the lifecycle, the
@@ -84,7 +81,6 @@ mark_live_drains_backlog() ->
          || I <- lists:seq(1, N)
         ],
 
-        %% Gated.
         ?assertEqual(
             {error, timeout}, bondy_oplog:await_apply(Id, 200)
         ),
@@ -94,7 +90,6 @@ mark_live_drains_backlog() ->
 
         ?assertEqual(live, lifecycle_state(Id)),
         ?assertEqual(N, bondy_oplog:size(Id)),
-        %% MST is now non-empty.
         ?assertNotEqual(undefined, bondy_oplog_instance:root_hash(Id))
     after
         _ = bondy_oplog:stop_instance(Id),
@@ -161,7 +156,6 @@ seed_true_starts_live() ->
         ],
         ok = bondy_oplog:await_apply(Id),
         ?assertEqual(2, bondy_oplog:size(Id)),
-        %% Flag file materialised.
         FlagPath = filename:join([
             bondy_oplog_path:storage_path(Id, Tmp, sharded),
             "lifecycle.live"

@@ -6,8 +6,6 @@
 %% fraction of dead pages in a single sealed pack before paying for
 %% a rewrite. Multi-pack coalescing is unaffected — when there are
 %% 2+ sealed packs the GC always merges them into one.
-%%
-%% Pack-store QA item #9.
 %% =============================================================================
 
 -module(bondy_mst_pack_store_gc_threshold_test).

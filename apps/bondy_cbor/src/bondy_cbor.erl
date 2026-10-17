@@ -308,7 +308,6 @@ Uses hand-unrolled encoding for small arrays (0-15 elements) for performance,
 similar to msgpack's optimization strategy.
 """.
 -spec encode_list(list(), encoder()) -> iodata().
-%% Hand-unrolled cases for small arrays (fixarray: 0x80-0x8F)
 encode_list([], _Enc) ->
     <<16#80>>;
 encode_list([A], Enc) ->
@@ -473,12 +472,10 @@ encode_list([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O], Enc) ->
         Enc(N, Enc),
         Enc(O, Enc)
     ];
-%% General case for larger arrays - use binary comprehension
 encode_list(List, Enc) when is_list(List), is_function(Enc, 2) ->
     Len = length(List),
     [encode_head(?MT_ARRAY, Len) | encode_list_elements(List, Enc)].
 
-%% @private Encode list elements efficiently
 encode_list_elements(List, Enc) ->
     [Enc(E, Enc) || E <- List].
 
@@ -522,11 +519,9 @@ encode_map(Map, Enc) when map_size(Map) =:= 4 ->
         Enc(V4, Enc)
     ];
 encode_map(Map, Enc) when is_map(Map), is_function(Enc, 2) ->
-    %% General case: use iterator for efficiency
     Size = map_size(Map),
     [encode_head(?MT_MAP, Size) | encode_map_pairs(maps:iterator(Map), Enc)].
 
-%% @private Encode map pairs using iterator
 encode_map_pairs(Iter, Enc) ->
     case maps:next(Iter) of
         none ->
@@ -544,7 +539,6 @@ This is used for deterministic encoding (RFC 8949 Section 4.2.1).
 encode_map_sorted(Map, _Enc) when map_size(Map) =:= 0 ->
     <<16#A0>>;
 encode_map_sorted(Map, Enc) when is_map(Map), is_function(Enc, 2) ->
-    %% Encode all key-value pairs, converting keys to binary for sorting
     %% Using maps:to_list is faster than maps:fold for this use case
     Pairs = maps:to_list(Map),
     EncodedPairs = [
@@ -595,13 +589,10 @@ encoder function for nested structures, following the same API as json:encode_va
 %% Tiny positive integers (0-23): single byte, most common case
 encode_value(N, _Enc) when is_integer(N), N >= 0, N < 24 ->
     <<N>>;
-%% Small positive integers (24-255): two bytes
 encode_value(N, _Enc) when is_integer(N), N >= 24, N =< 16#FF ->
     <<24, N:8>>;
-%% Medium positive integers (256-65535): three bytes
 encode_value(N, _Enc) when is_integer(N), N >= 16#100, N =< 16#FFFF ->
     <<25, N:16>>;
-%% Fallback to general integer encoding for larger values and negatives
 encode_value(N, _Enc) when is_integer(N) ->
     encode_integer(N);
 encode_value(F, _Enc) when is_float(F) ->
@@ -760,7 +751,6 @@ format(Term) ->
 %%====================================================================
 
 %% @private
-%% Encode the header byte(s) for a major type and argument.
 -spec encode_head(0..7, non_neg_integer()) -> binary().
 encode_head(MT, Arg) when Arg < 24 ->
     <<(MT bsl 5 bor Arg)>>;
@@ -779,7 +769,6 @@ encode_head(MT, Arg) when Arg =< ?MAX_UINT64 ->
 encode_unsigned(N) when N =< ?MAX_UINT64 ->
     encode_head(?MT_UNSIGNED, N);
 encode_unsigned(N) ->
-    %% Bignum: tag 2 + byte string of big-endian bytes
     Bytes = binary:encode_unsigned(N),
     [encode_head(?MT_TAG, ?TAG_POSITIVE_BIGNUM), encode_binary(Bytes)].
 
@@ -789,25 +778,19 @@ encode_unsigned(N) ->
 encode_negative(N) when N >= -1 - ?MAX_UINT64 ->
     encode_head(?MT_NEGATIVE, -1 - N);
 encode_negative(N) ->
-    %% Negative bignum: tag 3 + byte string of big-endian bytes of (-1 - n)
     Bytes = binary:encode_unsigned(-1 - N),
     [encode_head(?MT_TAG, ?TAG_NEGATIVE_BIGNUM), encode_binary(Bytes)].
 
 %% @private
-%% Default encoder for encode/1.
 %% Optimizes the most common integer ranges inline to avoid function call overhead.
 %% Inspired by msgpack's approach of fast-pathing common values.
 -spec default_encoder(term(), encoder()) -> iodata().
-%% Tiny positive integers (0-23): single byte, most common case
 default_encoder(N, _Enc) when is_integer(N), N >= 0, N < 24 ->
     <<N>>;
-%% Small positive integers (24-255): two bytes
 default_encoder(N, _Enc) when is_integer(N), N >= 24, N =< 16#FF ->
     <<24, N:8>>;
-%% Medium positive integers (256-65535): three bytes
 default_encoder(N, _Enc) when is_integer(N), N >= 16#100, N =< 16#FFFF ->
     <<25, N:16>>;
-%% Fallback to general integer encoding for larger values and negatives
 default_encoder(N, _Enc) when is_integer(N) ->
     encode_integer(N);
 default_encoder(F, _Enc) when is_float(F) ->
@@ -828,19 +811,14 @@ default_encoder(Term, _Enc) ->
     error({badarg, Term}).
 
 %% @private
-%% Deterministic encoder with shortest encodings and sorted maps.
 %% Optimizes the most common integer ranges inline (same as default_encoder).
 -spec deterministic_encoder(term(), encoder()) -> iodata().
-%% Tiny positive integers (0-23): single byte, most common case
 deterministic_encoder(N, _Enc) when is_integer(N), N >= 0, N < 24 ->
     <<N>>;
-%% Small positive integers (24-255): two bytes
 deterministic_encoder(N, _Enc) when is_integer(N), N >= 24, N =< 16#FF ->
     <<24, N:8>>;
-%% Medium positive integers (256-65535): three bytes
 deterministic_encoder(N, _Enc) when is_integer(N), N >= 16#100, N =< 16#FFFF ->
     <<25, N:16>>;
-%% Fallback to general integer encoding for larger values and negatives
 deterministic_encoder(N, _Enc) when is_integer(N) ->
     encode_integer(N);
 deterministic_encoder(F, _Enc) when is_float(F) ->
@@ -870,19 +848,14 @@ deterministic_encoder(Term, _Enc) ->
 %% representing links as `{cid, binary()}` (tag 42), and rejecting bignums,
 %% NaN/Infinity, `undefined` and every other non-IPLD term.
 -spec dag_encoder(term(), encoder()) -> iodata().
-%% Tiny positive integers (0-23): single byte, most common case
 dag_encoder(N, _Enc) when is_integer(N), N >= 0, N < 24 ->
     <<N>>;
-%% Small positive integers (24-255): two bytes
 dag_encoder(N, _Enc) when is_integer(N), N >= 24, N =< 16#FF ->
     <<24, N:8>>;
-%% Medium positive integers (256-65535): three bytes
 dag_encoder(N, _Enc) when is_integer(N), N >= 16#100, N =< 16#FFFF ->
     <<25, N:16>>;
-%% Remaining unsigned integers up to the 64-bit limit
 dag_encoder(N, _Enc) when is_integer(N), N >= 0, N =< ?MAX_UINT64 ->
     encode_head(?MT_UNSIGNED, N);
-%% Negative integers down to -2^64 (mirror of the unsigned range)
 dag_encoder(N, _Enc) when is_integer(N), N < 0, N >= -1 - ?MAX_UINT64 ->
     encode_head(?MT_NEGATIVE, -1 - N);
 %% Integers outside [-2^64, 2^64-1] would need bignums, which DAG-CBOR forbids
@@ -962,36 +935,29 @@ encode_cid(Cid) when is_binary(Cid) ->
     ].
 
 %% @private
-%% Encode a float using the shortest representation that preserves the value.
 %% Optimized with early-exit: checks exponent range before attempting conversion.
 %% Inspired by msgpack's approach of checking feasibility before expensive operations.
 -spec encode_float_shortest(float()) -> binary().
 encode_float_shortest(F) ->
-    %% Extract exponent to determine which formats might work
     <<_Sign:1, Exp:11, _Frac:52>> = <<F:64/float>>,
     %% Biased exponent: 0 = zero/subnormal, 2047 = inf/nan
     %% Half-float range: exp in [1009..1038] for normal numbers (biased)
     %% Single-float range: exp in [897..1150] for normal numbers (biased)
     case Exp of
         0 ->
-            %% Zero or subnormal - try half first
             try_shortest_float(F);
         2047 ->
             %% Infinity or NaN - half-float can represent these
             try_shortest_float(F);
         _ when Exp >= 1009, Exp =< 1038 ->
-            %% Within half-float range, try half first
             try_shortest_float(F);
         _ when Exp >= 897, Exp =< 1150 ->
-            %% Outside half but within single range, skip half
             try_single_or_double(F);
         _ ->
-            %% Outside both ranges, must use double
             <<(?MT_SIMPLE bsl 5 bor ?AI_DOUBLE_FLOAT), F:64/float>>
     end.
 
 %% @private
-%% Try half -> single -> double encoding (full cascade).
 try_shortest_float(F) ->
     case encode_half_float(F) of
         {ok, Bin} -> Bin;
@@ -999,7 +965,6 @@ try_shortest_float(F) ->
     end.
 
 %% @private
-%% Try single -> double encoding (skip half).
 try_single_or_double(F) ->
     case encode_single_float(F) of
         {ok, Bin} -> Bin;
@@ -1007,7 +972,6 @@ try_single_or_double(F) ->
     end.
 
 %% @private
-%% Try to encode as half-precision float.
 -spec encode_half_float(float()) -> {ok, binary()} | error.
 encode_half_float(F) ->
     Half = float_to_half(F),
@@ -1017,7 +981,6 @@ encode_half_float(F) ->
     end.
 
 %% @private
-%% Try to encode as single-precision float.
 -spec encode_single_float(float()) -> {ok, binary()} | error.
 encode_single_float(F) ->
     Single = <<F:32/float>>,
@@ -1028,7 +991,6 @@ encode_single_float(F) ->
     end.
 
 %% @private
-%% Convert a float to IEEE 754 half-precision format.
 -spec float_to_half(float()) -> 0..65535.
 float_to_half(F) ->
     <<D:64/bits>> = <<F:64/float>>,
@@ -1068,7 +1030,6 @@ float_to_half(F) ->
     end.
 
 %% @private
-%% Convert IEEE 754 half-precision to float.
 -spec half_to_float(0..65535) -> float().
 half_to_float(H) ->
     Sign = H bsr 15,
@@ -1127,7 +1088,6 @@ float_nan() ->
 %%====================================================================
 
 %% @private
-%% Decode a single CBOR value.
 -spec decode_value(binary()) -> {decode_value(), binary()}.
 decode_value(<<>>) ->
     error(incomplete);
@@ -1137,7 +1097,6 @@ decode_value(<<IB, Rest/binary>>) ->
     decode_major_type(MT, AI, Rest).
 
 %% @private
-%% Dispatch based on major type.
 -spec decode_major_type(0..7, 0..31, binary()) -> {decode_value(), binary()}.
 decode_major_type(?MT_UNSIGNED, AI, Bin) ->
     decode_unsigned(AI, Bin);
@@ -1158,7 +1117,6 @@ decode_major_type(?MT_SIMPLE, AI, Bin) ->
     decode_simple(AI, Bin).
 
 %% @private
-%% Decode argument value from additional info.
 -spec decode_arg(0..31, binary()) -> {non_neg_integer(), binary()}.
 decode_arg(AI, Bin) when AI < 24 ->
     {AI, Bin};
@@ -1179,13 +1137,11 @@ decode_arg(_, <<>>) ->
     error(incomplete).
 
 %% @private
-%% Decode unsigned integer (major type 0).
 -spec decode_unsigned(0..31, binary()) -> {non_neg_integer(), binary()}.
 decode_unsigned(AI, Bin) ->
     decode_arg(AI, Bin).
 
 %% @private
-%% Decode byte string (major type 2).
 -spec decode_bytes(0..31, binary()) -> {binary(), binary()}.
 decode_bytes(?AI_INDEFINITE, Bin) ->
     decode_bytes_indefinite(Bin, []);
@@ -1215,7 +1171,6 @@ decode_bytes_indefinite(<<>>, _Acc) ->
     error(incomplete).
 
 %% @private
-%% Decode text string (major type 3).
 %% UTF-8 validation is skipped for performance (inspired by msgpack's approach).
 %% The RFC 8949 requires text strings to be valid UTF-8, but validation
 %% can be deferred to the application layer when needed.
@@ -1228,7 +1183,6 @@ decode_text(AI, Bin) ->
     {Len, Rest} = decode_arg(AI, Bin),
     case Rest of
         <<Text:Len/binary, Rest2/binary>> ->
-            %% No UTF-8 validation for performance (msgpack-style)
             {Text, Rest2};
         _ ->
             error(incomplete)
@@ -1251,7 +1205,6 @@ decode_text_indefinite(<<>>, _Acc) ->
     error(incomplete).
 
 %% @private
-%% Decode array (major type 4).
 %% Uses <<Bin/binary>> wrapper for binary match context reuse optimization.
 %% This pattern allows the BEAM to reuse the match context across recursive calls,
 %% avoiding heap allocation for each element. Inspired by msgpack's unpacker.
@@ -1263,7 +1216,6 @@ decode_array(AI, Bin) ->
     decode_array_n(Len, Rest, []).
 
 %% @private
-%% Optimized array decoder with binary match context reuse.
 %% Do not remove the <<Bin/binary>> wrapper - it enables match context reuse optimization.
 decode_array_n(0, <<Bin/binary>>, Acc) ->
     {lists:reverse(Acc), Bin};
@@ -1279,7 +1231,6 @@ decode_array_indefinite(<<Bin/binary>>, Acc) ->
     decode_array_indefinite(Rest, [Value | Acc]).
 
 %% @private
-%% Decode map (major type 5).
 %% Uses proplist accumulation then maps:from_list for efficiency.
 %% Uses <<Bin/binary>> wrapper for binary match context reuse optimization.
 %% Inspired by msgpack's unpacker.
@@ -1291,7 +1242,6 @@ decode_map(AI, Bin) ->
     decode_map_n(Len, Rest, []).
 
 %% @private
-%% Optimized map decoder with binary match context reuse.
 %% Do not remove the <<Bin/binary>> wrapper - it enables match context reuse optimization.
 %% Uses proplist accumulation to avoid repeated map updates (O(1) prepend vs O(log n) map update).
 decode_map_n(0, <<Bin/binary>>, Acc) ->
@@ -1310,7 +1260,6 @@ decode_map_indefinite(<<Bin/binary>>, Acc) ->
     decode_map_indefinite(Rest2, [{Key, Value} | Acc]).
 
 %% @private
-%% Decode tag (major type 6).
 -spec decode_tag(0..31, binary()) -> {decode_value(), binary()}.
 decode_tag(AI, Bin) ->
     {Tag, Rest} = decode_arg(AI, Bin),
@@ -1318,7 +1267,6 @@ decode_tag(AI, Bin) ->
     decode_tagged(Tag, Value, Rest2).
 
 %% @private
-%% Convert common tags to native types.
 -spec decode_tagged(tag(), decode_value(), binary()) ->
     {decode_value(), binary()}.
 decode_tagged(?TAG_POSITIVE_BIGNUM, Bytes, Rest) when is_binary(Bytes) ->
@@ -1326,13 +1274,11 @@ decode_tagged(?TAG_POSITIVE_BIGNUM, Bytes, Rest) when is_binary(Bytes) ->
 decode_tagged(?TAG_NEGATIVE_BIGNUM, Bytes, Rest) when is_binary(Bytes) ->
     {-1 - binary:decode_unsigned(Bytes), Rest};
 decode_tagged(?TAG_SELF_DESCRIBE, Value, Rest) ->
-    %% Self-describing CBOR - unwrap the tag
     {Value, Rest};
 decode_tagged(Tag, Value, Rest) ->
     {{tag, Tag, Value}, Rest}.
 
 %% @private
-%% Decode simple values and floats (major type 7).
 -spec decode_simple(0..31, binary()) -> {decode_value(), binary()}.
 decode_simple(?SIMPLE_FALSE, Bin) ->
     {false, Bin};
@@ -1343,7 +1289,6 @@ decode_simple(?SIMPLE_NULL, Bin) ->
 decode_simple(?SIMPLE_UNDEFINED, Bin) ->
     {undefined, Bin};
 decode_simple(24, <<V, Rest/binary>>) when V >= 32 ->
-    %% Simple value in following byte
     {{simple, V}, Rest};
 decode_simple(?AI_HALF_FLOAT, <<H:16, Rest/binary>>) ->
     {half_to_float(H), Rest};
@@ -1363,7 +1308,6 @@ decode_simple(_, <<>>) ->
 %%====================================================================
 
 %% @private
-%% Extract decoder callbacks once at entry point.
 %% This optimization avoids repeated maps:get/3 calls during recursive
 %% array/map decoding. Inspired by OTP json.erl's callback extraction pattern.
 -spec extract_callbacks(decoders()) -> #dec_callbacks{}.
@@ -1389,15 +1333,10 @@ when
 decode_value_custom(<<>>, _Acc, _Decoders) ->
     error(incomplete);
 decode_value_custom(<<IB, Rest/binary>>, Acc, Decoders) ->
-    %% Extract callbacks once at entry point for efficient recursive decoding
     Cbs = extract_callbacks(Decoders),
     decode_value_cached(<<IB, Rest/binary>>, Acc, Cbs).
 
 %% @private
-%% Decode with pre-extracted callbacks (avoids repeated maps:get calls).
-%% This is the core optimization: callbacks are extracted once and passed
-%% through all recursive calls, eliminating O(N) maps:get lookups for
-%% arrays/maps of N elements. Pattern inspired by OTP json.erl.
 -spec decode_value_cached(binary(), Acc, #dec_callbacks{}) ->
     {decode_value(), binary(), Acc}
 when
@@ -1410,7 +1349,6 @@ decode_value_cached(<<IB, Rest/binary>>, Acc, Cbs) ->
     decode_major_type_cached(MT, AI, Rest, Acc, Cbs).
 
 %% @private
-%% Dispatch to type-specific decoders using cached callbacks.
 decode_major_type_cached(?MT_UNSIGNED, AI, Bin, Acc, _Cbs) ->
     {N, Rest} = decode_arg(AI, Bin),
     {N, Rest, Acc};
@@ -1445,8 +1383,6 @@ decode_major_type_cached(?MT_SIMPLE, AI, Bin, Acc, Cbs) ->
     {Value2, Rest, Acc}.
 
 %% @private
-%% Array decoding with cached callbacks - callbacks are passed directly,
-%% eliminating maps:get calls on each element.
 decode_array_cached(?AI_INDEFINITE, Bin, Acc, Cbs) ->
     ArrayStart = Cbs#dec_callbacks.array_start,
     Acc1 = ArrayStart(indefinite, Acc),
@@ -1458,7 +1394,6 @@ decode_array_cached(AI, Bin, Acc, Cbs) ->
     decode_array_n_cached(Len, Rest, [], Acc1, Cbs).
 
 %% @private
-%% Decode N array elements with cached callbacks.
 decode_array_n_cached(0, Bin, Items, Acc, Cbs) ->
     ArrayFinish = Cbs#dec_callbacks.array_finish,
     {Result, Acc2} = ArrayFinish(Acc),
@@ -1475,7 +1410,6 @@ decode_array_n_cached(N, Bin, Items, Acc, Cbs) ->
     decode_array_n_cached(N - 1, Rest, [Value | Items], Acc2, Cbs).
 
 %% @private
-%% Decode indefinite array with cached callbacks.
 decode_array_indefinite_cached(<<16#FF, Rest/binary>>, Items, Acc, Cbs) ->
     ArrayFinish = Cbs#dec_callbacks.array_finish,
     {Result, Acc2} = ArrayFinish(Acc),
@@ -1492,8 +1426,6 @@ decode_array_indefinite_cached(Bin, Items, Acc, Cbs) ->
     decode_array_indefinite_cached(Rest, [Value | Items], Acc2, Cbs).
 
 %% @private
-%% Map decoding with cached callbacks - callbacks are passed directly,
-%% eliminating maps:get calls on each key-value pair.
 decode_map_cached(?AI_INDEFINITE, Bin, Acc, Cbs) ->
     MapStart = Cbs#dec_callbacks.map_start,
     Acc1 = MapStart(indefinite, Acc),
@@ -1505,7 +1437,6 @@ decode_map_cached(AI, Bin, Acc, Cbs) ->
     decode_map_n_cached(Len, Rest, [], Acc1, Cbs).
 
 %% @private
-%% Decode N map pairs with cached callbacks.
 %% Uses proplist accumulation then maps:from_list for efficiency
 %% (inspired by msgpack's approach - avoids repeated map updates).
 decode_map_n_cached(0, Bin, Pairs, Acc, Cbs) ->
@@ -1525,7 +1456,6 @@ decode_map_n_cached(N, Bin, Pairs, Acc, Cbs) ->
     decode_map_n_cached(N - 1, Rest2, [{Key, Value} | Pairs], Acc3, Cbs).
 
 %% @private
-%% Decode indefinite map with cached callbacks.
 decode_map_indefinite_cached(<<16#FF, Rest/binary>>, Pairs, Acc, Cbs) ->
     MapFinish = Cbs#dec_callbacks.map_finish,
     {Result, Acc2} = MapFinish(Acc),
@@ -1543,7 +1473,6 @@ decode_map_indefinite_cached(Bin, Pairs, Acc, Cbs) ->
     decode_map_indefinite_cached(Rest2, [{Key, Value} | Pairs], Acc3, Cbs).
 
 %% @private
-%% Continue decoding from a continuation state.
 -spec continue_decode(binary(), list(), term(), decoders()) ->
     {decode_value(), binary(), term()}.
 continue_decode(Bin, [], Acc, Decoders) ->
@@ -1858,5 +1787,4 @@ escape_string(<<C, Rest/binary>>, Acc) when C < 32 ->
 escape_string(<<C/utf8, Rest/binary>>, Acc) when C < 128 ->
     escape_string(Rest, [C | Acc]);
 escape_string(<<C/utf8, Rest/binary>>, Acc) ->
-    %% Multi-byte UTF-8 character, convert to list of bytes
     escape_string(Rest, lists:reverse(binary_to_list(<<C/utf8>>)) ++ Acc).

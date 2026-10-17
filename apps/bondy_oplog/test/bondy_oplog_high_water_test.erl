@@ -6,13 +6,11 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-%% Sanity: a fresh ref reads as `{ok, no_watermark}`.
 new_ref_reads_as_no_watermark_test() ->
     Ref = bondy_oplog_high_water:new(),
     ?assertEqual({ok, no_watermark}, bondy_oplog_high_water:read(Ref)),
     ?assertEqual(0, bondy_oplog_high_water:read_raw(Ref)).
 
-%% Advance from zero is observable.
 advance_from_zero_test() ->
     Ref = bondy_oplog_high_water:new(),
     ok = bondy_oplog_high_water:advance(Ref, 42),
@@ -34,7 +32,6 @@ advance_same_value_test() ->
     ok = bondy_oplog_high_water:advance(Ref, 200),
     ?assertEqual({ok, 200}, bondy_oplog_high_water:read(Ref)).
 
-%% Advance to a higher value updates the watermark.
 advance_to_higher_test() ->
     Ref = bondy_oplog_high_water:new(),
     ok = bondy_oplog_high_water:advance(Ref, 10),

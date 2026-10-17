@@ -56,20 +56,17 @@ end_per_testcase(_TestCase, _Config) ->
 %% =============================================================================
 
 subprotocol_validation(_Config) ->
-    %% {http_longpoll, text, json} should be valid
     ?assertMatch(
         {ok, {http_longpoll, text, json}},
         bondy_wamp_protocol:validate_subprotocol({http_longpoll, text, json})
     ),
 
-    %% Unsupported longpoll variants should fail
     ?assertMatch(
         {error, invalid_subprotocol},
         bondy_wamp_protocol:validate_subprotocol({http_longpoll, text, msgpack})
     ).
 
 encoding_roundtrip(_Config) ->
-    %% Verify that the http_longpoll subprotocol can encode and decode
     Msg = #event{
         subscription_id = 100,
         publication_id = 200,
@@ -78,7 +75,6 @@ encoding_roundtrip(_Config) ->
         kwargs = undefined
     },
 
-    %% Encode using the json encoding
     Bin = bondy_wamp_encoding:encode(Msg, json),
     ?assert(is_binary(Bin)),
 
@@ -94,13 +90,11 @@ open_and_init_protocol(_Config) ->
     RealmUri = <<>>,
     SessionId = bondy_session_id:new(),
 
-    %% Start transport session
     {ok, Pid} = bondy_http_transport_session_sup:start_child(
         TransportId, RealmUri, SessionId
     ),
     ?assert(is_pid(Pid)),
 
-    %% Init protocol with longpoll subprotocol
     Subprotocol = {http_longpoll, text, json},
     Peer = {{127, 0, 0, 1}, 12345},
     ?assertEqual(
@@ -108,10 +102,8 @@ open_and_init_protocol(_Config) ->
         bondy_http_transport_session:init_protocol(Pid, Subprotocol, Peer)
     ),
 
-    %% Verify encoding
     ?assertEqual(json, bondy_http_transport_session:encoding(Pid)),
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 poll_receive_empty_timeout(_Config) ->
@@ -126,7 +118,6 @@ poll_receive_empty_timeout(_Config) ->
         Pid, {http_longpoll, text, json}, {{127, 0, 0, 1}, 12345}
     ),
 
-    %% Poll with very short timeout — should return empty on timeout
     T0 = erlang:system_time(millisecond),
     Result = bondy_http_transport_session:poll_receive(Pid, 200),
     T1 = erlang:system_time(millisecond),
@@ -136,7 +127,6 @@ poll_receive_empty_timeout(_Config) ->
     Elapsed = T1 - T0,
     ?assert(Elapsed >= 150),
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 poll_receive_queue_messages(_Config) ->
@@ -151,22 +141,18 @@ poll_receive_queue_messages(_Config) ->
         Pid, {http_longpoll, text, json}, {{127, 0, 0, 1}, 12345}
     ),
 
-    %% Enqueue messages before polling
     Msg1 = make_event(1),
     Msg2 = make_event(2),
     ok = bondy_http_transport_queue:enqueue(TransportId, Msg1, #{}),
     ok = bondy_http_transport_queue:enqueue(TransportId, Msg2, #{}),
 
-    %% Poll should return immediately with messages
     Result = bondy_http_transport_session:poll_receive(Pid, 5000),
     ?assertMatch({ok, {messages, [_ | _]}}, Result),
 
     {ok, {messages, Msgs}} = Result,
     ?assert(length(Msgs) >= 1),
-    %% First message should be Msg1 (FIFO ordering)
     ?assertEqual(Msg1, hd(Msgs)),
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 poll_receive_buffered_replies(_Config) ->
@@ -181,7 +167,6 @@ poll_receive_buffered_replies(_Config) ->
         Pid, {http_longpoll, text, json}, {{127, 0, 0, 1}, 12345}
     ),
 
-    %% Send a HELLO to generate a buffered reply (WELCOME or ABORT)
     RealmTestUri = <<"com.leapsight.test.longpoll_buffering">>,
     _ = bondy_realm:create(RealmTestUri),
     ok = bondy_realm:disable_security(RealmTestUri),
@@ -199,10 +184,8 @@ poll_receive_buffered_replies(_Config) ->
         json
     ),
 
-    %% Handle client message — reply gets buffered (no SSE or poll waiting)
     ok = bondy_http_transport_session:handle_client_message(Pid, HelloBin),
 
-    %% Now poll_receive should return the buffered reply immediately
     Result = bondy_http_transport_session:poll_receive(Pid, 5000),
     ?assertMatch({ok, {replies, [_ | _]}}, Result),
 
@@ -212,7 +195,6 @@ poll_receive_buffered_replies(_Config) ->
     ),
     ?assert(is_record(Decoded, welcome) orelse is_record(Decoded, abort)),
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 poll_receive_wakeup_on_enqueue(_Config) ->
@@ -227,7 +209,6 @@ poll_receive_wakeup_on_enqueue(_Config) ->
         Pid, {http_longpoll, text, json}, {{127, 0, 0, 1}, 12345}
     ),
 
-    %% Start a poll_receive in a separate process (it will block)
     Self = self(),
     Poller = spawn_link(fun() ->
         Result = bondy_http_transport_session:poll_receive(Pid, 10000),
@@ -237,12 +218,10 @@ poll_receive_wakeup_on_enqueue(_Config) ->
     %% Give the poller time to register its poll_from
     timer:sleep(100),
 
-    %% Enqueue a message and notify — this should wake up the poller
     Msg = make_event(42),
     ok = bondy_http_transport_queue:enqueue(TransportId, Msg, #{}),
     bondy_http_transport_session:notify_enqueue(TransportId),
 
-    %% The poller should get the result quickly
     receive
         {poll_result, Result} ->
             ?assertMatch({ok, {messages, [_ | _]}}, Result),
@@ -253,7 +232,6 @@ poll_receive_wakeup_on_enqueue(_Config) ->
         ct:fail("Poller did not receive message after enqueue notification")
     end,
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 poll_receive_sync_reply_wakeup(_Config) ->
@@ -268,12 +246,10 @@ poll_receive_sync_reply_wakeup(_Config) ->
         Pid, {http_longpoll, text, json}, {{127, 0, 0, 1}, 12345}
     ),
 
-    %% Create realm for HELLO
     RealmTestUri = <<"com.leapsight.test.longpoll_sync_wakeup">>,
     _ = bondy_realm:create(RealmTestUri),
     ok = bondy_realm:disable_security(RealmTestUri),
 
-    %% Start a poll_receive in a separate process (it will block)
     Self = self(),
     _Poller = spawn_link(fun() ->
         Result = bondy_http_transport_session:poll_receive(Pid, 10000),
@@ -283,7 +259,6 @@ poll_receive_sync_reply_wakeup(_Config) ->
     %% Give the poller time to register its poll_from
     timer:sleep(100),
 
-    %% Send a HELLO — the sync reply should wake up the poller
     HelloBin = bondy_wamp_encoding:encode(
         #hello{
             realm_uri = RealmTestUri,
@@ -297,7 +272,6 @@ poll_receive_sync_reply_wakeup(_Config) ->
     ),
     ok = bondy_http_transport_session:handle_client_message(Pid, HelloBin),
 
-    %% The poller should receive the sync reply
     receive
         {poll_result, Result} ->
             ?assertMatch({ok, {replies, [_ | _]}}, Result),
@@ -312,7 +286,6 @@ poll_receive_sync_reply_wakeup(_Config) ->
         ct:fail("Poller did not receive sync reply wakeup")
     end,
 
-    %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
 close_transport(_Config) ->

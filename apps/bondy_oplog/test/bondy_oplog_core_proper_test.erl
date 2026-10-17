@@ -11,12 +11,6 @@
 %%   - prop_subscription_delivers_matches/0  (§17 D6 — subscription delivery)
 %%   - prop_overlay_projection_merge/0       (§17 D7 — overlay-projection merge)
 %%   - prop_concurrent_readers_observe_lineage/0 (§17 D8 — reader safety)
-%%
-%% D9 (adapter agnosticism) is verified by construction: the substrate
-%% only consumes the `bondy_oplog_projection_adapter` / `bondy_oplog_cache_adapter`
-%% behaviours, never module-specific entry points. The properties below
-%% run against the ETS reference pair; a second adapter pair would
-%% reuse the same fixture by swapping `?CACHE_MOD` / `?PROJ_MOD`.
 %% =============================================================================
 
 -module(bondy_oplog_core_proper_test).
@@ -342,11 +336,7 @@ prop_cache_coherence_write_through() ->
                 {ok, Entry} =
                     bondy_oplog_core_registry:lookup(NS, primary, 0),
                 CH = bondy_oplog_core_registry:entry_cache_handle(Entry),
-                %% Invariant 1: cache empty after write_through.
                 CacheEmpty = ?CACHE_MOD:get(CH, <<>>, Key) =:= not_found,
-                %% Invariant 2: subsequent read returns the projection's
-                %% pre-event value (write_through did not touch the
-                %% projection).
                 Cached = bondy_oplog_core:read(NS, primary, Key),
                 ok = ?CACHE_MOD:invalidate_all(CH),
                 Slow = bondy_oplog_core:read(NS, primary, Key),
@@ -377,13 +367,10 @@ prop_concurrent_readers_observe_lineage() ->
                     end)
                  || _ <- lists:seq(1, 3)
                 ],
-                %% Writer interleaves with readers.
                 populate_overlay(NS, Key, Events),
-                %% Collect.
                 AllSnaps = lists:flatten(
                     [collect_snaps(P) || P <- Readers]
                 ),
-                %% Build the valid lineage map: HLC → expected Value.
                 Lineage = build_lineage(Events),
                 lists:all(
                     fun({V, H}) -> in_lineage({V, H}, Lineage) end,

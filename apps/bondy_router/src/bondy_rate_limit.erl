@@ -197,13 +197,6 @@ allow_session([{Scope, T} | Rest]) ->
             throttled
     end.
 
-%% REMOVED: delete_session_limiter/1. A chain holds only the realm's SHARED
-%% bucket (which outlives the session by design) and unregistered private
-%% buckets (`bondy_regulator_rate_limit:new/2`), which own no row and are freed
-%% by the VM with the session's state. Nothing was left for a teardown to do,
-%% and a no-op teardown is what let the previous, REGISTERED private buckets
-%% orphan a row whenever the connection died without running it.
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================

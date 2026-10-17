@@ -53,7 +53,6 @@ init_per_suite(Config) ->
     Ctxt = bondy_context:new(Peer, {ws, text, json}, #{session => Session}),
     Ref = bondy_context:ref(Ctxt),
 
-    %% Add N distinct exact registrations (one callee per URI).
     Ids = [
         begin
             Uri = uri(I),
@@ -88,7 +87,6 @@ list_paginates_all_entries(Config) ->
     %% Page size does not divide the total, so pages straddle the boundary.
     Collected = drain(RealmUri, 4, undefined, []),
 
-    %% Complete and duplicate-free.
     ?assertEqual(ExpectedIds, lists:usort(Collected)),
     ?assertEqual(length(ExpectedIds), length(Collected)),
     %% The keyset walk yields strictly ascending ids.

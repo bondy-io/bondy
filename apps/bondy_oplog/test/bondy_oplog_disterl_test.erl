@@ -1,5 +1,3 @@
-%% Stage 8: distributed-Erlang transport test.
-%%
 %% Spawns two peer nodes (using `peer:start_link/1`), starts an
 %% instance on each with a distinct origin, exchanges events via
 %% `bondy_oplog_transport_disterl`, and verifies
@@ -10,11 +8,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("bondy_oplog.hrl").
 
-%% Helper invoked from the peer node via erpc:call/4.
 -export([do_responder_call/3]).
 
 setup() ->
-    %% Start the local node in distributed mode if not already.
     case net_kernel:get_state() of
         #{started := no} ->
             %% Use a unique name per run so tests don't collide.
@@ -30,7 +26,6 @@ setup() ->
         _ ->
             ok
     end,
-    %% Make sure the local app is up so we can sync from the other end.
     {ok, _} = application:ensure_all_started(bondy_db),
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
@@ -58,34 +53,25 @@ two_nodes_converge_via_disterl() ->
     {ok, Peer, NodeB} = start_peer_node("nodeb"),
     try
         ok = setup_peer(NodeB),
-        %% Local instance "I" on this node, distinct on the peer node:
         Inst = list_to_binary(
             "dx_" ++ integer_to_list(os:system_time(microsecond))
         ),
-        %% Local (initiator) node: holds B in our diagram. We'll PULL
-        %% from the remote node (call it A).
         {ok, _} = bondy_oplog_test_projection:start_instance(Inst, #{
             origin => bondy_oplog_origin:new()
         }),
-        %% Remote node: start the same instance with a different origin
-        %% and append 5 events.
         {ok, _} = bondy_oplog_test_projection:start_instance_on(NodeB, Inst, #{
             origin => bondy_oplog_origin:new()
         }),
         ok = remote_append_n(NodeB, Inst, 5),
         RootRemote = remote_root(NodeB, Inst),
-        %% Sync local from remote via disterl transport.
         {ok, _} = bondy_oplog:sync(Inst, NodeB, #{
             transport => bondy_oplog_transport_disterl,
             transport_opts => #{timeout => 10_000}
         }),
-        %% Convergence invariant: local's missing_set against remote's
-        %% root is empty.
         ?assertEqual(
             [],
             bondy_oplog_instance:missing_set(Inst, RootRemote)
         ),
-        %% Local now has the 5 events from remote.
         ?assertEqual(5, bondy_oplog:size(Inst)),
         ok = bondy_oplog:stop_instance(Inst)
     after
@@ -109,11 +95,7 @@ disterl_request_routes_through_responder() ->
         }),
         %% Append events ONLY to Inst1 locally so its root is non-undef.
         [bondy_oplog:append(Inst1, X) || X <- lists:seq(1, 3)],
-        %% Inst2 locally is empty (root = undefined).
         ?assertEqual(undefined, bondy_oplog:root_hash(Inst2)),
-        %% From the remote node, ask the responder for our local Inst1
-        %% root and our local Inst2 root. Different instances, same
-        %% wire shape; the responder must demux.
         Self = node(),
         %% `get_root` replies `{ok, Root, Fingerprint}`; Fingerprint is
         %% `undefined` for these bare oplog instances (no bondy_db manifest).
@@ -131,7 +113,6 @@ disterl_request_routes_through_responder() ->
         ),
         ?assert(is_binary(R1)),
         ?assertEqual(undefined, R2),
-        %% The local responder did the demux correctly.
         ok = bondy_oplog:stop_instance(Inst1),
         ok = bondy_oplog:stop_instance(Inst2)
     after

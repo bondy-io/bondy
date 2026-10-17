@@ -231,7 +231,6 @@ retention_truncate_vs_drain_race() ->
     _ = held_compact(Id),
     ok = bondy_oplog_instance:await_apply(Id),
 
-    %% No cell lost: every key materialized in the projection.
     Missing = [
         K
      || K <- Keys, bondy_oplog_core:read(NS, primary, K) =:= undefined
@@ -397,22 +396,17 @@ fused_catalogue_bootstrap_roundtrip() ->
         SrcId, {cell_apply, ?BUCKET_REG, <<"kb">>, {inc, 1}}
     ),
     ok = bondy_oplog_instance:await_apply(SrcId),
-    %% Retention-truncate the source history: the projection is now the
-    %% ONLY holder of the cells.
     ?assertMatch(
         {ok, {compacted, _, _}}, bondy_oplog_instance:compact(SrcId, [])
     ),
     ?assertEqual(0, bondy_oplog:size(SrcId)),
 
-    %% Producer: the fused instance serves a full multi-bucket snapshot.
     {ok, {_Watermark, Cursor, _}} = bondy_oplog_catalogue_snapshot:init(SrcId),
     Cells = pull_snapshot(SrcId, Cursor, []),
     Buckets = lists:usort([B || {B, _K, _F} <- Cells]),
     ?assertEqual([?BUCKET_REG, ?BUCKET_SUB], Buckets),
     ?assertEqual(2, length(Cells)),
 
-    %% Installer: a FRESH fused mux target materializes each bucket's
-    %% cells in its own table's projection.
     TgtId = mk_id(),
     TgtNsSub = ns_of(TgtId),
     TgtNsReg = binary_to_atom(<<"reg_", TgtId/binary>>, utf8),
@@ -581,7 +575,6 @@ watermark_door_holds_unapplied_peer_event_applier() ->
     %% hold is what kept it alive for the applier's replay.
     ?assert(bondy_oplog:size(B) >= 1),
 
-    %% Next compaction cycle folds-then-truncates the held prefix.
     ?assertMatch(
         {ok, {compacted, _, _}},
         bondy_oplog_instance:compact(B, [bondy_oplog_registry:frontier(B)])
@@ -639,7 +632,6 @@ compaction_holds_doored_event_until_applied_watermark_path() ->
     ),
     ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
 
-    %% Applied now: the next tick truncates the held key.
     ?assertMatch(
         {ok, {compacted, _, _}},
         bondy_oplog_instance:compact(B, [bondy_oplog_registry:frontier(B)])
@@ -874,7 +866,6 @@ live_door_accepts_unapplied_remote_event_fused() ->
     ?assertNotEqual(
         undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
     ),
-    %% The applied VV witnesses it honestly.
     AOrigin = bondy_oplog_instance:origin(A),
     ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
     %% The event was installed (not dropped); the next compaction
@@ -927,7 +918,6 @@ live_door_accepts_unapplied_remote_event_applier() ->
     ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
     ?assert(bondy_oplog:size(B) >= 1),
 
-    %% Next compaction cycle folds-then-truncates the held prefix.
     ?assertMatch(
         {ok, {compacted, _, _}},
         bondy_oplog_instance:compact(B, [bondy_oplog_registry:frontier(B)])
@@ -952,7 +942,6 @@ live_filter_drops_already_applied_remote_event() ->
     ok = bondy_oplog_instance:await_apply(A),
     {ok, EventA} = bondy_oplog:get(A, KA),
 
-    %% B applies it the normal way (page sync), then compacts past it.
     ?assertMatch(
         {ok, _},
         bondy_oplog_sync_session:run(B, A, #{record_in_peer_state => false})
@@ -968,7 +957,6 @@ live_filter_drops_already_applied_remote_event() ->
     ),
     ?assertEqual(0, bondy_oplog:size(B)),
 
-    %% The re-push is witnessed by the applied VV → filtered.
     ?assertEqual(ok, bondy_oplog:append_remote(B, EventA)),
     ?assertEqual(0, bondy_oplog:size(B)),
     AOrigin = bondy_oplog_instance:origin(A),
@@ -1177,7 +1165,6 @@ live_bootstrap_with_churn_between_batches_converges() ->
     ?assertMatch({3, _}, bondy_oplog_core:read(BNs, primary, K)),
     ?assertMatch({1, _}, bondy_oplog_core:read(BNs, primary, <<"k_other">>)),
 
-    %% Idempotent under a second full re-apply.
     {ok, _} = bondy_oplog_test_helpers:install(B, []),
     ?assertMatch({3, _}, bondy_oplog_core:read(BNs, primary, K)),
 
@@ -1208,7 +1195,6 @@ unservable_own_root_self_heals_when_peers_dominate() ->
         ?assert(map_size(bondy_oplog_registry:frontier(Id)) > 0),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(Id)),
 
-        %% And the shard is alive again: new writes install and compact.
         _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"us_new">>, {inc, 1}}),
         ok = bondy_oplog_instance:await_apply(Id),
         ?assertNotEqual(

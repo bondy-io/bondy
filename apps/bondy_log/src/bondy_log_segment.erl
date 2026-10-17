@@ -225,8 +225,6 @@ read_header(Fd) ->
         {ok, Bin} ->
             case decode_header(Bin) of
                 {ok, _} = Ok ->
-                    %% Position fd past the header so subsequent
-                    %% sequential reads/writes land on frame 0.
                     {ok, _} = prim_file:position(Fd, ?HEADER_BYTES),
                     Ok;
                 {error, _} = E ->

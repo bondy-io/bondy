@@ -18,32 +18,26 @@
 
 all() ->
     [
-        %% Original tests (preserved)
         anon_auth_not_allowed,
         ticket_auth_not_allowed,
         local_scope,
         client_scope_with_ticket,
         client_scope_with_id,
 
-        %% Ticket auth method availability
         ticket_method_available_for_user,
         ticket_method_not_available_outside_cidr,
 
-        %% Ticket issuance
         scope_survives_jwt_roundtrip,
         issue_with_custom_expiry,
         issue_returns_ticket_and_details,
 
-        %% Ticket authentication flow
         ticket_auth_full_flow,
         wrong_user_ticket_rejected,
 
-        %% Role-restricted tickets (delegation, MCP-D31 part 3)
         issue_with_authroles_writes_the_claim,
         issue_with_authroles_superset_refused,
         restricted_ticket_caps_session_roles,
 
-        %% Error cases
         invalid_method_rejected,
         nonexistent_user_error
     ].
@@ -230,7 +224,6 @@ anon_auth_not_allowed(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Peer = {{127, 0, 0, 1}, 10000},
 
-    %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(RealmUri, #{
         peer => Peer,
         authrealm => RealmUri,
@@ -261,12 +254,10 @@ ticket_auth_not_allowed(Config) ->
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
 
-    %% We disable ticket auth
     ok = bondy_config:set([security, ticket, authmethods], [
         <<"cryptosign">>, <<"wampcra">>
     ]),
 
-    %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(RealmUri, #{
         peer => Peer,
         authrealm => RealmUri,
@@ -287,7 +278,6 @@ ticket_auth_not_allowed(Config) ->
         bondy_ticket:issue(Session, #{})
     ),
 
-    %% We re-enable authmethods
     ok = bondy_config:set([security, ticket, authmethods], [
         <<"cryptosign">>,
         <<"password">>,
@@ -303,7 +293,6 @@ local_scope(Config) ->
     Roles = [],
     SourceIP = {127, 0, 0, 1},
 
-    %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(RealmUri, #{
         peer => {SourceIP, 0},
         authrealm => RealmUri,
@@ -324,7 +313,6 @@ local_scope(Config) ->
         bondy_ticket:issue(Session, #{})
     ),
 
-    %% We issue a self-issued ticket
     ok = bondy_rbac:grant(
         RealmUri,
         bondy_rbac:request(#{
@@ -344,10 +332,8 @@ local_scope(Config) ->
         bondy_session:table(bondy_session:external_id(Session)), Session
     ),
 
-    %% We issue a local scope ticket
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
 
-    %% We simulate a new session
     SessionId = bondy_session_id:new(),
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
@@ -373,7 +359,6 @@ client_scope_with_ticket(Config) ->
     Roles = [],
     SourceIP = {127, 0, 0, 1},
 
-    %% We simulate APP has logged in using cryptosign
     AppSession = bondy_session:new(RealmUri, #{
         peer => {SourceIP, 0},
         authrealm => RealmUri,
@@ -390,12 +375,10 @@ client_scope_with_ticket(Config) ->
         AppSession
     ),
 
-    %% We issue a self-issued ticket
     {ok, AppTicket, _} = bondy_ticket:issue(AppSession, #{
         expiry_time_secs => 300
     }),
 
-    %% We simulate U1 has logged in using wampcra
     UserSession = bondy_session:new(RealmUri, #{
         peer => {SourceIP, 0},
         authrealm => RealmUri,
@@ -444,7 +427,6 @@ client_scope_with_id(Config) ->
     Roles = [],
     SourceIP = {127, 0, 0, 1},
 
-    %% We simulate U1 has logged in using wampcra
     UserSession = bondy_session:new(RealmUri, #{
         peer => {SourceIP, 0},
         authrealm => RealmUri,
@@ -460,7 +442,6 @@ client_scope_with_id(Config) ->
         bondy_session:table(bondy_session:external_id(UserSession)), UserSession
     ),
 
-    %% We issue a self-issued ticket
     {ok, UserTicket, Details} = bondy_ticket:issue(
         UserSession,
         #{
@@ -474,7 +455,6 @@ client_scope_with_id(Config) ->
         Details
     ),
 
-    %% We simulate a new session
     SessionId = bondy_session_id:new(),
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
@@ -598,11 +578,9 @@ ticket_auth_full_flow(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SourceIP = {127, 0, 0, 1},
 
-    %% Step 1: Issue a ticket via a CRA-authenticated session
     Session = make_session(RealmUri, ?U1, ?WAMP_CRA_AUTH),
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
 
-    %% Step 2: Authenticate in a new session using the ticket
     SessionId = bondy_session_id:new(),
     {ok, Ctxt} = bondy_auth:init(
         SessionId, RealmUri, ?U1, [], SourceIP
@@ -614,18 +592,15 @@ ticket_auth_full_flow(Config) ->
         ?WAMP_TICKET_AUTH, Ticket, undefined, Ctxt
     ),
 
-    %% Should return extra map (may contain scope info)
     ?assert(is_map(Extra)).
 
 wrong_user_ticket_rejected(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SourceIP = {127, 0, 0, 1},
 
-    %% Issue a ticket for U1
     Session = make_session(RealmUri, ?U1, ?WAMP_CRA_AUTH),
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
 
-    %% Try to authenticate as APP using U1's ticket
     SessionId = bondy_session_id:new(),
     {ok, Ctxt} = bondy_auth:init(
         SessionId, RealmUri, ?APP, [], SourceIP

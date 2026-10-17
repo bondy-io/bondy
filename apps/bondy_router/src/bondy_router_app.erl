@@ -113,8 +113,6 @@ start(_Type, Args) ->
 
 %% @private
 start_substrate_and_services() ->
-    %% Now that we have initialised the configuration we start the following
-    %% dependencies
     {ok, _} = application:ensure_all_started(tuplespace, permanent),
 
     %% Partisan was configured by bondy_config:init/1 above. A standalone node
@@ -160,7 +158,6 @@ start_substrate_and_services() ->
     %% `bondy_bridge_relay_rpc_SUITE:boot_loads_every_app_module'.
     ok = ensure_app_modules_loaded(),
 
-    %% Finally we start the supervisor
     case bondy_router_sup:start_link() of
         {ok, Pid} ->
             maybe
@@ -411,7 +408,6 @@ start_services(_) ->
         %% ready, and a degraded boot (`start_services(failed)`) never gets
         %% here.
         {ok, _} = application:ensure_all_started(bondy_mcp, permanent),
-        %% Finally we allow clients to connect
         ok ?= start_normal_listeners(),
         {ok, _} = application:ensure_all_started(
             bondy_http_connector, permanent
@@ -526,7 +522,6 @@ start_normal_listeners() ->
     %% We flag the status, the HTTP /ready path will now return true.
     ok = bondy_config:set(status, ready),
 
-    %% Bondy Router Bridge Relay (client) connections
     bondy_bridge_relay_manager:start_bridges().
 
 %% @private
@@ -577,11 +572,6 @@ setup_event_handlers() ->
     bondy_cluster:on_down(fun(Node) ->
         bondy_event_manager:notify({[bondy, cluster, connection, down], Node})
     end),
-
-    % Used for debugging
-    % _ = bondy_event_manager:add_watched_handler(
-    %     bondy_event_logger, []
-    % ),
 
     ok.
 

@@ -155,15 +155,12 @@ cast(Val) -> Val.
 %% TEST FIXTURES
 %% =============================================================================
 
-%% Sample realm URIs for testing
 test_realm1() -> <<"com.example.test1">>.
 test_realm2() -> <<"com.example.test2">>.
 
-%% Sample client IDs for testing
 test_client1() -> <<"client123">>.
 test_client2() -> <<"client456">>.
 
-%% Sample device IDs for testing
 test_device1() -> <<"device789">>.
 test_device2() -> <<"device012">>.
 
@@ -217,44 +214,35 @@ new_realm_all_others_binary_test() ->
 %% -----------------------------------------------------------------------------
 
 type_sso_test() ->
-    %% realm = all, client_id = all
     Scope = bondy_auth_scope:new(all, all, test_device1()),
     ?assertEqual(sso, bondy_auth_scope:type(Scope)).
 
 type_client_sso_test() ->
-    %% realm = all, client_id = binary
     Scope = bondy_auth_scope:new(all, test_client1(), test_device1()),
     ?assertEqual(client_sso, bondy_auth_scope:type(Scope)).
 
 type_local_test() ->
-    %% realm = binary, client_id = all
     Scope = bondy_auth_scope:new(test_realm1(), all, test_device1()),
     ?assertEqual(local, bondy_auth_scope:type(Scope)).
 
 type_client_local_test() ->
-    %% realm = binary, client_id = binary
     Scope = bondy_auth_scope:new(test_realm1(), test_client1(), test_device1()),
     ?assertEqual(client_local, bondy_auth_scope:type(Scope)).
 
-%% Test all combinations to ensure completeness
 type_combinations_test() ->
     Realm = test_realm1(),
     ClientId = test_client1(),
     DeviceId = test_device1(),
 
-    %% SSO: realm=all, client_id=all
     Scope1 = bondy_auth_scope:new(all, all, DeviceId),
     ?assertEqual(sso, bondy_auth_scope:type(Scope1)),
 
-    %% Client SSO: realm=all, client_id=binary
     Scope2 = bondy_auth_scope:new(all, ClientId, DeviceId),
     ?assertEqual(client_sso, bondy_auth_scope:type(Scope2)),
 
-    %% Local: realm=binary, client_id=all
     Scope3 = bondy_auth_scope:new(Realm, all, DeviceId),
     ?assertEqual(local, bondy_auth_scope:type(Scope3)),
 
-    %% Client Local: realm=binary, client_id=binary
     Scope4 = bondy_auth_scope:new(Realm, ClientId, DeviceId),
     ?assertEqual(client_local, bondy_auth_scope:type(Scope4)).
 
@@ -559,7 +547,6 @@ device_id_all_value_test() ->
 %% -----------------------------------------------------------------------------
 
 integration_type_and_matches_test() ->
-    %% Create scopes of different types
     SsoScope1 = bondy_auth_scope:new(all, all, test_device1()),
     SsoScope2 = bondy_auth_scope:new(all, all, test_device2()),
     ClientSsoScope = bondy_auth_scope:new(all, test_client1(), test_device1()),
@@ -568,14 +555,12 @@ integration_type_and_matches_test() ->
         test_realm1(), test_client1(), test_device1()
     ),
 
-    %% Verify types
     ?assertEqual(sso, bondy_auth_scope:type(SsoScope1)),
     ?assertEqual(sso, bondy_auth_scope:type(SsoScope2)),
     ?assertEqual(client_sso, bondy_auth_scope:type(ClientSsoScope)),
     ?assertEqual(local, bondy_auth_scope:type(LocalScope)),
     ?assertEqual(client_local, bondy_auth_scope:type(ClientLocalScope)),
 
-    %% Verify matches work correctly with types
     ?assert(bondy_auth_scope:matches(SsoScope1, SsoScope2)),
     ?assertNot(bondy_auth_scope:matches(SsoScope1, ClientSsoScope)),
     ?assertNot(bondy_auth_scope:matches(LocalScope, ClientLocalScope)),
@@ -590,7 +575,6 @@ integration_normalize_and_accessors_test() ->
 
     Scope = bondy_auth_scope:normalize(Input),
 
-    %% Verify accessors work with normalized scope
     ?assertEqual(test_realm1(), bondy_auth_scope:realm(Scope)),
     ?assertEqual(test_client1(), bondy_auth_scope:client_id(Scope)),
     ?assertEqual(all, bondy_auth_scope:device_id(Scope)),
@@ -601,17 +585,14 @@ integration_new_vs_normalize_consistency_test() ->
     ClientId = test_client1(),
     DeviceId = test_device1(),
 
-    %% Create scope using new/3
     Scope1 = bondy_auth_scope:new(RealmUri, ClientId, DeviceId),
 
-    %% Create scope using normalize/1
     Scope2 = bondy_auth_scope:normalize(#{
         realm => RealmUri,
         client_id => ClientId,
         device_id => DeviceId
     }),
 
-    %% Should be identical
     ?assertEqual(Scope1, Scope2),
     ?assertEqual(bondy_auth_scope:type(Scope1), bondy_auth_scope:type(Scope2)),
     ?assert(bondy_auth_scope:matches(Scope1, Scope2)).

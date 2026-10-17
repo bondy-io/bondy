@@ -138,7 +138,6 @@ read_missing_required_field_test() ->
         Path = filename:join(
             Dir, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_FILENAME
         ),
-        %% Missing committed_frame_offset.
         ok = file:write_file(
             Path,
             "{committed_segment, 0}.\n"

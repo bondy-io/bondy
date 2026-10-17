@@ -78,7 +78,6 @@ run_offset_o1(Dir) ->
         "consumer offset = {seg=~p, off=~p}; frames-from-offset to eol = ~p",
         [Seg, Off, FromOffset]
     ),
-    %% The offset is AT the head: a re-armed drain from here does no work.
     ?assertEqual(
         0,
         FromOffset,
@@ -111,7 +110,6 @@ run_mst_reread(Dir) ->
         [FromOffset, FromStaleMst, TotalFrames]
     ),
 
-    %% The coupling: offset-resume does nothing; mst-resume re-reads everything.
     ?assertEqual(0, FromOffset),
     ?assert(TotalFrames > 0),
     ?assertEqual(
@@ -126,20 +124,17 @@ run_restart(Dir) ->
     append_batch(InstId, 1, ?N),
     ok = bondy_oplog_instance:await_apply(InstId),
 
-    %% Pre-stop: the MST reflects the data and the offset is at the head.
     ML0 = bondy_oplog_instance:mst_last(InstId),
     ?assertNotEqual(undefined, ML0),
     WalP0 = bondy_oplog_registry:wal_pid(InstId),
     {S0, O0} = consumer_offset_pos(WalP0),
     ?assertEqual(0, frames_to_eol(WalP0, {offset, S0, O0})),
 
-    %% Clean stop + restart (durable close must preserve the tree).
     ok = bondy_oplog:stop_instance(InstId),
     {ok, _} = open_async_instance(InstId, NS, Dir, Origin, ?SEAL_EVERY),
     ok = bondy_oplog:await_drain(InstId),
     ?assertEqual(?N, bondy_oplog:size(InstId)),
 
-    %% Post-restart: the architectural invariant that MUST hold.
     ML1 = bondy_oplog_instance:mst_last(InstId),
     WalP1 = bondy_oplog_registry:wal_pid(InstId),
     {S1, O1} = consumer_offset_pos(WalP1),
@@ -161,8 +156,6 @@ run_restart(Dir) ->
         ML1,
         "durable MST root did not survive a clean restart"
     ),
-    %% The resume cursor is ALWAYS O(1): resuming from the consumer offset
-    %% does no work, regardless of the MST.
     ?assertEqual(
         0,
         FromOffset1,

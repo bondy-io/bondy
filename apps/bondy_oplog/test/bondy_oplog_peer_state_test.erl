@@ -1,5 +1,3 @@
-%% Stage-3 peer-state tests.
-
 -module(bondy_oplog_peer_state_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -74,7 +72,6 @@ strict_read_names_unconfirmed_members() ->
         bondy_oplog_peer_state:confirmed_peer_states(I, [P1, P2])
     ),
 
-    %% With P2 confirmed, both are returned in member order.
     ok = bondy_oplog_peer_state:record_sync_complete(P2, I, vv(3)),
     sync(),
     {ok, States} = bondy_oplog_peer_state:confirmed_peer_states(I, [P1, P2]),
@@ -124,7 +121,6 @@ record_and_read() ->
     I = mk_inst(),
     H = vv(0),
     ok = bondy_oplog_peer_state:record_sync_complete(P, I, H),
-    %% record_sync_complete is a cast — give it a beat to land.
     sync(),
     ?assertEqual({ok, H}, frontier_of(P, I)),
     ?assertMatch(
@@ -164,7 +160,6 @@ stale_peer_included_when_since_is_old() ->
     Old = os:system_time(millisecond) - 10 * 60 * 1000,
     bondy_oplog_peer_state:record_sync_complete(P, I, vv(4), Old),
     sync(),
-    %% Override the cutoff via the explicit /2 form.
     Cutoff = Old - 1,
     ?assertMatch(
         [P],

@@ -346,7 +346,6 @@ add_version(#{} = Pass) ->
     maps:put(version, <<"1.0">>, Pass).
 
 do_upgrade(_, #{version := ?VERSION} = Pass) ->
-    %% We finished upgrading to latest version
     Pass;
 do_upgrade({hash, _}, #{version := <<"1.0">>} = Pass) ->
     %% We need the original password to be able to upgrade to 1.1

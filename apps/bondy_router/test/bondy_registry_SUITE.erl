@@ -88,7 +88,6 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     meck:unload(),
-    %% bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 %% =============================================================================
@@ -669,14 +668,6 @@ register_callback(Config) ->
         bondy_dealer:register(Uri1, Opts, RealmUri, Ref1),
         "Callbacks cannot use shared registration"
     ),
-
-    %% Not allowed currently
-    %% Uri2 = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
-    % ?assertMatch(
-    %     {ok, _},
-    %     bondy_dealer:register(Uri2, Opts, RealmUri, Ref1),
-    %     "We can have multiple URIs associates with the same Ref"
-    % ),
 
     Ref2 = bondy_ref:new(internal, {bondy_wamp_api, resolve}),
 
@@ -1570,8 +1561,6 @@ add_subscription_test(Type, RealmUri, Uri, Opts, Ctxt) ->
         "The new entry should be included in the list of stored entries "
         "for this session"
     ),
-
-    %% {Matches, _} = bondy_registry:match(Type, RealmUri, Uri),
 
     ?assertEqual(
         {error, {already_exists, Entry}},

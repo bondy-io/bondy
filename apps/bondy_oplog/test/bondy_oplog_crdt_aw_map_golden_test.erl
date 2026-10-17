@@ -34,7 +34,6 @@ encode_state_is_byte_identical_test() ->
     State = ?MOD:interpret_cog(Log, ?MOD:init()),
     Bytes = ?MOD:encode_state(State),
     ?assertEqual(binary:decode_hex(?GOLDEN_HEX), Bytes),
-    %% And it still round-trips.
     ?assertEqual(State, ?MOD:decode_state(Bytes)).
 
 ev(Hlc, Origin, Seq, Op, Ctx) ->

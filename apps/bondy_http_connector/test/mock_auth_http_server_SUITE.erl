@@ -263,7 +263,6 @@ gis_generate_token(Config) ->
         maps:get(<<"token">>, Decoded)
     ),
     ?assert(is_integer(maps:get(<<"expires">>, Decoded))),
-    %% Should NOT have an error key
     ?assertEqual(error, maps:find(<<"error">>, Decoded)).
 
 gis_invalid_credentials(Config) ->
@@ -282,18 +281,15 @@ gis_invalid_credentials(Config) ->
     ?assertMatch(<<_/binary>>, maps:get(<<"message">>, ErrorObj)).
 
 gis_error_in_body(Config) ->
-    %% Even with correct credentials, GIS returns errors in body with 200
     mock_auth_http_server:set_credentials(
         gis, <<"admin">>, <<"s3cret">>
     ),
     Url = <<(base(Config))/binary, "/portal/sharing/rest/generateToken">>,
-    %% Send correct credentials
     Body = <<"username=admin&password=s3cret&f=json">>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
     {ok, 200, _RH, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Decoded = json:decode(RespBody),
-    %% Should have token, no error
     ?assertMatch(<<_/binary>>, maps:get(<<"token">>, Decoded)),
     ?assertEqual(error, maps:find(<<"error">>, Decoded)).
 
@@ -375,7 +371,6 @@ request_log(Config) ->
 
 request_log_filtered(Config) ->
     mock_auth_http_server:clear_requests(),
-    %% Hit two different endpoints
     OAuthUrl = <<(base(Config))/binary, "/oauth2/token">>,
     GisUrl = <<(base(Config))/binary, "/portal/sharing/rest/generateToken">>,
     Body = <<"grant_type=client_credentials">>,
@@ -424,14 +419,12 @@ failure_infinity(Config) ->
     Url = <<(base(Config))/binary, "/oauth2/token">>,
     Body = <<"grant_type=client_credentials">>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
-    %% Should keep failing
     {ok, 500, _, _} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     {ok, 500, _, _} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     {ok, 500, _, _} =
         hackney:request(post, Url, Headers, Body, [with_body]),
-    %% Clear and verify recovery
     mock_auth_http_server:clear_failure(oauth2),
     {ok, 200, _, _} =
         hackney:request(post, Url, Headers, Body, [with_body]).

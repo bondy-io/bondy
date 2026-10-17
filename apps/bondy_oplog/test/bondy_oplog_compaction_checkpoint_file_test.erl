@@ -413,7 +413,6 @@ instance_init_fails_loudly_on_corrupt_checkpoint() ->
             Id, [Id, {peer, dummy_corrupt}]
         ),
         ok = bondy_oplog:stop_instance(Id),
-        %% Corrupt the persisted checkpoint.
         Path = checkpoint_path(Tmp, Id),
         ok = file:write_file(Path, <<"corrupted">>),
         %% Re-open must fail with our tagged reason — surfaced by the
@@ -525,15 +524,12 @@ default_ets_when_ephemeral() ->
         {ok, {compacted, _, _}} = bondy_oplog_test_helpers:compact_among(
             Id, [Id, {peer, def_eph_peer}]
         ),
-        %% Checkpoint is in ETS, queryable in-memory.
         ?assertMatch({ok, _, _}, bondy_oplog:compaction_checkpoint(Id))
     after
         bondy_oplog:stop_instance(Id),
         bondy_oplog_peer_state:forget_peer({peer, def_eph_peer})
     end.
 
-%% End-to-end: with the new default, checkpoint survives an instance
-%% restart even though the caller didn't ask for a file backend.
 checkpoint_persists_via_default() ->
     Suffix = integer_to_list(os:system_time(microsecond)),
     Tmp = filename:join(

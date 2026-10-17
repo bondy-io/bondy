@@ -82,7 +82,6 @@ lww_concurrent_converges() ->
         ok = bondy_db:apply(Ta, <<"r">>, <<"k">>, {set, 100, <<"va">>}),
         ok = bondy_db:apply(Tb, <<"r">>, <<"k">>, {set, 200, <<"vb">>}),
         ok = sync_both(Ta, Tb),
-        %% Both replicas agree on the single LWW winner (highest HLC).
         ?assertEqual(
             {ok, {<<"vb">>, 200}}, bondy_db:read(Ta, <<"r">>, <<"k">>)
         ),
@@ -104,7 +103,6 @@ lww_later_write_wins() ->
         ?assertEqual({ok, {<<"v1">>, 1}}, bondy_db:read(T, <<"r">>, <<"u">>)),
         ok = bondy_db:apply(T, <<"r">>, <<"u">>, {set, 3, <<"v3">>}),
         ?assertEqual({ok, {<<"v3">>, 3}}, bondy_db:read(T, <<"r">>, <<"u">>)),
-        %% Stale write is absorbed — the cell stays at v3.
         ok = bondy_db:apply(T, <<"r">>, <<"u">>, {set, 2, <<"stale">>}),
         ?assertEqual({ok, {<<"v3">>, 3}}, bondy_db:read(T, <<"r">>, <<"u">>))
     after
@@ -121,10 +119,8 @@ lww_clear_then_reset_reanimates() ->
         ?assertEqual(
             {ok, {<<"issued">>, 1}}, bondy_db:read(T, <<"r">>, <<"tok">>)
         ),
-        %% Revoke — the cell reads as absent.
         ok = bondy_db:apply(T, <<"r">>, <<"tok">>, {clear, 2}),
         ?assertEqual({error, not_found}, bondy_db:read(T, <<"r">>, <<"tok">>)),
-        %% Re-issue — a later set resurrects the cell.
         ok = bondy_db:apply(T, <<"r">>, <<"tok">>, {set, 3, <<"reissued">>}),
         ?assertEqual(
             {ok, {<<"reissued">>, 3}}, bondy_db:read(T, <<"r">>, <<"tok">>)
@@ -202,7 +198,6 @@ aw_add_survives_nonobserving_remove() ->
     {DbA, Ta} = open_replica(aw_addwins_a, security_group_members, aw),
     {DbB, Tb} = open_replica(aw_addwins_b, security_group_members, aw),
     try
-        %% A adds alice, then B observes it via a sync.
         ok = bondy_db:apply(Ta, <<"r">>, <<"admins">>, {put, <<"alice">>, ?M}),
         ok = sync_both(Ta, Tb),
         ?assertEqual(
@@ -214,7 +209,6 @@ aw_add_survives_nonobserving_remove() ->
         ok = bondy_db:apply(Tb, <<"r">>, <<"admins">>, {rmv, <<"alice">>}),
         ok = bondy_db:apply(Ta, <<"r">>, <<"admins">>, {put, <<"alice">>, ?M2}),
         ok = sync_both(Ta, Tb),
-        %% Add-wins: A's concurrent (unobserved) add survives the remove.
         ?assertEqual(
             {ok, #{<<"alice">> => [?M2]}, read_hlc},
             norm(bondy_db:read(Ta, <<"r">>, <<"admins">>))

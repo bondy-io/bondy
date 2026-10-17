@@ -113,10 +113,8 @@ encode_term(Term, _) ->
 -spec decode_term(term(), decode_opts()) -> term().
 
 decode_term(<<"true">>, _) ->
-    %% Just in case
     true;
 decode_term(<<"false">>, _) ->
-    %% Just in case
     false;
 decode_term(<<"null">>, _) ->
     undefined;

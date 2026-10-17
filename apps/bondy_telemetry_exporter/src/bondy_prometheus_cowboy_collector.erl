@@ -3,9 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Replaces
-%% -module(prometheus_cowboy2_instrumenter).
-
 -module(bondy_prometheus_cowboy_collector).
 -moduledoc """
 Collects Cowboy metrics using the [metrics stream handler](https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl).

@@ -175,24 +175,19 @@ do_handle_wamp_call_(#http_connector_proc_conf{} = ProcConf, KWArgs0) ->
     } = ProcConf,
 
     try
-        %% 1. Extract custom headers
         {CustomHeaders, KWArgs1} = extract_custom_headers(KWArgs0),
 
-        %% 2. Interpolate path template — consumes matched keys
         {Path, KWArgs2} = interpolate_path(PathTemplate, KWArgs1, PathVars),
 
-        %% 3. Build URL and route remaining kwargs
         Endpoint = construct_url(BaseUrl, Path),
         {Url, Body} = route_kwargs(Method, Endpoint, KWArgs2),
 
-        %% 4. Build headers
         BaseHeaders = [
             {<<"Content-Type">>, <<"application/json">>},
             {<<"Accept">>, <<"application/json">>}
             | CustomHeaders
         ],
 
-        %% 5. Acquire token + apply auth
         Token = acquire_token(ServiceName, AuthMod, AuthConf),
         {FinalUrl, FinalHeaders} =
             AuthMod:apply_auth(Token, Url, BaseHeaders, AuthConf),
@@ -204,7 +199,6 @@ do_handle_wamp_call_(#http_connector_proc_conf{} = ProcConf, KWArgs0) ->
             url => FinalUrl
         }),
 
-        %% 6. Make HTTP request
         MethodAtom = method_to_atom(Method),
         Response = request_with_retry(
             ServiceName,
@@ -378,7 +372,6 @@ extract_custom_headers(KWArgs) ->
 route_kwargs(Method, Endpoint, KWArgs) when
     Method =:= get; Method =:= delete; Method =:= head
 ->
-    %% GET/DELETE/HEAD: remaining kwargs become query params
     case map_size(KWArgs) of
         0 ->
             {Endpoint, <<>>};
@@ -394,7 +387,6 @@ route_kwargs(Method, Endpoint, KWArgs) when
             {<<Endpoint/binary, "?", QS/binary>>, <<>>}
     end;
 route_kwargs(_Method, Endpoint, KWArgs) ->
-    %% POST/PUT/PATCH: remaining kwargs become JSON body
     case map_size(KWArgs) of
         0 -> {Endpoint, <<>>};
         _ -> {Endpoint, iolist_to_binary(json:encode(KWArgs))}

@@ -45,7 +45,6 @@ headroom_clamp() ->
     %% leave no room for map/envelope/framing overhead → emsgsize).
     ok = application:set_env(bondy_oplog, sync_response_headroom, 5.0),
     ?assertEqual(0.95, bondy_oplog_config:sync_response_headroom()),
-    %% Non-positive / non-numeric → fall back to the default.
     ok = application:set_env(bondy_oplog, sync_response_headroom, -1),
     ?assertEqual(0.8, bondy_oplog_config:sync_response_headroom()),
     ok = application:unset_env(bondy_oplog, sync_response_headroom).
@@ -222,7 +221,6 @@ parts_interleaved() ->
     F2 = crypto:strong_rand_bytes(15000),
     R1 = lists:flatten(split_all(<<"b">>, key(1), F1, ?BUDGET)),
     R2 = lists:flatten(split_all(<<"b">>, key(2), F2, ?BUDGET)),
-    %% Feed them one part at a time, alternating.
     Interleaved = interleave(R1, R2),
     {Cells, Pending} = lists:foldl(
         fun(Part, {CellAcc, Pend}) ->
@@ -295,13 +293,11 @@ alarm_test_() ->
 
 alarm_raises() ->
     clear_all(bondy_oplog_sync_oversized_items),
-    %% No new skips since PrevTotal → no alarm.
     Base = bondy_oplog_sync_metrics:oversized_total(),
     S0 = astate(false, Base, 0),
     S1 = bondy_oplog_responder:check_oversized_alarm(S0),
     ?assertNot(maps:get(oversized_alarm, S1)),
     ?assertNot(alarm_active(bondy_oplog_sync_oversized_items)),
-    %% A skip bumps the counter → the poll asserts the alarm.
     ok = bondy_oplog_sync_metrics:report_oversized(page, {i, h}, 99999, 1000),
     S2 = bondy_oplog_responder:check_oversized_alarm(S1),
     ?assert(maps:get(oversized_alarm, S2)),

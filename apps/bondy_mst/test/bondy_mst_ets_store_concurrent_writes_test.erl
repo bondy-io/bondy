@@ -40,10 +40,6 @@ capabilities_advertises_concurrent_writes_test() ->
     ok = bondy_mst_ets_store:destroy(Store).
 
 non_owner_can_insert_into_store_tab_test() ->
-    %% The substrate fix that landed for the Jepsen OR-set work made
-    %% the store's ETS table `public` unconditionally so the sync
-    %% session (running in a different process) could insert pages.
-    %% Revert that and this test fails with `badarg cause => access`.
     Store = bondy_mst_ets_store:open(
         sha256,
         [{name, <<"non_owner_test">>}]

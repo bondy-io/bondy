@@ -97,8 +97,6 @@ storage_path_origin_persists() ->
     end.
 
 storage_path_origin_survives_restart() ->
-    %% Stop the instance, restart with the same storage_path, assert the
-    %% origin is unchanged. This is the kill+restart scenario PR-J4 hit.
     Dir = mktemp_dir("sup_origin_restart_"),
     Id = unique_id(<<"restart">>),
     Opts = #{

@@ -201,14 +201,6 @@ ranch_transport(_) -> ranch_tcp.
 %% @private
 %% Options handed to the connection handler: the listener's whole resolved option
 %% block, read ONCE here at listener start rather than once per connection.
-%%
-%% One clause for both stream protocols. `bondy_bridge_relay_server:init/1' has
-%% always read `auth_timeout', `idle_timeout', `hibernate' and `ping' out of
-%% these; `bondy_wamp_tcp_connection_handler:init/1' used to ignore them and read
-%% `[Ref, idle_timeout]' and `[Ref, ping]' from application environment itself, on
-%% every accepted connection. Both now take the same two things from the same
-%% place, which is also where the HTTP carriers get theirs — see
-%% `bondy_http_services:carrier_state/2'.
 stream_protocol_opts(_Protocol, Name) -> bondy_config:get(Name, []).
 
 %% @private

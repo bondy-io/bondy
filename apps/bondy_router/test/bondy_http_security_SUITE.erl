@@ -129,10 +129,8 @@ admin_ping_security_headers(_Config) ->
         get, Url, [], <<>>, []
     ),
     ?assertEqual(204, Status),
-    %% X-Frame-Options should be set
     FrameOpts = header_value(<<"x-frame-options">>, RespHeaders),
     ?assertEqual(<<"SAMEORIGIN">>, FrameOpts),
-    %% X-Content-Type-Options should be set
     ContentTypeOpts = header_value(
         <<"x-content-type-options">>, RespHeaders
     ),

@@ -43,7 +43,6 @@ test_datetime(_) ->
     %% Test basic datetime encoding (returns datetime string)
     DT1 = {{2025, 10, 20}, {14, 30, 45}},
     Encoded1 = bondy_wamp_cbor:encode(DT1),
-    %% Decode and verify
     Decoded1 = bondy_wamp_cbor:decode(Encoded1),
     ?assertEqual(<<"2025-10-20T14:30:45Z">>, Decoded1),
 
@@ -209,7 +208,6 @@ test_key_value_list(_) ->
     KVList = [{<<"key1">>, <<"value1">>}, {<<"key2">>, <<"value2">>}],
     Result = bondy_wamp_cbor:encode(KVList),
 
-    %% Decode back and verify
     Decoded = bondy_wamp_cbor:decode(Result),
     ?assertEqual(
         #{<<"key1">> => <<"value1">>, <<"key2">> => <<"value2">>}, Decoded
@@ -273,7 +271,6 @@ test_decode_head(_) ->
     ?assertEqual([3, 4], TailDecoded4).
 
 test_decode_tail(_) ->
-    %% Get a tail from decode_head and decode it
     CBOR = bondy_wamp_cbor:encode([1, 2, 3, 4, 5]),
     {_, Tail1} = bondy_wamp_cbor:decode_head(CBOR, 2),
     Result1 = bondy_wamp_cbor:decode_tail(Tail1),
@@ -303,7 +300,6 @@ test_decode_tail(_) ->
     ?assertEqual([custom_null, 2], Result5).
 
 test_encode_with_tail(_) ->
-    %% Get tail from decode_head, encode new elements with it
     CBOR = bondy_wamp_cbor:encode([1, 2, 3, 4, 5]),
     {_, Tail1} = bondy_wamp_cbor:decode_head(CBOR, 2),
     Result1 = iolist_to_binary(
@@ -359,8 +355,6 @@ test_validate_opts(_) ->
     ).
 
 test_roundtrip(_) ->
-    %% Test encode/decode roundtrip for various data structures
-
     %% Basic types
     ?assertEqual(1, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(1))),
     ?assertEqual(

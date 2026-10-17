@@ -133,15 +133,11 @@ end_per_testcase(_TC, _Config) ->
 %% ===================================================================
 
 cc_fetch_token(Config) ->
-    %% POST token endpoint with Basic auth header,
-    %% form body grant_type=client_credentials,
-    %% extract access_token from response.
     Conf = cc_config(Config),
     {ok, {Token, _Meta}} = bondy_http_connector_auth_generic:fetch_token(Conf),
     ?assertEqual(<<"mock-oauth2-access-token">>, Token).
 
 cc_fetch_token_with_expires_in(Config) ->
-    %% Verify expires_in metadata is extracted from the response
     mock_auth_http_server:set_token(oauth2, <<"tok-xyz">>, 900),
     Conf = cc_config(Config),
     {ok, {Token, Meta}} = bondy_http_connector_auth_generic:fetch_token(Conf),
@@ -149,7 +145,6 @@ cc_fetch_token_with_expires_in(Config) ->
     ?assertEqual(900, maps:get(expires_in, Meta)).
 
 cc_apply_auth_bearer_header(_Config) ->
-    %% Verify token is placed as Authorization: Bearer {token}
     Conf = cc_config_apply_only(),
     Url = <<"https://api.example.com/v1/resources">>,
     {ResultUrl, ResultHeaders} =
@@ -158,14 +153,12 @@ cc_apply_auth_bearer_header(_Config) ->
         ),
     %% URL should be unchanged (token goes in header, not query)
     ?assertEqual(Url, ResultUrl),
-    %% Authorization header should have Bearer prefix
     ?assertEqual(
         [{<<"Authorization">>, <<"Bearer eyJabc123">>}],
         ResultHeaders
     ).
 
 cc_fetch_basic_auth_sent(Config) ->
-    %% Verify the mock received a Basic auth header on the token request
     mock_auth_http_server:set_credentials(
         oauth2, <<"test-client">>, <<"test-secret">>
     ),
@@ -175,7 +168,6 @@ cc_fetch_basic_auth_sent(Config) ->
         <<"test-secret">>
     ),
     {ok, {_Token, _Meta}} = bondy_http_connector_auth_generic:fetch_token(Conf),
-    %% Verify Basic auth was sent
     [Req] = mock_auth_http_server:get_requests(oauth2),
     Headers = maps:get(headers, Req),
     AuthHeader = maps:get(<<"authorization">>, Headers),
@@ -197,21 +189,17 @@ cc_fetch_invalid_credentials(Config) ->
     ?assertMatch({error, {http_status, 401}}, Result).
 
 cc_fetch_server_error(Config) ->
-    %% Token endpoint returns 500
     mock_auth_http_server:set_failure(oauth2, 500),
     Conf = cc_config(Config),
     Result = bondy_http_connector_auth_generic:fetch_token(Conf),
     ?assertMatch({error, {http_status, 500}}, Result).
 
 cc_custom_token_type(Config) ->
-    %% Verify the mock returns token_type correctly and it can be used
-    %% in the format string.
     mock_auth_http_server:set_token_type(oauth2, <<"Bearer">>),
     Conf = cc_config(Config),
     {ok, {Token, _Meta}} = bondy_http_connector_auth_generic:fetch_token(Conf),
     %% Token itself is just the access_token, not token_type
     ?assertEqual(<<"mock-oauth2-access-token">>, Token),
-    %% Verify the mock response includes token_type
     Url = <<(proplists:get_value(base_url, Config))/binary, "/oauth2/token">>,
     Body = <<"grant_type=client_credentials">>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
@@ -225,23 +213,18 @@ cc_custom_token_type(Config) ->
 %% ===================================================================
 
 gis_fetch_token(Config) ->
-    %% POST generateToken with form body username/password/f/referer,
-    %% extract token from response.
     Conf = gis_config(Config),
     {ok, Token} = bondy_http_connector_auth_generic:fetch_token(Conf),
     ?assertEqual(<<"mock-gis-token-abc123">>, Token).
 
 gis_apply_auth_query_param(_Config) ->
-    %% GIS places the token as a ?token= query parameter
     Conf = gis_config_apply_only(),
     Url = <<"https://maps.example.com/rest/services/MyService">>,
     {ResultUrl, ResultHeaders} =
         bondy_http_connector_auth_generic:apply_auth(
             <<"gis-tok-123">>, Url, [], Conf
         ),
-    %% Headers should be unchanged
     ?assertEqual([], ResultHeaders),
-    %% URL should have ?token=... appended
     ?assertNotEqual(
         nomatch,
         binary:match(ResultUrl, <<"token=gis-tok-123">>)
@@ -262,7 +245,6 @@ gis_fetch_error_in_body(Config) ->
     ?assertMatch({error, {upstream_error, _}}, Result).
 
 gis_fetch_no_token_in_response(Config) ->
-    %% If the token is empty/missing in the response
     mock_auth_http_server:set_token(gis, <<>>),
     Conf = gis_config(Config),
     Result = bondy_http_connector_auth_generic:fetch_token(Conf),

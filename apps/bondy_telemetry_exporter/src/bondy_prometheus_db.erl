@@ -202,7 +202,6 @@ deregister_cleanup(_) -> ok.
 %% runtime-computed atoms (sync outcome, scheduler kind) are expanded here.
 events() ->
     [
-        %% WAL
         [bondy_oplog, wal, append],
         [bondy_oplog, wal, fsync],
         [bondy_oplog, wal, rotate],
@@ -230,7 +229,6 @@ events() ->
         [bondy_oplog, applier, origins_reaped],
         [bondy_oplog, applier, replay_cell_events],
         [bondy_oplog, applier, validator_refresh],
-        %% Instance
         [bondy_oplog, instance, append],
         [bondy_oplog, instance, backpressure],
         [bondy_oplog, instance, mst_install],
@@ -279,16 +277,13 @@ events() ->
         [bondy_oplog, scheduler, gc, tick],
         [bondy_oplog, scheduler, gc, skipped],
         [bondy_oplog, scheduler, gc, trigger_outcome],
-        %% Origin retirement
         [bondy_oplog, retirement, completed],
         [bondy_oplog, retirement, skipped],
-        %% Secondary indexes
         [bondy_oplog, secondary_writer, flush],
         [bondy_oplog, secondary_writer, saturated],
         [bondy_oplog, secondary_index, rebuild],
         %% Core substrate periodic gauges (emitted by bondy_oplog_core_metrics)
         [bondy_oplog_core, metrics, refresh],
-        %% MST
         [bondy_mst, merge, stop],
         [bondy_mst, merge, exception],
         [bondy_mst, merge, abandoned],

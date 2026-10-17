@@ -302,7 +302,6 @@ name creates it afresh rather than reviving what was there.
     },
     hostname_verification => #{
         alias => <<"hostname_verification">>,
-        %% We rename the prop
         key => customize_hostname_check,
         required => false,
         datatype =>

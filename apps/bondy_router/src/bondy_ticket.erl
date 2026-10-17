@@ -358,7 +358,6 @@ verify(Ticket, Opts) ->
             authid := Authid,
             issued_at := IssuedAt,
             expires_at := ExpiresAt,
-            % issued_on := Node,
             scope := Scope0,
             kid := Kid
         } = Claims0,
@@ -853,7 +852,6 @@ scope(Session, Opts, Uri) ->
     ClientId = maps:get(client_id, Opts, all),
     InstanceId = maps:get(device_id, Opts, all),
 
-    %% Throw exception if client is requesting a ticket issued to itself
     Authid =/= ClientId orelse throw(invalid_request),
 
     bondy_auth_scope:new(Uri, ClientId, InstanceId).

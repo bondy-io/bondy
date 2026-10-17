@@ -72,11 +72,9 @@ unreachable_member_still_learns_from_the_rest() ->
         [O], bondy_oplog_origin_retirement:learn_retirements([[O]])
     ),
     ?assert(bondy_oplog_origin_bans:is_retired(O)),
-    %% Idempotent: a second pass learns nothing new from the same answer.
     ?assertEqual(
         [], bondy_oplog_origin_retirement:learn_retirements([[O]])
     ),
-    %% ...and an answer from no member at all teaches nothing.
     ?assertEqual([], bondy_oplog_origin_retirement:learn_retirements([])).
 
 %% A catalogue install replaces the frontier with its source's, which may still
@@ -120,7 +118,6 @@ reap_is_atomic_against_a_concurrent_merge() ->
     end,
     Frontier = bondy_oplog_instance:frontier(Id),
     ?assertNot(maps:is_key(O, Frontier)),
-    %% The concurrent merges still landed for the unretired origin.
     ?assertEqual(200, maps:get(Other, Frontier, 0)),
     ok = bondy_oplog:stop_instance(Id).
 
@@ -223,7 +220,6 @@ retire_dead_retires_the_complement() ->
     [Own] = bondy_oplog_origin_retirement:local_origins(),
     ?assertNot(lists:member(Own, Retired)),
     ?assertNot(bondy_oplog_origin_bans:is_retired(Own)),
-    %% Idempotent: nothing new is retired on a second call.
     ?assertEqual({ok, []}, bondy_oplog_origin_retirement:retire_dead()),
     ok = bondy_oplog:stop_instance(Id).
 
@@ -255,14 +251,12 @@ universal_is_the_intersection_of_member_sets() ->
     ?assertEqual(
         [A, B], bondy_oplog_origin_retirement:universal([[A, B], [B, A]])
     ),
-    %% B is retired by both members; A and C by one each.
     ?assertEqual(
         [B], bondy_oplog_origin_retirement:universal([[A, B], [B, C]])
     ),
     ?assertEqual(
         [], bondy_oplog_origin_retirement:universal([[A], [B], [C]])
     ),
-    %% A member with an empty set blocks everything.
     ?assertEqual(
         [], bondy_oplog_origin_retirement:universal([[A, B], []])
     ).
@@ -328,7 +322,6 @@ reap_frontier_is_idempotent() ->
     A = <<"reap-idem">>,
     ok = bondy_oplog_registry:merge_frontier(Id, #{A => 1}),
     ?assertEqual([A], bondy_oplog_registry:reap_frontier(Id, [A])),
-    %% Reaping an absent origin reports nothing rather than inventing it.
     ?assertEqual([], bondy_oplog_registry:reap_frontier(Id, [A])),
     ?assertEqual([], bondy_oplog_registry:reap_frontier(Id, [])),
     ok = bondy_oplog:stop_instance(Id).
@@ -348,7 +341,6 @@ retired_origin_never_re_enters_the_frontier() ->
     ?assertEqual(5, maps:get(O, bondy_oplog_instance:frontier(Id), 0)),
     ok = bondy_oplog_origin_bans:retire(O, decommissioned),
     ?assertEqual([O], bondy_oplog_registry:reap_frontier(Id, [O])),
-    %% A peer still advertising the origin must not re-add it.
     ok = bondy_oplog_registry:merge_frontier(Id, #{O => 9}),
     ?assertEqual(
         false, maps:is_key(O, bondy_oplog_instance:frontier(Id))

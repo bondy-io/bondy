@@ -33,7 +33,6 @@ calling the IdP for a session that had long since disconnected
 -include_lib("oidcc/include/oidcc_token.hrl").
 
 -define(TABLE, bondy_oidc_refresh_queue).
-%% 30 seconds
 -define(REFRESH_INTERVAL_MS, 30_000).
 %% Refresh 60 seconds before expiry
 -define(REFRESH_BUFFER_SECS, 60).
@@ -270,7 +269,6 @@ handle_refresh_success(
             _ -> 0
         end,
 
-    %% Update claims in PlumDB
     UpdateFun = fun(Claims) ->
         Claims1 =
             case NewRT of
@@ -285,7 +283,6 @@ handle_refresh_success(
 
     case bondy_ticket:update_claims(RealmUri, Authid, UpdateFun) of
         ok ->
-            %% Re-schedule if we have a refresh token
             case NewRT of
                 undefined ->
                     ok;

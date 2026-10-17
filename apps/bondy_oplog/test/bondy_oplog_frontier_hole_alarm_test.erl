@@ -89,12 +89,10 @@ a_standing_hole_raises_once_then_clears() ->
     ok = bondy_oplog_registry:merge_applied(Id, #{O => [2]}),
     ?assertEqual([2], maps:get(O, bondy_oplog_registry:pending(Id))),
 
-    %% First sweep: adopt. The clock starts now, nothing is raised.
     H1 = sweep([Id], 0, #{}),
     ?assertEqual(#{Id => {0, false}}, H1),
     ?assertEqual(0, alarm_count(Id)),
 
-    %% Still inside the window.
     H2 = sweep([Id], ?T, H1),
     ?assertEqual(#{Id => {0, false}}, H2),
     ?assertEqual(0, alarm_count(Id)),
@@ -108,7 +106,6 @@ a_standing_hole_raises_once_then_clears() ->
     ?assertEqual(#{Id => {0, true}}, H4),
     ?assertEqual(1, alarm_count(Id)),
 
-    %% Filling the hole absorbs the pending seq and clears the alarm.
     ok = bondy_oplog_registry:merge_applied(Id, #{O => [1]}),
     ?assertEqual(2, maps:get(O, bondy_oplog_registry:frontier(Id), 0)),
     ?assertEqual(#{}, bondy_oplog_registry:pending(Id)),

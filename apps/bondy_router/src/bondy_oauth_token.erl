@@ -251,7 +251,6 @@ bound" above).
     {ok, t()} | {error, issue_error()}.
 
 issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
-    %% Realm we are operating in
     RealmUri = bondy_auth:realm_uri(AuthCtxt),
     %% Maybe SSO realm used for auth
     AuthRealmUri = bondy_auth:authrealm(AuthCtxt),

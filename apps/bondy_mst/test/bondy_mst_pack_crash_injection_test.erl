@@ -15,8 +15,6 @@
 %% This module spawns a peer node, drives the store from there, and
 %% SIGKILLs the peer between `set_root/2` and any debounce flush. The
 %% parent then opens the store directly and verifies both halves.
-%%
-%% Pack-store QA item #13.
 %% =============================================================================
 
 -module(bondy_mst_pack_crash_injection_test).

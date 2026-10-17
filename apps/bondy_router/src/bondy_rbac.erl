@@ -1004,7 +1004,6 @@ do_get_metadata([], _, Acc) ->
                 V;
             (_, L0) when is_list(L0) ->
                 IsList = lists:any(fun is_list/1, L0),
-                %% Flatten and dedup
                 case sets:to_list(sets:from_list(lists:flatten(L0))) of
                     [V] when IsList == false ->
                         % Unwrap if singleton
@@ -1195,18 +1194,15 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
         fun(Resource) ->
             Key = {Rolename, Resource},
 
-            %% We store the list of permissions as the value
             Existing = bondy_connect_lib:or_else(
                 do_get(Table, RealmUri, Key),
                 []
             ),
 
-            %% We deduplicate
             Permissions1 = lists:umerge(
                 lists:sort(Existing), lists:sort(Permissions0)
             ),
 
-            %% We finally store the updated grant
             ok = store(Table, RealmUri, Key, Permissions1, Opts)
         end,
         Resources
@@ -1300,7 +1296,6 @@ do_revoke([{Rolename, RoleType} | Roles], RealmUri, Resources, Permissions) ->
     ok = lists:foreach(
         fun(Resource) ->
             Key = {Rolename, Resource},
-            %% check if there is currently a GRANT we can revoke
             case do_get(Table, RealmUri, Key) of
                 undefined ->
                     %% can't REVOKE what wasn't GRANTED
@@ -1418,7 +1413,6 @@ acc_grants([Rolename | Rolenames], Type, RealmProto, Seen, Acc) ->
     %% Grants can be assigned to a group defined in the realm or in the realm's
     %% prototype.
 
-    %% We get the groups this role is member of.
     Groupnames = role_groupnames(Rolename, Type, RealmProto, Seen),
 
     %% We iterate over the role's groups to gather grants (permissions)
@@ -1444,7 +1438,6 @@ acc_grants([Rolename | Rolenames], Type, RealmProto, Seen, Acc) ->
         Name == Rolename
     ],
 
-    %% We continue iterating over the roles
     acc_grants(Rolenames, Type, RealmProto, NewSeen, [Grants | NewAcc]).
 
 %% @private

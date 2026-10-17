@@ -1,5 +1,3 @@
-%% Stage 10: PropEr property tests with shrinking.
-%%
 %% Verifies the convergence invariant: for any sequence of append/sync
 %% commands on two replicas, a final convergence round produces identical
 %% root hashes and identical projections on both sides.

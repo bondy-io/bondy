@@ -114,7 +114,6 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
     [N1, N2] = nodes_of(Config),
     Pairs = seed_pairs(<<"asym">>),
 
-    %% 1. Write through bondy_db on N1, converge to N2 via background AAE.
     seed_and_converge(N1, N2, Pairs),
 
     try
@@ -173,7 +172,6 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
             Targets
         ),
 
-        %% 4. ASYMMETRIC COMPACTION: compact N1's instances only.
         lists:foreach(
             fun(I) ->
                 ?assertMatch({ok, _}, erpc:call(N1, ?MODULE, do_compact, [I]))

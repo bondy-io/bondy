@@ -210,7 +210,6 @@ storage_path_puts_the_id_in_one_component_test() ->
             Flat = unicode:characters_to_binary(
                 bondy_oplog_path:storage_path(Id, <<"/data">>, flat)
             ),
-            %% dirname strips exactly the instance
             ?assertEqual(<<"/data">>, filename:dirname(Flat)),
             ?assertEqual(Id, filename:basename(Flat)),
             Sharded = unicode:characters_to_binary(
@@ -270,14 +269,11 @@ checkpoint_dir_lands_inside_the_instance_dir_test_() ->
                 ?assertEqual(bondy_oplog_compaction_checkpoint_file, Mod),
                 {ok, St} = Mod:init(Id, CkptOpts),
                 ok = Mod:put_checkpoint(St, {watermark, 1}, #{}),
-                %% Where the file actually landed, from the disk.
                 InstanceDir = unicode:characters_to_binary(
                     bondy_oplog_path:instance_dir(Id, Base, Opts)
                 ),
                 Expected = filename:join(InstanceDir, <<"checkpoint.etf">>),
                 ?assert(filelib:is_regular(Expected)),
-                %% ...and nowhere else under the base: one file, inside
-                %% the instance's own directory.
                 Found = filelib:wildcard(
                     unicode:characters_to_list(
                         filename:join(Base, <<"**/checkpoint.etf">>)

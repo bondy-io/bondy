@@ -113,12 +113,10 @@ authenticate(EncSignature, _, _, #{pubkey := Pub} = State) when
         Challenge = maps:get(challenge, State),
         Signature = decode_hex(EncSignature),
 
-        %% Verify that the Challenge was signed using the Ed25519 key
         case bondy_cryptosign:verify(Signature, Challenge, Pub) of
             true ->
                 {ok, #{}, State};
             false ->
-                %% Challenge does not match the expected
                 {error, invalid_signature, State}
         end
     catch
@@ -138,11 +136,6 @@ authenticate(EncSignature, _, _, #{pubkey := Pub} = State) when
 decode_hex(HexString) ->
     try
         hex_utils:hexstr_to_bin(HexString)
-        % of
-        %     Bin when byte_size(Bin) == 96 ->
-        %         Bin;
-        %     _ ->
-        %         throw(invalid_signature_length)
     catch
         throw:Reason ->
             throw(Reason);

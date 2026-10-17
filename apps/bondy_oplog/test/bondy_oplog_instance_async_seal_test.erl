@@ -59,29 +59,22 @@ run(Dir) ->
     _ = bondy_oplog_instance:await_apply(InstId),
     ?assertEqual(?N, bondy_oplog:size(InstId)),
 
-    %% The seal worker runs off the instance process — wait for at least one
-    %% sealed pack to appear on disk.
     ok = wait_for(fun() -> length(sealed_packs(Dir)) >= 1 end, 5000),
     ok = telemetry:detach(HId),
 
-    %% The async roll path fired (would be 0 if put had sealed inline).
     ?assert(
         counters:get(Counter, 1) >= 1,
         "no seal_roll telemetry — the async roll path did not run"
     ),
 
-    %% The instance gen_server is alive (the worker lifecycle never faulted it).
     InstP = bondy_oplog_registry:instance_pid(InstId),
     ?assert(is_process_alive(InstP)),
 
-    %% Every appended pair is present in the durable MST.
     {ok, {_Root0, Pairs0}} = bondy_oplog_instance:replay_pairs(
         InstP, undefined
     ),
     ?assertEqual(?N, length(Pairs0)),
 
-    %% Stop (kills any in-flight seal worker) + restart: the reopen recovery
-    %% re-seals an interrupted roll, so no data is lost.
     ok = bondy_oplog:stop_instance(InstId),
     {ok, _} = open_async_instance(InstId, NS, Dir, Origin, ?SEAL_EVERY),
     ok = bondy_oplog:await_drain(InstId),

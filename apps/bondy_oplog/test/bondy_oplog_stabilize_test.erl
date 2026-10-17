@@ -71,9 +71,7 @@ removal_produces_a_reclaimable_state_test() ->
     Cleared = ?M:apply_op(S, {clear, 20}, <<"k">>),
     ?assertEqual({cleared, 20}, Cleared),
 
-    %% Invisible to readers immediately...
     ?assertEqual(undefined, ?M:to_value(Cleared)),
-    %% ...and physically reclaimable once its HLC is stable.
     ?assertEqual(keep, ?M:stabilize(20, Cleared)),
     ?assertEqual(discard, ?M:stabilize(21, Cleared)).
 

@@ -61,7 +61,6 @@ unchanged_root_skips_within_window() ->
     Id = mk_id(),
     R = root(1),
     ?assert(bondy_oplog_sync_scheduler:live_decide(Id, R, 0, ?BASE, ?MAX)),
-    %% A tick before the window elapses (?BASE) — skipped.
     ?assertNot(
         bondy_oplog_sync_scheduler:live_decide(Id, R, ?BASE - 1, ?BASE, ?MAX)
     ),
@@ -79,7 +78,6 @@ window_elapsed_polls_and_doubles() ->
     %% At ?BASE the window elapsed → poll; window grows to 2*?BASE, due
     %% at ?BASE + 2*?BASE.
     ?assert(bondy_oplog_sync_scheduler:live_decide(Id, R, ?BASE, ?BASE, ?MAX)),
-    %% Just before the new due time → skip.
     Due2 = ?BASE + 2 * ?BASE,
     ?assertNot(
         bondy_oplog_sync_scheduler:live_decide(Id, R, Due2 - 1, ?BASE, ?MAX)
@@ -103,11 +101,8 @@ window_caps_at_max() ->
     R = root(1),
     Base = 100,
     Max = 400,
-    %% Drive successive polls, always stepping the clock to the current
-    %% due time, and assert the inter-poll gap caps at Max.
     Now0 = 0,
     ?assert(bondy_oplog_sync_scheduler:live_decide(Id, R, Now0, Base, Max)),
-    %% windows: 100 -> 200 -> 400 -> 400 (capped) -> 400 ...
     Gaps = drive_polls(Id, R, Now0, Base, Max, 5),
     ?assertEqual([100, 200, 400, 400, 400], Gaps).
 
@@ -133,7 +128,6 @@ root_change_resets_to_base() ->
             Id, R2, Due2 + 1 + (?BASE - 1), ?BASE, ?MAX
         )
     ),
-    %% At base after the reset → poll again.
     ?assert(
         bondy_oplog_sync_scheduler:live_decide(
             Id, R2, Due2 + 1 + ?BASE, ?BASE, ?MAX

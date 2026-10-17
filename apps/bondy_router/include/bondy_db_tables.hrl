@@ -1,15 +1,7 @@
 %% =============================================================================
 %% BONDY DB TABLE NAMES + MARKERS
 %% =============================================================================
-%%
-%% These atoms are the bondy_db logical table names (and the `?EOT'/`?TOMBSTONE'
-%% markers). Historically this header named plum_db prefixes and was called
-%% `bondy_plum_db.hrl'; the data now lives in bondy_db (design §11.4) and plum_db
-%% is no longer a dependency, so the header was renamed, the `?PLUM_DB_*' macros
-%% renamed to `?BONDY_DB_*', and it is now self-contained (no longer includes
-%% `plum_db/include/plum_db.hrl').
 
-%% End-of-table / tombstone markers (were provided by plum_db.hrl).
 -define(EOT, '$end_of_table').
 -define(TOMBSTONE, '$deleted').
 

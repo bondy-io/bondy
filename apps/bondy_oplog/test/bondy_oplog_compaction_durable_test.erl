@@ -113,10 +113,8 @@ durable_compaction_with_seal(Dir) ->
         append_batch(InstId, 1, Batch),
         _ = bondy_oplog_instance:await_apply(InstId),
         ?assertEqual(Batch, bondy_oplog:size(InstId)),
-        %% The oldest events sealed to disk.
         ?assert(length(sealed_packs(Dir)) >= 1),
 
-        %% Compaction truncates the sealed prefix in-process.
         Witness = bondy_oplog_registry:frontier(InstId),
         ?assertMatch(
             {ok, {compacted, _, _}},
@@ -125,7 +123,6 @@ durable_compaction_with_seal(Dir) ->
         ?assertEqual(0, bondy_oplog:size(InstId)),
         ?assertNotEqual(undefined, bondy_oplog:current_watermark(InstId)),
 
-        %% Still functional: a second sealing round + compaction succeeds.
         append_batch(InstId, 2, Batch),
         _ = bondy_oplog_instance:await_apply(InstId),
         ?assertEqual(Batch, bondy_oplog:size(InstId)),

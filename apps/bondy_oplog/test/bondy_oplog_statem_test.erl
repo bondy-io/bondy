@@ -1,5 +1,3 @@
-%% Stage 11: stateful PropEr model.
-%%
 %% Models a pair of replicas A and B as a state machine:
 %%
 %%   - State tracks the cells each replica's projection is expected to hold.
@@ -155,10 +153,8 @@ next_state(#model{} = S, _Result, {call, _, append_b, [_B, Key, Id]}) ->
         b_seen = sets:add_element(Id, S#model.b_seen)
     };
 next_state(#model{} = S, _Result, {call, _, sync_a_b, _}) ->
-    %% A pulls from B: A learns whatever B has.
     S#model{a_seen = sets:union(S#model.a_seen, S#model.b_seen)};
 next_state(#model{} = S, _Result, {call, _, sync_b_a, _}) ->
-    %% B pulls from A.
     S#model{b_seen = sets:union(S#model.a_seen, S#model.b_seen)};
 next_state(#model{} = S, _Result, {call, _, compact_a, _}) ->
     S#model{a_compacted = true};
@@ -290,7 +286,6 @@ cleanup_app(_) ->
         bondy_oplog:stop_instance(I)
      || I <- bondy_oplog:list_instances()
     ],
-    %% Forget any synthetic peer-state entries we left behind.
     [
         bondy_oplog_peer_state:forget_peer({peer, statem_a, I})
      || I <- bondy_oplog:list_instances()

@@ -247,14 +247,11 @@ run_workload(M0, Flush) ->
 run_workload_collect(M0, Flush) ->
     N = 1500,
 
-    %% Wave 0 — seed with evens.
     Evens = [{2 * I, ?VAL} || I <- lists:seq(1, N)],
     M1 = Flush(bondy_mst:put_batch(M0, Evens)),
     Live1 = lists:sort([K || {K, _} <- Evens]),
     assert_invariant(M1, Live1),
 
-    %% Waves 1..K — interleave odds in chunks so each batch straddles
-    %% existing keys and the merge must split pages.
     OddItems = [{2 * I + 1, ?VAL} || I <- lists:seq(1, N)],
     {M2, Live2} = lists:foldl(
         fun(Chunk, {MAcc, LAcc}) ->
@@ -267,7 +264,6 @@ run_workload_collect(M0, Flush) ->
         chunks(OddItems, 100)
     ),
 
-    %% Delete sweep — every 5th live key.
     ToDelete = [K || K <- Live2, K rem 5 =:= 0],
     {M3, Live3} = lists:foldl(
         fun(K, {MAcc, LAcc}) ->

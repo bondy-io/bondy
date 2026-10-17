@@ -174,7 +174,6 @@ An implementation of the `app_config` behaviour.
 %% =============================================================================
 
 init(Args) ->
-    %% We initialise the environment with the args
     ok = set_vsn(Args),
 
     ?LOG_NOTICE(#{
@@ -182,7 +181,6 @@ init(Args) ->
         version => get(bondy, vsn)
     }),
 
-    %% We read bondy env and cache the values
     ok = app_config:init(?BONDY, #{callback_mod => ?MODULE}),
 
     %% Resolve the listener inventory before anything consumes it:
@@ -342,8 +340,6 @@ listener_transport_opts(Name, Ip) ->
     SocketOpts = bondy_cert_manager:maybe_inject_sni_fun(Name, SocketOpts1),
 
     Opts#{
-        %% connection_type => worker,
-
         % the default, made explicit
         num_conns_sups => NumAcceptors,
         socket_opts => SocketOpts
@@ -508,7 +504,6 @@ setup_partisan() ->
     %% this module edited Partisan's environment, so it is read again here.
     ok = partisan_config:init(),
 
-    %% We add the wamp_relay channel
     ok = bondy_config:set(aae_channel, ?BONDY_AAE_CHANNEL),
     ok = bondy_config:set(wamp_peer_channel, ?WAMP_RELAY_CHANNEL).
 
@@ -644,7 +639,6 @@ prepare_private_config() ->
 
 %% @private
 configure_registry() ->
-    %% Configure partition count
     KeyPath = [registry, partitions],
 
     ok =
@@ -657,7 +651,6 @@ configure_registry() ->
                 ok
         end,
 
-    %% Configure partition spawn_opts
     Opts0 = bondy_config:get([registry, partition_spawn_opts], []),
     Value = ?VALIDATE_MQ_DATA(
         key_value:get(message_queue_data, Opts0, off_heap)
@@ -666,7 +659,6 @@ configure_registry() ->
     bondy_config:set([registry, partition_spawn_opts], Opts).
 
 configure_jobs_pool() ->
-    %% Configure partition count
     KeyPath = [jobs_pool, size],
 
     case bondy_config:get(KeyPath, undefined) of
@@ -759,7 +751,6 @@ with_tls_material(Name, SocketOpts) ->
     SocketOpts :: [atom() | {atom(), any()}].
 
 normalise_socket_opts(SocketOpts0) ->
-    %% We normalise the buffer option
     SocketOpts1 = normalise_socket_buffer(SocketOpts0),
 
     %% We default to listen on any i.e. 0.0.0.0 or :: depending on IPVer

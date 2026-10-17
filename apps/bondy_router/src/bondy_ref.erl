@@ -34,7 +34,6 @@ or callback function.
 }).
 
 -type t() :: #bondy_ref{}.
-% -type t_or_uri()        ::  t() | uri().
 -type relay() :: #bondy_ref{type :: relay}.
 -type bridge_relay() :: #bondy_ref{type :: bridge_relay}.
 -type client() :: #bondy_ref{type :: client}.

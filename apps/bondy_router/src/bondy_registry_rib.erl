@@ -807,15 +807,6 @@ reap_orphan_stubs(RealmUri) ->
 %% frontier already claims its existing events, so AAE re-ships nothing).
 %% What licenses a delete is the backing cell being gone, checked per key in
 %% `prune_cellless_stubs/2`.
-%%
-%% Scoping to non-members is what keeps this affordable. The predecessor
-%% listed EVERY cell of BOTH RIB tables per realm to diff against the stub
-%% keys; `bondy_db:list/2` pages through `bondy_oplog_core:range_all/5`,
-%% which scatters to every shard and truncates after merging, so it costs
-%% O(cells x shards) decodes. Measured on the Fly fleet at 190,984
-%% subscription cells: 43.5s for ONE table, every sweep. Here the common
-%% case — nobody has departed — is one C-side match-spec scan returning a
-%% handful of nodestrings, and no cell read at all.
 departed_stub_nodes(RealmUri) ->
     MS = [{{{'_', RealmUri, '_', '_', '$1'}, '_'}, [], ['$1']}],
     Live = live_nodestrings(),

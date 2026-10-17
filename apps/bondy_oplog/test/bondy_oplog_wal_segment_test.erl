@@ -67,7 +67,6 @@ create_and_read_header_test() ->
         ok = prim_file:close(Fd),
         ?assertEqual(SegId, bondy_log_segment:segment_id(Header)),
         ?assertEqual(identity(), bondy_log_segment:identity(Header)),
-        %% Reopen and re-parse.
         {ok, Fd2, Header2} = bondy_log_segment:open(Path),
         ok = prim_file:close(Fd2),
         ?assertEqual(Header, Header2)

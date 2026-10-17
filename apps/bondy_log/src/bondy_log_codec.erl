@@ -425,7 +425,6 @@ ensure_registry_callable(Module) ->
 %% =============================================================================
 
 %% @private
-%% Threshold + didn't-shrink short-circuits.
 try_compress(Body, Algo, Min, Opts) ->
     InSize = iolist_size(Body),
     case InSize < Min of
@@ -467,7 +466,6 @@ compress_now(Body, InSize, zlib, Tel) ->
                 emit_compress(Tel, zlib, InSize, OutSize, T1 - T0),
                 {?FLAG_COMPRESSED, Envelope};
             false ->
-                %% Compression didn't help — keep the raw body.
                 {0, Body}
         end
     after
@@ -560,8 +558,6 @@ meta(Tel, Algo, KeyId) ->
 %% AES-256-GCM. The IV is freshly generated per call —
 %% `crypto:strong_rand_bytes/1`'s 12 random bytes give the maximum
 %% feasible collision resistance for the AES-GCM 96-bit-IV contract.
-%% Returns the on-wire envelope as a binary; the caller composes it
-%% with the frame header.
 encrypt_now(Body, Registry, Opts) ->
     Tel = tel(Opts),
     {KeyId, Key} = Registry:current_key(),

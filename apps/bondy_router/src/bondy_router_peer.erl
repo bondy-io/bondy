@@ -140,7 +140,6 @@ consume all enqueued messages.
     ok | no_return().
 
 send(RealmUri, To, Msg, Opts) ->
-    %% We validate the message
     bondy_wamp_message:is_message(Msg) orelse
         error({invalid_wamp_message, Msg}),
 
@@ -418,12 +417,10 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
         {?BONDY_REQ, _Pid, _RealmUri, #result{} = R} when
             R#result.request_id == ReqId
         ->
-            %% ok = bondy_router_peer:ack(Pid, Ref),
             {ok, message_to_map(R)};
         {?BONDY_REQ, _Pid, _RealmUri, #error{} = R} when
             R#error.request_id == ReqId
         ->
-            %% ok = bondy_router_peer:ack(Pid, Ref),
             {error, message_to_map(R)};
         Other ->
             {error, Other}

@@ -317,7 +317,6 @@ resolve_services_with_secrets(_Config) ->
 resolve_services_without_secrets(_Config) ->
     Service = make_service_no_secrets(<<"plain-svc">>),
     [Resolved] = bondy_http_connector_secret_resolver:resolve_services([Service]),
-    %% Should pass through unchanged
     ?assertEqual(Service, Resolved).
 
 resolve_services_merges_with_existing_vars(_Config) ->
@@ -335,7 +334,6 @@ resolve_services_merges_with_existing_vars(_Config) ->
         }
     },
 
-    %% Start with a service that already has static vars
     Service0 = make_service(<<"merge-svc">>, SecretsSpec),
     #{auth_conf := AuthConf0} = Service0,
     Service = Service0#{
@@ -347,13 +345,10 @@ resolve_services_merges_with_existing_vars(_Config) ->
     [Resolved] = bondy_http_connector_secret_resolver:resolve_services([Service]),
 
     #{auth_conf := #{vars := Vars}} = Resolved,
-    %% Static var preserved
     ?assertEqual(<<"keep-me">>, maps:get(existing_var, Vars)),
-    %% Secret var added
     ?assertEqual(<<"myuser">>, maps:get(client_id, Vars)).
 
 resolve_services_missing_field(_Config) ->
-    %% Secret JSON has no "MISSING_FIELD" key
     mock_sm_success(#{<<"OTHER">> => <<"value">>}),
 
     SecretsSpec = #{

@@ -73,7 +73,6 @@ compaction_persists_truncated_root(Dir) ->
         PackDir = bondy_oplog_path:instance_dir(
             InstId, unicode:characters_to_binary(Dir), StartOpts
         ),
-        %% With commit_every => 1 the root is durable before compaction.
         ?assertNotEqual(undefined, disk_root(PackDir)),
 
         Witness = bondy_oplog_registry:frontier(InstId),
@@ -83,11 +82,6 @@ compaction_persists_truncated_root(Dir) ->
         ),
         ?assertEqual(0, bondy_oplog:size(InstId)),
 
-        %% INVARIANT: compaction's effect on the root must be durable in
-        %% lockstep with the checkpoint it advanced — so the on-disk root
-        %% equals the in-memory (post-truncate) root. If they differ, the
-        %% durable checkpoint has outrun the durable MST root and a crash
-        %% here corrupts the shard on reboot.
         MemRoot = bondy_oplog_instance:root_hash(InstId),
         ?assertEqual(MemRoot, disk_root(PackDir))
     after

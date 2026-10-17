@@ -28,13 +28,11 @@ k(H, O, S) ->
 ev(H, O, S, Op) ->
     bondy_oplog_event:new(k(H, O, S), Op, #{}).
 
-%% Fold `apply_op/3` over `{Op, Key}` pairs (the eager write path).
 fold(Mod, Pairs) ->
     lists:foldl(
         fun({Op, Key}, S) -> Mod:apply_op(S, Op, Key) end, Mod:init(), Pairs
     ).
 
-%% Assert `interpret_cog/2` is invariant under a few input permutations.
 assert_cog_perm_invariant(Mod, Events) ->
     Base = Mod:interpret_cog(Events, Mod:init()),
     Want = Mod:to_value(Base),

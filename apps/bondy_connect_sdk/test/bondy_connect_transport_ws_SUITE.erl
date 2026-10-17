@@ -54,7 +54,6 @@ end_per_suite(_) ->
 %% TESTS
 %% =============================================================================
 
-%% A full register→call works over ws:// with the json (text-frame) subprotocol.
 ws_upgrade_bad_path_fails(_) ->
     Result = bondy_connect_client:connect(#{
         transport => ws,

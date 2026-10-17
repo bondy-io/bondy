@@ -499,7 +499,6 @@ handle_inbound_messages(
     %% Opt-in: per-session throttle for flood-prone verbs before routing.
     case msg_throttle(H, St) of
         allow ->
-            %% We have a session, so we forward messages via router
             case bondy_router:forward(H, St#wamp_state.context) of
                 {ok, Ctxt} ->
                     handle_inbound_messages(T, update_context(Ctxt, St), Acc);
@@ -527,7 +526,6 @@ handle_inbound_messages(_, #wamp_state{state_name = shutting_down} = St, _) ->
     >>,
     stop({protocol_violation, Reason}, St);
 handle_inbound_messages([], St, []) ->
-    %% We have no replies
     {noreply, St};
 handle_inbound_messages([], St, Acc) ->
     {reply, lists:reverse(Acc), St};
@@ -610,22 +608,18 @@ open_session(Extra, St0) when is_map(Extra) ->
             transport_id => maps:get(transport_id, Ctxt0, undefined)
         },
 
-        %% We open a session
         Result = bondy_session_manager:open(SessionId0, RealmUri, Properties),
-        %% throw if we got an error
         Session = resulto:throw_or_unwrap(Result),
 
         %% This might be different than the SessionId0 in case we found a
         %% collision while storing (almost impossible).
         SessionId = bondy_session:external_id(Session),
 
-        %% We set the session in the context
         Ctxt1 = bondy_context:set_session(Ctxt0, Session),
         St1 = update_context(Ctxt1, St0),
 
         SessionInfo = bondy_session:to_external(Session),
 
-        %% We send the WELCOME message
         Welcome = bondy_wamp_message:welcome(
             SessionId,
             SessionInfo#{
@@ -713,7 +707,6 @@ maybe_auth_challenge(
     SessionId = bondy_context:session_id(Ctxt1),
     SourceIP = bondy_context:source_ip(Ctxt1),
 
-    %% Extract identity from ticket claims
     Authid = maps:get(authid, Claims),
     Authroles = maps:get(authroles, Claims, []),
 
@@ -750,7 +743,6 @@ maybe_auth_challenge(enabled, #{authid := UserId} = Details, Realm, St0) ->
     Roles = authroles(Details),
     SourceIP = bondy_context:source_ip(Ctxt),
 
-    %% We initialise the auth context
     case bondy_auth:init(SessionId, Realm, UserId, Roles, SourceIP) of
         {ok, AuthCtxt} ->
             St2 = St1#wamp_state{auth_context = AuthCtxt},
@@ -776,7 +768,6 @@ maybe_auth_challenge(_, Details, Realm, St0) ->
     Roles = [<<"anonymous">>],
     SourceIP = bondy_context:source_ip(Ctxt),
 
-    %% We initialise the auth context with anon id and role
     case bondy_auth:init(SessionId, Realm, anonymous, Roles, SourceIP) of
         {ok, AuthCtxt} ->
             St = St1#wamp_state{auth_context = AuthCtxt},

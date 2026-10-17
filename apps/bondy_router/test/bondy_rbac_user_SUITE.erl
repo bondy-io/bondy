@@ -79,7 +79,6 @@ init_per_suite(Config) ->
     [{keypairs, KeyPairs} | Config].
 
 end_per_suite(Config) ->
-    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 add_sso_realm(RealmUri) ->
@@ -287,7 +286,6 @@ update(_) ->
 
 change_password(_) ->
     SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
-    % User0 = bondy_rbac_user:fetch(?REALM2_URI, ?SSOU1),
     P1 = <<"newpassword">>,
 
     ?assertEqual(
@@ -520,7 +518,6 @@ group_deletion_cleans_members(_) ->
 
     ok = bondy_rbac_group:remove(?REALM1_URI, G),
 
-    %% Each former member still exists but no longer references the group.
     [
         ?assertEqual(
             [],
@@ -528,7 +525,6 @@ group_deletion_cleans_members(_) ->
         )
      || U <- Users
     ],
-    %% And the reverse index has no entries left for the deleted group.
     ok = flush_member_index(),
     ?assertEqual(
         {[], undefined}, bondy_rbac_group:members(?REALM1_URI, G, #{})
@@ -545,7 +541,6 @@ membership_is_relation_authoritative(_) ->
     ok = add_group(?REALM1_URI, G),
     ok = add_member(?REALM1_URI, U, [G]),
 
-    %% The API surfaces the derived group set.
     ?assertEqual(
         [G], bondy_rbac_user:groups(bondy_rbac_user:fetch(?REALM1_URI, U))
     ),
@@ -557,7 +552,6 @@ membership_is_relation_authoritative(_) ->
     ?assert(is_map(Value)),
     ?assertNot(maps:is_key(groups, Value)),
 
-    %% Retracting the membership drops it from the derived set.
     ok = bondy_rbac_user:remove_group(?REALM1_URI, U, G),
     ?assertEqual(
         [], bondy_rbac_user:groups(bondy_rbac_user:fetch(?REALM1_URI, U))
@@ -589,7 +583,6 @@ token_version(_) ->
         {ok, 0}, bondy_rbac_user:token_version(?REALM1_URI, anonymous)
     ),
 
-    %% A non-existent user has no version.
     ?assertEqual(
         {error, not_found},
         bondy_rbac_user:token_version(?REALM1_URI, <<"no_such_user_xyz">>)
@@ -605,7 +598,6 @@ declarative_config_membership(_) ->
     ok = add_group(?REALM1_URI, G1),
     ok = add_group(?REALM1_URI, G2),
 
-    %% A declaratively created user gets the membership the config declares.
     ok = declarative_add(?REALM1_URI, U, [G1]),
     ?assertEqual([G1], user_groups(?REALM1_URI, U)),
 
@@ -677,7 +669,6 @@ recreated_user_inherits_nothing(_) ->
     }),
     ok = bondy_rbac_user:add_alias(Uri, User, Alias),
 
-    %% Everything is in place before the delete.
     C0 = bondy_rbac:get_context(Uri, User),
     ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.call">>, Resource, C0)),
     ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.register">>, Resource, C0)),

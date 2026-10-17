@@ -134,10 +134,8 @@ group_commit_coalesces_concurrent_appends_test() ->
         N = 50,
         Events = mk_monotonic_events(N),
         Replies = suspend_enqueue_resume(Pid, Events),
-        %% Every append succeeded...
         [?assertMatch({ok, [_]}, R) || R <- Replies],
         Info = bondy_oplog_wal:info(Pid),
-        %% ...and exactly one fsync covered the whole group.
         ?assertEqual(1, maps:get(fsync_count, Info)),
         ?assertEqual(N, maps:get(append_count, Info))
     end).
@@ -185,13 +183,11 @@ group_commit_append_is_durable_on_return_test() ->
         {ok, Hlc, {Seg, _Start}} = bondy_oplog_wal:append(Pid, E),
         Info = bondy_oplog_wal:info(Pid),
         EndOff = maps:get(head_offset, Info),
-        %% durable == head immediately on return
         ?assertEqual({Seg, EndOff}, bondy_oplog_wal:durable_position(Pid)),
         ?assertEqual(EndOff, maps:get(durable_offset, Info)),
         ?assertEqual(
             ok, bondy_oplog_wal:await_durable(Pid, {Seg, EndOff}, 0)
         ),
-        %% one fsync for the one-append group
         ?assertEqual(1, maps:get(fsync_count, Info))
     end).
 
@@ -230,13 +226,10 @@ group_commit_mid_group_rotation_all_durable_test() ->
         Positions = [Pos || {ok, [{_Hlc, Pos}]} <- Replies],
         ?assertEqual(N, length(Positions)),
         Segs = [S || {S, _Off} <- Positions],
-        %% rotation happened mid-group: events span more than one segment
         ?assert(lists:max(Segs) > 0),
         ?assertEqual(0, lists:min(Segs)),
-        %% the whole group is durable, including the pre-rotation frames
         DurablePos = bondy_oplog_wal:durable_position(Pid),
         [?assert(Pos =< DurablePos) || Pos <- Positions],
-        %% one explicit head fsync for the entire multi-segment group
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(1, maps:get(fsync_count, Info))
     end).
@@ -377,11 +370,8 @@ group_commit_fatal_during_drain_errors_group_and_stops_test() ->
                 suspend_enqueue_resume(Pid, Events)
             end
         ),
-        %% Every caller in the coalesced group — including the K-1 whose own
-        %% frame was written ok — plus the fatal caller gets the error.
         ?assertEqual(K, length(Replies)),
         [?assertEqual({error, Reason}, R) || R <- Replies],
-        %% The writer stopped (supervisor restart will run recovery).
         receive
             {'EXIT', Pid, Reason} -> ok
         after 5000 ->

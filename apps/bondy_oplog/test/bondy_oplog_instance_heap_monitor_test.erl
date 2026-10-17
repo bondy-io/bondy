@@ -110,12 +110,10 @@ functional_across_hibernations() ->
 
     [bondy_oplog:append(Id, {before, N}) || N <- lists:seq(1, 50)],
     timer:sleep(200),
-    %% Responds to a call across many hibernations, with state intact.
     Root1 = bondy_oplog:root_hash(Id),
     ?assert(is_binary(Root1)),
     ?assert(is_process_alive(Pid)),
 
-    %% New writes after the hibernations still land → root moves.
     [bondy_oplog:append(Id, {'after', N}) || N <- lists:seq(1, 50)],
     timer:sleep(150),
     Root2 = bondy_oplog:root_hash(Id),

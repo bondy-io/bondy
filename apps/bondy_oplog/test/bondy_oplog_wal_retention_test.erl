@@ -91,7 +91,6 @@ mk_one(HLC, Seq) ->
     Hlc = bondy_connect_hlc:now(HLC),
     {Hlc, mk_event(Hlc, Seq)}.
 
-%% Append a single event, returning {Hlc, Pos}.
 append1(Pid, HLC, Seq) ->
     {Hlc, E} = mk_one(HLC, Seq),
     {ok, Hlc, Pos} = bondy_oplog_wal:append(Pid, E),
@@ -132,7 +131,6 @@ advance_watermark_persists_test() ->
             ?assertEqual(H, maps:get(snapshot_watermark, Info)),
             H
         end),
-        %% Reopen and verify the watermark survives.
         with_wal(Dir, #{}, fun(Pid, _Dir) ->
             Info = bondy_oplog_wal:info(Pid),
             ?assertEqual(Hlc1, maps:get(snapshot_watermark, Info))
@@ -151,7 +149,6 @@ watermark_regression_rejected_test() ->
             {error, {watermark_regression, _, _}},
             bondy_oplog_wal:advance_snapshot_watermark(Pid, Low)
         ),
-        %% State untouched.
         Info = bondy_oplog_wal:info(Pid),
         ?assertEqual(High, maps:get(snapshot_watermark, Info))
     end).
@@ -160,14 +157,10 @@ sweep_noop_without_progress_test() ->
     with_wal(small_segment_opts(), fun(Pid, _Dir) ->
         HLC = bondy_connect_hlc:new(),
         fill_events(Pid, HLC, 4),
-        %% No watermark advance, no committed segment — sweep is a
-        %% no-op even though there are sealed segments.
         ?assertMatch({ok, [], 0}, bondy_oplog_wal:retention_sweep(Pid))
     end).
 
 sweep_respects_min_live_segments_test() ->
-    %% Floor: never drop below `min_live_segments` even if more are
-    %% eligible.
     Opts = maps:merge(small_segment_opts(), #{min_live_segments => 3}),
     with_wal(Opts, fun(Pid, _Dir) ->
         HLC = bondy_connect_hlc:new(),
@@ -241,8 +234,6 @@ sweep_deletes_eligible_prefix_test() ->
                 )
             )
         ),
-        %% Explicit `retention_sweep/1` after the implicit sweep is a
-        %% no-op: nothing more is eligible.
         ?assertMatch({ok, [], 0}, bondy_oplog_wal:retention_sweep(Pid))
     end).
 

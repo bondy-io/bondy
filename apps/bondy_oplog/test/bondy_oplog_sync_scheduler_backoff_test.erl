@@ -102,8 +102,6 @@ consecutive_failures_double_up_to_max() ->
     push_failure(Inst, killed),
     [{Inst, NextMs, Count}] = ets:lookup(?BACKOFF_TAB, Inst),
     ?assertEqual(6, Count),
-    %% After the 6th, wait should be clamped at max=1000.
-    %% NextMs ≈ time-of-last-push + 1000. We bound it generously.
     ?assert(NextMs >= Before + 900),
     ?assert(NextMs =< Before + 2000),
     ets:delete(?BACKOFF_TAB, Inst).
@@ -149,7 +147,6 @@ backoff_deferred_telemetry_fires() ->
         telemetry:detach(HandlerId)
     end,
     bondy_oplog:stop_instance(Inst),
-    %% Restore tight defaults for subsequent tests.
     ok = bondy_oplog_config:set_bootstrap_retry_base_ms(100),
     ok = bondy_oplog_config:set_bootstrap_retry_max_ms(1000),
     ets:delete(?BACKOFF_TAB, Inst).

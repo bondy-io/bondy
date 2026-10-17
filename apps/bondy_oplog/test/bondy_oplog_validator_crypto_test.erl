@@ -1,5 +1,3 @@
-%% Stage 12: crypto validator tests.
-
 -module(bondy_oplog_validator_crypto_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -16,10 +14,8 @@ sign_then_verify_test() ->
     Event = mk_event(Origin, 1),
     {Signed, _SState1} =
         bondy_oplog_validator_crypto:sign_event(Event, SState),
-    %% Signed event has both fields populated.
     ?assert(is_binary(bondy_oplog_event:prev_hash(Signed))),
     ?assert(is_binary(bondy_oplog_event:signature(Signed))),
-    %% A peer with the same pub key map can verify it.
     {ok, VState} = init_state(undefined, #{Origin => Pub}),
     ?assertEqual(
         ok,
@@ -33,7 +29,6 @@ verify_rejects_tampered_payload_test() ->
     Event = mk_event(Origin, 1),
     {Signed, _} =
         bondy_oplog_validator_crypto:sign_event(Event, SState),
-    %% Tamper with the op.
     Tampered = bondy_oplog_event:new(
         bondy_oplog_event:key(Signed),
         {tampered_op},
@@ -69,7 +64,6 @@ verify_rejects_unknown_origin_by_default_test() ->
     Event = mk_event(Origin, 1),
     {Signed, _} =
         bondy_oplog_validator_crypto:sign_event(Event, SState),
-    %% Verifier knows nothing about this origin.
     {ok, VState} = init_state(undefined, #{}),
     ?assertMatch(
         {error, {unknown_origin, _}},
@@ -103,7 +97,6 @@ hash_chain_links_consecutive_events_test() ->
     E2 = mk_event(Origin, 2),
     {Signed2, _S2} =
         bondy_oplog_validator_crypto:sign_event(E2, S1),
-    %% Signed2's prev_hash must equal hash(Signed1).
     ExpectedPrev = sha_hash(
         canonical_blob(Signed1),
         bondy_oplog_event:signature(Signed1)
@@ -225,10 +218,8 @@ instance_rejects_tampered_remote_event() ->
             peer_pubkeys => Pubkeys
         }
     }),
-    %% B appends → has a signed event.
     Key = bondy_oplog:append(IdB, bondy_oplog_test_projection:cell_op(1)),
     {ok, BEvent} = bondy_oplog:get(IdB, Key),
-    %% Tamper: rewrite the op while keeping the signature.
     Tampered = bondy_oplog_event:new(
         bondy_oplog_event:key(BEvent),
         {evil_op},
@@ -236,12 +227,10 @@ instance_rejects_tampered_remote_event() ->
         bondy_oplog_event:prev_hash(BEvent),
         bondy_oplog_event:signature(BEvent)
     ),
-    %% A receives — must reject.
     ?assertEqual(
         {error, invalid_signature},
         bondy_oplog:append_remote(IdA, Tampered)
     ),
-    %% A's MST is unchanged.
     ?assertEqual(0, bondy_oplog:size(IdA)),
     ok.
 
@@ -274,16 +263,12 @@ crypto_validator_refresh_adds_peer_pubkey() ->
             peer_pubkeys => #{OriginA => PubA, OriginB => PubB}
         }
     }),
-    %% B signs a local event then forwards it to A — must be rejected
-    %% because A doesn't know B's pubkey yet.
     Key1 = bondy_oplog:append(IdB, bondy_oplog_test_projection:cell_op(1)),
     {ok, Signed1} = bondy_oplog:get(IdB, Key1),
     ?assertMatch(
         {error, {unknown_origin, _}},
         bondy_oplog:append_remote(IdA, Signed1)
     ),
-    %% Operator pushes B's pubkey into A's rotation config and
-    %% triggers refresh.
     application:set_env(
         bondy_oplog,
         {validator_crypto, IdA},
@@ -330,10 +315,7 @@ crypto_validator_refresh_returns_error_without_env() ->
             peer_pubkeys => #{OriginA => PubA, OriginB => PubB}
         }
     }),
-    %% Ensure no env key is set.
     application:unset_env(bondy_oplog, {validator_crypto, IdA}),
-    %% Refresh cast is delivered, applier logs the error, keeps old
-    %% snapshot. Verify behaviourally: B's event is still rejected.
     ok = bondy_oplog_instance:refresh_validator(IdA, no_env_check),
     ApplierPid = bondy_oplog_registry:applier_pid(IdA),
     ?assert(is_pid(ApplierPid)),

@@ -3,8 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PR-H (#24) dead-origin VV reaping — the deterministic CRDT-level gate.
-%%
 %% Reaping drops the causal-context entries of permanently-retired origins
 %% but ONLY when they carry no live value, so it is VALUE-PRESERVING:
 %% `to_value/1` never changes, only `context_of/1` (the per-cell version
@@ -32,9 +30,7 @@ mv_reap_dominated_origin_test() ->
     State = {{[{?ALIVE, 1, [v_alive]}, {?DEAD, 2, []}], []}, 5},
     {State1, Reaped} = M:reap_origins(State, [?DEAD]),
     ?assertEqual([?DEAD], Reaped),
-    %% value-preserving: the sibling set is unchanged.
     ?assertEqual(M:to_value(State), M:to_value(State1)),
-    %% the context shrank — `dead` is gone.
     ?assertEqual([{?ALIVE, 1}], M:context_of(State1)),
     ?assertEqual([{?ALIVE, 1}, {?DEAD, 2}], M:context_of(State)).
 
@@ -87,7 +83,6 @@ aw_reap_context_only_origin_test() ->
     State = {Entries, CC, 9},
     {State1, Reaped} = M:reap_origins(State, [?DEAD]),
     ?assertEqual([?DEAD], Reaped),
-    %% value-preserving + the entries (the value carrier) untouched.
     ?assertEqual(M:to_value(State), M:to_value(State1)),
     ?assertEqual([{?ALIVE, 3}], M:context_of(State1)),
     {Entries1, _, _} = State1,

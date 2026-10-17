@@ -33,7 +33,6 @@ init_per_suite(Config) ->
     [{realm_uri, <<"com.myrealm">>} | Config].
 
 end_per_suite(Config) ->
-    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 future_apply_default(_) ->
@@ -75,8 +74,6 @@ new_cra_too_high_iterations(_) ->
     ).
 
 new_cra_above_legacy_cap_accepted(_) ->
-    %% S-1: a work factor above the OLD 65,536 cap (impossible before) is now
-    %% accepted. 100k keeps the test fast while proving the cap was lifted.
     Opts = #{protocol => cra, params => #{kdf => pbkdf2, iterations => 100000}},
     A = bondy_password:new(?P1, Opts),
     ?assertMatch(#{params := #{iterations := 100000}}, A),
@@ -127,16 +124,7 @@ new_scram_too_low_iterations(_) ->
         })
     ).
 
-%% ?assertError(
-%%     {invalid_argument, iterations},
-%%     bondy_password:new(?P1, #{
-%%         protocol => scram,
-%%         params => #{kdf => argon2id13, iterations => 0}
-%%     })
-%% ).
-
 new_scram_too_high_iterations(_) ->
-    %% S-1: rejected only above the new 10,000,000 ceiling.
     ?assertError(
         {invalid_argument, iterations},
         bondy_password:new(?P1, #{
@@ -153,14 +141,6 @@ new_scram_too_high_iterations(_) ->
             params => #{kdf => argon2id13}
         })
     ).
-
-%% ?assertError(
-%%     {invalid_argument, iterations},
-%%     bondy_password:new(?P1, #{
-%%         protocol => scram,
-%%         params => #{kdf => argon2id13, iterations => 4294967295 + 1}
-%%     })
-%% ).
 
 new_scram_options_pbkdf2(_) ->
     Opts = #{

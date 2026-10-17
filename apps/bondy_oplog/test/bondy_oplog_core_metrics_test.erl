@@ -92,10 +92,8 @@ snapshot_emits_refresh_event_per_namespace() ->
 
 cache_hit_rate_is_delta_based() ->
     NS = mk_ns(),
-    %% First tick establishes a baseline.
     fire_read(NS, true),
     ok = bondy_oplog_core_metrics:snapshot_now(),
-    %% Now produce 3 hits + 1 miss between this and the next snapshot.
     fire_read(NS, true),
     fire_read(NS, true),
     fire_read(NS, true),
@@ -104,7 +102,6 @@ cache_hit_rate_is_delta_based() ->
         ok = bondy_oplog_core_metrics:snapshot_now()
     end),
     [{Meas, _}] = [E || E = {_M, #{namespace := N}} <- Events, N =:= NS],
-    %% 3 hits out of 4 reads → 0.75. Floating point compare with epsilon.
     Rate = maps:get(cache_hit_rate, Meas),
     ?assert(is_float(Rate)),
     ?assert(abs(Rate - 0.75) < 1.0e-9).
@@ -112,16 +109,13 @@ cache_hit_rate_is_delta_based() ->
 rates_scale_with_window() ->
     NS = mk_ns(),
     ok = bondy_oplog_core_metrics:snapshot_now(),
-    %% Two reads in a short window.
     fire_read(NS, true),
     fire_read(NS, false),
-    %% Wait a known amount so the window is observable.
     timer:sleep(50),
     Events = capture_refresh_events(fun() ->
         ok = bondy_oplog_core_metrics:snapshot_now()
     end),
     [{Meas, Meta}] = [E || E = {_M, #{namespace := N}} <- Events, N =:= NS],
-    %% RPS must be positive and the window ≥ the sleep.
     ?assert(maps:get(read_rps, Meas) > 0),
     ?assert(maps:get(interval_ms, Meta) >= 50).
 
@@ -140,7 +134,6 @@ multiple_namespaces_are_independent() ->
     ?assertEqual(1, length(OursB)),
     [{MeasA, _}] = OursA,
     [{MeasB, _}] = OursB,
-    %% NSA: 2 hits, 0 misses → rate = 1.0; NSB: 0 hits, 1 miss → rate = 0.0
     ?assertEqual(1.0, maps:get(cache_hit_rate, MeasA)),
     ?assertEqual(0.0, maps:get(cache_hit_rate, MeasB)).
 
@@ -179,7 +172,6 @@ freshness_lag_ignores_secondary_index_shards() ->
     [{Meas, _}] = [E || E = {_M, #{namespace := N}} <- Events, N =:= NS],
     Lag = maps:get(current_freshness_lag_max_ms, Meas),
 
-    %% Fresh primary: a small lag, not the sentinel the secondary still holds.
     ?assert(Lag >= 0),
     ?assert(Lag < 60_000),
 

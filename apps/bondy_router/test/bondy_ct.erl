@@ -157,13 +157,6 @@
         {uri_strictness, loose}
     ]},
     {bondy_router, [
-        %% The listener inventory, declared the way an operator now declares it.
-        %% There is no second spelling: the legacy `admin_api.*',
-        %% `api_gateway.*', `wamp.{tcp,tls}.*' and `bridge.listener.*' mappings
-        %% are gone, so a listener exists only if it is named here. The seven
-        %% below are exactly the seven this harness enabled before; the two
-        %% bridge relays were disabled and are therefore simply absent.
-        %%
         %% Each name matches its option block further down, which is what makes
         %% the block reach it: a listener's options are read under its CURRENT
         %% name. The admin listener is `admin' -- the reserved name -- so
@@ -212,7 +205,6 @@
         %% capability of the build, seated by `bondy_config:setup_wamp/0` from
         %% `?DEALER_FEATURES` / `?BROKER_FEATURES`, and that runs on app start —
         %% so a copy in this fixture is overwritten before any test reads it.
-        %% It also drifted: this one still said `call_reroute` was supported.
         {session_manager_pool, [{size, 32}]},
         {job_manager_queue, [{ttl, 60000}, {max_size, 160000}]},
         {job_manager_pool, [{size, 16}]},

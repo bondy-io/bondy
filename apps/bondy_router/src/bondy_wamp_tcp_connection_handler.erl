@@ -237,7 +237,6 @@ handle_info(
 handle_info({Transport, Socket, Data}, #state{socket = Socket} = State0) when
     Transport =:= tcp orelse Transport =:= ssl
 ->
-    %% We append the newly received data to the existing buffer
     Buffer = State0#state.buffer,
     State1 = State0#state{buffer = <<>>},
 
@@ -277,8 +276,6 @@ handle_info({?BONDY_REQ, Pid, _RealmUri, M}, St) when Pid =:= self() ->
 handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% have sent to us using bondy_router_peer:send/2,3
-    %% ok = bondy_router_peer:ack(Pid, Ref),
-    %% We send the message to the peer
     handle_outbound(M, St);
 handle_info(
     {timeout, Ref, ping_idle_timeout}, #state{ping_tref = Ref} = State
@@ -538,7 +535,6 @@ handle_inbound(<<0:5, R:3, Len:24, Msg:Len/binary, Rest/binary>>, State) when
     %% Should we stop instead?
     handle_inbound(Rest, State);
 handle_inbound(<<>>, State) ->
-    %% We finished consuming data
     {ok, State};
 handle_inbound(Data, State0) ->
     %% We have a partial message i.e. byte_size(Data) < Len
@@ -776,12 +772,10 @@ close_socket(Reason, St) ->
 
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
 
-    %% We report socket stats
     ok = bondy_telemetry:socket_closed(wamp, raw, Seconds),
 
     case Reason of
         {tcp_error, _, _} ->
-            %% We increase the socker error counter
             ok = bondy_telemetry:socket_error(wamp, raw);
         _ ->
             ok
@@ -884,7 +878,6 @@ reset_ping(#state{ping_tref = undefined} = State) ->
 reset_ping(#state{} = State) ->
     ok = cancel_timer(State#state.ping_tref),
 
-    %% Reset retry state
     {_, Retry} = bondy_connect_retry:succeed(State#state.ping_retry),
 
     Time = State#state.ping_idle_timeout,
@@ -931,18 +924,12 @@ maybe_send_ping(#state{} = State) ->
 maybe_send_ping(Limit, State) when
     Limit == deadline orelse Limit == max_retries
 ->
-    % ?LOG_INFO(#{
-    %     description => "Connection closing.",
-    %     reason => ping_timeout
-    % }),
     {stop, {shutdown, ping_timeout}, State};
 maybe_send_ping(_Time, #state{} = State0) ->
-    %% We send a ping
     Bin = State0#state.ping_payload,
     Frame = <<0:5, 1:3, (byte_size(Bin)):24, Bin/binary>>,
     ok = send_frame(Frame, State0),
 
-    %% We schedule the next retry
     Ref = bondy_connect_retry:fire(State0#state.ping_retry),
     State = State0#state{
         ping_tref = Ref,

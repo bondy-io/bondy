@@ -42,22 +42,18 @@ validate_id(Id) ->
 
 validate_map(Map, Spec, Extensions) ->
     Opts = #{
-        % Fail atomically for the whole map
         atomic => true,
         % This will only turn the defined keys to atoms
         labels => atom,
-        % Remove all unknown options
         keep_unknown => false
     },
     validate_map(Map, Spec, Extensions, Opts).
 
 validate_map(Map, Spec, Extensions, Opts0) ->
     Defaults = #{
-        % Fail atomically for the whole map
         atomic => true,
         % This will only turn the defined keys to atoms
         labels => atom,
-        % Remove all unknown options
         keep_unknown => false
     },
     Opts = maps:merge(Defaults, Opts0),
@@ -85,7 +81,6 @@ maybe_add_extension({invoke, Options}, Acc) ->
     maps:put(invoke, NewKeySpec, Acc);
 maybe_add_extension(Key, Acc) ->
     try
-        %% We add a maps_utils key specification for the known
         NewKey = to_valid_extension_key(Key),
         NewKeySpec = #{
             %% we alias it so that maps_utils:validate/2 can find the key
@@ -105,7 +100,6 @@ to_valid_extension_key(Key) when is_atom(Key) ->
 to_valid_extension_key(Key) when is_binary(Key) ->
     try
         {match, _} = re:run(Key, extension_key_pattern()),
-        %% We add a maps_utils key specification for the known
         binary_to_existing_atom(Key, utf8)
     catch
         error:{badmatch, nomatch} ->

@@ -60,22 +60,17 @@ pre_bootstrap_catalogue_auto_bootstraps_from_first_peer() ->
     _ = bondy_oplog:append(Peer, {cell_apply, ?B, <<"k">>, {set, 5, <<"v">>}}),
     ok = bondy_oplog_test_projection:drain(Peer),
 
-    %% Pre-conditions.
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Peer)),
     ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Local)),
 
-    %% Configure the scheduler to use `Peer` as the only peer.
     ok = bondy_oplog_sync_scheduler:set_peer_source(
         bondy_oplog_peer_source_static, #{peers => [Peer]}
     ),
 
-    %% Trigger; wait for the dispatched bootstrap process to flip the
-    %% lifecycle.
     bondy_oplog_sync_scheduler:trigger(),
     ok = wait_for_live(Local, 5000),
 
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Local)),
-    %% Verify the cell landed on Local.
     LocalEntry = registry_entry(Local),
     Adapter = bondy_oplog_core_registry:entry_projection_adapter(LocalEntry),
     Handle = bondy_oplog_core_registry:entry_projection_handle(LocalEntry),
@@ -154,9 +149,6 @@ live_instance_fans_out_per_peer_syncs() ->
     {ok, _} = bondy_oplog_test_projection:start_instance(Inst),
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Inst)),
 
-    %% We want to verify the SCHEDULER's default fan-out path runs.
-    %% Override the dispatch with a one that captures, then call
-    %% default_dispatch directly via a thin wrapper.
     ok = bondy_oplog_sync_scheduler:set_dispatch(
         fun(I, Peers) ->
             Self ! {Ref, dispatched, I, Peers}

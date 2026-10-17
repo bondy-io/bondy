@@ -53,7 +53,6 @@ cmds_gen() ->
 %% Properties
 %% =============================================================================
 
-%% §4.3 ship gate: eager arrival-order fold == sorted-group interpret_cog.
 prop_eager_equals_group() ->
     ?FORALL(Cmds, cmds_gen(), begin
         Events = simulate(Cmds),
@@ -64,7 +63,6 @@ prop_eager_equals_group() ->
         Eager =:= Group
     end).
 
-%% interpret_cog is invariant under any arrival permutation.
 prop_permutation_invariant() ->
     ?FORALL(Cmds, cmds_gen(), begin
         Events = simulate(Cmds),
@@ -91,7 +89,6 @@ prop_replica_sync_converges() ->
         end)
     end).
 
-%% Re-delivering every event a second time changes nothing (idempotent).
 prop_idempotent_redelivery() ->
     ?FORALL(Cmds, cmds_gen(), begin
         Events = simulate(Cmds),
@@ -148,7 +145,6 @@ apply_event(State, Event) ->
         bondy_oplog_event:meta(Event)
     ).
 
-%% A length-stable shuffle generator: permute the given list.
 shuffle_gen(L) ->
     ?LET(Keys, vector(length(L), integer()), begin
         [E || {_, E} <- lists:sort(lists:zip(Keys, L))]

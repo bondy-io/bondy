@@ -212,11 +212,9 @@ formatted_body(From, To, Subject, Body, _Options) ->
     {ContentType, Content} =
         case Type of
             false ->
-                %% [{text, Text}]
                 {<<"text">>, Text} = lists:keyfind(<<"text">>, 1, Body),
                 {<<"text/plain">>, Text};
             {<<"html">>, HTML} ->
-                %% [{html, HTML}]
                 {<<"text/html">>, HTML}
         end,
 

@@ -54,7 +54,6 @@ end_per_suite(Config) ->
 wildcard_registered_once(Config) ->
     RealmUri = ?config(realm_uri, Config),
 
-    %% Several opens in the same realm.
     GuidA = open_session(RealmUri),
     GuidB = open_session(RealmUri),
     _ = open_session(RealmUri),

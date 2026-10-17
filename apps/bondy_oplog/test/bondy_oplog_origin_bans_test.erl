@@ -81,7 +81,6 @@ a_successful_write_restores_persistence() ->
     ?assertEqual(ok, bondy_oplog_origin_bans:retire(O, decommissioned)),
     ?assert(bondy_oplog_origin_bans:is_persistent()),
     ?assert(bondy_oplog_origin_bans:is_retired(O)),
-    %% And it is genuinely durable.
     ok = restart_bans(),
     ?assert(bondy_oplog_origin_bans:is_retired(O)),
     ?assert(bondy_oplog_origin_bans:is_persistent()).
@@ -178,7 +177,6 @@ banned_origin_rejected_at_append_remote() ->
         bondy_oplog:append_remote(Id, Event)
     ),
     ?assertEqual(0, bondy_oplog:size(Id)),
-    %% Lifting the ban allows the event through.
     ok = bondy_oplog_origin_bans:unban(Origin),
     ?assertEqual(
         ok,

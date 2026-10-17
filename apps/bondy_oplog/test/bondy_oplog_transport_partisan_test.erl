@@ -11,7 +11,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("bondy_oplog.hrl").
 
-%% Helper invoked from the peer node via erpc:call/4.
 -export([do_responder_call/3]).
 -export([start_clustered/0]).
 
@@ -198,9 +197,7 @@ sync_survives_peer_node_failure() ->
                 {sync_result, R} -> R
             after 15_000 -> {error, test_timeout}
             end,
-        %% The call must not silently "succeed" against a dead peer.
         ?assertMatch({error, _}, SyncOutcome),
-        %% Local state must be untouched -- no partial/corrupt merge.
         ?assertEqual(0, bondy_oplog:size(Inst)),
         ?assertEqual(undefined, bondy_oplog:root_hash(Inst))
     after
@@ -211,9 +208,6 @@ sync_survives_peer_node_failure() ->
             _:_ -> ok
         end
     end,
-    %% A fresh peer with the same shape of data: a subsequent sync must
-    %% still converge normally -- the failed round left nothing corrupted
-    %% to retry against.
     {ok, Peer2, NodeC} = start_peer_node("partfail2"),
     try
         ok = setup_peer(NodeC),

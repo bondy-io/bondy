@@ -78,12 +78,6 @@ previously using `decode_head/2`.
 encode_with_tail(Elements, TailBin) when
     is_list(Elements), is_binary(TailBin)
 ->
-    %% For CBOR, we need to:
-    %% 1. Count total elements (new elements + elements in tail)
-    %% 2. Encode the array header with proper count
-    %% 3. Encode the new elements
-    %% 4. Append the tail elements (already encoded)
-    %%
     %% Returned as iodata: flattening would copy the (potentially large)
     %% tail payload once per subscriber, and every consumer accepts
     %% iodata.
@@ -91,10 +85,8 @@ encode_with_tail(Elements, TailBin) when
     TailCount = count_cbor_elements(TailBin),
     TotalCount = length(Elements) + TailCount,
 
-    %% Encode array header
     HeaderBin = encode_array_header(TotalCount),
 
-    %% Encode each new element
     EncodedElements = [bondy_cbor:encode(E) || E <- Elements],
 
     [HeaderBin, EncodedElements, TailBin].
@@ -152,14 +144,12 @@ decode_tail(<<>>, _) ->
     [];
 decode_tail(Bin, Opts) when is_binary(Bin) ->
     %% The tail contains raw CBOR-encoded elements without array wrapper
-    %% We need to wrap them in an array and decode
     ElementCount = count_cbor_elements(Bin),
 
     case ElementCount of
         0 ->
             [];
         N ->
-            %% Wrap in CBOR array and decode
             HeaderBin = encode_array_header(N),
             WrappedBin = <<HeaderBin/binary, Bin/binary>>,
             do_decode(WrappedBin, Opts)
@@ -311,33 +301,26 @@ format_seconds(S) when is_float(S) ->
 %% =============================================================================
 
 %% @private
-%% Parse CBOR array header and return length and remaining binary
 parse_array_header(<<MajorAndInfo, Rest/binary>>) ->
     Major = MajorAndInfo bsr 5,
     Info = MajorAndInfo band 16#1f,
 
     case Major of
         ?CBOR_ARRAY when Info < 24 ->
-            %% Length encoded in info bits
             {ok, Info, Rest};
         ?CBOR_ARRAY when Info =:= 24 ->
-            %% 1-byte length follows
             <<Len:8, Rest2/binary>> = Rest,
             {ok, Len, Rest2};
         ?CBOR_ARRAY when Info =:= 25 ->
-            %% 2-byte length follows
             <<Len:16, Rest2/binary>> = Rest,
             {ok, Len, Rest2};
         ?CBOR_ARRAY when Info =:= 26 ->
-            %% 4-byte length follows
             <<Len:32, Rest2/binary>> = Rest,
             {ok, Len, Rest2};
         ?CBOR_ARRAY when Info =:= 27 ->
-            %% 8-byte length follows
             <<Len:64, Rest2/binary>> = Rest,
             {ok, Len, Rest2};
         ?CBOR_ARRAY when Info =:= 31 ->
-            %% Indefinite-length array
             {indefinite, Rest};
         _ ->
             error
@@ -346,7 +329,6 @@ parse_array_header(_) ->
     error.
 
 %% @private
-%% Encode a CBOR array header for given length
 encode_array_header(Len) when Len < 24 ->
     Byte = (?CBOR_ARRAY bsl 5) bor Len,
     <<Byte>>;
@@ -364,7 +346,6 @@ encode_array_header(Len) ->
     <<Byte, Len:64>>.
 
 %% @private
-%% Decode N elements from a definite-length array
 decode_n_elements(Rest, 0, _ArrayLen, Acc) ->
     Elements = lists:reverse(Acc),
     case Rest of
@@ -387,7 +368,6 @@ decode_n_elements(Bin, N, ArrayLen, Acc) when N > 0, ArrayLen > 0 ->
             )
     end;
 decode_n_elements(Rest, _N, 0, Acc) ->
-    %% Array ended before we got N elements
     Elements = lists:reverse(Acc),
     case Rest of
         <<>> ->
@@ -397,7 +377,6 @@ decode_n_elements(Rest, _N, 0, Acc) ->
     end.
 
 %% @private
-%% Decode N elements from an indefinite-length array
 decode_n_elements_indefinite(<<16#ff, _Rest/binary>>, _N, Acc) ->
     %% Hit break code
     lists:reverse(Acc);
@@ -424,7 +403,6 @@ decode_n_elements_indefinite(Bin, N, Acc) when N > 0 ->
     end.
 
 %% @private
-%% Decode a single CBOR element and return the remaining binary
 decode_single_element(Bin) ->
     case skip_cbor_value(Bin) of
         {ok, ValueBin, Rest} ->
@@ -435,7 +413,6 @@ decode_single_element(Bin) ->
     end.
 
 %% @private
-%% Skip over a complete CBOR value and return its binary and the rest
 skip_cbor_value(<<>>) ->
     error;
 skip_cbor_value(<<MajorAndInfo, Rest/binary>> = Bin) ->
@@ -525,7 +502,6 @@ skip_bytes_or_text(Bin, 27, Rest) ->
             error
     end;
 skip_bytes_or_text(_Bin, 31, Rest) ->
-    %% Indefinite-length bytes/text - skip chunks until break
     skip_indefinite_chunks(Rest, 1);
 skip_bytes_or_text(_, _, _) ->
     error.
@@ -533,11 +509,8 @@ skip_bytes_or_text(_, _, _) ->
 %% @private
 skip_indefinite_chunks(<<16#ff, Rest/binary>>, _StartPos) ->
     %% Break code - end of indefinite-length item
-    %% We need the original binary to extract the value
-    %% This is tricky - for now, just error on indefinite chunks
     {ok, <<16#ff>>, Rest};
 skip_indefinite_chunks(Bin, _StartPos) ->
-    %% Skip each chunk
     case skip_cbor_value(Bin) of
         {ok, _ChunkBin, Rest} ->
             skip_indefinite_chunks(Rest, 0);
@@ -561,7 +534,6 @@ skip_array(Bin, 27, Rest) ->
     <<ArrayLen:64, Rest2/binary>> = Rest,
     skip_n_values(Rest2, ArrayLen, 9, Bin);
 skip_array(Bin, 31, Rest) ->
-    %% Indefinite-length array
     skip_until_break(Rest, 1, Bin);
 skip_array(_, _, _) ->
     error.
@@ -583,14 +555,12 @@ skip_map(Bin, 27, Rest) ->
     <<MapLen:64, Rest2/binary>> = Rest,
     skip_n_values(Rest2, MapLen * 2, 9, Bin);
 skip_map(Bin, 31, Rest) ->
-    %% Indefinite-length map
     skip_until_break(Rest, 1, Bin);
 skip_map(_, _, _) ->
     error.
 
 %% @private
 skip_tag(Bin, Info, Rest) ->
-    %% Skip the tag number, then skip the tagged value
     {_HeaderLen, Rest2} =
         case Info of
             I when I < 24 ->
@@ -631,22 +601,18 @@ skip_simple(Bin, 24, Rest) ->
     <<_:8, Rest2/binary>> = Rest,
     {ok, binary:part(Bin, 0, 2), Rest2};
 skip_simple(Bin, 25, Rest) ->
-    %% Half-precision float (2 bytes)
     <<_:16, Rest2/binary>> = Rest,
     {ok, binary:part(Bin, 0, 3), Rest2};
 skip_simple(Bin, 26, Rest) ->
-    %% Single-precision float (4 bytes)
     <<_:32, Rest2/binary>> = Rest,
     {ok, binary:part(Bin, 0, 5), Rest2};
 skip_simple(Bin, 27, Rest) ->
-    %% Double-precision float (8 bytes)
     <<_:64, Rest2/binary>> = Rest,
     {ok, binary:part(Bin, 0, 9), Rest2};
 skip_simple(_, _, _) ->
     error.
 
 %% @private
-%% Skip N CBOR values
 skip_n_values(Rest, 0, _HeaderLen, OrigBin) ->
     TotalLen = byte_size(OrigBin) - byte_size(Rest),
     {ok, binary:part(OrigBin, 0, TotalLen), Rest};
@@ -659,7 +625,6 @@ skip_n_values(Bin, N, HeaderLen, OrigBin) when N > 0 ->
     end.
 
 %% @private
-%% Skip values until break code (0xff)
 skip_until_break(<<16#ff, Rest/binary>>, _HeaderLen, OrigBin) ->
     TotalLen = byte_size(OrigBin) - byte_size(Rest),
     {ok, binary:part(OrigBin, 0, TotalLen), Rest};

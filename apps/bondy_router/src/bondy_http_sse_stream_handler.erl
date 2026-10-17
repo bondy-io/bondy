@@ -87,20 +87,16 @@ init(Req0, Opts) ->
                     ),
                     {ok, Req, Opts};
                 ok ->
-                    %% Register as SSE stream with the transport session
                     ok = bondy_http_transport_session:register_sse_stream(
                         SessionPid, self()
                     ),
 
-                    %% Monitor the session process
                     MonRef = erlang:monitor(process, SessionPid),
 
-                    %% Get encoding for this transport
                     Encoding = bondy_http_transport_session:encoding(
                         SessionPid
                     ),
 
-                    %% Start SSE stream response
                     Headers = #{
                         <<"content-type">> =>
                             <<"text/event-stream; charset=utf-8">>,
@@ -119,7 +115,6 @@ init(Req0, Opts) ->
                     %% it), so the keepalives below are also what keeps the
                     %% connection alive through quiet periods.
 
-                    %% Schedule initial drain and keepalive
                     self() ! drain_queue,
 
                     State0 = #state{

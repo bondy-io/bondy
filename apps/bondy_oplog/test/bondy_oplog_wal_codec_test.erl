@@ -54,16 +54,11 @@ writer_with_compression_roundtrips() ->
     },
     {ok, Wal} = bondy_oplog_wal:start_link(Id, Opts),
     HLC = bondy_connect_hlc:new(),
-    %% Append a very compressible batch — bodies should shrink after
-    %% the codec runs.
     Events = [
         mk_event(bondy_connect_hlc:now(HLC), Seq)
      || Seq <- lists:seq(0, 9)
     ],
     {ok, _Acks} = bondy_oplog_wal:append_batch(Wal, Events),
-    %% Open a reader and read the batch back. It must be byte-for-byte
-    %% identical to what we appended — i.e. decompression actually
-    %% restores the original term encoding.
     {ok, Iter0} = bondy_log_reader:open(Wal, beginning),
     {ok, Batch, _Hlcs, _Pos, _Iter1} = bondy_log_reader:next(Iter0),
     ?assertEqual(Events, Batch),

@@ -119,8 +119,6 @@ rewrite_after_reclaim_is_accepted(T) ->
     ?assertEqual({error, not_found}, bondy_db:read(T, ?R, K)),
 
     %% THE ASSERTION: re-creating the reclaimed cell is a legitimate write.
-    %% Before the sweep co-evicted, this was
-    %% `{error, {context_regression, <<"items">>, <<"r", 0, "reclaimed">>}}`.
     ?assertEqual(ok, bondy_db:apply(T, ?R, K, enable)),
     ?assertEqual(true, value(bondy_db:read(T, ?R, K))).
 

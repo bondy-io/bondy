@@ -69,7 +69,6 @@ issue(RealmUri, Authid, OidcProvider, OidcTokens, Opts) when
             device_id => maps:get(device_id, ScopeOpts, <<"all">>)
         },
 
-        %% Extract OIDC token fields
         IdToken = maps:get(id_token, OidcTokens, undefined),
         RefreshToken = maps:get(refresh_token, OidcTokens, undefined),
         AccessTokenExpiresAt = maps:get(
@@ -92,7 +91,6 @@ issue(RealmUri, Authid, OidcProvider, OidcTokens, Opts) when
             oidc_provider => OidcProvider
         },
 
-        %% Add optional OIDC fields
         Claims1 =
             case IdToken of
                 undefined -> Claims0;

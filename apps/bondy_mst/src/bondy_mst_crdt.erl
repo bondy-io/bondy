@@ -108,15 +108,12 @@ following callbacks:
     %% Anti-entropy exchange orchestration (merge buffer, bounded merge
     %% concurrency, the get/put/missing protocol). See `bondy_mst_exchange`.
     exchange :: bondy_mst_exchange:t(),
-    %% max_versions
     %% The max number of versions to keep i.e. the version will not be eligible
     %% for garbage collection.
     max_versions = 10 :: pos_integer(),
-    %% version_ttl
     %% The time, measured in milliseconds, after which a version becomes
     %% eligible for garbage collection.
     version_ttl :: pos_integer(),
-    %% history
     %% This map's size is bounded by max_versions.
     history = #{} :: #{epoch() => hash()},
     %% A queue containing the latest gossiped roots from peers i.e. candidates
@@ -152,13 +149,11 @@ following callbacks:
     | {callback_mod, module()}
     | {callback_args, list()}.
 -type opts_map() :: #{
-    %% bondy_mst
     store => bondy_mst_store:t(),
     hash_algorithm => bondy_mst:hash_algorithm(),
     store_opts => bondy_mst_store:opts(),
     merger => bondy_mst:merger(),
     comparator => bondy_mst:comparator(),
-    %%
     max_merges => pos_integer(),
     max_merges_per_root => pos_integer(),
     callback_mod => module(),
@@ -340,11 +335,9 @@ new(NodeId, Opts) when is_list(Opts) ->
 new(NodeId, Opts0) when
     (is_atom(NodeId) orelse is_binary(NodeId)) andalso is_map(Opts0)
 ->
-    %% Configure the tree
     TreeOpts = maps:with([store, store_opts, merger, comparator], Opts0),
     Tree = bondy_mst:new(TreeOpts),
 
-    %% Configure the grove
     Opts = maps:with(
         [callback_mod, callback_args, max_merges, max_merges_per_root], Opts0
     ),
@@ -439,11 +432,9 @@ put(CRDT0, Key, Value, Opts) ->
         Tree0 = CRDT0#?MODULE.tree,
         Root0 = bondy_mst:root(Tree0),
 
-        %% We perform the put and update the grove state
         Tree = bondy_mst:put(Tree0, Key, Value),
         CRDT1 = CRDT0#?MODULE{tree = Tree},
 
-        %% We obtain the new root
         Root = bondy_mst:root(Tree),
 
         %% We store the new root on the version history so that is not
@@ -452,7 +443,6 @@ put(CRDT0, Key, Value, Opts) ->
         %% when history has reached its maximum size.
         CRDT = add_history(CRDT1, Root),
 
-        %% We conditionally broadcast
         case Root0 =/= Root andalso key_value:get(broadcast, Opts, true) of
             true ->
                 Gossip = #gossip{
@@ -744,14 +734,12 @@ maybe_broadcast(CRDT0, #gossip{key = undefined, value = undefined} = Gossip) ->
     Now = erlang:monotonic_time(),
     Elapsed = elapsed(Now, CRDT0#?MODULE.last_fwd_bcast_time),
 
-    %% We make sure we broadcast pending gossip messages first
     CRDT = broadcast_pending(CRDT0),
 
     case Elapsed >= CRDT#?MODULE.fwd_bcast_interval of
         true ->
             broadcast(CRDT, Gossip);
         false ->
-            %% Delay broadcast, coalescing by Peer
             Backlog = bondy_mst_coalescing_queue:in(
                 CRDT#?MODULE.bcast_backlog,
                 Gossip#gossip.from,
@@ -840,7 +828,6 @@ on_merge(CRDT0, Peer) ->
 
 %% @private
 maybe_gc(CRDT) ->
-    %% We preserve all roots being merged and all history roots
     gc(CRDT, keep_roots(CRDT)).
 
 %% @private
@@ -849,12 +836,10 @@ encode_hash(Bin) -> binary:encode_hex(Bin).
 
 %% @private
 cancel_merges(CRDT, NewRoot) ->
-    %% We remove any ongoing merges matching the merged NewRoot.
     Exchange = bondy_mst_exchange:cancel_merges(
         CRDT#?MODULE.exchange, NewRoot
     ),
 
-    %% We remove any pending merges matching the merged NewRoot.
     Backlog = bondy_mst_coalescing_queue:filter(
         CRDT#?MODULE.merge_backlog,
         fun(_, V) -> V =/= NewRoot end
@@ -867,12 +852,10 @@ add_history(#?MODULE{} = CRDT, Root) ->
     Epoch = erlang:monotonic_time(),
     TTL = CRDT#?MODULE.version_ttl,
 
-    %% We purge expired versions
     H1 = maps:filter(
         fun(Epoch0, _Root) -> elapsed(Epoch, Epoch0) =< TTL end,
         CRDT#?MODULE.history
     ),
-    %% We add the new version
     H = maps:put(Epoch, Root, H1),
 
     CRDT#?MODULE{history = H}.

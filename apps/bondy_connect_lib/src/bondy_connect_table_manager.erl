@@ -339,7 +339,6 @@ handle_call({give_away, Name, NewOwner}, {From, _Tag}, St) ->
                     true ->
                         do_give_away(Tab, NewOwner);
                     false ->
-                        %% The table does not exist or belongs to another process
                         false
                 end;
             error ->

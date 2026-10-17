@@ -433,8 +433,6 @@ peer(_) ->
 %% =============================================================================
 
 on_load() ->
-    %% We persist the rolename regex
-    %% -----------------------------
     %% Avoid whitespace, control characters, comma, semi-colon,
     %% non-standard Windows-only characters, other misc
     %% Illegal = lists:seq(0, 32) ++ [60, 62] ++ lists:seq(127, 191),

@@ -56,7 +56,6 @@ predicate_reflects_subscriptions(_) ->
     %% Fresh realm: no meta subscribers.
     false = bondy_registry:has_matches(subscription, ?REALM, ?ON_SUBSCRIBE),
 
-    %% Exact
     {ok, Id1} = subscribe(#{}, ?ON_SUBSCRIBE),
     true = bondy_registry:has_matches(subscription, ?REALM, ?ON_SUBSCRIBE),
     %% A subscriber to one meta topic does not demand another.
@@ -77,7 +76,6 @@ predicate_reflects_subscriptions(_) ->
     ok = bondy_broker:unsubscribe(Id2, ?REALM),
     false = bondy_registry:has_matches(subscription, ?REALM, ?ON_SUBSCRIBE),
 
-    %% Wildcard
     {ok, Id3} = subscribe(
         #{match => ?WILDCARD_MATCH}, <<"wamp..on_subscribe">>
     ),
@@ -135,7 +133,6 @@ delivery_with_subscribers(_) ->
     %% nothing else arrives.
     ok = assert_no_event(300),
 
-    %% Prefix meta subscriber.
     {ok, PrefixId} = subscribe(
         #{match => ?PREFIX_MATCH}, <<"wamp.subscription.">>
     ),

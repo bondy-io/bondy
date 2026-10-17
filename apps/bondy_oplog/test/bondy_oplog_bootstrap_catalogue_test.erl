@@ -262,7 +262,6 @@ bootstrap_seeds_local_frontier() ->
     file:del_dir_r(BaseDir).
 
 fresh_replica_bootstraps_from_peer() ->
-    %% Set up the peer with cells, the local replica with nothing.
     {Peer, _PeerNS, _, _} = setup_instance(),
     {Local, _LocalNS, _, _} = setup_instance(),
     Cells = [
@@ -277,7 +276,6 @@ fresh_replica_bootstraps_from_peer() ->
     ],
     ok = bondy_oplog_test_projection:drain(Peer),
 
-    %% Pre-bootstrap: peer high-water = 25, local high-water = 0.
     ?assertMatch(
         {ok, 25},
         high_water(Peer)
@@ -294,10 +292,8 @@ fresh_replica_bootstraps_from_peer() ->
         )
     ),
 
-    %% Post-bootstrap: local high-water has caught up to peer.
     ?assertMatch({ok, 25}, high_water(Local)),
 
-    %% Verify every key has the right cell present on the local replica.
     PeerEntry = peer_entry(Peer),
     LocalEntry = peer_entry(Local),
     LocalAdapter = bondy_oplog_core_registry:entry_projection_adapter(
@@ -330,7 +326,6 @@ bootstrap_marks_local_live() ->
     _ = bondy_oplog:append(Peer, {cell_apply, ?B, <<"k">>, {set, 1, <<"v">>}}),
     ok = bondy_oplog_test_projection:drain(Peer),
 
-    %% Peer is live (seeded), Local is pre_bootstrap.
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Peer)),
     ?assertEqual(pre_bootstrap, bondy_oplog_instance:lifecycle_state(Local)),
 
@@ -405,9 +400,7 @@ live_replica_recovers_lossless_via_anti_entropy() ->
     {ok, K2Frame} = Adapter:get(Handle, ?B, <<"k2">>),
     {K1Hlc, _, _} = bondy_oplog_cell_frame:decode_full(K1Frame),
     {K2Hlc, _, _} = bondy_oplog_cell_frame:decode_full(K2Frame),
-    %% Shared cell converges to the higher-HLC value (peer@20).
     ?assertEqual(20, K1Hlc),
-    %% Local-only cell is PRESERVED — the lossless property (no replace-wipe).
     ?assertEqual(30, K2Hlc),
 
     teardown(Peer),

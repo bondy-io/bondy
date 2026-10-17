@@ -142,7 +142,6 @@ entries_are_hlc_ascending_test() ->
     ).
 
 note_indexed_frame_rejects_last_below_first_test() ->
-    %% Guard on `note_indexed_frame/4`: LastHlc must be >= FirstHlc.
     Acc = bondy_log_idx:new(1000),
     ?assertError(
         function_clause,
@@ -265,7 +264,6 @@ read_bad_magic_test() ->
 read_unsupported_version_test() ->
     with_tmp_dir(fun(Dir) ->
         Path = filename:join(Dir, "000000000.qidx"),
-        %% Valid magic but version = 99.
         Bin = <<?MAGIC:32/big-unsigned, 99:8, 0:24, 0:32, 0:32>>,
         ok = file:write_file(Path, Bin),
         ?assertEqual(

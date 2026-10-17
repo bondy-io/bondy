@@ -98,7 +98,6 @@ end_per_testcase(_TC, Config) ->
         _:_ -> ok
     end,
     timer:sleep(50),
-    %% Clean up persistent_term keys
     lists:foreach(
         fun(Key) ->
             try
@@ -213,7 +212,6 @@ invalidate_forces_fresh_fetch(_Config) ->
     ?assertEqual(2, bondy_http_connector_mock_auth:call_count()).
 
 invalidate_nonexistent_service_ok(_Config) ->
-    %% Should not crash
     ?assertEqual(
         ok, bondy_http_connector_token_cache:invalidate(<<"no-such-svc">>)
     ).
@@ -231,7 +229,6 @@ multiple_services_isolated(_Config) ->
     {ok, TB} = bondy_http_connector_token_cache:get(
         <<"iso-b">>, bondy_http_connector_mock_auth, auth_conf()
     ),
-    %% Each service got its own token
     ?assertNotEqual(TA, TB),
 
     %% Invalidating one does not affect the other
@@ -248,7 +245,6 @@ worker_crash_cleans_registry(_Config) ->
         <<"crash-svc">>, bondy_http_connector_mock_auth, auth_conf()
     ),
 
-    %% Find the worker pid via the pool and kill it
     PoolName = {bondy_http_connector_token_cache, pool},
     Pid = gproc_pool:pick_worker(PoolName, <<"crash-svc">>),
     ?assert(is_pid(Pid)),
@@ -291,7 +287,6 @@ concurrent_cold_cache_single_fetch(_Config) ->
      || P <- Pids
     ],
 
-    %% All should succeed with the same token
     lists:foreach(
         fun(R) ->
             ?assertEqual({ok, <<"concurrent-tok">>}, R)
@@ -321,10 +316,8 @@ preemptive_refresh_fires(_Config) ->
     ),
     ?assertEqual(<<"refresh-tok-1">>, T1),
 
-    %% Wait for preemptive refresh
     timer:sleep(1500),
 
-    %% Token should have been refreshed in background
     {ok, T2} = bondy_http_connector_token_cache:get(
         <<"refresh-svc">>, bondy_http_connector_mock_auth, Conf
     ),
@@ -360,6 +353,5 @@ meta_expires_in_respected(_Config) ->
     {ok, T2} = bondy_http_connector_token_cache:get(
         <<"meta-svc">>, bondy_http_connector_mock_auth, Conf
     ),
-    %% Token should have been refreshed (counter incremented)
     ?assertNotEqual(<<"meta-tok-1">>, T2),
     ?assert(atomics:get(Counter, 1) >= 2).

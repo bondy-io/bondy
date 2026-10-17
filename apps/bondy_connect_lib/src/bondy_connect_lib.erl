@@ -13,7 +13,6 @@ with jitter.
 
 -include("bondy_connect_lib.hrl").
 
-%% Retry defaults
 -define(DEFAULT_RETRY_OPTS, #{
     max_retries => 3,
     base_delay => 100,

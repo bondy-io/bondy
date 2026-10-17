@@ -33,16 +33,12 @@ load_decide_disabled_never_yields_test() ->
     ?assertMatch({_, false}, decide(false, 1000.0, 0.0, 2.0)),
     ?assertMatch({_, false}, decide(false, 1000.0, 999.0, 2.0)),
     {Ewma, false} = decide(false, 10.0, 0.0, 2.0),
-    %% EWMA folded even while disabled.
     ?assert(close(Ewma, 3.0)).
 
 %% Above the threshold yields; below does not.
 load_decide_threshold_test() ->
-    %% A baseline already above threshold stays above after a high sample.
     ?assertMatch({_, true}, decide(true, 5.0, 5.0, 2.0)),
-    %% A baseline at zero with a zero sample is below threshold.
     ?assertMatch({_, false}, decide(true, 0.0, 0.0, 2.0)),
-    %% Clearly above the threshold yields (`>=`).
     ?assertMatch({_, true}, decide(true, 2.5, 2.5, 2.0)).
 
 %% A single moderate spike from a quiet baseline does NOT immediately yield;
@@ -52,7 +48,6 @@ load_decide_hysteresis_test() ->
     {E1, Y1} = decide(true, 3.0, 0.0, 2.0),
     ?assert(close(E1, 0.9)),
     ?assertEqual(false, Y1),
-    %% Feed a sustained 3.0 and watch it cross only after several ticks.
     Verdicts = verdict_chain(true, lists:duplicate(5, 3.0), 0.0, 2.0),
     %% Not on tick 1–3, yes by tick 4 (0.9, 1.53, 1.971, 2.28, ...).
     ?assertEqual([false, false, false, true, true], Verdicts).
@@ -60,7 +55,6 @@ load_decide_hysteresis_test() ->
 %% Once the gate is yielding, load dropping back to quiet resumes dispatch
 %% after the EWMA decays below the threshold.
 load_decide_resume_test() ->
-    %% Start hot (Ewma 5.0), then feed quiet (0.0) samples.
     Verdicts = verdict_chain(true, lists:duplicate(5, 0.0), 5.0, 2.0),
     %% 3.5 (yield), 2.45 (yield), 1.715 (resume), ...
     ?assertEqual([true, true, false, false, false], Verdicts).
@@ -104,9 +98,6 @@ cleanup(Prev) ->
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     restore(aae_load_adaptive, maps:get(adaptive, Prev)),
     restore(aae_load_run_queue_threshold, maps:get(threshold, Prev)),
-    %% Remove this run's storage tree. Without it each test leaves its
-    %% instance directories behind for good: 733, 462 and 168 stale trees
-    %% had accumulated under the three bases these scheduler suites use.
     %% Stale trees are not merely untidy — a directory holding a manifest
     %% whose segment has since gone missing makes any later run that
     %% reuses the path fail in recovery.
@@ -155,8 +146,6 @@ gate_off_dispatches() ->
 decide(Enabled, Sample, Prev, Threshold) ->
     bondy_oplog_sync_scheduler:load_decide(Enabled, Sample, Prev, Threshold).
 
-%% Folds a list of samples through `load_decide/4`, threading the EWMA, and
-%% returns the per-tick yield verdicts.
 verdict_chain(Enabled, Samples, Prev0, Threshold) ->
     {_, Rev} = lists:foldl(
         fun(S, {Prev, Acc}) ->
@@ -204,8 +193,6 @@ live_instance(Fence) ->
     ?assertEqual(live, bondy_oplog_instance:lifecycle_state(Id)),
     Id.
 
-%% Triggers one tick and reports, for `Inst`, whether a live session started
-%% and whether the named load-deferral telemetry fired.
 one_tick(Inst, DeferEvent) ->
     Self = self(),
     Ref = make_ref(),

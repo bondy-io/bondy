@@ -21,7 +21,6 @@ setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
-    %% Snapshot the AAE budget env so the test can pin it and restore.
     {
         application:get_env(bondy_oplog, aae_max_concurrency),
         application:get_env(bondy_oplog, aae_max_pages_in_flight)
@@ -42,7 +41,6 @@ bounded_batch_test_() ->
     end}.
 
 bounded_batch_converges() ->
-    %% Tiny node-wide budget → 2 pages per round.
     application:set_env(bondy_oplog, aae_max_concurrency, 1),
     application:set_env(bondy_oplog, aae_max_pages_in_flight, 2),
     ?assertEqual(2, bondy_oplog_config:aae_pages_per_round()),
@@ -54,7 +52,6 @@ bounded_batch_converges() ->
     %% Enough events that B's MST holds many pages (>> 2) → many bounded rounds.
     [bondy_oplog:append(B, {b, N}) || N <- lists:seq(1, 300)],
 
-    %% Capture every {get_pages, Batch} the session issues.
     Tab = ets:new(get_pages_batches, [public, bag]),
     meck:new(bondy_oplog_transport_inline, [passthrough]),
     %% Both request shapes are captured: the reciprocal 4-tuple the session
@@ -78,7 +75,6 @@ bounded_batch_converges() ->
     meck:unload(bondy_oplog_transport_inline),
     ?assertMatch({ok, _}, Result),
 
-    %% Converged: A now holds every page reachable from B's current root.
     ?assertEqual(
         [],
         bondy_oplog_instance:missing_set(A, bondy_oplog:root_hash(B))
@@ -88,7 +84,6 @@ bounded_batch_converges() ->
     ets:delete(Tab),
     ?assert(Sizes =/= []),
 
-    %% BOUNDED: no round pulled more than the per-round cap.
     Max = lists:max(Sizes),
     ?assert(
         Max =< 2,

@@ -130,8 +130,6 @@ bench_a_read_under_contention(_Config) ->
         {Mode, run_read_under_contention(Mode, Key, ?READ_WRITERS, ?READ_OPS)}
      || Mode <- ?WRITE_MODES
     ],
-    %% Flatten {Mode, {LookupLatency, MatchLatency}} into report/3's
-    %% [{Label, Metric}] shape.
     Flat = lists:append([
         [
             {io_lib:format("~p/lookup", [Mode]), LookupL},

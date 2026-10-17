@@ -184,11 +184,8 @@ survives_restart(Dir) ->
     {ok, LastKey0} = bondy_oplog_instance:latest_key(InstId),
     ok = await_sealed_packs(Dir, 1, 15_000),
 
-    %% Stop: `terminate/2` must CLOSE (preserve), not DESTROY (delete).
     ok = bondy_oplog:stop_instance(InstId),
 
-    %% The on-disk packs survive the stop — the decisive catch (destroy would
-    %% have `file:del_dir_r`'d them).
     ?assert(length(sealed_packs(Dir)) >= 1),
 
     %% Restart at the same Dir; the tree restores with the SAME root + size, so a
@@ -465,8 +462,6 @@ run(Dir) ->
     InstId = mk_id(),
     NS = ns_of(InstId),
 
-    %% Write enough to seal at least one pack: the MST now spans sealed packs on
-    %% disk, read through raw fds owned by the instance gen_server.
     {C, P} = register_shard(NS),
     {ok, _} = open_pack_instance(InstId, NS, Dir),
     append_batch(InstId, 1, ?BATCH),
@@ -497,8 +492,6 @@ run(Dir) ->
             _:_ -> ok
         end,
 
-    %% The applier's cold-replay path (which delegates to the instance) completes
-    %% without crashing — the exact sequence that crash-looped on restart before.
     ?assertEqual(ok, bondy_oplog_applier:replay_cell_events_sync(ApplierPid)),
     ?assert(is_process_alive(ApplierPid)),
 

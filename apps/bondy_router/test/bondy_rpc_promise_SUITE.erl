@@ -44,15 +44,10 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(Config) ->
-    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 add_new(_) ->
     Me = self(),
-    % meck:new(bondy_rpc_promise_manager, [passthrough]),
-    % meck:expect(bondy_rpc_promise_manager, on_evict_fun, fun() ->
-    %     fun(P) -> Me ! {evicted, P} end
-    % end),
 
     CallerSessionId = bondy_session_id:new(),
     CalleeSessionId = bondy_session_id:new(),
@@ -92,8 +87,6 @@ add_new(_) ->
         after 0 ->
             {error, on_evict_failed}
         end,
-
-    % meck:unload(bondy_rpc_promise_manager),
 
     ?assertEqual(
         Promise,

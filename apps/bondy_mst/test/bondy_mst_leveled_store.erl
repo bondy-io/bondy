@@ -153,7 +153,6 @@ list(#?MODULE{}) ->
 -spec free(T :: t(), Hash :: binary(), Page :: page()) -> T :: t().
 
 free(#?MODULE{pid = Pid, name = Name} = T, Hash, _Page) ->
-    %% We immediately delete
     ok = leveled_bookie:book_delete(Pid, Name, Hash, []),
     T.
 

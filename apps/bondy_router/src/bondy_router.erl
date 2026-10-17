@@ -285,7 +285,6 @@ pre_stop() ->
             ok
     end,
 
-    %% We loop with batches of 100
     Opts = #{limit => 100, return => ref},
     bondy_router_utils:foreach(Fun, bondy_session:list(Opts)).
 
@@ -335,10 +334,6 @@ async_forward(M, Ctxt0) ->
         %% will do it for us).
         ok = bondy_router_peer:set_process_metadata(Meta),
         Res = sync_forward(Event),
-        %% ?LOG_DEBUG(#{
-        %%     description => "info",
-        %%     info => process_info(self())
-        %% }),
         Res
     end,
 
@@ -367,8 +362,6 @@ async_forward(M, Ctxt0) ->
                 #{},
                 ?WAMP_CANCELLED,
                 [maps:get(~"message", ErrorMap)],
-                %% Binary key: the atom `error' used here before never matched
-                %% the binary key every reader looks for.
                 #{~"error" => ErrorMap}
             ),
             {reply, Reply, Ctxt0};

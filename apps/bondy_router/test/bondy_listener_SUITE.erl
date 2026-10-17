@@ -631,14 +631,6 @@ ws_listener_restricted_to_one_protocol(_Config) ->
     %% A WAMP subprotocol that is valid globally must be REFUSED on a listener
     %% whose services do not include it. This is the operator requirement:
     %% offering BAMP over WebSocket without offering WAMP.
-    %%
-    %% It no longer exercises the ping-ABSENT path in `do_init/4'. It did while
-    %% an unset `wamp_websocket' left the resolved carrier config with no
-    %% `ping' key, which made the coverage an ordering dependency rather than
-    %% an assertion. `bondy_listener_config:resolve_carrier_config/3' now
-    %% merges `carrier_defaults/1' under every carrier key, so a resolved
-    %% `websocket' config always carries a complete `ping' block and
-    %% `do_init/4''s `#{enabled => false}' fallback is unreachable from here.
     Inventory = [
         {ct_wamp_only, #{
             transport => tcp,

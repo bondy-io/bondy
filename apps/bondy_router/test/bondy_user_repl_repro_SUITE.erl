@@ -95,8 +95,6 @@ users_converge_under_write_load(Config) ->
      || I <- lists:seq(1, ?NUSERS)
     ],
 
-    %% Round-robin the username space across the three nodes, then run
-    %% ?WRITERS_PER_NODE concurrent writers on each node.
     Assigned = assign(Usernames, [N1, N2, N3]),
     Sampler = start_sampler(Nodes),
     T0 = erlang:monotonic_time(millisecond),
@@ -131,7 +129,6 @@ users_converge_under_write_load(Config) ->
         [?NUSERS, T1 - T0, length(Failed), lists:sublist(Failed, 10)]
     ),
 
-    %% Sample the Grafana quantity while (and after) the cluster settles.
     {Converged, Trace} = wait_converged(Nodes, Usernames, ?SETTLE_MS),
 
     ct:pal(

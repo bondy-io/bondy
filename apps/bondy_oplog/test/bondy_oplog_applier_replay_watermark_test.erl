@@ -63,8 +63,6 @@ cold_replay_full_fold() ->
         ok = bondy_oplog_applier:replay_cell_events(Applier),
         ok = bondy_oplog_test_projection:drain(Id),
         Events = drain_telemetry(SubRef),
-        %% At least one replay event fired and the projection holds
-        %% the latest write.
         ?assertNotEqual([], Events),
         {<<"v3">>, 3} =
             bondy_oplog_core:read(NS, primary, <<"k">>)
@@ -94,8 +92,6 @@ second_replay_short_circuits_when_root_unchanged() ->
         ok = bondy_oplog_applier:replay_cell_events(Applier),
         ok = bondy_oplog_test_projection:drain(Id),
         Events = drain_telemetry(SubRef),
-        %% At least one of the captured replay events must report
-        %% `outcome => no_change` — the no-mutation case.
         NoChange = [
             E
          || E <- Events,
@@ -103,7 +99,6 @@ second_replay_short_circuits_when_root_unchanged() ->
                 no_change
         ],
         ?assertNotEqual([], NoChange),
-        %% Every no_change must have zero work counters.
         lists:foreach(
             fun({_, M, _}) ->
                 ?assertEqual(0, maps:get(cells_applied, M)),
@@ -123,21 +118,15 @@ incremental_replay_skips_already_folded_events() ->
     %% only the new events, not the cumulative count. Projection
     %% reflects the latest writes (idempotency invariant).
     {Id, NS, Cache, Proj, Applier} = setup_instance(),
-    %% First batch (3 events). Append, barrier (drains the applier
-    %% mailbox), then run an explicit replay so `last_replayed_root`
-    %% is anchored at the post-batch MST root.
     ok = append_n(Id, <<"k">>, 3),
     ok = bondy_oplog_test_projection:drain(Id),
     ok = bondy_oplog_applier:replay_cell_events(Applier),
     ok = bondy_oplog_test_projection:drain(Id),
     SubRef = attach_telemetry(),
     try
-        %% Second batch (2 more events). These shift the MST root.
         ok = append_one(Id, <<"k">>, 4, <<"v4">>),
         ok = append_one(Id, <<"k">>, 5, <<"v5">>),
         ok = bondy_oplog_test_projection:drain(Id),
-        %% Replay — should fold at most 2 new pairs (the just-appended
-        %% events) in the diff, NOT all 5.
         ok = bondy_oplog_applier:replay_cell_events(Applier),
         ok = bondy_oplog_test_projection:drain(Id),
         Events = drain_telemetry(SubRef),
@@ -163,8 +152,6 @@ incremental_replay_skips_already_folded_events() ->
                 ),
                 ?assert(MaxPairs =< 2)
         end,
-        %% Final projection state is correct regardless of which
-        %% replay path was taken.
         {<<"v5">>, 5} =
             bondy_oplog_core:read(NS, primary, <<"k">>)
     after

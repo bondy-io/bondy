@@ -17,34 +17,26 @@
 
 all() ->
     [
-        %% Original test (preserved)
         test_1,
 
-        %% Full sign-verify flow
         full_cryptosign_flow,
         challenge_extra_has_required_keys,
 
-        %% Wrong key / signature
         wrong_key_signature_fails,
         invalid_hex_encoding_fails,
         missing_pubkey_in_challenge,
         no_matching_pubkey_in_challenge,
 
-        %% CIDR filtering
         user1_allowed_from_any_ip,
         user2_rejected_outside_cidr,
 
-        %% Method selection
         method_mismatch_after_challenge,
         invalid_method_rejected,
 
-        %% User without authorized keys
         user_without_keys_excluded,
 
-        %% Error cases
         nonexistent_user_error,
 
-        %% Context after challenge
         context_method_set_after_challenge
     ].
 
@@ -195,7 +187,6 @@ test_1(Config) ->
         "Channel binding not supported yet, should be undefined"
     ),
 
-    %% We simulate the response from the client
     Message = hex_utils:hexstr_to_bin(HexMessage),
     Signature = list_to_binary(
         hex_utils:bin_to_hexstr(
@@ -252,16 +243,13 @@ full_cryptosign_flow(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Use first key pair
     KeyPair = hd(KeyPairs),
     Details = make_details(KeyPair),
 
-    %% Step 1: Challenge
     {true, Extra, Ctxt1} = bondy_auth:challenge(
         ?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt0
     ),
 
-    %% Step 2: Sign and authenticate
     HexChallenge = maps:get(challenge, Extra),
     Signature = sign_challenge(HexChallenge, KeyPair),
 
@@ -269,7 +257,6 @@ full_cryptosign_flow(Config) ->
         ?WAMP_CRYPTOSIGN_AUTH, Signature, undefined, Ctxt1
     ),
 
-    %% Cryptosign returns empty extra on success
     ?assertEqual(#{}, AuthExtra),
     ?assertEqual(?WAMP_CRYPTOSIGN_AUTH, bondy_auth:method(Ctxt2)).
 
@@ -287,7 +274,6 @@ challenge_extra_has_required_keys(Config) ->
         ?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt0
     ),
 
-    %% Challenge extra must have 'challenge' key (hex-encoded)
     ?assert(maps:is_key(challenge, Extra)),
     ?assert(is_binary(maps:get(challenge, Extra))),
     ?assert(byte_size(maps:get(challenge, Extra)) > 0).
@@ -305,13 +291,11 @@ wrong_key_signature_fails(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Challenge with a valid key
     Details = make_details(hd(KeyPairs)),
     {true, Extra, Ctxt1} = bondy_auth:challenge(
         ?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt0
     ),
 
-    %% Sign with a different (not registered) key
     WrongKeyPair = bondy_cryptosign:generate_key(),
     HexChallenge = maps:get(challenge, Extra),
     WrongSig = sign_challenge(HexChallenge, WrongKeyPair),
@@ -337,7 +321,6 @@ invalid_hex_encoding_fails(Config) ->
         ?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt0
     ),
 
-    %% Non-hex string should fail
     ?assertMatch(
         {error, invalid_signature},
         bondy_auth:authenticate(
@@ -353,7 +336,6 @@ missing_pubkey_in_challenge(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Challenge without pubkey in authextra
     ?assertMatch(
         {error, missing_pubkey},
         bondy_auth:challenge(
@@ -369,7 +351,6 @@ no_matching_pubkey_in_challenge(Config) ->
         SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
     ),
 
-    %% Challenge with a pubkey not in the user's authorized_keys
     UnknownKeyPair = bondy_cryptosign:generate_key(),
     Details = make_details(UnknownKeyPair),
 
@@ -434,7 +415,6 @@ method_mismatch_after_challenge(Config) ->
         ?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt0
     ),
 
-    %% After cryptosign challenge, trying another method fails
     ?assertMatch(
         {error, invalid_method},
         bondy_auth:authenticate(?PASSWORD_AUTH, <<"x">>, undefined, Ctxt1)

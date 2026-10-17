@@ -89,8 +89,6 @@ counter_cmds_gen() ->
 %% Properties
 %% =============================================================================
 
-%% §4.3 ship gate (realistic): per replica, eager delivery-order fold ==
-%% key-sorted interpret_cog of exactly what it delivered.
 prop_per_replica_eager_equals_group() ->
     ?FORALL(Cmds, cmds_gen(), begin
         {PerOrigin, _Log} = simulate(Cmds),
@@ -123,7 +121,6 @@ prop_full_sync_converges() ->
         )
     end).
 
-%% interpret_cog is invariant under any arrival permutation of the log.
 prop_permutation_invariant() ->
     ?FORALL(Cmds, cmds_gen(), begin
         {_PerOrigin, Log} = simulate(Cmds),
@@ -133,7 +130,6 @@ prop_permutation_invariant() ->
         end)
     end).
 
-%% Re-delivering every event a second time changes nothing (idempotent).
 prop_idempotent_redelivery() ->
     ?FORALL(Cmds, cmds_gen(), begin
         {_PerOrigin, Log} = simulate(Cmds),
@@ -257,7 +253,6 @@ sort_by_key(Events) ->
         Events
     ).
 
-%% A length-stable shuffle generator: permute the given list.
 shuffle_gen(L) ->
     ?LET(Keys, vector(length(L), integer()), begin
         [E || {_, E} <- lists:sort(lists:zip(Keys, L))]

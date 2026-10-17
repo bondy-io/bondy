@@ -103,7 +103,6 @@ need a separate persistence layer.
 -define(HIST_MAX_VALUE, ((1 bsl ?HIST_MAX_BITS) - 1)).
 -define(HIST_COUNT_POS, 1).
 -define(HIST_SUM_POS, 2).
-%% bucket I → counters slot ?HIST_BUCKET_BASE + I (= 3 + I)
 -define(HIST_BUCKET_BASE, 3).
 
 -record(state, {}).
@@ -588,9 +587,6 @@ code_change(_, State, _) ->
 %% PRIVATE
 %% =============================================================================
 
-%% Look up the entry; allocate on first-touch with insert_new. On race
-%% (insert_new returns false) we re-lookup so the loser uses the winner's
-%% reference and the abandoned counters array is GC'd.
 operate(Key, Type, Op) ->
     case lookup_entry(Key) of
         {ok, #{type := Type, ref := Ref}} ->
@@ -604,7 +600,6 @@ operate(Key, Type, Op) ->
                 true ->
                     Op(Ref0);
                 false ->
-                    %% lost the race; retry with the winner's ref
                     operate(Key, Type, Op)
             end
     end.

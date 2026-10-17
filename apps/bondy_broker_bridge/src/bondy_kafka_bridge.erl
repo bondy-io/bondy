@@ -381,7 +381,6 @@ init(Config) ->
 
 -doc "Validate a Kafka produce action spec against `PRODUCE_ACTION_SPEC`.".
 validate_action(Action0) ->
-    %% maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC).
     try maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC) of
         Action1 ->
             {ok, Action1}

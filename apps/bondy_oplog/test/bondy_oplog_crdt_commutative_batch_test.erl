@@ -63,7 +63,6 @@ batch_eager_equals_group_test() ->
     Eager = lists:foldl(fun(E, S) -> eager(S, E) end, ?MOD:init(), Log),
     Group = ?MOD:interpret_cog(Log, ?MOD:init()),
     ?assertEqual(Eager, Group),
-    %% k1 removed (the batch observed its dot), k2 present.
     ?assertEqual(#{<<"k2">> => [<<"v2">>]}, ?MOD:to_value(Group)).
 
 %% A put and a remove of the SAME field in one batch share the dot and the
@@ -83,7 +82,6 @@ batch_atomic_put_rmv_same_field_test() ->
     State = eager(?MOD:init(), E),
     ?assertEqual(#{<<"k">> => [<<"v">>]}, ?MOD:to_value(State)).
 
-%% Re-delivering a batch event a second time changes nothing.
 batch_idempotent_redelivery_test() ->
     E = mk_event(
         1,

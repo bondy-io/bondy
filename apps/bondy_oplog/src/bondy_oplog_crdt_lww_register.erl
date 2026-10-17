@@ -157,7 +157,6 @@ apply_op(undefined, {set, H, V}, _Key) ->
     {set, V, H};
 apply_op(undefined, {clear, H}, _Key) ->
     {cleared, H};
-%% set vs current set
 apply_op({set, _OldV, OldH}, {set, H, V}, _Key) when H > OldH ->
     {set, V, H};
 apply_op({set, OldV, OldH} = S, {set, H, V}, _Key) when H == OldH ->
@@ -169,7 +168,6 @@ apply_op({set, OldV, OldH} = S, {set, H, V}, _Key) when H == OldH ->
 apply_op({set, _, _} = S, {set, _, _}, _Key) ->
     %% Older HLC; rejected.
     S;
-%% set vs incoming clear
 apply_op({set, _OldV, OldH}, {clear, H}, _Key) when H > OldH ->
     {cleared, H};
 apply_op({set, _OldV, OldH}, {clear, H}, _Key) when H == OldH ->
@@ -178,14 +176,12 @@ apply_op({set, _OldV, OldH}, {clear, H}, _Key) when H == OldH ->
 apply_op({set, _, _} = S, {clear, _}, _Key) ->
     %% Older clear; rejected.
     S;
-%% cleared vs incoming set
 apply_op({cleared, OldH}, {set, H, V}, _Key) when H > OldH ->
     %% Later-HLC set resurrects the register (LWW: latest wins).
     {set, V, H};
 apply_op({cleared, OldH} = S, {set, H, _}, _Key) when H =< OldH ->
     %% Older or tied set; cleared retains (cleared wins at tie).
     S;
-%% cleared vs incoming clear
 apply_op({cleared, OldH}, {clear, H}, _Key) ->
     {cleared, erlang:max(OldH, H)}.
 
