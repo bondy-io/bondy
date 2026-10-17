@@ -231,15 +231,18 @@ prop_leq_is_transitive() ->
         end
     ).
 
-%% Property: leq is antisymmetric - if leq(A, B) and leq(B, A), then A's event == B's event
+%% Property: leq is antisymmetric. Two independently generated stamps
+%% that compare below each other carry the same event tree. Small sizes
+%% make such pairs common (seeds, single events), so the premise fires.
 prop_leq_is_antisymmetric() ->
     ?FORALL(
-        S,
-        stamp(),
+        {A, B},
+        {stamp(), stamp()},
         begin
-            %% For the same stamp, antisymmetry should hold
-            (bondy_connect_itc:leq(S, S) andalso bondy_connect_itc:leq(S, S)) =:=
-                (element(2, S) =:= element(2, S))
+            Both =
+                bondy_connect_itc:leq(A, B) andalso
+                    bondy_connect_itc:leq(B, A),
+            not Both orelse element(2, A) =:= element(2, B)
         end
     ).
 

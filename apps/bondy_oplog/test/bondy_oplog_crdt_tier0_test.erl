@@ -4,10 +4,8 @@
 %% =============================================================================
 
 %% Dedicated unit coverage for the five commutative tier_0 CRDT twins —
-%% `g_counter`, `pn_counter`, `g_set`, `max_register`, `min_register`. Before
-%% PR-Z these were covered only by the `tier0_equivalence` test (a byte-for-
-%% byte comparison against the now-deleted fold twins). With the folds gone,
-%% these tests pin each CRDT's behaviour directly: the `apply_op/3` fold
+%% `g_counter`, `pn_counter`, `g_set`, `max_register`, `min_register`.
+%% These tests pin each CRDT's behaviour directly: the `apply_op/3` fold
 %% produces the right value, `interpret_cog/2` is permutation-invariant (the
 %% Strong Eventual Consistency property), duplicate redelivery is absorbed
 %% (counters), the encoding round-trips, and the contract markers hold.

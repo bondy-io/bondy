@@ -167,14 +167,11 @@ local_readiness_reports_this_node(_) ->
 
 %% The caller's `_deadline` bounds the survey, and running out of it is
 %% FAIL-CLOSED. A survey that ran out of time and answered `safe` would be
-%% asserting exactly the thing it failed to check: the retirement pass that
-%% follows a removal reaps origins no live member claims and is itself
-%% fail-closed on a member it could not ask, so "I did not get to ask" and
-%% "everyone answered" must not produce the same verdict.
+%% asserting exactly the thing it failed to check, so "I did not get to ask"
+%% and "everyone answered" must not produce the same verdict.
 %%
-%% Driven at the predicate with a spent budget, which is what a caller whose
-%% deadline has already passed produces. No peer is contacted at all — with no
-%% time to receive an answer there is nothing to be gained by asking.
+%% Driven at the predicate with a spent budget. No peer is contacted at all —
+%% with no time to receive an answer there is nothing to be gained by asking.
 a_spent_budget_makes_a_leave_unsafe(_) ->
     Peer = 'bondy_cluster_api_suite_spent@127.0.0.1',
     Survey = bondy_cluster_api:survey([Peer], 0),
@@ -205,9 +202,8 @@ info_answers_this_node_spec(_) ->
 %% carry, and the authority it requires.
 %%
 %% DECLARED, never derived from the module: a set read out of the code it is
-%% meant to constrain can only ever agree with itself. `members` and `info`
-%% answered in ANY realm until 2026-09-02, for exactly as long as this case
-%% listed the two procedures somebody remembered to list.
+%% meant to constrain can only ever agree with itself. A procedure missing
+%% from this list has its authority checked by nothing.
 procedures() ->
     [
         {?BONDY_CLUSTER_LEAVE, [<<"nosuch@nowhere">>], master_realm},

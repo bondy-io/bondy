@@ -86,7 +86,7 @@ prop_frame_roundtrip() ->
 %% frame produces a decode error (CRC mismatch / length / truncated /
 %% unknown_flag / unsupported_version). A flip inside `Magic` itself is
 %% covered by a separate sniff-priority test, because `bad_magic` is a
-%% deliberately distinct error type. See P4 (todo).
+%% deliberately distinct error type. See `prop_bit_flip_magic/0`.
 prop_frame_bit_flip_detection() ->
     ?FORALL(
         {Body, BitIdx},
@@ -262,9 +262,9 @@ prop_idx_v2_seek_matches_v1_on_point_ranges() ->
 %% Generates a v2 entry list with non-degenerate ranges
 %% `(FirstHlc, LastHlc, Offset)` where `FirstHlc < LastHlc`, then for a
 %% target HLC drawn from inside one specific entry's range asserts that
-%% `seek/2` returns exactly that entry's offset. The "scan bounded by
-%% one batch" guarantee is the seek-level expression of the design's
-%% acceptance — the reader has the right anchor frame on the first
+%% `bondy_log_idx:seek/2` returns exactly that entry's offset. The "scan
+%% bounded by one batch" guarantee is the seek-level expression of the
+%% design's acceptance — the reader has the right anchor frame on the first
 %% probe and never has to walk forward into the un-indexed gap.
 prop_idx_v2_seek_in_range_returns_that_entry() ->
     ?FORALL(
@@ -332,8 +332,8 @@ idx_spec_with_target() ->
 
 %% The v2 reader (this one) must round-trip both v1- and v2-encoded
 %% frames byte-for-byte, with the version field preserved as a
-%% distinguishing tag. This is the property that gates rolling forward
-%% to v2 frames on disk while keeping pre-PR1 segments readable.
+%% distinguishing tag. This property gates writing v2 frames on disk
+%% while keeping v1 segments readable.
 prop_frame_v1_v2_decoder_equivalence() ->
     ?FORALL(
         Body,
@@ -464,7 +464,7 @@ prop_wal_roundtrip() ->
     ).
 
 %% =============================================================================
-%% Sparse-index consistency property (P6)
+%% Sparse-index consistency property
 %% =============================================================================
 
 %% For every entry the writer emits into a `.qidx`, the on-disk frame at
@@ -584,7 +584,7 @@ seg_is_empty(Dir, InstanceId, SegId) ->
     end.
 
 %% =============================================================================
-%% Recovery properties (P5, P7, P10)
+%% Recovery properties
 %% =============================================================================
 
 %% After appending N events and truncating the head segment's `.qdata`
@@ -612,7 +612,7 @@ prop_truncation_safety() ->
             ),
             {ok, Size} = file_size(SegPath),
             %% Trim ChopBytes off the tail (but never below the segment
-            %% header — the header isn't tested by P5).
+            %% header — the header isn't tested by `prop_truncation_safety/0`).
             TruncTo = max(?SEG_HEADER, Size - ChopBytes),
             truncate_file(SegPath, TruncTo),
             {ok, P2} = bondy_oplog_wal:start_link(instance_id(), Opts),
@@ -696,7 +696,7 @@ prop_consumer_offset_clamping() ->
             ok = bondy_oplog_wal:close(P1),
             InstDir = filename:join(Dir, instance_id()),
             %% Seed an aggressively-bad consumer.offset by writing
-            %% the file content directly. The `with_position/3` setter
+            %% the file content directly. `bondy_log_state:with_position/3`
             %% guards against offsets < segment header, but recovery
             %% must still cope with such values when they appear on
             %% disk (file written by an older buggy applier, manual
@@ -736,21 +736,13 @@ prop_consumer_offset_clamping() ->
 %% Batched fsync + `await_durable/3` correctness
 %% =============================================================================
 
-%% For any sequence of N appends in `batched` mode, with size and time
-%% triggers configured high enough that no fsync runs implicitly, the
-%% following must hold:
-%%
-%% - Before any explicit `sync/1`, every per-append end position lies
-%%   strictly above `durable_position/1`. `await_durable/3` with a
-%%   zero timeout returns `{error, timeout}` for each.
-%%
-%% - After `sync/1`, `durable_position/1` equals the head, and
-%%   `await_durable/3` with a zero timeout returns `ok` for every
-%%   recorded end position.
-%%
-%% In other words: durability is reached at fsync boundaries and only
-%% at fsync boundaries; `await_durable/3` reports the position's status
-%% correctly with respect to the boundary.
+%% For N appends in `batched` mode with the size and time triggers set high
+%% enough that no fsync runs implicitly: before any explicit `sync/1` every
+%% per-append end position lies strictly above `durable_position/1` and
+%% `await_durable/3` with a zero timeout returns `{error, timeout}` for each;
+%% after `sync/1`, `durable_position/1` equals the head and `await_durable/3`
+%% with a zero timeout returns `ok` for every recorded end position.
+%% Durability is reached at fsync boundaries and only there.
 prop_await_durable_correctness() ->
     ?FORALL(
         N,
@@ -852,10 +844,10 @@ prop_batch_atomicity() ->
     ).
 
 %% =============================================================================
-%% Retention safety property (P9)
+%% Retention safety property
 %% =============================================================================
 
-%% P9. For any interleaving of:
+%% For any interleaving of:
 %%   - appends (which grow `live_segments` via natural rotation),
 %%   - `set_committed_segment/2` (the consumer-cursor stub),
 %%   - `advance_snapshot_watermark/2` (which also triggers an
@@ -1110,10 +1102,10 @@ wal_full_invariant(_Pid, {unexpected_error, _}) ->
     false.
 
 %% =============================================================================
-%% P4 — bit-flip in frame Magic
+%% Bit-flip in frame Magic
 %% =============================================================================
 
-%% P4. For any sequence of appended frames in the head segment, flipping
+%% For any sequence of appended frames in the head segment, flipping
 %% any single bit inside the 32-bit Magic field of frame K on disk and
 %% reopening the WAL must result in:
 %%
@@ -1126,7 +1118,7 @@ wal_full_invariant(_Pid, {unexpected_error, _}) ->
 %%       truncated head_offset.
 %%
 %% The "halt at first bad frame" semantics in v1 are deliberate (no
-%% Magic-rescan); P4 pins them down.
+%% Magic-rescan); `prop_bit_flip_magic/0` pins them down.
 prop_bit_flip_magic() ->
     ?FORALL(
         {N, K, BitInMagic},
@@ -1195,13 +1187,13 @@ prop_bit_flip_magic() ->
     ).
 
 %% =============================================================================
-%% P8 — rotation atomicity (in-process orphan slice)
+%% Rotation atomicity (in-process orphan slice)
 %% =============================================================================
 
-%% P8 (orphan slice). A crash between `create/4` (new segment file
-%% exists on disk) and `commit_rotation/3` (manifest updated) leaves a
+%% Orphan slice. A crash between `create/4` (new segment file
+%% exists on disk) and the manifest commit of the rotation leaves a
 %% `<NewSegId>.qdata` file that's not referenced by the manifest. On
-%% reopen, recovery's `cleanup_orphans/2` must:
+%% reopen, `bondy_log_recovery`'s orphan cleanup must:
 %%
 %%   (a) Delete the orphan file.
 %%   (b) Leave the live `current_segment` (and the live event sequence)
@@ -1261,10 +1253,10 @@ prop_rotation_atomicity() ->
     ).
 
 %% =============================================================================
-%% P13 — partial write (recovery-and-resume slice)
+%% Partial write (recovery-and-resume slice)
 %% =============================================================================
 
-%% P13 (in-process variant; full fault-injection harness still TODO).
+%% In-process variant; a full fault-injection harness is still TODO.
 %%
 %% A `prim_file:write/2` that returns ok but writes fewer bytes than
 %% requested leaves the on-disk segment in a state byte-identical to a
@@ -1444,10 +1436,10 @@ is_subsequence([X | XR], [X | YR]) -> is_subsequence(XR, YR);
 is_subsequence(Xs, [_ | YR]) -> is_subsequence(Xs, YR).
 
 %% =============================================================================
-%% P11 — concurrent reader safety
+%% Concurrent reader safety
 %% =============================================================================
 
-%% P11. While the writer is appending, an arbitrary number of readers
+%% While the writer is appending, an arbitrary number of readers
 %% walking from arbitrary start positions must:
 %%
 %%   (a) Never crash the writer (the writer process survives the trial).
@@ -1575,10 +1567,10 @@ is_prefix(Read, Events) ->
     Read =:= lists:sublist(Events, length(Read)).
 
 %% =============================================================================
-%% P14 — failed fsync (fault injection)
+%% Failed fsync (fault injection)
 %% =============================================================================
 
-%% P14. A failed `bondy_mst_io:datasync/1` in the writer's per_write fsync
+%% A failed `bondy_mst_io:datasync/1` in the writer's per_write fsync
 %% path must:
 %%
 %%   (a) Surface as `{error, {datasync_failed, _}}` to the caller whose
@@ -1675,10 +1667,10 @@ prop_failed_fsync() ->
     ).
 
 %% =============================================================================
-%% P14 — failed fsync (batched-mode variant)
+%% Failed fsync (batched-mode variant)
 %% =============================================================================
 
-%% P14 in batched mode. `append/2` returns before the datasync, so appends
+%% In batched mode `append/2` returns before the datasync, so appends
 %% made before the first failed datasync are acknowledged. The first
 %% `flush_tick` whose datasync fails must stop the writer rather than leave
 %% the bytes pending for a retry, and the directory must reopen and accept
@@ -1757,10 +1749,10 @@ prop_failed_fsync_batched() ->
     ).
 
 %% =============================================================================
-%% P15 — failed rename (fault injection)
+%% Failed rename (fault injection)
 %% =============================================================================
 
-%% P15. A failed `prim_file:rename/2` on the manifest commit path
+%% A failed `prim_file:rename/2` on the manifest commit path
 %% (during rotation) must:
 %%
 %%   (a) Surface as `{error, _}` to the caller whose `append` /
@@ -1803,8 +1795,8 @@ prop_rename_failure() ->
                 %% commit during rotation will fail. The wal_io fault
                 %% lock keeps the meck install/unload window from
                 %% colliding with any other property that mocks the same
-                %% module (see [[feedback_meck_global]] — meck swaps the
-                %% module VM-wide via the code server).
+                %% module (meck swaps the module VM-wide via the code
+                %% server).
                 {Results, Alive, ManifestAfter, SegAfter} =
                     with_io_fault_lock(fun() ->
                         ok = meck:expect(
@@ -1812,8 +1804,8 @@ prop_rename_failure() ->
                             rename,
                             fun(_From, _To) -> {error, eacces} end
                         ),
-                        %% Use safe_append/2: after C1's fix, the
-                        %% rotation-failure stops the gen_server, so
+                        %% Use safe_append/2: the rotation failure
+                        %% stops the gen_server, so
                         %% subsequent appends would otherwise exit with
                         %% `noproc` and crash the comprehension.
                         Rs = [safe_append(Pid, E) || E <- Events],
@@ -1834,14 +1826,12 @@ prop_rename_failure() ->
                 SawRotationError = Errors =/= [],
                 ManifestIntact = ManifestAfter =:= ManifestBefore,
                 CurrentSegUnchanged = SegAfter =:= SegBefore,
-                %% C1 — after the rename failed, the writer was inside
-                %% the post-close window of `rotate/1`; the producing
-                %% code now stops the gen_server with `{rotation_failed_
-                %% after_seal, _}` rather than reverting to a state that
-                %% references the closed old fd. We probe by reopening
-                %% from disk: recovery must succeed and the in-memory
-                %% state must match the on-disk reality (manifest still
-                %% pointing at the old segment).
+                %% After the rename fails, the writer is inside the
+                %% post-close window of `rotate/1`; it must not revert to
+                %% a state that references the closed old fd. The probe
+                %% reopens from disk: recovery must succeed and the
+                %% in-memory state must match the on-disk reality
+                %% (manifest still pointing at the old segment).
                 ReopenResult = reopen_only(Opts),
                 {ReopenOk, ReopenSeg} =
                     case ReopenResult of
@@ -1896,10 +1886,10 @@ prop_rename_failure() ->
     ).
 
 %% =============================================================================
-%% P12 — multi-process convergence (writer kill + reopen)
+%% Multi-process convergence (writer kill + reopen)
 %% =============================================================================
 
-%% P12 (in-process slice). Spawn a writer and a reader, run a workload,
+%% In-process slice. Spawn a writer and a reader, run a workload,
 %% kill the writer with `exit(kill)` at a randomly-chosen append count,
 %% reopen the WAL, and verify:
 %%
@@ -2122,21 +2112,14 @@ is_strictly_increasing(_) ->
 
 %% --- meck fault-injection lock + reopen helpers -------------------------
 
-%% Serialises any property that mocks `bondy_mst_io`. `meck:new/2`
-%% swaps the module in the VM-wide code server, so two test modules
-%% mocking the same module concurrently would clobber each other's
-%% expectations. `global:trans/4` acquires a node-scoped lock; release
-%% is automatic when `Body` returns. The lock is held only across the
-%% meck install/expect/uninstall window, not across the writer's whole
-%% lifetime, so it does not serialise property runs that do not fault-
-%% inject.
-%%
-%% The lock resource MUST be keyed by the MOCKED module, not by the
-%% test module — otherwise sibling suites (`bondy_oplog_wal_group_commit_test`,
-%% `bondy_mst_pack_writer_test`) that also fault-inject `bondy_mst_io`
-%% would each hold a distinct `?MODULE`-scoped lock and never mutually
-%% exclude (the intermittent `{error, eacces}` leak this comment used to
-%% describe as impossible). Keep this key IDENTICAL across those suites.
+%% Serialises any property that mocks `bondy_mst_io`: `meck:new/2` swaps the
+%% module in the VM-wide code server, so two test modules mocking it
+%% concurrently would clobber each other's expectations. `global:trans/4`
+%% holds a node-scoped lock across the meck install/expect/uninstall window
+%% only. The lock resource MUST be keyed by the MOCKED module, not the test
+%% module, and kept IDENTICAL across `bondy_oplog_wal_group_commit_test` and
+%% `bondy_mst_pack_writer_test`; a `?MODULE`-scoped key never mutually
+%% excludes.
 with_io_fault_lock(Body) ->
     Lock = {meck_vm_lock, bondy_mst_io},
     global:trans(
@@ -2155,7 +2138,7 @@ with_io_fault_lock(Body) ->
 
 %% Wrapper around `bondy_oplog_wal:append/2` that turns a `noproc` exit
 %% into a regular `{error, noproc}` reply. Used by properties that
-%% deliberately drive the writer into a state where it stops (e.g. C1 in
+%% deliberately drive the writer into a state where it stops (e.g.
 %% `prop_rename_failure/0`).
 safe_append(Pid, Event) ->
     try
@@ -2367,8 +2350,9 @@ seg_path(Dir, SegId) ->
 
 %% Append every event in `Events` through `Pid`, capture the
 %% `{Segment, StartOffset}` returned by each, then read `head_offset`
-%% from `info/1`. Used by P4 / P13 / P5 to derive frame boundaries
-%% without re-parsing the on-disk segment.
+%% from `info/1`. Used by the bit-flip, partial-write, rescan-recovery and
+%% multi-process convergence properties to derive frame boundaries without
+%% re-parsing the on-disk segment.
 append_and_record_positions(Pid, Events) ->
     Positions = [
         begin
@@ -2381,8 +2365,8 @@ append_and_record_positions(Pid, Events) ->
     {Positions, HeadOff}.
 
 %% Writes a `consumer.offset` file directly, bypassing the setter
-%% guards. Used by P10 to seed arbitrary (including invalid) offsets
-%% that recovery must still clamp safely.
+%% guards. Used by `prop_consumer_offset_clamping/0` to seed arbitrary
+%% (including invalid) offsets that recovery must still clamp safely.
 seed_raw_consumer_offset(InstDir, Seg, Off) ->
     Path = filename:join(
         InstDir, ?BONDY_OPLOG_WAL_CONSUMER_OFFSET_FILENAME

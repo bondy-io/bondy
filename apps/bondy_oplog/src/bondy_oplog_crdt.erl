@@ -203,7 +203,7 @@ silently diverge.
 
 -callback query(Query :: term(), State :: term()) -> Result :: term().
 
-%% Projection-seam callbacks (operation-based projection, Option B).
+%% Projection-seam callbacks (operation-based projection).
 
 -callback to_value(State :: term()) -> Value :: term().
 

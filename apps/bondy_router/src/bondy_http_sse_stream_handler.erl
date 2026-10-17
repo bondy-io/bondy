@@ -16,10 +16,6 @@ Messages arrive by ONE path: `drain_queue` notifications, drained from
 CHALLENGE, ABORT, an inline ERROR), so the order the client sees is the order
 they were produced.
 
-They used to arrive by two paths, the synchronous replies bypassing the queue as
-`{sync_reply, Bin}` — which is how a reply produced later reached the client
-first.
-
 Keepalive SSE comments are sent periodically to prevent intermediaries from
 closing the connection, unless the listener's resolved `sse.ping.enabled` is
 `false`. The interval is the listener's resolved `sse.ping.interval`.
@@ -106,14 +102,11 @@ init(Req0, Opts) ->
                     Req = cowboy_req:stream_reply(200, Headers, Req1),
 
                     %% No timeout cast: stream lifetime is governed by the
-                    %% CONNECTION timer, which
-                    %% `bondy_listener_config:held_stream_defaults/1' seats
+                    %% CONNECTION timer, which `bondy_listener_config' seats
                     %% from `sse.idle_timeout' with
-                    %% `reset_idle_timeout_on_send' on — identically over
-                    %% HTTP/1.1 and HTTP/2 (a per-stream cast only ever
-                    %% worked over HTTP/1.1; `cowboy_http2.erl:988' discards
-                    %% it), so the keepalives below are also what keeps the
-                    %% connection alive through quiet periods.
+                    %% `reset_idle_timeout_on_send' on, over HTTP/1.1 and
+                    %% HTTP/2 alike (cowboy_http2 discards a per-stream
+                    %% cast). The keepalives below keep it alive when quiet.
 
                     self() ! drain_queue,
 

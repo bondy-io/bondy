@@ -16,11 +16,10 @@
 %%     when theirs differ. It answers from the instance's REGISTRY ROW, not by
 %%     parsing the id, so `bondy_db` has to carry the DB in the instance opts.
 %%
-%% The parse this replaced failed silently: a separator change made `db_of/1`
-%% return `undefined` and stopped replication with nothing logged
-%% (`bondy_oplog_compaction_cluster_SUITE` timed out waiting for convergence).
-%% The cases below pin both halves, and are written to kill a reintroduced
-%% parse — see `lookup_not_parse/0`.
+%% A parse of the id fails silently: a separator change makes
+%% `bondy_oplog:db_of/1` return `undefined` and stops replication with nothing
+%% logged. The cases below pin both halves, and are written to kill a
+%% reintroduced parse — see `lookup_not_parse/0`.
 %% =============================================================================
 
 -module(bondy_db_instance_id_test).
@@ -139,8 +138,8 @@ total() ->
 %% The encoding — one directory component, injective
 %% =============================================================================
 
-%% An id has to survive `storage_path/3` as a single component: the directory
-%% it names is exactly the id, under exactly the base.
+%% An id has to survive `bondy_oplog_path:storage_path/3` as a single
+%% component: the directory it names is exactly the id, under exactly the base.
 encoded_ids_name_one_directory_test() ->
     Ids = [
         bondy_db:encode_instance_id(main, 4),

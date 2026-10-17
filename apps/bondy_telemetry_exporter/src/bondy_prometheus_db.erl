@@ -97,11 +97,9 @@ the collector. Idempotent; called from `bondy_prometheus:setup/0` at boot.
 setup() ->
     ok = declare_metrics(),
     %% The core-substrate `bondy_metrics` families are declared where they
-    %% are populated — in `bondy_oplog_core_metrics:init/1` — via
-    %% `bondy_metrics:declare/1`, so they are not declared here. They reach
-    %% /metrics through the declared-families collector
-    %% (`bondy_prometheus_collector`), which replaced an earlier blanket
-    %% passthrough that duplicated every already-declared family.
+    %% are populated, in `bondy_oplog_core_metrics:init/1`, so they are not
+    %% declared here. They reach /metrics through the declared-families
+    %% collector (`bondy_prometheus_collector`).
     case
         telemetry:attach_many(
             ?HANDLER_ID, events(), fun ?MODULE:handle_event/4, undefined
@@ -1196,10 +1194,10 @@ alarms() ->
     end.
 
 %% @private
-%% Reads the same oracle the `/ready` probe serves. It used to read
-%% `bondy_config:get(status)` alone, which is only the first of that oracle's
-%% three conditions — a node whose durable `main` DB failed to open exported
-%% `bondy_node_ready 1` while `/ready` answered 503.
+%% Reads the same oracle the `/ready` probe serves,
+%% `bondy_router_app:is_ready/0`. `bondy_config:get(status)` alone is only
+%% that oracle's first condition: a node whose durable `main` DB fails to open
+%% would export `bondy_node_ready 1` while `/ready` answers 503.
 node_ready() ->
     try bondy_router_app:is_ready() of
         true -> [{[], 1}];

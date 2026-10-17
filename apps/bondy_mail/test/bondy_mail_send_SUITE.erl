@@ -423,8 +423,8 @@ The encoded message is still measured exactly, after encoding.
 
 Admission works on the decoded request scaled by a headroom factor, which is an
 estimate; this is the check that is not. It is reached directly here because a
-request that passes the first check and fails the second is, by construction,
-hard to build -- which is the point of the headroom.
+request that passes the first check and fails the second is hard to build --
+which is the point of the headroom.
 """.
 encoded_size_is_checked_exactly(_) ->
     {ok, Built} = bondy_mail_request:new(

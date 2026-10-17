@@ -357,21 +357,12 @@ only a refused publication proves the ceiling is being hit.
 """.
 -spec reconcile_limit_alarms() -> ok.
 
-%% Re-evaluate the ceilings for every realm that currently holds a retention
-%% alarm, and clear the ones whose condition has become false.
-%%
-%% The alarm handler is already the registry of what is believed true, so this
-%% needs no second record of which realms are alarmed — and the walk is over
-%% the raised alarms, which is empty on a healthy node.
-%%
-%% Clearing happens HERE, on the eviction cycle, rather than on the
-%% counter-decrement path: a decrement is per message on both `take/2` and the
-%% eviction sweep, so a `gen_event` cast per removed message would put the
-%% shared `alarm_handler` manager in front of retention. The cost is latency —
-%% a realm that drops back under its ceiling clears on the next cycle rather
-%% than at the moment it does, which is the behaviour the operator
-%% documentation already describes for every producer that probes on an
-%% interval.
+%% The alarm handler is already the registry of which realms are alarmed, so
+%% the walk is over the raised alarms, empty on a healthy node. Clearing
+%% happens on the eviction cycle rather than on the counter-decrement path:
+%% a decrement is per message, and a `gen_event` cast per removed message
+%% would put the shared `alarm_handler` manager in front of retention. A
+%% realm that drops under its ceiling clears on the next cycle.
 reconcile_limit_alarms() ->
     lists:foreach(fun reconcile_realm/1, alarmed_realms()).
 
@@ -408,14 +399,11 @@ init_evictor() ->
         decr_counters(Realm, 1, bondy_retained_message:size(Msg))
     end,
     %% A `jobs` producer that returns is restarted IMMEDIATELY, and one that
-    %% crashes never reaches the sleep below — so an eviction pass that raises
-    %% spins as fast as the scheduler can respawn it. That is not theoretical:
-    %% when the durable `main` DB fails to open, the catalogue boots with main
-    %% idle (see `bondy_namespace_catalog:open_main_into/1`) and
-    %% `bondy_retained_message:table/0` raises `retained_messages_not_provisioned`
-    %% on every pass, producing hundreds of crashed processes per millisecond
-    %% until the node's supervision tree gives out. Catch, log and sleep: a
-    %% cycle that cannot run is a cycle to skip, not a reason to melt the node.
+    %% crashes never reaches the sleep below, so an eviction pass that raises
+    %% spins as fast as the scheduler respawns it: with `main` idle after a
+    %% failed open, `bondy_retained_message:table/0` raises
+    %% `retained_messages_not_provisioned` on every pass. Catch, log and
+    %% sleep: a cycle that cannot run is a cycle to skip.
     Fun = fun() ->
         try bondy_retained_message:evict_expired('_', Decr) of
             N when N > 0 ->

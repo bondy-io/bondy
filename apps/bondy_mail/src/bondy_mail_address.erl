@@ -223,13 +223,12 @@ named(Raw, Address) ->
 %% @private
 %% Spaces only, and at the byte level.
 %%
-%% Two reasons, and both were learned the hard way. `string:trim/1` treats CR
-%% and LF as whitespace, so it would quietly turn `Acme\n <a@b>` into the name
-%% `Acme` and accept it -- see named/2. And every `string` function raises
-%% `badarg` on a binary that is not valid UTF-8, so `string:trim(<<128>>, ...)`
-%% took down the calling process: a router pool process, over a display name a
-%% peer chose. Validation may refuse anything it likes and must crash at
-%% nothing.
+%% Two reasons. `string:trim/1` treats CR and LF as whitespace, so it would
+%% quietly turn `Acme\n <a@b>` into the name `Acme` and accept it -- see
+%% named/2. And every `string` function raises `badarg` on a binary that is
+%% not valid UTF-8, so `string:trim(<<128>>, ...)` would take down the calling
+%% process: a router pool process, over a display name a peer chose.
+%% Validation may refuse anything it likes and must crash at nothing.
 trim_spaces(<<$\s, Rest/binary>>) ->
     trim_spaces(Rest);
 trim_spaces(Bin) ->

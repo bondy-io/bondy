@@ -6,13 +6,13 @@
 -module(bondy_mcp_handshake).
 
 -moduledoc """
-Session mechanics for the handshake protocol era (design §12: revisions
+Session mechanics for the handshake protocol era (revisions
 `2025-06-18` and `2025-11-25` over Streamable HTTP). The HTTP orchestration
 — era selection, method dispatch, status codes — stays in
 `bondy_mcp_http_handler`; this module owns what a handshake SESSION is,
 including reaching one owned by another cluster node.
 
-## The session (§12.1)
+## The session
 
 An MCP handshake session is a `bondy_http_transport_session` process plus a
 STORED WAMP session (subscriber role) whose ref targets that process. The
@@ -24,7 +24,7 @@ specification's session-id character rule.
 The stored session is opened with `transport_id` set, which makes
 `bondy_router_peer:send/3` deliver everything addressed to it — broker `EVENT`s — into
 the session's transport queue instead of its mailbox (`bondy.erl`'s
-`maybe_enqueue/3`). That queue IS the §12.2 notification backlog: a
+`maybe_enqueue/3`). That queue IS the notification backlog: a
 disconnected `GET` stream loses nothing, and reconnecting drains it.
 The open runs INSIDE the transport session process (via
 `bondy_http_transport_session:with_state/2`) because
@@ -74,7 +74,7 @@ liveness probe to the consumer node's door and detached, so a conflict
 self-heals instead of pinning `409` until the session dies. Frame
 delivery between healthy nodes rides partisan's ordered channel; on a
 partition the stream goes quiet and the client's reconnect answers
-`404` → re-initialize, which is the §12.2 loss model already accepted
+`404` → re-initialize, which is the loss model already accepted
 (`Last-Event-Id` resumability is deferred).
 
 ## Authentication is per request, the session never is
@@ -88,7 +88,7 @@ era, and the session is BOUND to the principal that initialized it
 per request): a different principal presenting the session id gets the
 same `404` an unknown session gets — holding a session id grants nothing.
 
-## Deviations from §12.1 as originally designed, and why
+## Deviations from the designed bootstrap, and why
 
 The designed bootstrap (synthesize a WAMP `HELLO`, authenticate via
 stored claims) forces the realm to permit `cookie` as a WAMP auth
@@ -96,8 +96,8 @@ method — read from `bondy_wamp_protocol:maybe_auth_challenge/4`, which
 hard-selects `?WAMP_COOKIE_AUTH` whenever claims are present. A realm
 authenticating MCP clients by password or OAuth JWT would refuse its
 own sessions. The session is instead opened directly from the
-HTTP-authenticated identity — the mechanism §21 increment 6's stream
-proved — and no WAMP protocol state exists in the session process.
+HTTP-authenticated identity, and no WAMP protocol state exists in the
+session process.
 An unreachable or unknown owner answers `404`, not the designed `410`:
 the transport specification obliges the client to re-initialize on `404`
 and says nothing about `410`.
@@ -115,9 +115,10 @@ and says nothing about `410`.
 %% Attach spawns and awaits a proxy on the owner.
 -define(ATTACH_TIMEOUT, 10000).
 
-%% Handler state kept inside the transport session process. `with_state/2`
+%% Handler state kept inside the transport session process.
+%% `bondy_http_transport_session:with_state/2`
 %% serializes every update, which is what orders concurrent POSTs'
-%% subscribes and unsubscribes (§12.3).
+%% subscribes and unsubscribes.
 -type hs() :: #{
     realm := binary(),
     principal := anonymous | binary(),
@@ -126,7 +127,7 @@ and says nothing about `410`.
     %% WAMP subscription id => the resource URI it serves, and its inverse.
     subs := #{integer() => binary()},
     uris := #{binary() => integer()},
-    %% JSON-RPC id => the in-flight call (§12.5).
+    %% JSON-RPC id => the in-flight call.
     inflight := #{any() => inflight()}
 }.
 -type inflight() :: #{
@@ -222,7 +223,7 @@ principal(#{authid := Authid}) -> Authid.
 -doc """
 Creates the session for a successful `initialize`: starts the transport
 session (its held `GET` stream deliberately NOT counting as activity —
-§12.8: only POSTs reset the idle timer) and, inside it, opens the stored
+only POSTs reset the idle timer) and, inside it, opens the stored
 WAMP session bound to the authenticated principal. Also ensures this
 node's door is running, so peers can reach the session from the first
 moment its id is on the wire. Returns the minted `Mcp-Session-Id`.
@@ -230,7 +231,7 @@ moment its id is on the wire. Returns the minted `Mcp-Session-Id`.
 `Listener` is the serving listener's name, carried — with the realm —
 as the session's lifecycle telemetry metadata, so the transport
 session's `closed` event reaches `bondy_mcp_metrics` with the labels
-the close series needs (§15.1). The metadata is registered only AFTER
+the close series needs. The metadata is registered only AFTER
 the stored session opened: a bootstrap that fails part-way closes a
 transport that was never announced as an MCP session, and its stop
 event must not be accounted as one.
@@ -323,7 +324,7 @@ fetch(WireId, RealmUri, AuthSt) ->
             {error, not_found}
     end.
 
--doc "Marks POST activity on the session (§12.8: only POSTs do).".
+-doc "Marks POST activity on the session (only POSTs do).".
 -spec touch(handle()) -> ok.
 
 touch({local, Pid}) ->
@@ -347,13 +348,13 @@ close({remote, Node, TransportId}) ->
     ok.
 
 %% =============================================================================
-%% API — subscriptions (§12.4)
+%% API — subscriptions
 %% =============================================================================
 
 -doc """
 Subscribes the session's stored WAMP session to `Topic`, serving resource
-`Uri`. Executes inside the owning session process, so concurrent POSTs'
-subscribes and unsubscribes are ordered by construction — from any node.
+`Uri`. Executes inside the owning session process, which serialises
+concurrent POSTs' subscribes and unsubscribes from any node.
 Idempotent per URI.
 """.
 -spec subscribe(handle(), Uri :: binary(), Topic :: binary()) ->
@@ -378,7 +379,7 @@ unsubscribe({remote, Node, TransportId}, Uri) ->
     door_call(Node, {unsubscribe, TransportId, Uri}).
 
 %% =============================================================================
-%% API — in-flight requests and cancellation (§12.5)
+%% API — in-flight requests and cancellation
 %% =============================================================================
 
 -doc """
@@ -418,7 +419,7 @@ take_inflight({remote, Node, TransportId}, Id) ->
     end.
 
 -doc """
-`notifications/cancelled` (§12.5): cancels the in-flight call registered
+`notifications/cancelled`: cancels the in-flight call registered
 under the JSON-RPC id, with the WAMP cancel mode recorded at call time
 (the manifest entry's `cancel_mode` WAMP option, `killnowait` by
 default). The entry is taken from the OWNER and the cancel executes on
@@ -426,7 +427,7 @@ the entry's ORIGIN node — where the promise lives — so the notification
 may arrive at any node in the cluster. The blocked POST process is
 answered by the dealer with the cancellation error and produces the
 response. Arriving after the response was sent — the entry is gone — is
-a no-op by construction.
+a no-op: `take_inflight` finds nothing and nothing is routed.
 """.
 -spec cancel_inflight(handle(), Id :: any()) -> ok.
 
@@ -447,7 +448,7 @@ Enqueues `notifications/*/list_changed` into every handshake session on
 `RealmUri` — called by `bondy_mcp_gateway` after a rebuild that changed
 the manifest. Pre-encoded here: the queue's `{encoded, Bin}` shape means
 "send verbatim" to the `GET` stream, and a session with no stream
-connected keeps it as backlog (§12.2).
+connected keeps it as backlog.
 """.
 -spec notify_manifest_changed(binary(), [tools | resources]) -> ok.
 
@@ -495,7 +496,7 @@ list_changed_type(tools) -> tools_list_changed;
 list_changed_type(resources) -> resources_list_changed.
 
 %% =============================================================================
-%% API — the held GET stream (§12.2)
+%% API — the held GET stream
 %% =============================================================================
 
 -doc """
@@ -553,10 +554,10 @@ detach_stream(_) ->
 
 -doc """
 Drains up to one batch of the session's queue for the `GET` stream,
-translating above the queue (§12.3): `{encoded, Bin}` entries are MCP
+translating above the queue: `{encoded, Bin}` entries are MCP
 JSON-RPC sent verbatim; raw `EVENT` records become
 `notifications/resources/updated` carrying only the resource URI their
-subscription serves (§12.4) — an event whose subscription this session
+subscription serves — an event whose subscription this session
 no longer holds is dropped. Returns the SSE data frames in queue order,
 and whether a further batch may remain. Owner-local: the local GET
 stream and the remote stream's proxy both call it there.
@@ -842,7 +843,7 @@ local_fetch(TransportId, RealmUri, Principal) ->
 
 %% @private
 %% The binding checks, uniformly `not_found`. The stored-session liveness
-%% check covers the admin-kill and realm-deletion rows of §12.8: a session
+%% check covers the admin-kill and realm-deletion close reasons: a session
 %% whose WAMP session was closed underneath it is dead — the transport
 %% process is closed here and the client re-initializes.
 check(Pid, RealmUri, Principal) ->
@@ -858,7 +859,7 @@ check(Pid, RealmUri, Principal) ->
                     {ok, {local, Pid}, Meta};
                 {error, not_found} ->
                     %% The stored WAMP session was closed underneath the
-                    %% transport (§12.8: the admin-kill and realm-deletion
+                    %% transport (the admin-kill and realm-deletion
                     %% rows both land here — this seat cannot tell which,
                     %% so one honest reason covers both).
                     ok = local_close(Pid, stored_session_closed),
@@ -1140,7 +1141,8 @@ translate(Other, _) ->
     false.
 
 %% @private
-%% `with_state/2` wraps the closure's own reply in `{ok, _}`; collapse the
+%% `bondy_http_transport_session:with_state/2` wraps the closure's own reply
+%% in `{ok, _}`; collapse the
 %% two layers so callers see the closure's result, and a session that died
 %% mid-call as an error.
 flatten({ok, Inner}) -> Inner;

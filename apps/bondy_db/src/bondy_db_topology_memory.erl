@@ -79,7 +79,7 @@ survival, not just the projection.
 ## Bucket and instance strategy
 
 Bucket is the entity type — exactly like `bondy_db_topology_shared_shards` —
-and the realm is folded into the cell key by the facade (G-1). This lets the
+and the realm is folded into the cell key by the facade. This lets the
 topology declare `instances_strategy/0 => per_shard`: one oplog instance
 (WAL + MST + applier) per shard, shared by every table on it and multiplexed by
 the entity-type bucket. The per-`(EntityType, Shard)` ETS projections stay
@@ -153,7 +153,7 @@ The entity-type as a binary — exactly like `bondy_db_topology_shared_shards`.
 
 The bucket carries the entity type (not the realm) so a `per_shard` instance can
 multiplex its tables by bucket; the realm is folded into the cell key by the
-facade (G-1) instead, isolating realms there. Each `(EntityType, Shard)` still
+facade instead, isolating realms there. Each `(EntityType, Shard)` still
 has its own ETS table, so the bucket also keeps a table's cells contiguous
 within it.
 """.

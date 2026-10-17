@@ -383,12 +383,9 @@ handle_inbound_messages(
         ?WAMP_GOODBYE_AND_OUT
     ),
     Bin = bondy_wamp_encoding:encode(Reply, encoding(St0)),
-    %% NOTE: `M#goodbye.reason_uri` is DROPPED. It used to be recorded in the
-    %% state and read by nothing, which made `wamp.close.logout` look honoured
-    %% when it never was: `terminate/1` closes the session with `undefined`, so
-    %% the logout branch of the old `bondy_session:maybe_revoke_tickets/2` was
-    %% unreachable and a client could never revoke its own ticket by
-    %% disconnecting. Carrying the reason to the close is a separate change.
+    %% `M#goodbye.reason_uri` is DROPPED: `terminate/1` closes the session
+    %% with `undefined`, so `wamp.close.logout` is not honoured and a client
+    %% cannot revoke its own ticket by disconnecting.
     St1 = St0#wamp_state{state_name = closed},
 
     ok = notify(Reply, erlang:iolist_size(Bin), St1),
@@ -423,19 +420,12 @@ handle_inbound_messages(
     #wamp_state{state_name = closed} = St0,
     _
 ) ->
-    %% Client is requesting a session
-    %% This will return either reply with
-    %% wamp_welcome() | wamp_challenge() | wamp_abort()
-    %% Admission gate first (two atomics reads): when the node's run
-    %% queues are deep, a session open the node accepts will spend
-    %% seconds of wall clock in scheduling delay and likely time out on
-    %% the client after holding a socket, session state and auth work
-    %% the whole while; when its memory is near the limit, every session
-    %% admitted is heap the node cannot afford. Refusing HERE costs a
-    %% parse and an encoded ABORT, and the reason URI is retryable
-    %% (wamp.error.unavailable) so well-behaved clients back off and try
-    %% again — admitted sessions keep their establishment latency instead
-    %% of sharing the overload with everyone.
+    %% HELLO: the reply is a WELCOME, a CHALLENGE or an ABORT. Admission gate
+    %% first (two atomics reads): with deep run queues an admitted session
+    %% spends seconds in scheduling delay and times out on the client after
+    %% holding a socket and auth work; near the memory limit every session is
+    %% heap the node cannot afford. Refusing HERE costs a parse and an ABORT
+    %% whose reason URI (wamp.error.unavailable) is retryable.
     case admit_hello() of
         {refuse, Reason} ->
             ok = bondy_telemetry:wamp_dropped(admission, hello),

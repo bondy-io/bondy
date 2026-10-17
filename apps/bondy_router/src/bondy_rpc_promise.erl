@@ -31,18 +31,14 @@ back to the origin `wamp_call()` and Caller
     info :: optional(map())
 }).
 
-%% Wildcards are allowed only when key is used as pattern.
-%% All lookups are ets:select/3 over the (realm_uri, type)-bound prefix of
-%% this ordered_set: the most common patterns (YIELD | ERROR ground
-%% callee_session_id and invocation_id; CANCEL grounds caller_session_id
-%% and call_id) leave earlier key fields as wildcards, so every match is a
-%% scan of that prefix region, bounded by the realm partition's in-flight
-%% promises of that type. Progressive call results repeat the YIELD lookup
-%% once per progressive result, so under heavy streaming with many
-%% in-flight promises this is the first place to revisit (e.g. a
-%% callee-first key or a secondary index).
-%% We opted to have a single entry for all use cases but this might change
-%% in the future.
+%% Wildcards are allowed only when the key is used as a pattern. All lookups
+%% are ets:select/3 over the (realm_uri, type)-bound prefix of this
+%% ordered_set: the common patterns (YIELD | ERROR ground callee_session_id
+%% and invocation_id; CANCEL grounds caller_session_id and call_id) leave
+%% earlier key fields as wildcards, so every match scans that prefix region,
+%% bounded by the partition's in-flight promises of that type. Progressive
+%% results repeat the YIELD lookup per result, so under heavy streaming this
+%% is the first place to revisit (a callee-first key or a secondary index).
 -record(bondy_rpc_promise_key, {
     realm_uri :: uri(),
     type :: call | invocation,

@@ -337,13 +337,11 @@ do_add(registration, Uri) ->
     Ref = bondy_ref:new(internal, {bondy_wamp_api, resolve}),
     Opts = #{match => ?POLICY, invoke => <<"single">>},
     case bondy_registry:add(registration, ?REALM, Uri, Opts, Ref) of
-        {ok, _, _} -> ok;
         {ok, _} -> ok
     end;
 do_add(subscription, Uri) ->
     Ref = bondy_ref:new(internal, {bondy_wamp_api, resolve}),
     case bondy_registry:add(subscription, ?REALM, Uri, #{}, Ref) of
-        {ok, _, _} -> ok;
         {ok, _} -> ok
     end.
 
@@ -469,7 +467,8 @@ do_sweep_counts() ->
 %% Why did the reap not fire? Reports, for the cell `{Type, Uri}` owned by
 %% `Owner`: the origins its stored state actually carries, the dead set this
 %% node computes, and a DIRECT per-instance reap report (which carries
-%% `supported` and `cells_scanned`, both of which `reap_instance/2` discards).
+%% `supported` and `cells_scanned`, both of which
+%% `bondy_oplog_origin_retirement` discards).
 do_diagnose(Owner, {Type, Uri}) ->
     Dead = dead_origins(),
     Reports = [
@@ -493,8 +492,8 @@ do_diagnose(Owner, {Type, Uri}) ->
         %% For every instance that actually SCANNED a cell: does its applied
         %% frontier carry any of the origins we just declared dead? If yes,
         %% the writer IS known dead and present here, and the decline happens
-        %% inside `reap_one_cell/5`. If no, the dead set never named the
-        %% cell's writer and the fault is upstream.
+        %% inside the per-cell reap of `bondy_oplog_cell_utils`. If no, the
+        %% dead set never named the cell's writer and the fault is upstream.
         scanned_frontiers => [
             {I, #{
                 frontier => maps:keys(bondy_oplog_instance:frontier(I)),

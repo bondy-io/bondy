@@ -6,7 +6,7 @@
 -module(bondy_mcp_request_state).
 
 -moduledoc """
-The MRTR `requestState` envelope (design §11.1): a callee's continuation
+The MRTR `requestState` envelope: a callee's continuation
 state sealed into an opaque string the MCP client round-trips, and opened
 on the retry.
 
@@ -20,7 +20,7 @@ encryption keys — AEAD rather than a bare MAC, because a callee's
 continuation may itself be sensitive and confidentiality costs nothing
 extra. The key is the REALM's (replicated with it), never the listener's:
 a continuation minted through one endpoint or node must open on any other
-serving the same realm (§11.1). Cross-realm replay is structurally
+serving the same realm. Cross-realm replay is structurally
 impossible — another realm's keys cannot decrypt the mint.
 
 `open/3` rejects with a uniform `{error, invalid}` for every failure —

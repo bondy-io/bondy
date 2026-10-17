@@ -1,6 +1,5 @@
-%% Tests for the per-instance MST owner (Stage 2 after second course
-%% correction). Instance ids are binaries; lifecycle goes through the
-%% library façade.
+%% Tests for the per-instance MST owner. Instance ids are binaries;
+%% lifecycle goes through the library façade.
 
 -module(bondy_oplog_instance_test).
 
@@ -613,7 +612,7 @@ wait_until_value(F, T) ->
     end.
 
 %% =============================================================================
-%% Stage 6: backpressure
+%% Backpressure
 %% =============================================================================
 
 backpressure_test_() ->

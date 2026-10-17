@@ -582,7 +582,7 @@ consumer_offset_clamped_to_last_valid_test() ->
         ClampedOff = bondy_log_state:committed_frame_offset(
             Clamped
         ),
-        %% Per design §6 the clamp lands on a frame boundary. Legal
+        %% The clamp lands on a frame boundary. Legal
         %% values are: any appended frame's start offset, the segment
         %% header (= "nothing applied"), or `head_offset` (= "applier
         %% fully caught up" — the next-frame-to-apply is the one not
@@ -661,7 +661,7 @@ recover_refuses_instance_id_mismatch_test() ->
         rmrf(Dir)
     end.
 
-%% QA finding C1: if the manifest has `current_segment` not in
+%% If the manifest has `current_segment` not in
 %% `live_segments`, recovery MUST refuse to open before doing orphan
 %% cleanup — otherwise cleanup would delete the head segment's .qdata,
 %% leaving an unrecoverable state.
@@ -673,7 +673,7 @@ recover_refuses_manifest_with_current_not_in_live_test() ->
         ok = bondy_oplog_wal:close(P),
         InstDir = instance_dir(Dir),
         %% Hand-edit the manifest so `current_segment = 0` but
-        %% `live_segments = []`. This is the corruption shape C1 fixes.
+        %% `live_segments = []`. This is the corruption shape recovery refuses.
         ManifestPath = filename:join(
             InstDir, ?BONDY_OPLOG_WAL_MANIFEST_FILENAME
         ),
@@ -711,7 +711,7 @@ recover_refuses_manifest_with_current_not_in_live_test() ->
                 }
             )
         ),
-        %% C1 says: validation rejects *before* cleanup runs, so the
+        %% Validation rejects *before* cleanup runs, so the
         %% segment file survives.
         ?assert(filelib:is_regular(SegPath))
     after

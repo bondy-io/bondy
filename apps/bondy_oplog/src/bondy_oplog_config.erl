@@ -157,9 +157,9 @@ gc_scheduler_enabled() ->
 
 -doc """
 Whether origin retirement auto-reacts to membership removals and runs its
-periodic pass (default `true`). The pass is idempotent and fail-closed, so
-enablement is safe by construction; disable only to pin retirement to
-explicit operator runs (`bondy_oplog_origin_retirement:run/0`).
+periodic pass (default `true`). The pass is meant to be idempotent and
+fail-closed. Disable it only to pin retirement to explicit operator runs
+(`bondy_oplog_origin_retirement:run/0`).
 """.
 -spec origin_retirement_enabled() -> boolean().
 
@@ -171,7 +171,7 @@ Periodic origin-retirement pass interval in milliseconds (default
 `600_000`). Membership events remain the primary trigger; the periodic pass
 covers origin-epoch turnover WITHOUT a membership change — e.g. a K8s
 StatefulSet pod that loses its volume and rejoins under the same name.
-The pass is idempotent and fail-closed, so the tick is safe by construction.
+The pass is meant to be idempotent and fail-closed.
 """.
 -spec origin_retirement_interval_ms() -> non_neg_integer().
 
@@ -240,17 +240,13 @@ pack_auto_seal_bytes() ->
 Seal driver for the durable pack-store MST instances (default `async`).
 
 `async` rolls `incoming.pack` aside at the commit barrier and rewrites it into
-a sealed pack in a monitored worker process, keeping the multi-hundred-ms
-rewrite off the instance's apply pipeline. The seal is therefore no longer a
-freeze of local writes' visibility (read-after-write freshness lag) — measured
-~44% lower `mst_install` p99 and the 84–188ms (up to ~750ms under disk
-contention) inline seal freezes removed entirely, with no throughput cost. It
-does NOT change durable write throughput — the per-writer ceiling is bounded by
-disk fsync bandwidth, independent of where the seal runs.
+a sealed pack in a monitored worker process, so the rewrite does not block the
+instance's apply pipeline. Durable write throughput is bounded by disk fsync
+bandwidth either way.
 
-`sync` restores the historical inline seal (the store seals on `put` when the
-threshold is crossed). Affects only durable (pack-store) instances; ephemeral
-(ets/map) backends never seal.
+`sync` seals inline: the store seals on `put` when the threshold is crossed.
+Affects only durable (pack-store) instances; ephemeral (ets/map) backends never
+seal.
 """.
 -spec pack_seal_mode() -> sync | async.
 
@@ -481,14 +477,11 @@ set_aae_max_concurrency(N) when is_integer(N), N >= 1 ->
 Node-wide budget, in MST pages, for AAE reconciliation in flight at any instant
 (default `2048`).
 
-This is the lever that bounds AAE's peak memory. A sync session pulls missing
-pages from its peer in rounds; historically it pulled the *entire* missing set
-in one round, so a bulk initial sync loaded a whole shard tree at once (× every
-shard syncing concurrently — the 16× blow-up). The budget caps how many pages
-any one round materialises: each of the `aae_max_concurrency/0` sessions fetches
-at most `aae_pages_per_round/0` pages per round, so total in-flight pages stay
-≈ this budget regardless of concurrency or dataset size. A larger budget syncs
-faster but raises the peak; a smaller budget is gentler on RAM and slower.
+This budget bounds AAE's peak memory. A sync session pulls missing pages from
+its peer in rounds, and each of the `aae_max_concurrency/0` sessions fetches at
+most `aae_pages_per_round/0` pages per round, so total in-flight pages stay
+close to this budget regardless of concurrency or dataset size. A larger budget
+syncs faster but raises the peak; a smaller budget is gentler on RAM and slower.
 """.
 -spec aae_max_pages_in_flight() -> pos_integer().
 

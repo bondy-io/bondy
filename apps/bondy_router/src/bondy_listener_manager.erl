@@ -77,16 +77,11 @@ blocks where their consumers read them. Raises on any configuration error.
 
 init() ->
     %% Read through `bondy_config` rather than `application:get_env/3`: the
-    %% per-listener option blocks are only reachable that way (app_config caches
-    %% application env into persistent_term and `bondy_config:get/2` reads the
-    %% cache), so taking the inventory from the same accessor keeps one source
-    %% of truth. `bondy_config:init/1` populates the cache before calling this.
-    %%
-    %% One path. An absent key means the operator declared no listeners at all --
-    %% cuttlefish drops the inventory translation unless some
-    %% `listeners.$name.*' mapping is set, and they are all default-free -- so the
-    %% built-in defaults apply. There is no second spelling to fall back to:
-    %% `listeners.$name.*' is the only listener surface the schemas define.
+    %% per-listener option blocks are reachable only through its cache, which
+    %% `bondy_config:init/1` populates before calling this. An absent key
+    %% means the operator declared no listeners: cuttlefish drops the
+    %% inventory translation unless some default-free `listeners.$name.*'
+    %% mapping is set, so the built-in defaults apply.
     {Inventory0, Provenance} =
         case bondy_config:get(listeners, undefined) of
             undefined -> {bondy_listener_config:default_inventory(), default};
@@ -331,45 +326,21 @@ http_listeners() ->
 %% configuration and the resolver is pure.
 admin_local_spec() ->
     %% `platform_runtime_dir`, not `platform_tmp_dir` and not
-    %% `platform_data_dir`. A socket file is ephemeral, is recreated on every
-    %% boot, and must not sit among the durable stores — but it must also not
-    %% sit anywhere an operator is invited to mount. `platform_tmp_dir` is
-    %% scratch space, is a Docker VOLUME, and is routinely backed by a
-    %% PersistentVolume; a mount there that has no AF_UNIX socket inodes takes
-    %% the node's control endpoint down with it, which is the `enotsup` case
-    %% above. `platform_runtime_dir` exists to be the one directory nobody has a
-    %% reason to mount, and `deployment/Dockerfile` deliberately leaves it out
-    %% of `VOLUME`.
-    %%
-    %% Read without a default on purpose: the key carries a `{default, ...}` in
-    %% the schema, so an absent value means the release was rendered wrong, and
-    %% inventing a directory here would put the node's control socket somewhere
-    %% the operator is not looking.
+    %% `platform_data_dir`: a socket file is ephemeral and must not sit
+    %% anywhere an operator is invited to mount. `platform_tmp_dir` is a
+    %% Docker VOLUME, and a mount without AF_UNIX socket inodes is the
+    %% `enotsup` case above; `deployment/Dockerfile` leaves
+    %% `platform_runtime_dir` out of `VOLUME`. Read without a default: the
+    %% schema carries one, so an absent value means a wrongly rendered release.
     Dir = bondy_config:get(platform_runtime_dir),
-    %% The filename is NOT scoped to this node, and cannot be from here.
-    %%
-    %% Scoping it would close a real hazard: two nodes pointed at one
-    %% `platform_runtime_dir` collide on this path, silently and in one
-    %% direction, because `bondy_listener_ranch:maybe_unlink_socket/1` deletes
-    %% whatever it finds before binding — so the node that boots second takes
-    %% the path from the node that boots first, which goes on serving an
-    %% unlinked inode nothing can reach. Measured as an `econnrefused` in
-    %% `bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves`,
-    %% which `bondy_ct:node_env/2` works around with a per-peer directory.
-    %%
-    %% What blocks it is boot order, not effort. Any node identity comes from
-    %% Partisan's configuration, which `bondy_config:init/1` re-reads only at
-    %% its end, because it spends its body editing Partisan's application
-    %% environment by hand. This function runs inside `init/1` before that, so
-    %% there is no final node name yet. Worse, `nodestring/0` and
-    %% `node_hash/0` CACHE, so reading one here would pin a wrong node identity
-    %% into session ids for the lifetime of the node.
-    %%
-    %% Closing it means resolving the path where the identity exists
-    %% (`start/1`, which runs after `bondy_config:init/1` returns) and
-    %% republishing the `[admin_local, path]` block
-    %% `bondy_config:splat_listener_blocks/1` has already emitted from the
-    %% value below — a change to the write-once inventory, not made here.
+    %% The filename is NOT scoped to this node and cannot be from here: this
+    %% runs inside `bondy_config:init/1` before Partisan's configuration is
+    %% re-read, so there is no final node name yet, and `nodestring/0` and
+    %% `node_hash/0` CACHE. Two nodes sharing one `platform_runtime_dir`
+    %% therefore collide on this path: `bondy_listener_ranch` unlinks whatever
+    %% it finds before binding, so the second node takes the path
+    %% (`bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves`;
+    %% `bondy_ct:node_env/2` uses a per-peer directory).
     #{
         transport => uds,
         protocol => http,

@@ -27,8 +27,7 @@
 %% The crash case must not be carried by a boot fold that DECLARES every cell
 %% event in the MST applied. That reconstructs the number and loses the data:
 %% the MST records receipt, so an event received and never materialised is
-%% claimed,
-%% and the claim is what `watermark_door/2` and `capped_truncation_point/2`
+%% claimed, and the claim is what `bondy_oplog_instance`'s truncation guards
 %% check before truncating it. See `bondy_oplog_frontier_fold_gap_test`.
 %% =============================================================================
 -module(bondy_oplog_frontier_recovery_test).
@@ -56,8 +55,9 @@ crash_restart_reconstructs_frontier_test_() ->
     {timeout, 120, fun crash_restart_reconstructs_frontier/0}.
 
 %% Same crash/reconstruct path, but the table carries an `aw_map` (add-wins)
-%% CRDT — exactly `bondy_realm_keys`. Exercises frontier reconstruction over an
-%% aw cell through the durable stack.
+%% CRDT — exactly the realm-keys table (`?BONDY_DB_REALM_KEYS_TAB` in
+%% `bondy_db_tables.hrl`). Exercises frontier reconstruction over an aw cell
+%% through the durable stack.
 crash_restart_reconstructs_aw_frontier_test_() ->
     {timeout, 120, fun crash_restart_reconstructs_aw_frontier/0}.
 
@@ -285,9 +285,9 @@ write_keys(T, N) ->
         lists:seq(1, N)
     ).
 
-%% One aw_map cell per key (mirrors `bondy_realm_keys`: a cell keyed by a Uri
-%% holding `kid => bundle`). The value bundle is a map of binaries, like a real
-%% key bundle.
+%% One aw_map cell per key (mirrors the realm-keys table: a cell keyed by a
+%% Uri holding `kid => bundle`). The value bundle is a map of binaries, like a
+%% real key bundle.
 write_aw_keys(T, N) ->
     Realm = <<"r1">>,
     lists:foreach(
@@ -306,11 +306,11 @@ write_aw_keys(T, N) ->
 %% Wait for every instance's applier to drain so the frontier reflects all
 %% writes (the hook fires on the applier's projection write, not on `apply/4`).
 %% Wait for BOTH applier stages: the WAL drain, then the projection replay.
-%% They are separate barriers. `await_apply/1` settles the drain; the boot
-%% re-fold is a `replay_cell_events` cast the applier init enqueues BEHIND the
-%% drain, so after a crash restart the frontier is still catching up when
-%% `await_apply/1` returns. `replay_cell_events_sync/1` is the replay barrier —
-%% the same one every other durable e2e test here uses.
+%% They are separate barriers. `bondy_oplog_instance:await_apply/1` settles
+%% the drain; the boot re-fold is a `replay_cell_events` cast the applier init
+%% enqueues BEHIND the drain, so after a crash restart the frontier is still
+%% catching up when it returns.
+%% `bondy_oplog_applier:replay_cell_events_sync/1` is the replay barrier.
 drain_all() ->
     lists:foreach(
         fun(I) ->

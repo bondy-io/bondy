@@ -38,8 +38,9 @@
 %%
 %% The registry cases kill `bondy_oplog_registry` or
 %% `bondy_oplog_core_registry` under a running table. Reads and writes through
-%% the same handle must keep working, and a `start_instance/2` of a running
-%% shard must return its subtree rather than start a second one on its WAL.
+%% the same handle must keep working, and a `bondy_oplog:start_instance/2` of
+%% a running shard must return its subtree rather than start a second one on
+%% its WAL.
 %% A row whose owner dies while the core registry is down (its supervisor is
 %% suspended across both kills) must be deleted once the registry is back.
 %% =============================================================================

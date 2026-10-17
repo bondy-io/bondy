@@ -561,13 +561,13 @@ encode_atom(null, _Encoder) ->
     ?CBOR_NULL;
 encode_atom(undefined, _Encoder) ->
     ?CBOR_UNDEFINED;
-% Half-precision +Infinity
+%% Half-precision +Infinity
 encode_atom(infinity, _Encoder) ->
     <<16#F9, 16#7C, 16#00>>;
-% Half-precision -Infinity
+%% Half-precision -Infinity
 encode_atom(neg_infinity, _Encoder) ->
     <<16#F9, 16#FC, 16#00>>;
-% Half-precision NaN
+%% Half-precision NaN
 encode_atom(nan, _Encoder) ->
     <<16#F9, 16#7E, 16#00>>;
 encode_atom(Atom, _Encoder) when is_atom(Atom) ->
@@ -840,13 +840,11 @@ deterministic_encoder(Term, _Enc) ->
 
 %% @private
 %% DAG-CBOR encoder (https://ipld.io/specs/codecs/dag-cbor/spec/).
-%%
-%% A strict, deterministic profile threaded through the shared `encode_*`
-%% helpers exactly like `default_encoder/2` and `deterministic_encoder/2`. It
-%% differs from the latter by: encoding floats as 64-bit doubles (never the
-%% shortest form), sorting map keys length-first, restricting keys to strings,
-%% representing links as `{cid, binary()}` (tag 42), and rejecting bignums,
-%% NaN/Infinity, `undefined` and every other non-IPLD term.
+%% It differs from `deterministic_encoder/2` in four ways:
+%% - it writes every float as a 64-bit double;
+%% - it accepts only string map keys and sorts them length-first;
+%% - it writes a link `{cid, binary()}` as tag 42;
+%% - it rejects bignums, NaN/Infinity, `undefined` and other non-IPLD terms.
 -spec dag_encoder(term(), encoder()) -> iodata().
 dag_encoder(N, _Enc) when is_integer(N), N >= 0, N < 24 ->
     <<N>>;
@@ -1131,7 +1129,7 @@ decode_arg(27, <<V:64, Rest/binary>>) ->
 decode_arg(AI, _Bin) when AI >= 28, AI =< 30 ->
     error({invalid_ai, AI});
 decode_arg(31, _Bin) ->
-    % Handled specially by callers
+    %% Handled specially by callers
     {indefinite, <<>>};
 decode_arg(_, <<>>) ->
     error(incomplete).
@@ -1485,11 +1483,10 @@ continue_decode(_Bin, _Stack, _Acc, _Decoders) ->
 %% Internal - DAG-CBOR Decoding (strict)
 %%====================================================================
 %%
-%% A separate, strict recursive descent. Unlike the lenient `decode_value/1`
-%% path it rejects anything that is not canonical DAG-CBOR: non-minimal
-%% arguments, indefinite-length items, tags other than 42, non-string or
-%% unsorted map keys, half/single-precision and special floats, the `undefined`
-%% simple value and unassigned simple values.
+%% A strict recursive descent that, unlike the lenient `decode_value/1`,
+%% rejects non-minimal arguments, indefinite-length items, tags other than
+%% 42, non-string or unsorted map keys, half/single-precision and special
+%% floats, and the `undefined` and unassigned simple values.
 
 %% @private
 -spec decode_value_dag(binary()) -> {decode_value(), binary()}.
@@ -1719,7 +1716,7 @@ format_value({simple, N}) when is_integer(N) ->
 %% @private
 format_float(F) ->
     case F of
-        % NaN check
+        %% NaN check
         _ when F =/= F ->
             "NaN";
         _ ->

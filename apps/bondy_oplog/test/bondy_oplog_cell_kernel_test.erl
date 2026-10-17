@@ -4,9 +4,9 @@
 %% =============================================================================
 
 %% Tests for `bondy_oplog_cell_kernel` — the per-cell projection kernel.
-%% Since PR-Z the kernel is CRDT-only: `from_modules/2` resolves a former
-%% `fold_module` label to its native CRDT twin (or errors for an unknown
-%% label), and the eager step / read seam run the op-based CRDT. Verifies
+%% The kernel is CRDT-only: `from_modules/2` resolves a `fold_module`
+%% label to its native CRDT twin (or errors for an unknown label), and the
+%% eager step / read seam run the op-based CRDT. Verifies
 %% the selector + resolution, that the CRDT branch maintains the
 %% materialised value via the commutative O(1) step, the COG read seam, and
 %% that a non-commutative CRDT is refused on the eager path.
@@ -65,7 +65,7 @@ decode_state_dispatch_test() ->
 %% State bytes reaching decode_state are this node's own projection frames —
 %% peer state arrives as terms via the sync transport, never as bytes here
 %% (measured: `bondy_aae_cluster_SUITE` runtime-atom cases). So the decode is
-%% PLAIN per the C-2 own-bytes rule: an atom present only as ETF bytes — the
+%% PLAIN, not `[safe]`: an atom present only as ETF bytes — the
 %% post-restart state, when no loaded module names it and its event was
 %% compacted out of the log — must decode (re-interning it), not be refused.
 own_bytes_decode_state_interns_own_atom_test() ->

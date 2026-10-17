@@ -7,17 +7,15 @@
 
 -moduledoc """
 The MCP request-header contract: `Origin`, `MCP-Protocol-Version`, the
-`Mcp-Method` / `Mcp-Name` pair (§10.1) and the `Mcp-Param-{Name}` family
+`Mcp-Method` / `Mcp-Name` pair and the `Mcp-Param-{Name}` family
 (x-mcp-header), plus the protocol-revision sets those are checked against.
 
-Split out of `bondy_mcp_http_handler`. MCP-D01 keeps ONE handler for both
-eras because the era is a per-request property and a router-level split
-could not see the request body — but that argument is about the dispatcher,
-not about every layer beneath it. Nothing here is era-specific: the same
-`Origin` rule, the same header-versus-body agreement and the same
-revision sets serve both, which is exactly why they can move without
-touching the version decision. The protocol-revision macros moved with
-them and are now referenced nowhere else.
+`bondy_mcp_http_handler` is ONE handler for both eras because the era is a
+per-request property and a router-level split could not see the request
+body — but that argument is about the dispatcher, not about every layer
+beneath it. Nothing here is era-specific: the same `Origin` rule, the same
+header-versus-body agreement and the same revision sets serve both, so this
+module sits outside the version decision.
 
 Every check either returns `ok` or THROWS `{reply, Status, Body, Req}` —
 the same protocol `bondy_mcp_http_handler` catches around its pipeline —
@@ -33,8 +31,8 @@ so a caller reads as a straight sequence of assertions.
 %% The protocol revisions THIS implementation carries, per era. The
 %% effective supported set of an endpoint is the intersection with its
 %% configured `protocol_versions`. A modern request is validated against
-%% the modern set (§10.1); an `initialize` negotiates against the
-%% handshake set (§12), latest first — date-form revisions sort
+%% the modern set; an `initialize` negotiates against the
+%% handshake set, latest first — date-form revisions sort
 %% lexicographically in chronological order.
 -define(MODERN_VERSIONS, [<<"2026-07-28">>]).
 -define(HANDSHAKE_VERSIONS, [<<"2025-11-25">>, <<"2025-06-18">>]).

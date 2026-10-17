@@ -178,10 +178,10 @@ end#{
 %% Membership is stored in the cell-per-fact `security_group_members` relation
 %% (NOT in the user cell). Each `(user, group)` fact is an enable-wins presence
 %% cell written in BOTH key orderings so each direction is a bounded key-range
-%% scan (the permutation-index pattern, design §11): a forward `f` band keyed
+%% scan (the permutation-index pattern): a forward `f` band keyed
 %% `enc(user) ⊕ enc(group)` for "groups of a user", and a reverse `r` band keyed
 %% `enc(group) ⊕ enc(user)` for "members of a group". The realm is folded into
-%% the cell key by the facade (G-1), so reads address `(Table, RealmUri, Key)`.
+%% the cell key by the facade, so reads address `(Table, RealmUri, Key)`.
 -define(MEMBER_FWD, <<"f">>).
 -define(MEMBER_REV, <<"r">>).
 
@@ -877,17 +877,12 @@ list(RealmUri, Opts) ->
     Mode = maps_utils:get_any([mode, <<"mode">>], Opts, partition),
     case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
         undefined ->
-            %% Whole-realm listing — streamed through a bounded keyset fold so
-            %% it never materialises the raw cell set (the prior `bondy_db:list`
-            %% + `lists:sublist` could OOM a large realm). Membership is joined
-            %% from ONE scan of the realm's forward membership band (rather than
-            %% a per-user scan) since the whole realm is materialised anyway.
-            %% `global` because this branch's result is user-visible and
-            %% has always come back in username order; `bondy_relation:fold/4`
-            %% follows the relation's mode, so the default `partition` would
-            %% silently change that ordering. It costs one read per shard per
-            %% row — the price of the alphabetical listing, now paid where it
-            %% is asked for.
+            %% Whole-realm listing, streamed through a bounded keyset fold.
+            %% Membership is joined from ONE scan of the realm's forward
+            %% membership band. `global` because the result is user-visible
+            %% in username order and `bondy_relation:fold/4` follows the
+            %% relation's mode, so the default `partition` would change that
+            %% ordering. It costs one read per shard per row.
             {ok, Acc} = bondy_relation:fold(
                 relation(global), RealmUri, fun(User, A) -> [User | A] end, []
             ),
@@ -1319,13 +1314,8 @@ decode_raw_row(_) ->
 %% =============================================================================
 %% PRIVATE: MEMBERSHIP RELATION (security_group_members)
 %% =============================================================================
-%% Membership is cell-per-fact and add-wins: each `(user, group)` fact is an
-%% `ew_flag` (enable-wins) presence cell, written in BOTH key orderings — a
-%% forward `f` band (`enc(user) ⊕ enc(group)`) and a reverse `r` band
-%% (`enc(group) ⊕ enc(user)`) — so each direction is a bounded, realm-local
-%% key-range scan with no secondary index. A retract disables both cells; a
-%% disabled cell reads as `false`, so the scans keep only the `true` (live)
-%% ones.
+%% A retract disables both cells of a fact; a disabled cell reads as `false`,
+%% so the scans keep only the live ones.
 
 %% @private
 member_table() ->
@@ -1410,16 +1400,10 @@ clear_memberships(RealmUri, Username) ->
 member_groups(RealmUri, Username) ->
     {Lo, Hi} = fwd_band(Username),
     %% Single-shard read: a user's forward cells co-locate on the user's shard
-    %% (catalogue `aggregate_root => second_col`), and `shard_for/3` derives
-    %% that shard from the band's leading bytes (`second_col(Lo) = Username`)
-    %% — so this is one bounded shard scan, not the all-shard scatter
-    %% `range_all` would run. This is the hot auth path
-    %% (`get_context` → `lookup`).
-    %% Folded to exhaustion rather than read as one page — a user with more
-    %% groups than the default limit silently lost the rest, and a missing
-    %% group is a missing set of PERMISSIONS. `shard` keeps it the single
-    %% co-located scan described above: without it the fold would walk every
-    %% shard, adding an empty scan per other shard to this hot read.
+    %% (catalogue `aggregate_root => second_col`), and `bondy_db:shard_for/3`
+    %% derives that shard from the band's leading bytes, so this is one
+    %% bounded scan on the hot auth path. Folded to exhaustion rather than
+    %% read as one page: a missing group is a missing set of PERMISSIONS.
     Shard = bondy_db:shard_for(member_table(), RealmUri, Lo),
     {ok, Rev} = bondy_db:fold(
         member_table(),
@@ -1935,29 +1919,16 @@ import_legacy(RealmUri, Username, Value) ->
 %% user map with `groups` stripped; the desired membership set (the map's
 %% `groups`) is reconciled into the relation. The user-cell write still happens
 %% on every membership change, so its HLC — the `token_version` — keeps
-%% advancing (a removed/added group forces the zookie forward, design §9.3).
+%% advancing (a removed/added group forces the zookie forward).
 store(RealmUri, #{username := Username} = User, #{declarative := true}) ->
-    %% Declarative config apply: write WITHOUT firing the runtime lifecycle
-    %% side-effects, and IDEMPOTENTLY — emit a write only when something
-    %% differs. Re-reading the same config file on every boot must not re-stamp
-    %% the user cell with a fresh HLC (which would diverge the cross-node content
-    %% digest); the op-based CRDT + anti-entropy handle convergence, so no
-    %% deterministic-version rebase is needed. The user object is deterministic
-    %% (see `bondy_realm:validate_rbac_config` for the deterministic salt), so an
-    %% unchanged config compares equal.
-    %%
-    %% The config file declares group membership, so the relation is reconciled
-    %% here exactly as on the runtime path: the file is the desired state, and a
-    %% group dropped from it is retracted. `reconcile_membership/3` writes
-    %% nothing when the relation already matches, so idempotency is preserved.
-    %%
-    %% A membership change forces the user-cell write even when the record
-    %% itself is unchanged: that cell's HLC is the revocation zookie
-    %% (`token_version/2`), so without the write, revoking a group through the
-    %% config file would leave already-issued tokens valid.
-    %%
-    %% Both properties are covered by
-    %% `bondy_rbac_user_SUITE:declarative_config_membership/1`.
+    %% Declarative config apply: write WITHOUT the runtime lifecycle
+    %% side-effects, and only when something differs, so re-reading the same
+    %% config on every boot does not re-stamp the user cell with a fresh HLC
+    %% (`bondy_realm` salts a config-declared password deterministically).
+    %% The file is the desired membership, so a group dropped from it is
+    %% retracted. A membership change forces the user-cell write because
+    %% that cell's HLC is the revocation zookie (`token_version/2`).
+    %% `bondy_rbac_user_SUITE:declarative_config_membership/1` covers both.
     Desired = strip_groups(User),
     Reconciled = reconcile_membership(
         RealmUri, Username, maps:get(groups, User, [])

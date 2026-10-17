@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% IDX-4 — lag bound, back-pressure, backfill / rebuild.
+%% Lag bound, back-pressure, backfill / rebuild.
 %%
 %% Covers:
 %%   - rebuild from the primary repopulates a wiped index;
@@ -143,7 +143,7 @@ cleanup({Db, Sup, Dir}) ->
 %% =============================================================================
 
 %% Wiping the index ETS and calling rebuild_index/2 re-materialises it from
-%% the primary (the backfill path), not via the IDX-3 applier-replay helper.
+%% the primary (the backfill path), not via the applier-replay helper.
 rebuild_after_clear_repopulates({Db, _Sup, _Dir}) ->
     {ok, T} = open_lww(Db),
     R = <<"r1">>,
@@ -196,8 +196,7 @@ rebuild_removes_orphans({Db, _Sup, _Dir}) ->
     ok = bondy_db:close_table(T).
 
 %% The startup backfill freshens every secondary shard, so a finite max_lag
-%% range read over an empty index passes (resolves the IDX-3 carry-over #4
-%% where empty shards stayed sentinel-stale).
+%% range read over an empty index passes; empty shards are not sentinel-stale.
 backfill_freshens_all_shards({Db, _Sup, _Dir}) ->
     {ok, T} = open_lww(Db),
     R = <<"r1">>,
@@ -628,9 +627,10 @@ restarted_writer_replays_lost_ops({Db, _Sup, _Dir}) ->
     end,
     ok = bondy_db:close_table(T).
 
-%% Runs `Body` while the rebuild's first `flush_entry/2` call first runs
-%% `Hook(Pid)` on the writer it targets. Calls from other processes, such as
-%% an instance's compaction flush barrier, pass through without the hook.
+%% Runs `Body` while the rebuild's first
+%% `bondy_oplog_secondary_writer:flush_entry/2` call first runs `Hook(Pid)` on
+%% the writer it targets. Calls from other processes, such as an instance's
+%% compaction flush barrier, pass through without the hook.
 with_flush_hook(Hook, Body) ->
     Once = atomics:new(1, []),
     Rebuild = whereis(bondy_oplog_index_rebuild),

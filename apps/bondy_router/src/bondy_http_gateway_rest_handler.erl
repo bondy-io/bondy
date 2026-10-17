@@ -117,7 +117,7 @@ mapping; an API spec's `status_codes` map overrides it. Examples:
 -export([forbidden/2]).
 
 -ifdef(TEST).
-%% G-1: exposed for unit-testing the per-scheme fail-closed authorization logic.
+%% Exposed for unit-testing the per-scheme fail-closed authorization logic.
 -export([is_authorized/3]).
 %% Exposed so the error body it builds can be driven directly: reaching it
 %% through a real request needs a live listener, a parsed API spec and a
@@ -149,7 +149,7 @@ init(Req, St0) ->
 
     %% TODO Set session will now be required by bondy_auth:init
 
-    %TODO
+    %% TODO
     Session = undefined,
     St1 = St0#{
         authid => undefined,
@@ -348,7 +348,7 @@ with the mapped HTTP status code.
 delete_resource(Req0, #{api_spec := Spec} = St0) ->
     Method = method(Req0),
     Enc = json,
-    % TODO get this by parsing headers
+    %% TODO get this by parsing headers
     St1 = St0#{encoding => Enc},
     case perform_action(Method, maps:get(Method, Spec), St1) of
         {ok, Response, St2} ->
@@ -448,7 +448,7 @@ is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
 is_authorized(_, Req, #{security := #{<<"type">> := Type}} = St) when
     Type == <<"basic">> orelse Type == <<"oidc">>
 ->
-    %% G-1: `basic` and `oidc` are first-class schemes in the spec parser but
+    %% `basic` and `oidc` are first-class schemes in the spec parser but
     %% have NO runtime enforcement here. They MUST fail closed — falling through
     %% to the anonymous branch below would serve the endpoint unauthenticated
     %% even though the operator declared it protected.
@@ -1229,7 +1229,7 @@ url(Host, Path, <<>>) ->
 url(Host, Path, QS) ->
     <<Host/binary, Path/binary, $?, QS/binary>>.
 
-% private
+%% private
 -doc "The Spec uses lowercase for the method names but Cowboy uses uppercase.".
 method(Req) ->
     method_to_lowercase(cowboy_req:method(Req)).

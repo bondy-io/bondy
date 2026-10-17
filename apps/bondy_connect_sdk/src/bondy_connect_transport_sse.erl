@@ -8,7 +8,7 @@
 -moduledoc """
 WAMP over Server-Sent Events, against Bondy's `/wamp/sse/*` endpoints.
 
-## Asymmetric by construction
+## Two HTTP conversations
 
 SSE is a one-way server→client stream. WAMP needs both directions, so this
 transport is two HTTP conversations at once:

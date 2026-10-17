@@ -13,21 +13,13 @@
 -compile([nowarn_export_all, export_all]).
 
 %% Reproduction harness for a customer report: "users are not replicated"
-%% with the Grafana `Instances DIVERGED` panel showing 23.
-%%
-%% The panel counts instance_ids for which
-%% `bondy_oplog_instance_frontier_hash` takes more than one distinct value
-%% across the scraped nodes, i.e.
-%%   count(count by (instance_id)(count_values by (instance_id)(...)) > 1)
-%% This suite computes exactly that quantity from
-%% `bondy_oplog_registry:frontier/1`, the same source the exporter reads.
-%%
-%% DIFFERENCE FROM `bondy_aae_cluster_SUITE`: that suite runs with the CT
-%% harness overrides applied by `bondy_ct:node_env/2` — `live_sync_adaptive
-%% => false` and `aae_max_concurrency => 8`. The customer runs the shipped
-%% defaults. This suite restores the SHIPPED DEFAULTS so the configuration
-%% under test is the customer's, and writes users through the real RBAC API
-%% (`bondy_rbac_user:add/2`) rather than through `bondy_db:apply/…`.
+%% with the Grafana `Instances DIVERGED` panel showing 23. The panel counts
+%% instance ids for which the `bondy_oplog_instance_frontier_hash` metric
+%% takes more than one distinct value across the scraped nodes; this suite
+%% computes that quantity from `bondy_oplog_registry:frontier/1`, the source
+%% the exporter reads. Unlike `bondy_aae_cluster_SUITE`, this suite runs the
+%% SHIPPED `db.aae.*` defaults, not the `bondy_ct:node_env/2` overrides, and
+%% writes users through `bondy_rbac_user:add/2`.
 
 %% schema/bondy.schema defaults for the `db.aae.*` keys the customer does
 %% not set (their bondy.conf carries no `db.*` key at all).
@@ -106,7 +98,7 @@ users_converge_under_write_load(Config) ->
     ]),
     ct:pal("scheduler/instance snapshot:~n~p", [snapshot(Nodes)]),
 
-    %% Phase 2 — sustained churn. The customer's cluster is not quiescent when
+    %% Sustained churn. The customer's cluster is not quiescent when
     %% the panel reads 23; it is taking writes. Hold the cluster under a steady
     %% update stream for ?CHURN_MS and sample the panel quantity throughout.
     ChurnSampler = start_sampler(Nodes),

@@ -6,7 +6,7 @@
 -module(bondy_mcp_spec_parser).
 
 -moduledoc """
-Validator for MCP overlay documents (design §18.4) — the operator-authored
+Validator for MCP overlay documents — the operator-authored
 layer that names WAMP procedures for MCP, carries what has no WAMP meaning
 (the MCP `name`, annotations, `wamp_options`) and declares resource
 templates.
@@ -19,16 +19,16 @@ atom-keyed form. It does not touch storage and does not check the world
 
 Validated here, per entry:
 
-- `name` — the §17 rules: 1..256 bytes, printable ASCII, no whitespace.
+- `name` — 1..256 bytes, printable ASCII, no whitespace.
 - `kind` — the closed set `tool` | `resource` | `resource_template`.
 - the WAMP binding, a valid exact-match URI: `wamp_procedure` for a
   `tool` or `resource_template`, `wamp_topic` for a `resource`.
-- For a `resource_template` (§16.3): the RFC 6570 `uri_template`'s variable
+- For a `resource_template`: the RFC 6570 `uri_template`'s variable
   set must equal `uri_vars_schema`'s key set; every `{{var}}` reference in
   `wamp_args` / `wamp_kwargs` / `update_topic` must be a template variable;
   and the entry must declare `result_args_schema` and/or
   `result_kwargs_schema`.
-- Two entries claiming one `(realm, name)` reject the document (§17).
+- Two entries claiming one `(realm, name)` reject the document.
 """.
 
 -type kind() :: tool | resource | resource_template.
@@ -72,7 +72,7 @@ Validated here, per entry:
 %% =============================================================================
 
 -doc """
-Validates `Map` — a decoded §18.4 overlay document — as a whole and returns
+Validates `Map` — a decoded overlay document — as a whole and returns
 its normalized form, or `{error, Reason}` naming the first violation.
 """.
 -spec parse(map()) -> {ok, document()} | {error, any()}.
@@ -171,7 +171,7 @@ optional_fields(E, Data) ->
     ).
 
 %% @private
-%% §14.3: the entry's audit redaction policy — the top-level argument and
+%% The entry's audit redaction policy — the top-level argument and
 %% result fields excluded from digest computation at capture. Field names
 %% are deduplicated and sorted so the policy recorded in an audit record
 %% is canonical.
@@ -192,7 +192,7 @@ redaction(E, Data) ->
     end.
 
 %% @private
-%% The §16.3 resource-template consistency checks.
+%% The resource-template consistency checks.
 template_fields(E0, Data) ->
     UriTemplate = required_binary(<<"uri_template">>, Data),
     Vars = uri_template_vars(UriTemplate),
@@ -244,7 +244,7 @@ template_fields(E0, Data) ->
         Unknown -> throw({unknown_template_vars, Unknown})
     end,
 
-    %% §16.3: every resource template declares its result shape.
+    %% Every resource template declares its result shape.
     (maps:is_key(result_args_schema, E2) orelse
         maps:is_key(result_kwargs_schema, E2)) orelse
         throw(missing_result_schema),
@@ -267,7 +267,7 @@ required_binary(Key, Data) ->
     end.
 
 %% @private
-%% §17: 1..256 bytes, printable ASCII, no whitespace. Case-sensitive as-is.
+%% A name is 1..256 bytes, printable ASCII, no whitespace. Case-sensitive as-is.
 name(Name) when byte_size(Name) >= 1, byte_size(Name) =< 256 ->
     Printable = lists:all(
         fun(C) -> C >= 33 andalso C =< 126 end,
@@ -299,7 +299,7 @@ uri_template_vars(Template) ->
     lists:sort(template_vars(Template, <<"{">>, <<"}">>, [])).
 
 %% @private
-%% The `{{var}}` references inside one binding value (§16.3). Non-binary
+%% The `{{var}}` references inside one binding value. Non-binary
 %% values (a JSON number, a nested literal) carry no references.
 binding_refs(Value) when is_binary(Value) ->
     template_vars(Value, <<"{{">>, <<"}}">>, []);

@@ -299,8 +299,8 @@ self_root_confirms_ephemeral_fused_compacts() ->
 %% `?BUCKET_SUB`, with `bondy_oplog_crdt_struct` joining at runtime via
 %% `register_table/4` as `?BUCKET_REG`), as the registry's two RIB tables do.
 %% The core compaction mechanism operates purely on the MST as a flat key/value
-%% tree — mux-agnostic by construction; self-root-confirms and asserts combined
-%% size returns to 0 across both tables.
+%% tree, so it is mux-agnostic; the case self-root-confirms and asserts
+%% combined size returns to 0 across both tables.
 mux_shard_both_tables_compact_together() ->
     Id = mk_id(),
     NsSub = ns_of(Id),
@@ -466,22 +466,15 @@ fused_catalogue_bootstrap_roundtrip() ->
     close_shard(TC1, TP1),
     close_shard(TC2, TP2).
 
-%% The frontier-GAP detection end to end: a retention peer truncates
-%% history a laggard never received; the laggard's next FULL sync round
-%% completes but must (a) fail with `{frontier_gap, _}` rather than
-%% silently succeed, and (b) NOT adopt the peer's frontier (the adoption's
-%% "can never over-claim" argument requires all-peer-confirmed compaction,
-%% which retention bypasses — adopting would flip the convergence oracle
-%% to CONVERGED over silently missing data). The catalogue bootstrap is
-%% then the remedy: after install + finalize the same sync round passes.
 %% THE WATERMARK DOOR (fused). A peer event whose key sorts at or below
 %% this replica's watermark can arrive AFTER the watermark advanced: the
 %% peer-confirmed frontier and in-flight events race by design under
 %% concurrent writes. Discarding such an event UNAPPLIED at the watermark
 %% re-truncate loses data silently — the op never reaches this replica's
 %% projection, and the applied VV max-merges past the hole on the next
-%% same-origin apply, masking the loss from every oracle. The door must FOLD a never-applied event into the projection
-%% (advancing the VV) before dropping it.
+%% same-origin apply, masking the loss from every oracle. The door must FOLD
+%% a never-applied event into the projection (advancing the VV) before
+%% dropping it.
 watermark_door_folds_unapplied_peer_event_fused() ->
     A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
     B = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
@@ -1012,6 +1005,14 @@ live_append_remote_reaches_projection_applier() ->
     teardown(A),
     teardown(B).
 
+%% The frontier-GAP detection end to end: a retention peer truncates
+%% history a laggard never received; the laggard's next FULL sync round
+%% completes but must (a) fail with `{frontier_gap, _}` rather than
+%% silently succeed, and (b) NOT adopt the peer's frontier (the adoption's
+%% "can never over-claim" argument requires all-peer-confirmed compaction,
+%% which retention bypasses — adopting would flip the convergence oracle
+%% to CONVERGED over silently missing data). The catalogue bootstrap is
+%% then the remedy: after install + finalize the same sync round passes.
 frontier_gap_detected_after_peer_truncation() ->
     Retention = #{max_age_ms => 0, max_events => 1},
     A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, Retention),

@@ -252,8 +252,8 @@ pointer-only index.
 The columns binary is always the reading node's own bytes: every node's
 applier re-runs `project/2` on the in-memory value when it applies a
 cell, so projection bytes never arrive from a peer. `decode_projection/1`
-therefore plain-decodes them per the C-2 own-bytes rule (rationale:
-`bondy_oplog_cell_kernel:decode_value_bytes/2`).
+therefore decodes them without `[safe]`, as the `bondy_oplog_cell_kernel`
+moduledoc states for own bytes.
 """.
 -spec project(spec(), term()) -> binary().
 
@@ -280,8 +280,7 @@ project(Spec, Value) ->
 -spec decode_projection(binary()) -> map().
 
 decode_projection(<<>>) -> #{};
-%% Own-persisted projection bytes — plain decode per the C-2 own-bytes
-%% rule (rationale: `bondy_oplog_cell_kernel:decode_value_bytes/2`).
+%% Own projection bytes, so no `[safe]`: see `bondy_oplog_cell_kernel`.
 decode_projection(Bin) when is_binary(Bin) -> binary_to_term(Bin).
 
 %% =============================================================================

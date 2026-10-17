@@ -52,9 +52,8 @@ the same grain as the static table — or the call raises `badarg`.
 
 Call it from the registering application's `start/2`. Every registrant is
 started by `bondy_router_app` BEFORE `start_normal_listeners/0` runs, so a
-registration is in place before any client can be admitted — the ordering
-is by construction, not by luck (falsifier:
-`bondy_mcp_gateway_SUITE:overlay_wamp_api_lifecycle` goes through this
+registration is in place before any client can be admitted
+(`bondy_mcp_gateway_SUITE:overlay_wamp_api_lifecycle` goes through this
 seam). Registration is idempotent; there is no unregister — a handler
 lives as long as the node.
 """.
@@ -92,21 +91,14 @@ handle_call(#call{} = M0, Ctxt) ->
 %% @private
 handle_decoded_call(#call{procedure_uri = Proc} = M, Ctxt) ->
     Resolved = resolve(Proc),
-    %% The `dry_run` convention is opt-in per procedure, and this is what makes
-    %% opting out SAFE. Without this gate a procedure that does not read the
-    %% KWArg would simply act, so a caller that believed it was simulating
-    %% would have performed the thing — the one failure this convention exists
-    %% to remove. Refusing here means the caller learns the procedure cannot
-    %% simulate, at the only moment the answer is still useful.
-    %%
-    %% `bondy_task_catalogue` is the declaration, so support is discoverable
-    %% through `bondy.task.describe` before the call rather than by trying it.
-    %%
-    %% Scope: this is reached for `bondy.*` and its two aliases only — the
-    %% dealer sends `wamp.*` to `bondy_wamp_meta_api`, which has no such gate.
-    %% Those are read-only reflection procedures, so a stray `dry_run` KWArg
-    %% there is ignored rather than acted on; if a `wamp.*` procedure ever
-    %% mutates, it needs this gate too.
+    %% The `dry_run` convention is opt-in per procedure, and this gate makes
+    %% opting out SAFE: a procedure that does not read the KWArg would act,
+    %% so a caller that believed it was simulating would have performed the
+    %% thing. `bondy_task_catalogue` is the declaration, so support is
+    %% discoverable through `bondy.task.describe`. Reached for `bondy.*` and
+    %% its two aliases only; the dealer sends `wamp.*` to
+    %% `bondy_wamp_meta_api`, whose procedures are read-only reflection, so
+    %% a stray `dry_run` KWArg there is ignored.
     case dry_run_refusal(Resolved, M) of
         undefined -> do_handle_call(Resolved, M, Ctxt);
         Error -> {reply, Error}

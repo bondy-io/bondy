@@ -7,9 +7,10 @@
 %% (`seal_mode => async`). A durable instance opened in async mode must:
 %%
 %%  1. drive the seal off the install/commit critical path — the
-%%     `[bondy_mst, page_store, seal_roll]` event (emitted ONLY by the
-%%     async `maybe_roll_for_seal/1`, never by the synchronous `seal/1`)
-%%     fires, and sealed packs materialise on disk;
+%%     `[bondy_mst, page_store, seal_roll]` event (emitted ONLY by the async
+%%     `bondy_mst_pack_store:maybe_roll_for_seal/1`, never by the synchronous
+%%     `bondy_mst_pack_store:seal/1`) fires, and sealed packs materialise on
+%%     disk;
 %%  2. keep the instance gen_server alive throughout (the monitored worker
 %%     lifecycle never faults the instance under a normal workload);
 %%  3. lose no data — every appended event survives a stop + restart, where

@@ -4,10 +4,8 @@
 %% =============================================================================
 %% EUnit coverage for the registry ptrie CAS-contention telemetry sink in
 %% `bondy_prometheus` (`handle_net_event/4`). Each test drives the event
-%% through the handler with the shapes `bondy_registry_ptrie:do_write/3`
-%% emits and asserts the corresponding `bondy_metrics` counter moved —
-%% these counters are the evidence hook for the registry partition-grain
-%% decision.
+%% through the handler with the shapes `bondy_registry_ptrie` emits and
+%% asserts that the corresponding `bondy_metrics` counter moved.
 -module(bondy_prometheus_ptrie_cas_test).
 
 -include_lib("eunit/include/eunit.hrl").

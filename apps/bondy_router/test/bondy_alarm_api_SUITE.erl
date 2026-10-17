@@ -16,7 +16,7 @@
 %% Three properties:
 %%
 %%   * DISPATCH — the four procedures resolve and answer.
-%%   * AUTHORITY — a session in an ordinary realm is refused (D4: alarms are an
+%%   * AUTHORITY — a session in an ordinary realm is refused (alarms are an
 %%     operator concern; `realm_uri` on an alarm names the affected tenant, it
 %%     does not grant that tenant access).
 %%   * ENCODABILITY — a reply carrying a producer's arbitrary Erlang term still
@@ -272,17 +272,13 @@ a_junk_cursor_is_refused(_) ->
     }),
     ?assertEqual(?WAMP_INVALID_ARGUMENT, E#error.error_uri).
 
-%% A progressive stream is bounded by the caller's `_deadline`. That is what
-%% the option is FOR: the WAMP call timeout is, for a progressive call, an
-%% inactivity window that every chunk restarts, so without this a
-%% slowly-dripping stream is unbounded.
-%%
-%% Driven through `stream_pages/3` with a SYNTHETIC pager rather than through
-%% the alarm history, for the one reason a real one cannot serve: the property
-%% is about ELAPSED TIME and a local ring answers in microseconds. A pager that
-%% takes 50ms a page against a 100ms deadline makes the outcome a fact rather
-%% than a race. `bondy.alarm.history` is that loop's only caller today, which
-%% is why its suite is where the loop is tested.
+%% A progressive stream is bounded by the caller's `_deadline`: the WAMP call
+%% timeout is, for a progressive call, an inactivity window that every chunk
+%% restarts, so a slowly-dripping stream is otherwise unbounded. Driven
+%% through `bondy_wamp_api_utils:stream_pages/3` with a SYNTHETIC pager,
+%% because the property is about ELAPSED TIME and a local ring answers in
+%% microseconds; a pager that takes 50ms a page against a 100ms deadline
+%% makes the outcome a fact rather than a race.
 a_stream_stops_at_the_deadline(_) ->
     {M, Ctxt} = stream_call(#{'_deadline' => 100}),
     ?assertEqual(
@@ -329,7 +325,7 @@ catalogue_lists_every_declared_entry(_) ->
     ?assertEqual(<<"integration">>, maps:get(<<"class">>, Relay)),
     ?assertMatch([_ | _], maps:get(<<"config_keys">>, Relay)).
 
-%% The runbook join (design §9): the entry names what to look at and what may
+%% The runbook join: the entry names what to look at and what may
 %% be done. Asserted on the WIRE because the fields are only useful if they
 %% survive rendering — `observe_with` is a list of maps mixing binary and atom refs,
 %% which is exactly the shape a renderer flattens by accident.
@@ -374,7 +370,7 @@ an_alarm_carries_its_catalogue_join_key(_) ->
     [Task] = maps:get(<<"tasks">>, Entry),
     ?assertMatch({ok, #{}}, bondy_task_catalogue:lookup(Task)).
 
-%% D4. Every one of the four, because an authority check that covers three
+%% Every one of the four, because an authority check that covers three
 %% procedures and misses the fourth is the usual shape of this bug.
 every_procedure_requires_the_master_realm(_) ->
     ok = raise(<<"relay is down">>),
@@ -481,8 +477,7 @@ only_a_real_change_publishes_an_update(_) ->
 
 %% The other delivery of the same walk. A caller that announced
 %% `progressive_call_results` gets every page as a RESULT of its own and never
-%% handles a cursor — same pager, so the two modes cannot disagree about what
-%% the history IS.
+%% handles a cursor — same pager, so the two modes read the same history.
 %%
 %% Driven with a limit of 1 against a ring holding several transitions, so the
 %% stream is genuinely multi-chunk rather than one result wearing a flag.

@@ -328,11 +328,10 @@ call_safe(Pid, Request, Timeout) ->
 %% ERROR); a bare term is a client-side failure (call_safe/3's catch, a local
 %% precondition check, or a send_msg failure) that needs one. Applied at the
 %% ops where both classes are reachable — call/call_async/call_stream,
-%% register/unregister/subscribe/unsubscribe, publish_ack.
-%%
-%% Deliberately NOT enriched the way error_payload/1 is: this payload is
-%% matched exactly by callers (`{error, #{kind => client, reason => timeout}}`),
-%% so extra keys would break them, and the caller already holds the reason term.
+%% register/unregister/subscribe/unsubscribe, publish_ack. NOT enriched the
+%% way error_payload/1 is: callers match this payload exactly
+%% (`{error, #{kind => client, reason => timeout}}`), so extra keys would
+%% break them, and the caller already holds the reason term.
 tag_error({error, Reason}) when not is_map(Reason) ->
     {error, #{kind => client, reason => Reason}};
 tag_error(Result) ->
@@ -634,15 +633,13 @@ terminate(Reason, StateName, Data) ->
     %% part of the public API.
     _ = reply_pending({error, disconnected}, Data),
     %% A `connect/1` WAITER is different: it is asking why it could not
-    %% establish, and `disconnected` answers nothing. Replying it here used to
-    %% discard the real reason, so a wrong realm, a failed credential, an
-    %% exhausted retry budget and a router refusal were indistinguishable to
-    %% the caller — and to anyone debugging one.
+    %% establish, and `disconnected` answers nothing — a wrong realm, a failed
+    %% credential, an exhausted retry budget and a router refusal each need
+    %% their own reason.
     _ = reply_waiters({error, connect_error(Reason)}, Data),
     %% No rate-limiter teardown: the dispatch's token bucket is unregistered
-    %% (`bondy_regulator_rate_limit:new/2`) and is freed with the state. It used
-    %% to own an ETS row keyed by a `unique_integer` nobody could reconstruct,
-    %% so a connection that never reached this line orphaned it for good.
+    %% (`bondy_regulator_rate_limit:new/2`) and is freed with the state
+    %% (`bondy_connect_load_SUITE:rate_bucket_is_unregistered`).
     ok.
 
 %% @private Unwrap a gen_statem termination reason into the error a caller
@@ -1366,8 +1363,7 @@ apply_effect({spawn, Tag, Key, Job}, {D0, Data}) ->
 %% than crashing on a `start_child` failure — a failed worker start must not take
 %% down the connection (and, via the `one_for_all` conn_sup, every other
 %% in-flight worker). The dispatch helper handles the error like the worker-DOWN
-%% path: release the load token, synthesize an ERROR / advance the FIFO (review
-%% B1).
+%% path: release the load token, synthesize an ERROR / advance the FIFO.
 start_worker(Job, #data{handler_sup = HSup}) ->
     case bondy_connect_handler_sup:start_worker(HSup, Job) of
         {ok, Pid} ->
@@ -1425,14 +1421,12 @@ call_span(#call{procedure_uri = Uri, options = Opts}) ->
 
 %% @private Emit the `[bondy_connect, rpc, latency]` event (kind `call`)
 %% for a settled CALL entry. Entries without a span stash (the admin
-%% register/subscribe/... acks and publish acks) emit nothing. The
-%% timeout and teardown paths bypass resolve_pending/3 and therefore
-%% emit nothing — the event measures a router-answered round trip.
-%% `Reply` is the reply being dispatched to the owner, so the outcome
-%% is exactly what the caller observes: a WAMP ERROR settles as
-%% `error`, everything else as `success`. The configured `peer_service`
-%% names the router on this CLIENT leg (the config map is validated,
-%% so the key is always present).
+%% register/subscribe/... acks and publish acks) emit nothing; the timeout
+%% and teardown paths bypass resolve_pending/3 and emit nothing — the event
+%% measures a router-answered round trip. `Reply` is the reply dispatched
+%% to the owner, so a WAMP ERROR settles as `error`, everything else as
+%% `success`. The configured `peer_service` names the router on this CLIENT
+%% leg (the config map is validated, so the key is always present).
 notify_span(
     #{span := #{uri := Uri, trace := Trace, start := T0}}, Reply, Config
 ) ->
@@ -1453,10 +1447,9 @@ notify_span(_, _, _) ->
 %% entry's timer — per the WAMP spec a progressive call's timeout is the
 %% limit between results, so each progressive result restarts it (capped
 %% by the `_deadline` option when given); the final RESULT/ERROR settles
-%% the entry. Sync calls never request progressive results (call/5
-%% rejects the option), so a progressive RESULT for a sync or unmarked
-%% entry means the router sent progress we did not ask for: drop it
-%% rather than surface an unexpected reply shape.
+%% the entry. Sync calls never request progressive results (call/5 rejects
+%% the option), so a progressive RESULT for a sync or unmarked entry is
+%% progress the client did not ask for: drop it rather than surface it.
 notify_progress(ReqId, Payload, #data{pending = Pending} = Data) ->
     case maps:find(ReqId, Pending) of
         {ok,
@@ -1681,13 +1674,11 @@ reconnect_allowed({abort, _, _}, #data{}) ->
     %% `retry_initial_connect` defaults to `false` so that a MISCONFIGURED
     %% `connect/1` — wrong URL, wrong realm, bad credentials — fails fast
     %% instead of disappearing into a backoff loop. A transient ABORT is the
-    %% opposite of a misconfiguration: nothing about the request is wrong, and
-    %% the router has said so in the message. Honouring fail-fast here would
-    %% make every client give up at precisely the moment the router is
-    %% shedding load — which is when retrying is the whole point, and which is
-    %% overwhelmingly a FIRST connect (a fleet coming up against a busy
-    %% cluster). Permanent aborts do not reach this clause: the caller's
-    %% `is_retriable/1` has already rejected them.
+    %% opposite of a misconfiguration: nothing about the request is wrong,
+    %% and the router has said so. Fail-fast here would make every client
+    %% give up exactly when the router is shedding load, overwhelmingly on
+    %% a FIRST connect (a fleet coming up against a busy cluster). Permanent
+    %% aborts never reach this clause: `is_retriable/1` rejects them first.
     true;
 reconnect_allowed(_Reason, #data{}) ->
     false.
@@ -1833,18 +1824,13 @@ is_retriable({handshake_error, R}) -> is_retriable_posix(R);
 is_retriable(_) -> false.
 
 %% @private Whether a router ABORT describes a condition that could clear.
-%%
 %% The authority is the router's own `nature` key, which every Bondy ABORT
-%% carries (`bondy_connect_error:to_map/1`): `transient` means "retrying the operation
-%% unchanged could succeed", `permanent` means the request itself is at fault
-%% and will fail identically forever. Trusting the flag rather than a URI table
-%% means a new transient condition on the router is handled by clients that
-%% predate it.
-%%
-%% The URI fallback covers a router too old to send `nature`, or a non-Bondy
-%% WAMP router. It is deliberately an allow-list: an ABORT we cannot classify
-%% stays fatal, because retrying a genuinely permanent failure forever is worse
-%% than surfacing it.
+%% carries (`bondy_connect_error:to_map/1`): `transient` means retrying the
+%% operation unchanged could succeed; `permanent` means the request itself is
+%% at fault. Trusting the flag rather than a URI table means a client handles
+%% a transient condition that postdates it. The URI fallback covers a router
+%% too old to send `nature`, or a non-Bondy router, and is an allow-list: an
+%% unclassifiable ABORT stays fatal, because retrying forever is worse.
 is_transient_abort(Uri, Details) when is_map(Details) ->
     case maps:get(~"nature", Details, undefined) of
         ~"transient" -> true;
@@ -1965,15 +1951,12 @@ send_msg(Msg, #data{transport_mod = Mod, transport = T}) ->
 
 %% @private
 %% A failed transport send is evidence the link is dead, and the inbound path
-%% cannot be relied on to duplicate that evidence — a long-poll transport has
-%% no socket close to observe, so a connection that only reports the failure
-%% to the one caller stays `established` on a dead link, failing every
-%% subsequent request. Each request-sending site therefore notifies the statem
-%% with a `?SEND_FAILURE` info event, which `established` turns into
-%% `on_transport_failure/2` (any other state drops it through its catch-all —
-%% there the failure is already being handled by other means). The transport's
-%% own pre-flight refusal of a single message is the one exception: the link
-%% is fine, only that message is not.
+%% cannot be relied on to duplicate it: a long-poll transport has no socket
+%% close to observe, so a connection that only told the one caller would stay
+%% `established` on a dead link. Each request-sending site therefore sends
+%% the statem a `?SEND_FAILURE` info event; `established` turns it into
+%% `on_transport_failure/2`, other states drop it as already handled. The
+%% transport's pre-flight refusal of one message is the exception.
 notify_send_failure({message_too_large, _, _}) ->
     ok;
 notify_send_failure(Reason) ->
@@ -2026,12 +2009,11 @@ result_payload(#result{details = Details, args = Args, kwargs = KWArgs}) ->
 %% @private A router-sent ERROR, shared by every request kind that awaits one
 %% (CALL, REGISTER, SUBSCRIBE, UNREGISTER, UNSUBSCRIBE, acknowledged PUBLISH)
 %% via resolve_pending/3 (route_app/2). `kind => wamp` discriminates this from
-%% a client-side `{error, Reason}` at the tag_error/1 boundary.
-%%
-%% The payload is a `bondy_connect_error:t()` carrying the router's error, with `kind`,
-%% `args` and `kwargs` retained so existing matches keep working. `message` and
-%% `nature` are the useful additions: a caller can tell a retryable refusal from
-%% a permanent one without parsing the URI.
+%% a client-side `{error, Reason}` at the tag_error/1 boundary. The payload is
+%% a `bondy_connect_error:t()` carrying the router's error, with `kind`, `args`
+%% and `kwargs` retained so existing matches keep working; `message` and
+%% `nature` let a caller tell a retryable refusal from a permanent one
+%% without parsing the URI.
 error_payload(#error{args = Args, kwargs = KWArgs} = M) ->
     Error = bondy_wamp_error:from_wamp(M),
     Error#{

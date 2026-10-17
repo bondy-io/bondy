@@ -82,20 +82,12 @@ challenge(Details, Ctxt, State0) ->
 
         case bondy_auth:user(Ctxt) of
             undefined ->
-                %% No user exists for the provided authid (username). Fail via
-                %% the normal error channel — throw (not error/1) so the catch
-                %% below returns {error, authentication_failed, State}, which the
-                %% router maps to the SAME generic ABORT as a wrong
-                %% password/signature (bondy_wamp_protocol:abort_message/1). This
-                %% prevents the client from telling "no such user" from "bad
-                %% credentials" via the ABORT reason.
-                %%
-                %% NOTE: a fuller anti-enumeration SCRAM would instead proceed to
-                %% a *mock* challenge here (a deterministic fake salt/iteration
-                %% count derived from the authid) so an unknown user still
-                %% receives a CHALLENGE. Without it a residual behavioural oracle
-                %% remains: an unknown user is ABORTed immediately whereas a real
-                %% user receives a CHALLENGE first. Tracked as a follow-up.
+                %% No user exists for this authid. Throw rather than error/1
+                %% so the catch below returns {error, authentication_failed,
+                %% State}, which the router maps to the same generic ABORT as
+                %% a wrong password (bondy_wamp_protocol:abort_message/1), so
+                %% the ABORT reason does not reveal "no such user". An unknown
+                %% user is still ABORTed before a CHALLENGE, a residual oracle.
                 throw(authentication_failed);
             _ ->
                 User = bondy_auth:user(Ctxt),
@@ -218,7 +210,7 @@ do_authenticate(ClientProof, Ctxt, State) ->
     } = Password,
 
     AuthId = bondy_auth:user_id(Ctxt),
-    % We do not support channel binding yet
+    %% We do not support channel binding yet
     CBindData = undefined,
 
     AuthMessage = bondy_password_scram:auth_message(

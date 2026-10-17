@@ -105,15 +105,11 @@ volume.
 
 -record(?MODULE, {
     writer :: bondy_mst_pack_writer:t(),
-    %% Invariant: stored in DESCENDING `pack_id` order (newest first).
-    %% The read paths (`do_get/2`, `do_has/2`) iterate this list and
-    %% short-circuit on the first hit, so newer pages — the most-
-    %% recently-written and typically the most-recently-accessed — are
-    %% probed first. Every mutation that grows the list (`seal/1`,
-    %% `finalise_compaction/6`) funnels through `newest_first/1` to
-    %% preserve the invariant. Callers that need ascending order
-    %% (`apply_compaction/3` reporting) sort at the use-site rather
-    %% than reshuffling the canonical field.
+    %% Invariant: DESCENDING `pack_id` order (newest first). The read paths
+    %% (`do_get/2`, `do_has/2`) short-circuit on the first hit, so the newest
+    %% pages are probed first. Every mutation that grows the list (`seal/1`,
+    %% `finalise_compaction/6`) funnels through `newest_first/1`; callers that
+    %% need ascending order (`apply_compaction/3`) sort at the use-site.
     sealed_views :: [#sealed_view{}],
     free_set :: sets:set(binary()),
     hashing_algorithm :: atom(),
@@ -136,25 +132,21 @@ volume.
     %% `complete_seal/2`, keeping the multi-hundred-ms rewrite off the
     %% critical path. The thresholds mean the same thing in both modes.
     seal_mode = sync :: sync | async,
-    %% Tombstones-flush debounce. The `tombstones` file uses the same
-    %% tmp+datasync+rename+fsync_dir pattern as the manifest (4 fsyncs
-    %% per write). `bondy_mst:put/3` issues one `free/3` per spine
-    %% modification — typically ~5 per put on a populated tree — so a
-    %% naive per-call write costs ~20 fsyncs per MST put. We keep the
-    %% in-memory `free_set` current and persist on the same shape as
-    %% the set_root debounce: when `tombstones_unsynced_count` reaches
-    %% the records threshold, or the wall-clock floor has elapsed, the
-    %% next mutation flushes. Seal / auto-seal / GC / close / explicit
-    %% `flush/1` force a flush so the on-disk tombstones never lag the
-    %% in-memory set for long.
+    %% Tombstones-flush debounce: `bondy_mst:put/3` issues one `free/3` per
+    %% spine modification and the `tombstones` file costs 4 fsyncs per write,
+    %% so the in-memory `free_set` is kept current and persisted on the
+    %% set_root debounce shape: when `tombstones_unsynced_count` reaches the
+    %% records threshold, or the wall-clock floor has elapsed, the next
+    %% mutation flushes. Seal / auto-seal / GC / close / explicit `flush/1`
+    %% force a flush.
     tombstones_flush_every_records :: pos_integer() | infinity,
     tombstones_flush_every_ms :: pos_integer() | infinity,
     tombstones_unsynced_count = 0 :: non_neg_integer(),
     last_tombstones_flush_ms :: integer(),
     tombstones_dirty = false :: boolean(),
-    %% GC dead-fraction gate. The original policy was "rewrite on any
-    %% drop", which is correct but not granular — for very large stores
-    %% with sparse churn it rewrites the world on every GC. Setting
+    %% GC dead-fraction gate. A "rewrite on any drop" policy is correct
+    %% but not granular — for very large stores with sparse churn it
+    %% rewrites the world on every GC. Setting
     %% this to e.g. 0.5 lets operators accept up to that fraction of
     %% dead pages in a single sealed pack before paying for a full
     %% rewrite. Multi-pack coalescing is unaffected: when there are
@@ -486,13 +478,13 @@ put(#?MODULE{writer = W, hashing_algorithm = Algo} = T, Page) ->
     case bondy_mst_pack_writer:append(W, Bytes) of
         {ok, Hash, W1} ->
             %% The writer's content hash IS sha256(serialise(Page)), which
-            %% equals bondy_mst_page:hash(Page, Algo) by construction (both
-            %% term_to_binary the same `{Level, Low, List}` with identical
-            %% opts, then sha256 it), so the on-disk store is content-
-            %% addressed for free. Re-deriving it here would repeat one
-            %% term_to_binary + one sha256 per page — the dominant CPU of the
-            %% MST spine rebuild (mst_install). We assert the equivalence
-            %% under TEST and skip the redundant work in release/bench.
+            %% equals bondy_mst_page:hash(Page, Algo): both term_to_binary
+            %% the same `{Level, Low, List}` with identical opts, then sha256
+            %% it, so the on-disk store is content-addressed for free.
+            %% Re-deriving it here would repeat one term_to_binary + one
+            %% sha256 per page — the dominant CPU of the MST spine rebuild.
+            %% `assert_content_hash/3` checks the equivalence under TEST and
+            %% skips the redundant work in release/bench.
             ok = assert_content_hash(Hash, Page, Algo),
             T1 = maybe_persist_free_set(
                 T#?MODULE{writer = W1},
@@ -1279,19 +1271,16 @@ serialise(Page) ->
 %% THIS node and read back from this node's own pack files, so `[safe]` buys
 %% no protection here: the atoms a page carries were already materialised in
 %% this VM when the page was built or when a peer's page was decoded off the
-%% wire. That wire boundary is where the `C-2` `[safe]` decodes live
-%% (`bondy_oplog_cell_kernel`, the `bondy_oplog_crdt_*` modules) and it is the
-%% one that matters.
+%% wire. That wire boundary (`bondy_oplog_cell_kernel`, the
+%% `bondy_oplog_crdt_*` modules) is where the `[safe]` decodes live.
 %%
-%% What `[safe]` did buy was a boot-time brick. It resolves atoms against the
-%% VM's atom table AT READ TIME, and on a cold start that table is a moving
-%% target — modules load lazily, and `bondy_oplog_instance:init/1` folds the
-%% store early. A page holding any atom whose defining module has not been
-%% loaded yet (a value that arrived from a peer on a newer version, or simply
-%% a module not reached this early in boot) fails `binary_to_term` with
-%% `badarg`. The fold dies, the instance dies, and the node cannot open a
-%% store it had written perfectly well. `binary_to_term/1` still raises
-%% `badarg` on genuinely malformed bytes, so corruption detection is unchanged.
+%% `[safe]` resolves atoms against the VM's atom table AT READ TIME, and on a
+%% cold start that table is a moving target: modules load lazily, and
+%% `bondy_oplog_instance:init/1` folds the store early. A page holding an atom
+%% whose defining module is not yet loaded would fail `binary_to_term` with
+%% `badarg` and brick the node (`bondy_mst_pack_page_codec_test`).
+%% `binary_to_term/1` still raises `badarg` on malformed bytes, so corruption
+%% detection is unchanged.
 deserialise(Bytes) ->
     {Level, Low, List} = erlang:binary_to_term(Bytes),
     bondy_mst_page:new(Level, Low, List).
@@ -1299,10 +1288,10 @@ deserialise(Bytes) ->
 %% @private
 %% Content-addressing invariant: the writer's content hash (sha256 of the
 %% serialised page body) must equal the canonical `bondy_mst_page:hash/2`.
-%% This holds by construction — both serialise `{Level, Low, List}` with the
-%% same `term_to_binary` opts and sha256 the result — so release/bench builds
-%% trust the writer's hash and skip the recompute. Under TEST we re-derive and
-%% assert it, exercising the invariant across the full pack-store test suite.
+%% Both serialise `{Level, Low, List}` with the same `term_to_binary` opts and
+%% sha256 the result, so release/bench builds trust the writer's hash and skip
+%% the recompute. Under TEST this re-derives and asserts it on every `put/2`,
+%% so the pack-store test suite exercises the invariant.
 -ifdef(TEST).
 assert_content_hash(Hash, Page, Algo) ->
     Hash = bondy_mst_page:hash(Page, Algo),
@@ -1732,8 +1721,8 @@ emit_seal(T, RecordCount, PackBytes, DurationUs, NewPackId) ->
 %% The cheap, synchronous half of an asynchronous seal: the cost of rolling
 %% `incoming.pack` aside (datasync + close + rename + manifest commit), as
 %% opposed to the worker's `seal_incoming` rewrite. `duration_us` here should
-%% stay in the sub-millisecond range — a regression signals the roll is no
-%% longer cheap and the collapse fix is compromised.
+%% stay in the sub-millisecond range; a higher value signals the roll has
+%% stopped being cheap.
 emit_seal_roll(T, RecordCount, PackBytes, DurationUs, NewPackId) ->
     telemetry:execute(
         [bondy_mst, page_store, seal_roll],

@@ -44,7 +44,7 @@ crash_loses_staged_root_wal_replay_recovers() ->
     Staged = sha256(<<"staged-root">>),
     Pages = mk_pages([{k1, v1}, {k2, v2}, {k3, v3}]),
     try
-        %% Phase 1 — persist R0 on parent with low threshold so the
+        %% Persist R0 on parent with low threshold so the
         %% set_root call fsyncs immediately. Close cleanly.
         Store0 = bondy_mst_pack_store:open(sha256, #{
             dir => Dir,
@@ -56,7 +56,7 @@ crash_loses_staged_root_wal_replay_recovers() ->
         ok = bondy_mst_pack_store:close(Store1),
         ?assertEqual(Persisted, on_disk_root(Dir)),
 
-        %% Phase 2 — peer reopens the SAME dir with debounce off, appends
+        %% The peer reopens the SAME dir with debounce off, appends
         %% synced pages, stages R1, and parks (no close, no flush).
         {ok, Peer, Node} = start_peer(),
         try
@@ -69,7 +69,7 @@ crash_loses_staged_root_wal_replay_recovers() ->
                 [Dir, InstId, Staged, Pages]
             ),
 
-            %% Phase 3 — kill -9. peer:start_link/1 linked the peer to
+            %% kill -9. peer:start_link/1 linked the peer to
             %% us; trap_exit catches the linked exit.
             _ = os:cmd("kill -9 " ++ integer_to_list(PeerOsPid)),
             ok = await_peer_exit(Peer, 5_000)
@@ -81,11 +81,11 @@ crash_loses_staged_root_wal_replay_recovers() ->
             end
         end,
 
-        %% Phase 4 — verify staged R1 was lost. The on-disk manifest is
+        %% The staged R1 is lost. The on-disk manifest is
         %% still at R0 because no debounce ever fired on the peer.
         ?assertEqual(Persisted, on_disk_root(Dir)),
 
-        %% Phase 5 — simulate WAL replay: reopen, observe R0, write R1
+        %% Simulate WAL replay: reopen, observe R0, write R1
         %% authoritatively, close. The on-disk root catches up.
         Store2 = bondy_mst_pack_store:open(sha256, #{
             dir => Dir,

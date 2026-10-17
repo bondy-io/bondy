@@ -13,7 +13,7 @@ signatures and expiry.
 -include("bondy_security.hrl").
 
 -define(NOW, erlang:system_time(second)).
-% 2 mins
+%% 2 mins
 -define(LEEWAY_SECS, 2 * 60).
 -define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
 
@@ -105,7 +105,7 @@ do_verify(RealmUri, JWT, Spec) ->
             ~"kid" := Kid
         } = Claims,
 
-        %% A-1: the token's issuer (`aud`) must be trusted by the target realm
+        %% The token's issuer (`aud`) has to be trusted by the target realm
         %% (itself or its SSO realm), else a token minted under an unrelated
         %% realm/SSO family could be replayed here against its own issuer's key.
         case bondy_realm:is_trusted_issuer(RealmUri, AuthRealmUri) of

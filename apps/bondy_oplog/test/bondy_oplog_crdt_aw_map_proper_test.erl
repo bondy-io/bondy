@@ -3,8 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PropEr properties for the add-wins observed-remove map — the tier_2
-%% ship gate.
+%% PropEr properties for the add-wins observed-remove map.
 %%
 %% A command sequence over a few origins (`{put,O,K,V}`, `{rmv,O,K}`,
 %% `{sync,From,To}`) is simulated with realistic **causal-delivery**
@@ -30,12 +29,11 @@
 %%
 %% `prop_nested_counter_oracle` is a SEPARATE property (its own apply-only
 %% generator) checking semantic correctness against an independent oracle.
-%% The properties above only prove replicas agree with each other, which is
-%% satisfied even if every replica agrees on a WRONG value. Not academic:
-%% that is exactly how `bondy_oplog_crdt_nested_core:put_nested/7` pruning a
-%% writer's own prior nested sub-op — silently dropping sequential
-%% same-origin `pn_counter` increments — shipped past every property above
-%% and was caught only by manual reproduction.
+%% The properties above only check that replicas agree with each other, which
+%% is satisfied even if every replica agrees on a WRONG value. The oracle is
+%% what catches `bondy_oplog_crdt_nested_core:put_nested/7` pruning a writer's
+%% own prior nested sub-op and dropping sequential same-origin `pn_counter`
+%% increments; no agreement property does.
 
 -module(bondy_oplog_crdt_aw_map_proper_test).
 

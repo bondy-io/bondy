@@ -373,11 +373,8 @@ sub_del_local_exact_2(Config) ->
 %% (registration side). A subscriber's session dying (a killed connection
 %% process) must trigger the SAME `bondy_session_manager` DOWN handler ->
 %% `bondy_router:flush/2` -> `bondy_broker:flush/2` -> registry `remove_all`
-%% chain that the registration side already proves — orphaned subscriptions
-%% left behind after every client of a load test disconnects is exactly the
-%% shape of the memory growth observed under a real subscribe-heavy load
-%% (Fly fleet-scale run, 2026-08-01/02): zero active connections, but the
-%% fused registry projection never shrank back down.
+%% chain, or every disconnect of a subscribe-heavy load leaves orphaned
+%% subscriptions in the registry projection.
 sub_session_death_cleans_registry(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
     Uri = <<"com.example.", (bondy_router_utils:generate_fragment(12))/binary>>,
@@ -463,10 +460,6 @@ sub_same_uri_multiple_policies(Config) ->
         "Re-subscribing under an already-held policy is idempotent"
     ).
 
-%% Session-less (internal) subscribers: the SAME process reference
-%% re-subscribing to a topic is idempotent (already_exists with its own
-%% entry), while a DIFFERENT process subscribing to the same topic gets its
-%% own entry — each internal subscriber needs its own delivery.
 %% `remove_all/4' must remove every matched entry and run the task exactly once
 %% per entry, over a set LARGER than the `{limit, _}' option it passes.
 %%
@@ -565,6 +558,10 @@ remove_all_runs_task_once_per_entry(Config) ->
     SessionlessPid ! stop,
     ok.
 
+%% Session-less (internal) subscribers: the SAME process reference
+%% re-subscribing to a topic is idempotent (already_exists with its own
+%% entry), while a DIFFERENT process subscribing to the same topic gets its
+%% own entry — each internal subscriber needs its own delivery.
 sub_sessionless_refs(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
     Type = subscription,
@@ -698,17 +695,12 @@ register_callback(Config) ->
 
 pattern_based_registration_is_not_optional(Config) ->
     %% `wamp.dealer.pattern_based_registration` and
-    %% `wamp.broker.pattern_based_subscription` used to be operator flags.
-    %% Turning the first off refused the wildcard that
-    %% `bondy_session_manager:register_node_session_get/1` registers to serve
-    %% `wamp.session.get`, and the refusal came back as
-    %% `{error, pattern_based_registration_disabled}` where a `case` had no
-    %% clause for it — so setting the flag did not disable a feature, it stopped
-    %% the node opening sessions at all. There is no longer anything to set:
-    %% `bondy_config:setup_wamp/0` seats both, with no mapping to override them.
-    %%
-    %% Two halves, because a re-introduced flag and a dropped `set` break
-    %% different ones.
+    %% `wamp.broker.pattern_based_subscription` are not operator flags:
+    %% `bondy_config` seats both at setup, with no mapping to override them.
+    %% A node that refuses pattern-based registration refuses the wildcard the
+    %% session manager registers to serve `wamp.session.get`, and so stops
+    %% opening sessions at all. Two halves, because a re-introduced flag and a
+    %% dropped `set` break different ones.
     RealmUri = key_value:get(realm_uri, Config),
 
     %% One: the registration the router makes of itself. The same shape as the
@@ -1366,17 +1358,6 @@ kill_and_wait(Pid) ->
         ct:fail({timeout_waiting_for_exit, Pid})
     end.
 
-%% @private
-%% Polls the RIB cell until `Pred(ReadResult)` or ~5s.
-%% Every RIB write this suite waits on is appended synchronously in the
-%% caller's process (`bondy_registry_partition:add/2` and `remove/2` run the
-%% `bondy_registry_rib` hooks inline, and a restatement is written from the
-%% process that delivers the echo),
-%% only the projection apply is asynchronous. So the read-your-writes
-%% barrier `bondy_db:await/3` makes one read deterministic; a poll would
-%% only hide the applier's lag behind a budget, and reported nothing when
-%% the budget ran out. Returns `{false, Observed}` on a mismatch so the
-%% assertion shows what the cell held.
 %% The `registry` DB's ETS tables die with their storage owner. The cells this
 %% node wrote must come back from its members tables, with every registration
 %% field, and later writes must reach the reopened DB. Single node: no peer
@@ -1503,6 +1484,12 @@ await_restarted(Name, Old, N) ->
             await_restarted(Name, Old, N - 1)
     end.
 
+%% @private
+%% Every RIB write this suite waits on is appended synchronously in the
+%% caller's process; only the projection apply is asynchronous. So the
+%% read-your-writes barrier `bondy_db:await/3` makes one read deterministic,
+%% where a poll would only hide the applier's lag behind a budget. Returns
+%% `{false, Observed}` on a mismatch so the assertion shows what the cell held.
 await_cell(Table, RealmUri, Key, Pred) ->
     ok = bondy_db:await(Table, RealmUri, Key),
     Observed = bondy_db:read(Table, RealmUri, Key),

@@ -187,30 +187,24 @@ keeps reads parallel.
     %% `reset_target_shard/1` then falls back to the bare-suffix scope.
     index_clear_scope = undefined ::
         bondy_oplog_projection_adapter:clear_scope() | undefined,
-    %% Primary shards only. The
-    %% `bondy_oplog_projection_adapter:cell_keys_scope()` the secondary-index
+    %% Primary shards only. The `cell_keys_scope()` the secondary-index
     %% rebuild passes to `Adapter:cell_keys/2` to enumerate this primary's
     %% complete cell directory from the durable projection. The owner
-    %% (`bondy_db`) computes it from the topology's keyspace layout: `{entity,
-    %% EntityType}` on a backend whose primary bucket carries the entity type
-    %% (`shared_shards`, `single_bookie`); `all_primary` on a dedicated-Bookie
-    %% backend whose bucket is realm-keyed (`per_entity`). `undefined` for index
-    %% shards, and the rebuild then falls back to the MST walk.
+    %% (`bondy_db`) computes it from the topology's keyspace layout:
+    %% `{entity, EntityType}` on a backend whose primary bucket carries the
+    %% entity type (`shared_shards`, `single_bookie`); `all_primary` on a
+    %% realm-keyed dedicated Bookie (`per_entity`). `undefined` for index
+    %% shards, whose rebuild then walks the MST instead.
     primary_cell_scope = undefined ::
         bondy_oplog_projection_adapter:cell_keys_scope() | undefined,
-    %% Primary shards only. The per-table routing config the multiplexer needs to
-    %% (re)build a cell-apply ctx from the registry ALONE, so a `one_for_all`
+    %% Primary shards only. The per-table routing config the multiplexer needs
+    %% to rebuild a cell-apply ctx from the registry alone, so a `one_for_all`
     %% instance-subtree restart can self-heal its `cell_apply_source` for every
-    %% table on the shard — the runtime `register_table/4` adds are otherwise
-    %% lost on restart. The registry entry survives the restart; the applier or
-    %% fused instance rebuilds its source from every primary entry whose
-    %% `instance_id` matches.
-    %%
-    %% `cell_apply_bucket` is the entity-type Bucket this table's events carry,
-    %% the multiplexer's directory key. Set only for a `per_shard` (collapsed)
-    %% instance, where it is realm-independent (`atom_to_binary(ET)`);
-    %% `undefined` for a `per_table_shard` (single-table) instance, whose source
-    %% is keyless.
+    %% table on the shard; runtime `register_table/4` adds would otherwise be
+    %% lost. `cell_apply_bucket` is the entity-type Bucket this table's events
+    %% carry, the multiplexer's directory key: set only for a `per_shard`
+    %% (collapsed) instance, where it is realm-independent
+    %% (`atom_to_binary(ET)`); `undefined` for a `per_table_shard` instance.
     cell_apply_bucket = undefined :: binary() | undefined,
     %% `publish_ns`: the namespace remote-merge events publish under
     %% (`publish => true` tables), or `undefined`. Authoritative here so a
@@ -223,18 +217,13 @@ keeps reads parallel.
     %% non-`bondy_db` registration), while `[]` means "no indexes". Appended last.
     secondary_indexes = undefined :: [map()] | undefined,
     %% Index shards only. The grouping key of the `bondy_oplog_secondary_writer`
-    %% that drives this index shard — the secondary-side twin of `instance_id`.
-    %% A single writer serves every index shard sharing a `writer_key`, demuxing
-    %% the dispatched ops back to each `(NS, IndexName, SecShard)` stream. The
-    %% owner (`bondy_db`) sets its granularity from the topology's instance
-    %% strategy: coarse (`DbName/idx/SecShard`, shared across every index of the
-    %% DB on that secondary shard) on a `per_shard` backend; fine
-    %% (`NS/IndexName/idx/SecShard`, one writer per index shard) on a
-    %% `per_table_shard` backend. `undefined` for primary shards and for a raw
-    %% registration. The durable basis for refcounted writer teardown
-    %% (`writer_key_in_use/1`) and crash/epoch self-healing
-    %% (`index_entries_for_writer/1`), exactly as `instance_id` is for
-    %% primaries.
+    %% that drives this index shard, the secondary-side twin of `instance_id`.
+    %% One writer serves every index shard sharing a `writer_key`, demuxing the
+    %% dispatched ops back to each `(NS, IndexName, SecShard)` stream. The owner
+    %% (`bondy_db`) sets its granularity from the topology's instance strategy:
+    %% `DbName/idx/SecShard` on `per_shard`, `NS/IndexName/idx/SecShard` on
+    %% `per_table_shard`. `undefined` for primary shards and raw registrations;
+    %% the basis for refcounted writer teardown and self-healing.
     writer_key = undefined :: binary() | undefined,
     %% Optional per-table construction config for a `crdt_module` that needs
     %% more than an event to build its bottom state (e.g.
@@ -1175,17 +1164,15 @@ consistency_class(NS) when is_atom(NS) ->
 %% =============================================================================
 %% PRIVATE: durable index trust marker
 %% =============================================================================
-%% The durable twin of the in-memory `needs_rebuild` atomic, with INVERTED
-%% ("trusted") semantics — presence = built + clean, absence = rebuild. A
-%% marker naming another index cell format counts as absent.
-%% Stored as a reserved cell in the index shard's own projection at
-%% `bondy_oplog_index_key:trust_marker_loc/3` (bucket `<<"$idx_trusted">>`,
-%% outside the index keyspace, so `clear/2` and range scans never see it).
-%% A `put_batch` error from the adapter is returned to the caller; a raise
-%% from the adapter (a dead handle) propagates, as it does on every other
-%% projection write.
 
 %% @private
+%% The durable twin of the in-memory `needs_rebuild` atomic, with inverted
+%% ("trusted") semantics: presence = built + clean, absence = rebuild. A marker
+%% naming another index cell format counts as absent. Stored as a reserved cell
+%% in the index shard's own projection at
+%% `bondy_oplog_index_key:trust_marker_loc/3` (bucket `<<"$idx_trusted">>`,
+%% outside the index keyspace, so `clear/2` and range scans never see it). A
+%% `put_batch` error goes to the caller; a raise (dead handle) propagates.
 persist_trust_marker(#entry{
     key = {NS, IndexName, Shard},
     projection_adapter = A,

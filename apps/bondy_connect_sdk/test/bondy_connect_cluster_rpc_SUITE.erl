@@ -103,17 +103,14 @@ end_per_testcase(_, Config) ->
     ok = set_progressive_feature(Config, false).
 
 %% The client listener each peer needs, declared in the INVENTORY rather than by
-%% re-enabling the legacy `bondy_router.wamp_tcp.*` keys.
-%%
-%% The name is kept as `wamp_tcp` so the peer still inherits that block's tuning
-%% from `bondy_ct`'s `?ENV` — `ping`, `proxy_protocol`, and the stream-socket
-%% options — since a listener's option block is read at `[Name, ...]`. The bind
-%% target comes from the spec, which `bondy_listener_ranch:with_bind/2` keystores
-%% over the block's own `socket_opts.port`.
-%%
-%% `admin` is restated at `port => 0` because setting `[bondy_router, listeners]`
-%% REPLACES what `node_env/2` installed: without it `with_reserved/1` injects
-%% `admin` at its fixed default 18081 and both peers on this host race for it.
+%% re-enabling the legacy `bondy_router.wamp_tcp.*` keys. The name is kept as
+%% `wamp_tcp` so the peer still inherits that block's tuning from `bondy_ct`'s
+%% `?ENV` — `ping`, `proxy_protocol`, and the stream-socket options — since a
+%% listener's option block is read at `[Name, ...]`; the bind target comes from
+%% the spec. `admin` is restated at `port => 0` because setting
+%% `[bondy_router, listeners]` REPLACES the inventory `bondy_ct` installs:
+%% without
+%% it `admin` lands on its fixed default 18081 and both peers race for it.
 peer_listeners(WampPort) ->
     [
         {admin, #{

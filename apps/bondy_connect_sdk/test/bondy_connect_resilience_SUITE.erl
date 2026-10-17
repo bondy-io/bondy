@@ -6,7 +6,7 @@
 -module(bondy_connect_resilience_SUITE).
 
 -moduledoc """
-M4 (Phase 6 — resilience) tests.
+Resilience tests.
 
 - **Config** (pure): `reconnect`/`ping`/`network_timeout` defaults, user-merge
   and validation.
@@ -129,7 +129,7 @@ config_rejects_bad_option(_) ->
         bondy_connect_config:validate(#{realm => ?REALM, network_timeout => -1})
     ).
 
-%% The optional `handler' load-regulation config (Decision 5) is plumbed through
+%% The optional `handler' load-regulation config is plumbed through
 %% validation so `max_concurrency'/`rate' are reachable by the connection's
 %% `bondy_connect_load:new/1' (an absent `handler' means unlimited, no rate).
 config_handler_options(_) ->
@@ -183,18 +183,14 @@ ping_keepalive_survives_idle(_) ->
     ?assertEqual([<<"hi">>], maps:get(args, R)),
     ok = bondy_connect_client:disconnect(Conn).
 
-%% The flip side of the above: a client whose pings go *unanswered*
-%% must give up after `max_attempts` and reconnect. We point the client at a
-%% **mock** raw-socket server that completes the WAMP handshake + an anonymous
-%% WELCOME — so the client genuinely reaches `established` — but then stays SILENT
-%% on pings, never sending a pong. The link is otherwise healthy, so the only
-%% possible cause of the reconnect is the ping timeout. We observe the reconnect
-%% as a socket swap on the *same* connection process (its Erlang port changes),
-%% the same definitive signal the malformed-frame test uses.
-%%
-%% With the give-up path dead — the keepalive unable to trigger a reconnect on
-%% a silent link — this test hangs at `established` until the wait_until
-%% ceiling fires.
+%% The flip side of the above: a client whose pings go *unanswered* gives up
+%% after `max_attempts` and reconnects. The client dials a **mock** raw-socket
+%% server that completes the WAMP handshake + an anonymous WELCOME — so the
+%% client genuinely reaches `established` — but then stays SILENT on pings. The
+%% link is otherwise healthy, so the only possible cause of the reconnect is
+%% the ping timeout, observed as a socket swap on the *same* connection process
+%% (its Erlang port changes). A keepalive unable to give up on a silent link
+%% leaves this case at `established` until the wait_until ceiling fires.
 ping_failure_triggers_reconnect(_) ->
     Server = start_silent_server(),
     Port = silent_server_port(Server),
@@ -394,9 +390,8 @@ revocation_keeps_declared_replays_on_reconnect(_) ->
     ok = bondy_connect_client:disconnect(Caller),
     ok = bondy_connect_client:disconnect(Callee).
 
-%% register/subscribe/unregister/unsubscribe share error_payload/1 with call*
-%% (T2, decision 1): a router-refused REGISTER is a `kind := wamp` call_error(),
-%% not a bare atom.
+%% register/subscribe/unregister/unsubscribe share error_payload/1 with call*:
+%% a router-refused REGISTER is a `kind := wamp` call_error(), not a bare atom.
 register_duplicate_uri_errors(_) ->
     Proc = <<"com.example.res.duplicate">>,
     Callee1 = connect(#{}),
@@ -480,16 +475,14 @@ initial_connect_fails_fast(_) ->
     %% Well under the 30s await_ready ceiling — proves it did not retry-loop.
     ?assert(Elapsed < 5000000).
 
-%% A router ABORT whose `nature` is `transient` must NOT be fatal: the HELLO
+%% A router ABORT whose `nature` is `transient` is NOT fatal: the HELLO
 %% load-admission gate sheds new sessions under load with
 %% `wamp.error.unavailable`, expecting well-behaved clients to back off and come
 %% back. This is the FIRST connect, where `retry_initial_connect` defaults to
-%% `false` — the exception is deliberate (a transient abort is the opposite of a
-%% misconfiguration, which is what fail-fast exists for).
-%%
-%% The gate is closed deterministically rather than by generating real load:
-%% suspend the sampler so it cannot re-evaluate (it re-samples every 100ms and
-%% would immediately undo us), then flip the shared status cell it publishes.
+%% `false` — a transient abort is the opposite of the misconfiguration that
+%% fail-fast exists for. The gate is closed deterministically rather than by
+%% generating real load: suspend the sampler so it cannot re-evaluate (it
+%% re-samples every 100ms), then flip the shared status cell it publishes.
 transient_abort_retries_until_admitted(_) ->
     ok = force_hello_gate(closed),
     Parent = self(),
@@ -531,17 +524,13 @@ transient_abort_retries_until_admitted(_) ->
 
 %% Retrying is only half the contract — retrying WITHOUT backoff is worse than
 %% not retrying at all, because an un-backed-off reconnect loop is itself what
-%% keeps the router's run queues deep.
-%%
-%% This is not covered by the case above (a hot loop passes it just as happily).
-%% The trap is specific: on a refused handshake the TCP connect SUCCEEDS every
-%% time, so `on_connect_failure/2` — the only caller of `backoff_retry/2` —
-%% never runs, and a plain `{next_state, connecting, _}` would reset the budget
-%% and re-dial on a 0ms timer.
-%%
+%% keeps the router's run queues deep. The case above does not cover it (a hot
+%% loop passes it just as happily). The trap is specific: on a refused
+%% handshake the TCP connect SUCCEEDS every time, so the connect-failure path
+%% never runs, and a plain re-entry into `connecting` would re-dial at once.
 %% Count actual HELLO arrivals at the router over a fixed window: with the
-%% `bondy_connect_retry` ladder engaged (min 300ms, jittered) a few attempts fit; a
-%% full-speed loop produces orders of magnitude more.
+%% `bondy_connect_retry` ladder engaged (min 300ms, jittered) a few attempts
+%% fit.
 transient_abort_retry_backs_off(_) ->
     ok = force_hello_gate(closed),
     Before = hello_refusals(),

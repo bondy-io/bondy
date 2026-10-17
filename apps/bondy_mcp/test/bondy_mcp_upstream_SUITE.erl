@@ -5,7 +5,7 @@
 -module(bondy_mcp_upstream_SUITE).
 
 -moduledoc """
-The client direction (design §13, §21 increment 9) over real sockets:
+The client direction over real sockets:
 declared upstream MCP servers are projected into the WAMP registry, and
 every projected call flows WAMP → Streamable HTTP → upstream → back.
 
@@ -23,7 +23,7 @@ Two upstreams under test:
 
 Plus the projection policies: TOFU pinning with canonical-JSON hashes,
 drift blocking until explicit `approve/2`, per-realm prefix isolation,
-and the audit trail's `upstream_call`/`derivation` record (§13.1).
+and the audit trail's `upstream_call`/`derivation` record.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -315,12 +315,12 @@ call_maps_results_symmetrically(_) ->
     ?assertEqual(<<"kaput">>, maps:get(<<"reason">>, EKW)).
 
 trace_context_reaches_upstream_meta(_) ->
-    %% SEP-414 end to end, client direction (§13): a WAMP CALL's trace
+    %% SEP-414 end to end, client direction: a WAMP CALL's trace
     %% context — attached through the SDK, carried in the CALL's options
     %% to the dealer's internal-callback application — continues into
     %% the upstream request as `params._meta`, verbatim (the stub echoes
     %% `_meta` back under `meta`), and rides the completion event as its
-    %% `trace` metadata (the §15.4 span contract).
+    %% `trace` metadata (the span contract).
     TP = <<"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01">>,
     TS = <<"congo=t61rcWkgMzE">>,
     BG = <<"userId=alice">>,
@@ -426,7 +426,7 @@ drift_blocks_until_approved(_) ->
         ok = bondy_mcp_upstream:refresh(<<"stub2">>),
         {ok, Info1} = bondy_mcp_upstream:info(<<"stub2">>),
         ?assertEqual([<<"boom">>], maps:get(blocked, Info1)),
-        %% The pin gate counted the block (§15, as-built extension).
+        %% The pin gate counted the block.
         ?assert(
             mval(bondy_mcp_upstream_drift_blocked_total, DriftLabel) >=
                 Blocked0 + 1
@@ -464,7 +464,7 @@ namespace_isolation_across_upstreams(_) ->
 
 audit_records_the_service_account(_) ->
     %% Records reach the audit seam as `[bondy, mcp, audit, record]`
-    %% telemetry (MCP-D27: no local sink) — capture them there.
+    %% telemetry (no local sink) — capture them there.
     Self = self(),
     Id = {?MODULE, make_ref()},
     ok = telemetry:attach(
@@ -555,14 +555,14 @@ invalid_declarations_refuse_start(_) ->
     _ = supervisor:terminate_child(bondy_mcp_sup, bondy_mcp_upstream_sup),
     _ = supervisor:delete_child(bondy_mcp_sup, bondy_mcp_upstream_sup),
     try
-        %% Two upstreams sharing a realm+prefix: refused (§13.3).
+        %% Two upstreams sharing a realm+prefix: refused.
         ok = application:set_env(bondy_mcp, upstreams, [
             U1, U2#{prefix => maps:get(prefix, U1)}
         ]),
         ?assertMatch({error, _}, bondy_mcp_sup:start_upstreams()),
 
         %% An upstream without the explicit identity declaration:
-        %% refused (§13.1) — both the missing-key shape and a present
+        %% refused — both the missing-key shape and a present
         %% key with a value other than `service` (the two are enforced
         %% by distinct mechanisms in the owner's init).
         ok = application:set_env(bondy_mcp, upstreams, [

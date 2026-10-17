@@ -360,15 +360,10 @@ do_handle_receive(Req0, State) ->
                     PollTimeout = maps:get(poll_timeout, Config),
                     Encoding = bondy_http_transport_session:encoding(Pid),
                     %% The hold's only reply comes from the session, so its
-                    %% death must produce one too: without this monitor a
-                    %% session killed mid-hold leaves the poll hanging until
-                    %% the connection idle timeout, and a long-poll client —
-                    %% which has no socket to see close — learns nothing
-                    %% until then. The `'DOWN'` clause of `info/3` answers
-                    %% `transport_not_found` at once, the same reply a poll
-                    %% arriving after the death would get from the `whereis`
-                    %% above. Monitoring before `request_poll/2` closes the
-                    %% window: a death between the two still delivers `'DOWN'`.
+                    %% death must produce one too: the `'DOWN'` clause of
+                    %% `info/3` answers `transport_not_found` at once, the
+                    %% same reply a poll after the death gets from `whereis`.
+                    %% Monitoring before `request_poll/2` closes the window.
                     MRef = erlang:monitor(process, Pid),
                     ok = bondy_http_transport_session:request_poll(
                         Pid, PollTimeout

@@ -441,9 +441,9 @@ ensure_hash_len(L) -> throw({?MODULE, build_error, {bad_hash_len, L}}).
 
 %% @private
 %% `lists:keysort/2` is stable, so duplicates retain insertion
-%% order; we then collapse adjacent duplicates by hash, keeping
-%% the first (= earliest-inserted) offset. Pack-writer duplicates
-%% should not happen by construction, but the codec stays robust.
+%% order; the codec then collapses adjacent duplicates by hash, keeping
+%% the first (= earliest-inserted) offset, rather than relying on the
+%% pack writer never producing duplicates.
 dedup_sorted([], _) ->
     [];
 dedup_sorted([{H, _} = E | Rest], HashLen) ->

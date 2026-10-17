@@ -90,19 +90,9 @@
 %% Production defaults for open-time options
 %% -----------------------------------------------------------------------------
 %%
-%% Centralised so the values are visible at one read. Each is the
-%% out-of-the-box default applied when `bondy_mst_pack_store:open/2`
-%% is called without the corresponding key. Tests and benches that
-%% want a specific policy pass the key explicitly.
-%%
-%% `sync_every_records` — datasync the incoming-pack fd after this
-%% many appends. The pack store sits beneath a WAL that is the
-%% authoritative source of truth (`STORAGE_ARCHITECTURE.md` §4),
-%% so a crash with unsynced pack-store writes is recoverable by
-%% the applier replaying the WAL — per-record fsync would be
-%% over-conservative. 32 trades a modest visibility lag (bounded
-%% by `sync_every_ms` below) for ~32× fewer fsync syscalls at
-%% steady throughput.
+%% `sync_every_records` — datasync the incoming-pack fd after this many
+%% appends. The WAL above the pack store holds every record, so the
+%% applier replays it to recover unsynced pack-store writes.
 -define(BONDY_MST_PACK_DEFAULT_SYNC_EVERY_RECORDS, 32).
 %%
 %% `sync_every_ms` — opportunistic wall-clock floor. Datasync any
@@ -140,15 +130,11 @@
 -define(BONDY_MST_PACK_DEFAULT_ROOT_FLUSH_EVERY_MS, 200).
 %%
 %% `tombstones_flush_every_records` / `tombstones_flush_every_ms` —
-%% debounce the `tombstones` file rewrite triggered by `free/3` and
-%% by `put/2` un-tombstoning. The tombstones file uses the same
-%% tmp+datasync+rename+fsync_dir pattern as the manifest (4 fsyncs
-%% per call). `bondy_mst:put/3` issues one `free/3` per spine
-%% modification — typically 4-6 per put — so without debouncing this
-%% alone dominates per-put cost (~20 fsyncs/put on macOS APFS).
-%% Recovery story matches the set_root debounce: in-memory free_set
-%% is always authoritative; on crash the WAL applier re-derives
-%% missing tombstones by replaying puts forward from its watermark.
+%% debounce the `tombstones` file rewrite triggered by `free/3` and by
+%% `put/2` un-tombstoning; the file uses the same tmp+datasync+rename+
+%% fsync_dir pattern as the manifest. The in-memory free_set is
+%% authoritative; on crash the WAL applier re-derives missing tombstones
+%% by replaying puts forward from its watermark.
 -define(BONDY_MST_PACK_DEFAULT_TOMBSTONES_FLUSH_EVERY_RECORDS, 32).
 -define(BONDY_MST_PACK_DEFAULT_TOMBSTONES_FLUSH_EVERY_MS, 200).
 %%

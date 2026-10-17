@@ -8,8 +8,8 @@
 -moduledoc """
 The compiled MCP manifest entry: the projection of one realm's interface
 metadata (`bondy_interface`, the base layer) joined with the MCP overlay
-documents (`bondy_mcp_spec_parser`, the naming/annotation layer) — design
-§7.2's "one way out".
+documents (`bondy_mcp_spec_parser`, the naming/annotation layer) — the
+"one way out".
 
 `compile/3` derives the manifest of one realm. What the interface layer
 CREATES depends on the mode (`mcp.manifest.mode`; see `compile/3`'s doc):
@@ -17,25 +17,25 @@ under `curated` — the shipped default — nothing, only overlay-named
 entries exist; under `derived`:
 
 - every EXACT-match `procedure` interface entry becomes a `tool` named by
-  its WAMP URI (§17's default), unless an overlay tool entry claims that
+  its WAMP URI (the default name), unless an overlay tool entry claims that
   procedure — a claim REPLACES the URI-named base entry, which is what
   makes an overlay rename a rename rather than an added alias;
 - every exact-match `topic` interface entry becomes a `resource` at the
-  default URI `wamp:<realm>:<topic>` (§17);
+  default URI `wamp:<realm>:<topic>`;
 
 In both modes:
 - overlay entries stand on their own, joining the interface entry of their
   `wamp_procedure` (when one exists) field by field: an overlay field wins,
   an absent one falls through to the interface layer;
 - two surviving entries claiming one name with DIFFERENT underlying WAMP
-  bindings are BOTH skipped and reported in `collisions` (§17) — the
+  bindings are BOTH skipped and reported in `collisions` — the
   caller raises the alarm; identical bindings from two documents
   keep the entry from the lexicographically first document, so the result
   is deterministic.
 
 Each compiled entry carries `hash`: a SHA-256 over its NORMATIVE content —
 name, kind, the flattened schemas, the WAMP binding and the annotations
-(§7.5) — so drift is visible and an operator can pin a tool to the exact
+— so drift is visible and an operator can pin a tool to the exact
 content a security review saw. `description`, `version` and provenance are
 deliberately outside the hash: prose can be corrected without re-approving
 the tool. The canonical byte form is `term_to_binary/2` with
@@ -43,7 +43,7 @@ the tool. The canonical byte form is `term_to_binary/2` with
 for one OTP release; an OTP major upgrade may re-key hashes, which surfaces
 as visible drift, never as silent acceptance.
 
-Schemas are flattened per §16.1, symmetrically for input and output: a
+Schemas are flattened symmetrically for input and output: a
 kwargs-only shape passes through, an args-only shape wraps under the
 reserved `@args` key, a mixed shape merges `@args` into the kwargs
 properties.
@@ -51,7 +51,7 @@ properties.
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
-%% The §7.5 normative content: what `hash/1` covers. Everything else on a
+%% The normative content: what `hash/1` covers. Everything else on a
 %% compiled entry (realm, description, version, source) may change without
 %% changing the hash.
 -define(NORMATIVE_KEYS, [
@@ -92,8 +92,8 @@ properties.
     version => binary(),
     input_schema => map(),
     output_schema => map(),
-    %% §14.3 audit redaction policy. Deliberately OUTSIDE ?NORMATIVE_KEYS:
-    %% §7.5 enumerates the hash's coverage and does not name it, so a
+    %% The audit redaction policy. Deliberately OUTSIDE ?NORMATIVE_KEYS:
+    %% the hash covers the tool's contract, not its capture policy, so a
     %% capture-policy change does not re-key the tool. Whether it SHOULD —
     %% a security review arguably approves the redaction posture too — is
     %% an open design ruling, recorded in the design doc.
@@ -119,18 +119,18 @@ properties.
 Compiles the manifest of `RealmUri` from the interface store joined with
 `OverlayEntries` — the parsed entries of every loaded overlay document that
 name this realm, each annotated by the caller with `overlay_source` (its
-document id). Reads `bondy_db` only; contacts no peer (§7.10).
+document id). Reads `bondy_db` only; contacts no peer.
 
 `Mode` decides what the interface layer CREATES (it always contributes
 fields to the join):
 
-- `curated` (the shipped default, MCP-D31): only overlay-named entries
+- `curated` (the shipped default): only overlay-named entries
   exist. Describing a procedure or topic for reflection is not consent to
   agent exposure — the overlay is the explicit act, the same posture
   upstream tool projection has always had.
 - `derived`: every exact-match `procedure` interface entry additionally
   becomes a tool named by its URI, and every exact-match `topic` a
-  resource at the §17 default URI.
+  resource at the default URI.
 
 Falsifier:
 `bondy_mcp_gateway_SUITE:curated_mode_exposes_only_overlay_entries`.
@@ -196,7 +196,7 @@ compile(RealmUri, OverlayEntries, Mode) ->
     }.
 
 -doc """
-The content-addressed hash of a compiled entry (§7.5): `<<"sha256:...">>`
+The content-addressed hash of a compiled entry: `<<"sha256:...">>`
 (lowercase hex) over the entry's normative fields.
 """.
 -spec hash(t() | map()) -> binary().
@@ -270,7 +270,7 @@ base_resource(RealmUri, Iface) ->
 %% @private
 %% One overlay entry joined with the interface entry of its WAMP binding
 %% (a procedure, or for `resource` a topic): overlay fields win, absent
-%% ones fall through (§7.2 layering).
+%% ones fall through.
 overlay_entry(RealmUri, #{kind := resource} = O, _Procedures, Topics) ->
     Topic = maps:get(wamp_topic, O),
     Iface = maps:get(Topic, Topics, #{}),
@@ -362,7 +362,7 @@ finish(RealmUri, E0, Iface, Over) ->
     E4#{realm => RealmUri}.
 
 %% @private
-%% §16.1: kwargs-only passes through; args-only wraps under `@args`;
+%% Flattening: kwargs-only passes through; args-only wraps under `@args`;
 %% mixed merges `@args` into the kwargs properties.
 flatten(undefined, undefined) ->
     undefined;
@@ -385,7 +385,7 @@ maybe_put(_, undefined, Map) -> Map;
 maybe_put(Key, Value, Map) -> Map#{Key => Value}.
 
 %% @private
-%% §17: one name, several entries. Different underlying bindings — the
+%% One name, several entries. Different underlying bindings — the
 %% collision an agent must never be exposed to — skips them ALL and reports;
 %% identical bindings from two documents keep the first by document id.
 resolve_names(Candidates) ->
@@ -423,7 +423,7 @@ resolve_names(Candidates) ->
     ).
 
 %% @private
-%% The underlying WAMP binding a name resolves to — what §17's collision
+%% The underlying WAMP binding a name resolves to — what the collision
 %% rule compares.
 binding(#{procedure := P}) -> P;
 binding(#{topic := T}) -> T.

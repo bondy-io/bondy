@@ -150,8 +150,8 @@ cells_over() ->
 
 %% The oversized cell is met at key(2). Cells are already accumulated, so
 %% cap_cells flushes them and advances only to key(1) — key(2) leads the next
-%% round and is part-shipped there. The OLD behaviour advanced to key(3),
-%% stepping over key(2) permanently; that is the data loss this replaces.
+%% round and is part-shipped there. Advancing to key(3) would step over
+%% key(2) permanently and lose it.
 cells_oversized() ->
     Pairs = [{key(1), blob(1000)}, {key(2), blob(20000)}, {key(3), blob(1000)}],
     {ok, Cells, Advance} = bondy_oplog_catalogue_snapshot:cap_cells(

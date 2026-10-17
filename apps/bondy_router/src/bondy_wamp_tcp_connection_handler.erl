@@ -14,18 +14,11 @@ A ranch handler for the wamp protocol over either tcp or tls transports.
 -include("bondy.hrl").
 
 %% Harmonised transport ceiling. The RawSocket handshake lets the CLIENT pick
-%% its maximum message length as `2^(9+N)` for N in [0,15] -- up to 16 MiB --
-%% whereas every other carrier caps at 4 MiB (`websocket.max_frame_size` and
-%% `mcp.max_body_size`, both 4194304, in `bondy_listener_config`). Without a
-%% ceiling the same node accepts a 16 MiB message on one transport and refuses
-%% it on another.
-%%
-%% 4 MiB is 2^22, so the code is N = 22 - 9 = 13. The clamp is applied to the
-%% 4-bit code rather than to the resulting byte count, because the handshake
-%% REPLY echoes the code back: the RawSocket spec has the server answer with
-%% the maximum it will accept, so clamping the byte count alone would leave the
-%% client believing it may send 16 MiB while this handler drops anything over
-%% 4 MiB.
+%% its maximum message length as `2^(9+N)` for N in [0,15], up to 16 MiB,
+%% whereas every other carrier caps at 4 MiB (`bondy_listener_config`).
+%% 4 MiB is 2^22, so the code is N = 22 - 9 = 13. The clamp applies to the
+%% 4-bit code rather than to the byte count because the handshake REPLY
+%% echoes the code back as the maximum the server accepts.
 -define(RAW_MAX_LEN_CODE, 13).
 
 -record(state, {
@@ -168,9 +161,6 @@ init({Ref, Transport, Opts}) ->
         {packet, 0}
     ],
 
-    %% If Transport == ssl, upgrades a gen_tcp, or equivalent, socket to an SSL
-    %% socket by performing the TLS server-side handshake, returning a TLS
-    %% socket.
     ok = maybe_exit(Transport:setopts(Socket, SocketOpts)),
 
     ok = socket_opened(State),
@@ -623,20 +613,10 @@ init_wamp(Len0, Enc, State0) ->
 
             %% From the listener's option block in state, not a fresh
             %% application-environment read: this runs on every accepted
-            %% connection, and the block was already resolved once at listener
-            %% start.
-            %%
-            %% An absent `ping` block is a legitimate listener, not a
-            %% misconfiguration: every `listeners.$name.ping.*` mapping is
-            %% default-free, so a listener that configured no ping has no key
-            %% at this path at all, and a read with no default raises `badarg`
-            %% here — after the socket is accepted, so the listener binds and
-            %% then dies on the first client's handshake.
-            %%
-            %% The default is `enabled => false` rather than the empty list:
-            %% `maybe_enable_ping/2` has a clause for `enabled` true and one
-            %% for false and NONE for its absence, so `#{}` would move the
-            %% same crash one line down.
+            %% connection. An absent `ping` block is a legitimate listener:
+            %% every `listeners.$name.ping.*` mapping is default-free. The
+            %% default is `enabled => false` rather than `#{}` because
+            %% `maybe_enable_ping/2` has no clause for an absent `enabled`.
             PingOpts = maps_utils:from_property_list(
                 key_value:get(
                     ping, State0#state.opts, [{enabled, false}]
@@ -818,15 +798,10 @@ maybe_exit(Term) ->
 
 %% @private
 maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
-    %% The ping block's OWN interval, not the listener's `idle_timeout`. Taken
-    %% from `idle_timeout`, the probe timer and the reap timer came due at the
-    %% same moment, so the connection was closed rather than probed: the
-    %% keepalive could neither hold a NAT binding open nor notice a dead peer any
-    %% sooner than the reap already did. At `idle_timeout = infinity` — the
-    %% handler's own fallback, in force since the `wamp.{tcp,tls}.idle_timeout`
-    %% mapping was removed — `erlang:start_timer/3` in `reset_ping/1` raises
-    %% `badarg` instead, killing every connection on a listener whose ping is
-    %% enabled.
+    %% The ping block's OWN interval, not the listener's `idle_timeout`: a
+    %% probe timer equal to the reap timer closes the connection rather than
+    %% probing it, and the handler's `idle_timeout` fallback is `infinity`,
+    %% which `erlang:start_timer/3` in `reset_ping/1` rejects with `badarg`.
     IdleTimeout = maps:get(idle_timeout, PingOpts),
     Timeout = maps:get(timeout, PingOpts),
     Attempts = maps:get(max_attempts, PingOpts),
@@ -834,7 +809,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
     Retry = bondy_connect_retry:init(
         ping_timeout,
         #{
-            % disable, use max_retries only
+            %% disable, use max_retries only
             deadline => 0,
             interval => Timeout,
             max_retries => Attempts,

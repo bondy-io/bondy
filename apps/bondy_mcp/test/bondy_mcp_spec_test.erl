@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Falsifiers for `bondy_mcp_spec:hash/1` — the §7.5 content-addressed entry
+%% Falsifiers for `bondy_mcp_spec:hash/1` — the content-addressed entry
 %% hash. The property under test is the hash's BOUNDARY: it must cover
 %% exactly the normative content (name, kind, schemas, WAMP binding,
 %% annotations) — a change inside moves it, a change outside does not —
@@ -60,7 +60,7 @@ hash_is_independent_of_construction_order_test() ->
     ?assertEqual(bondy_mcp_spec:hash(E), bondy_mcp_spec:hash(Reordered)).
 
 non_normative_fields_do_not_move_the_hash_test() ->
-    %% §7.5 names the normative set; description, version and provenance
+    %% `?NORMATIVE_KEYS` is the set; description, version and provenance
     %% are outside it — prose can be corrected without re-approving the
     %% tool — and the realm is the pinning scope, not pinned content.
     H = bondy_mcp_spec:hash(entry()),
@@ -76,7 +76,7 @@ non_normative_fields_do_not_move_the_hash_test() ->
         H, bondy_mcp_spec:hash((entry())#{realm => <<"com.acme.app2">>})
     ),
     ?assertEqual(H, bondy_mcp_spec:hash(maps:remove(description, entry()))),
-    %% The §14.3 audit redaction policy is capture policy, not tool
+    %% The audit redaction policy is capture policy, not tool
     %% content — outside the hash (an open ruling, recorded in the spec
     %% module and the design doc).
     ?assertEqual(
@@ -95,7 +95,8 @@ normative_fields_move_the_hash_test() ->
         (entry())#{annotations => #{<<"destructive_hint">> => false}},
         (entry())#{annotations => #{}},
         (entry())#{wamp_options => #{<<"timeout">> => 30000}},
-        %% A silent schema change is exactly the drift §7.5 exists to expose.
+        %% A silent schema change is exactly the drift the hash exists to
+        %% expose.
         maps_update_path(entry()),
         maps:remove(input_schema, entry()),
         (entry())#{output_schema => #{<<"type">> => <<"object">>}}

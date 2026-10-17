@@ -27,7 +27,7 @@
 -export([start_all/1]).
 -export([start/2]).
 
-%% BONDY_MSRT_GROVE CALLBACKS
+%% BONDY_MST_CRDT CALLBACKS
 -export([send/2]).
 -export([broadcast/1]).
 

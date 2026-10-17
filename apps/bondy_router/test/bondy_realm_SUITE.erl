@@ -320,21 +320,7 @@ strip_private_keys(_) ->
 
 migration(_) ->
     Uri = gen_uri(),
-    %% 0.9.SNAPSHOT-SSO
-    %% -record(realm, {
-    %%     [2] uri                      ::  gen_uri(),
-    %%     [3] description              ::  binary(),
-    %%     [4] authmethods              ::  [binary()],
-    %%     [5] security_enabled = true  ::  boolean(),
-    %%     [6] is_sso_realm = false     ::  boolean(),
-    %%     [7] allow_connections = true ::  boolean(),
-    %%     [8] sso_realm_uri            ::  optional(gen_uri()),
-    %%     [9] private_keys = #{}       ::  keyset(),
-    %%     [10] public_keys = #{}        ::  keyset(),
-    %%     [11] password_opts            ::  bondy_password:opts() | undefined,
-    %%     [12] encryption_keys = #{}    ::  keyset(),
-    %%     [13] info = #{}               ::  map()
-    %% }).
+    %% The field order below is the 0.9.SNAPSHOT-SSO `realm` record layout.
     Desc = bondy_router_utils:generate_fragment(10),
     Authmethods = [?WAMP_CRYPTOSIGN_AUTH],
     Sec = true,
@@ -352,7 +338,7 @@ migration(_) ->
             PrivKeys, PubKeys, PassOpts, EncKeys, Info},
     %% We store an older-version realm directly into the global realm band
     %% (the empty binary) so that fetch/1 exercises the legacy from_term
-    %% migration path (design §11.4: realms now live in bondy_db).
+    %% migration path.
     Table = bondy_namespace_catalog:table(?BONDY_DB_REALM_TAB),
     ok = bondy_db:apply(Table, <<>>, Uri, {set, Old}),
 

@@ -3,27 +3,27 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Step 3 (design §11.3) — the WAMP fold modules: proves that the per-table
-%% CRDT each table is wired to (via `bondy_namespace_catalog:fold_opts/1`) has
-%% the right op-apply and concurrent-merge semantics for that table's WAMP data,
-%% independent of any plum_db cut-over.
+%% The WAMP fold classes: the CRDT `bondy_namespace_catalog:fold_opts/1` binds
+%% to each fold class has the right op-apply and concurrent-merge semantics
+%% for that class's WAMP data.
 %%
 %% Each test opens two memory-topology replicas (distinct origins) using the
-%% catalogue's OWN `fold_opts/1` output — so it exercises the real catalogue
-%% wiring, not a hand-rolled copy — drives a WAMP-shaped operation, and asserts
-%% the fold's defining property:
+%% catalogue's OWN `fold_opts/1` output for a class the test names — so it
+%% exercises the class binding, not which class each table is catalogued
+%% under — drives a WAMP-shaped operation, and asserts the fold's defining
+%% property:
 %%
 %%   - `lww`  (realm / user / group / gateway / ticket / token / bridge):
 %%            last-writer-wins, single value, and the clear→re-set reanimation
-%%            that gives refresh-token "revoked → re-issued" for free (§3).
-%%   - `mv`   (grants / sources): concurrent writes to the same cell survive as
-%%            SIBLINGS — the silent-LWW-on-concurrent-grants fix that is the
-%%            whole point (§0 / §3).
-%%   - `aw`   (group membership, the §3 split table): a concurrent add survives
-%%            a remove that did not observe it (add-wins observed-remove).
+%%            that gives refresh-token "revoked → re-issued" for free.
+%%   - `mv`   concurrent writes to the same cell survive as SIBLINGS, so
+%%            concurrent grants never silently collapse to one writer. The
+%%            catalogue declares the grant and source tables `lww` today.
+%%   - `aw`   (group membership): a concurrent add survives a remove that did
+%%            not observe it (add-wins observed-remove).
 %%
-%% The substrate already proves these CRDTs in isolation (`bondy_db_*_e2e_test`);
-%% here the proof is that the CATALOGUE binds the correct CRDT to each fold class.
+%% The substrate proves these CRDTs in isolation (`bondy_db_*_e2e_test`); here
+%% the check is that the catalogue binds the correct CRDT to each fold class.
 
 -module(bondy_namespace_catalog_folds_test).
 
@@ -111,7 +111,7 @@ lww_later_write_wins() ->
 
 %% `clear` is non-terminal: a later `set` brings the cell back. This is the
 %% refresh-token "revoked → re-issued" reanimation `lww_register` gives the
-%% ticket / token tables for free (§3).
+%% ticket / token tables for free.
 lww_clear_then_reset_reanimates() ->
     {Db, T} = open_replica(lww_reanimate, bondy_ticket, lww),
     try
@@ -130,7 +130,7 @@ lww_clear_then_reset_reanimates() ->
     end.
 
 %% =============================================================================
-%% mv — grants / sources
+%% mv — the multi-value class, opened over the grant table
 %% =============================================================================
 
 %% Two replicas grant the same `(realm, principal, resource)` cell without
@@ -163,7 +163,7 @@ mv_concurrent_grants_survive() ->
     end.
 
 %% =============================================================================
-%% aw — group membership (the §3 split table)
+%% aw — group membership
 %% =============================================================================
 
 %% Two replicas add distinct members to the same group concurrently. After a
@@ -191,7 +191,8 @@ aw_disjoint_adds_merge() ->
         ok = bondy_db:close(DbB)
     end.
 
-%% The §3 motivation, end to end: replica B removes a member it has observed
+%% The add-wins motivation, end to end: replica B removes a member it has
+%% observed
 %% while replica A concurrently re-adds that member (A never saw B's remove).
 %% Add-wins — the member survives, carrying A's concurrent value.
 aw_add_survives_nonobserving_remove() ->

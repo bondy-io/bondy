@@ -323,8 +323,8 @@ too_few_arguments_is_reported(Config) ->
 
 The dealer authorises every call with the procedure URI as the RBAC resource,
 and grants match by prefix and resolve through the realm's prototype. So the
-URI is grantable and revocable per realm today, which is why `?BONDY_PERMISSIONS`
-gained nothing for mail.
+URI is grantable and revocable per realm, and `?BONDY_PERMISSIONS` carries no
+mail entry.
 
 Asserted against `bondy_rbac:authorize/3` directly. The dealer's call to it is
 unconditional and sits ahead of the dispatcher, so what is in question here is

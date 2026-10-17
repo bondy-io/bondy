@@ -376,7 +376,7 @@ seal_then_append_advances_to_next_pack_id_test() ->
     end).
 
 %% =============================================================================
-%% Orphan cleanup on open (design doc §10.1, step 2)
+%% Orphan cleanup on open
 %% =============================================================================
 
 orphan_pack_without_manifest_entry_deleted_on_reopen_test() ->

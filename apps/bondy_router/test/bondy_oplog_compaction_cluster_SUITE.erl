@@ -7,11 +7,9 @@
 %% peer-confirmed compaction (the same mechanism durable databases use) keeps
 %% the ephemeral `registry` DB's history bounded on a real cluster under
 %% sustained write load and drains it once writes stop, at no cost to
-%% cross-node RIB correctness. Would have caught the
-%% `bondy_oplog_gc_scheduler` head-of-line starvation — idle `main/*` shards
-%% monopolising the tick's max_concurrency slots so `registry/*` shards were
-%% NEVER compacted on clustered nodes — the mechanism behind the fleet-scale
-%% OOM.
+%% cross-node RIB correctness. A `bondy_oplog_gc_scheduler` tick that lets
+%% idle `main/*` shards monopolise its max_concurrency slots never compacts
+%% `registry/*` shards on clustered nodes; assertion (b) fails on that shape.
 %%
 %% A 3-node real Partisan cluster (`bondy_ct:start_cluster/2` — full bondy
 %% releases, real AAE), NOT frozen: `bondy_ct:freeze_gc/1` is deliberately
@@ -27,9 +25,8 @@
 %% divergence on every node.
 %%
 %% `mst_retention` is an opt-in overload backstop, off by default, and this
-%% suite locks the DEFAULT behaviour: an always-on iteration of it surfaced a
-%% replace-mode install clobber on live re-bootstraps. The per-peer dispatch
-%% histogram and recovery-chain telemetry capture are diagnostics-on-failure.
+%% suite locks the DEFAULT behaviour. The per-peer dispatch histogram and
+%% recovery-chain telemetry capture are diagnostics-on-failure.
 
 -module(bondy_oplog_compaction_cluster_SUITE).
 
@@ -38,16 +35,11 @@
 
 -compile([nowarn_export_all, export_all]).
 
-%% Distinct from `bondy_aae_cluster_SUITE`'s `bondy1..3`, which these used to
-%% share: `bondy_ct` roots a peer's data directory at `<priv_dir>/<node>`, and
-%% Common Test hands every suite in a run the SAME `priv_dir`, so two suites
-%% using one peer name boot on each other's storage. This suite runs second and
-%% its peer died opening the other's MST pack store manifest
-%% (`{pack_store_open, {manifest, {_, file_io_server, invalid_unicode}}}`),
-%% restarting until `bondy_router_sup` hit its restart intensity — surfacing as a
-%% `noproc` from an unrelated supervisor in `init_per_suite`. Peer PORTS are
-%% derived from the index rather than the name and are unchanged; suites within
-%% a run are sequential, so they do not overlap.
+%% Distinct from `bondy_aae_cluster_SUITE`'s `bondy1..3`: `bondy_ct` roots a
+%% peer's data directory at `<priv_dir>/<node>`, and Common Test hands every
+%% suite in a run the SAME `priv_dir`, so two suites using one peer name boot
+%% on each other's storage. Peer PORTS are derived from the index rather than
+%% the name; suites within a run are sequential, so they do not overlap.
 -define(NODE_NAMES, [ccomp1, ccomp2, ccomp3]).
 -define(NUM_REALMS, 16).
 -define(WRITE_WINDOW_MS, 25000).
@@ -98,18 +90,14 @@ end_per_suite(Config) ->
 %% TESTS
 %% =============================================================================
 
-%% P-BOUND at DEFAULTS (retention off): peer-confirmed compaction alone
-%% must (a) keep every `registry/*` shard's history under the propagation
-%% ceiling throughout the sustained write window — the window is
-%% write_rate x (sync round + GC cadence), NOT unbounded — and (b) drain
-%% every shard to quiescent once writes stop, on ALL nodes. (b) is the
-%% assertion that fails if compaction stops running (the scheduler
-%% starvation shape). `main/*` (durable) shards are governed by the same
-%% mechanism and exempt from the ceiling only because their write volume
-%% here is negligible. Cross-node RIB consistency is asserted via
-%% `bondy_registry_rib:check/1` (empty divergence on every node):
-%% peer-confirmed truncation never discards anything a live peer lacks,
-%% so no recovery machinery should even be needed.
+%% At DEFAULTS (retention off), peer-confirmed compaction alone must (a) keep
+%% every `registry/*` shard's history under the propagation ceiling throughout
+%% the sustained write window — write_rate x (sync round + GC cadence), NOT
+%% unbounded — and (b) drain every shard to quiescent once writes stop, on ALL
+%% nodes. (b) fails if compaction stops running. `main/*` shards are exempt
+%% from the ceiling only because their write volume here is negligible.
+%% Cross-node RIB consistency is asserted via `bondy_registry_rib:check/1`:
+%% peer-confirmed truncation never discards anything a live peer lacks.
 sustained_writes_registry_history_stays_bounded(Config) ->
     Nodes = nodes_of(Config),
     Result = run_scenario(Config, defaults_peer_confirmed),
@@ -124,24 +112,14 @@ sustained_writes_registry_history_stays_bounded(Config) ->
     ],
     ct:pal("frontier-gap forensics per node:~n~p", [Forensics]),
 
-    %% With the watermark door closed (never-applied peer events are
-    %% folded or held at integrate, never discarded), no event is ever
-    %% LOST — but a single transient frontier-gap verdict per pair is
-    %% legitimate under sustained load: when a peer door-FOLDS an
-    %% in-flight event, its applied VV advances past what its truncated
-    %% MST can serve, and a third replica's complete round landing in
-    %% that window sees a deficit it can only cover via the ORIGIN one
-    %% round later (the origin cannot compact the event away — the
-    %% peer-confirmed frontier needs the lagging replica's roots to
-    %% contain it). The scheduler's ?GAP_STRIKE debounce absorbs
-    %% exactly this. So the assertion is the system guarantee, not
-    %% zero telemetry:
-    %%   (1) no pair gaps twice (two strikes = the rebootstrap
-    %%       threshold = a STANDING gap — the silent-data-loss class
-    %%       this suite's forensics proved), and
-    %%   (2) every recorded deficit has HEALED by now (the node's
-    %%       current applied VV covers the peer sequence the verdict
-    %%       recorded).
+    %% With the watermark door closed (never-applied peer events are folded
+    %% or held at integrate, never discarded), no event is ever LOST, but a
+    %% single transient frontier-gap verdict per pair is legitimate under
+    %% sustained load: a door-FOLD advances a peer's applied VV past what its
+    %% truncated MST can serve, and a third replica covers the deficit via the
+    %% ORIGIN one round later. The scheduler's ?GAP_STRIKE debounce absorbs
+    %% exactly this. So the assertion is (1) no pair gaps twice (two strikes =
+    %% the rebootstrap threshold = a STANDING gap) and (2) every deficit HEALED.
     GapEvents = [
         {N, G}
      || {N, #{gaps := Gs}} <- Forensics, G <- Gs
@@ -193,7 +171,7 @@ sustained_writes_registry_history_stays_bounded(Config) ->
         "transient (see forensics dump)"
     ),
 
-    %% The s16 page-loss TRIPWIRE: no node may end the run with an
+    %% The page-loss TRIPWIRE: no node may end the run with an
     %% instance whose own root cannot be fully served (missing pages).
     %% The unservable-root recovery machinery would eventually heal it,
     %% but page loss itself is the primary bug — catch it in the act
@@ -269,9 +247,9 @@ sustained_writes_registry_history_stays_bounded(Config) ->
     ),
 
     %% (b2) Post-settle PAGE reclamation: event counts are blind to the
-    %% page store — `bondy_mst:truncate/2` only unlinks dropped subtrees,
-    %% and before `truncate_below_or_equal/3` ran the store GC, shards
-    %% whose size read 0 still pinned their whole history as orphaned ETS
+    %% page store — `bondy_mst:truncate/2` only unlinks dropped subtrees;
+    %% the instance's truncation must also run the store GC, or shards
+    %% whose size reads 0 still pin their whole history as orphaned ETS
     %% pages (~5 GB/node at fleet scale). Assert the instance-owned ETS
     %% bytes actually shrank to a live-tree-sized footprint on every node.
     PageBytes = [
@@ -330,18 +308,15 @@ await_rib_convergence(Nodes, Deadline) ->
 %% =============================================================================
 %% STALE-PEER REJOIN (durable path)
 %% =============================================================================
-%%
-%% A silent member is still a member: compaction on the
-%% live pair keeps everything it has not confirmed (`bondy_oplog_compaction`),
-%% so on rejoin ordinary anti-entropy rounds carry the live pair's writes to it
-%% and its UNIQUE silence-era writes back out, with no re-bootstrap, on the
-%% durable (`main/*`, `security_users`) path.
-%%
-%% Until the rejoin, sync-scheduler dispatch is disabled on all nodes, every AE
-%% session is driven by hand (`bondy_oplog:sync/2`), scheduler GC is frozen and
-%% compaction is invoked explicitly (`bondy_oplog:compact/1`). The rejoin runs
-%% through the restored production schedulers, whose exit handling is where a
-%% re-bootstrap would be flagged.
+
+%% A silent member is still a member: compaction on the live pair keeps
+%% everything it has not confirmed (`bondy_oplog_compaction`), so on rejoin
+%% ordinary anti-entropy rounds carry the live pair's writes to it and its
+%% UNIQUE silence-era writes back out, with no re-bootstrap, on the durable
+%% (`main/*`, `security_users`) path. Until the rejoin, sync dispatch is
+%% disabled on all nodes, every AE session is driven by hand
+%% (`bondy_oplog:sync/2`), GC is frozen and compaction is explicit
+%% (`bondy_oplog:compact/1`). The restored schedulers flag any re-bootstrap.
 
 -define(STALE_BANDS, 4).
 %% Early/late keys per band in the prefix-hole case — sized so that at
@@ -519,19 +494,14 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ],
     ok.
 
-%% Per-origin prefix closure driven into the hazard it exists for,
-%% locking the enforcement contract:
-%%
-%%   (a) NO same-origin fold-time hole — the misfold never happens
-%%       (`prefix_hole` stays silent for the writer's origin);
-%%   (b) the non-contiguous suffix is HELD instead (`events_held` fires
-%%       on the writer's origin, and the co-sharded LATE keys are not
-%%       readable while held);
-%%   (c) with the production schedulers restored, the persisting
-%%       frontier deficit drives the frontier-gap -> rebootstrap chain,
-%%       which supplies both the data and the frontier: N3 converges to
-%%       every seed, EARLY and LATE value — and still no hole ever
-%%       folded, repair included.
+%% Per-origin prefix closure driven into the hazard it exists for:
+%%   (a) NO same-origin fold-time hole (`prefix_hole` stays silent for the
+%%       writer's origin);
+%%   (b) the non-contiguous suffix is HELD instead (`events_held` fires on
+%%       the writer's origin; co-sharded LATE keys are unreadable while held);
+%%   (c) with the production schedulers restored, the persisting frontier
+%%       deficit drives the frontier-gap -> rebootstrap chain: N3 converges
+%%       to every seed, EARLY and LATE value, and still no hole folds.
 truncated_prefix_is_held_and_repaired_by_rebootstrap(Config) ->
     Nodes = nodes_of(Config),
 
@@ -758,13 +728,10 @@ hole_scenario([N1, N2, N3] = Nodes) ->
     %%    only witness: the cut a recency filter makes past a silent member.
     %%    The production rule never makes it on a durable instance; it is
     %%    built here because the hold under test guards every truncation
-    %%    that outruns a peer, an ephemeral instance's retention included.
-    %%
-    %%    Repeated (bounded) until at least one instance has truncated on
-    %%    BOTH live nodes: with asymmetric truncation (disjoint advanced
-    %%    sets) the rejoining node's second round pulls the early prefix
-    %%    from whichever peer still ships it, filling every gap the first
-    %%    round held and dissolving the scenario under test.
+    %%    that outruns a peer. Repeated (bounded) until at least one instance
+    %%    has truncated on BOTH live nodes: with disjoint advanced sets the
+    %%    rejoining node's second round pulls the early prefix from whichever
+    %%    peer still ships it, dissolving the scenario under test.
     {Advanced1, Advanced2} = truncate_main_until_common(N1, N2, [], [], 5),
     Common = [I || I <- Advanced1, lists:member(I, Advanced2)],
     ct:pal(
@@ -807,20 +774,13 @@ hole_key(Tag) ->
     <<"hk_", Tag/binary>>.
 
 %% @private
-%% Take complete rounds from every peer until the outcome is decidable.
-%%
-%% The decision turns on the WRITER's origin alone. Every seed/early/late
-%% write in this case is made on one node, so that node's per-instance
-%% origin is the only one whose prefix was truncated. Other origins
-%% (a peer's own bootstrap writes, background traffic) routinely carry
-%% their own deficits, and an earlier version of this probe aggregated
-%% over all of them — which meant an unrelated origin's deficit masked the
-%% state under test and the case never reached a verdict.
-%%
-%% `{safe, _}` — the pre-truncation writes are readable, so there is no
-%% hole. `{blind, _}` — writes are missing AND the writer origin's maxima
-%% have MET, so `frontier_deficit/2` cannot see the loss on that origin.
-%% `{inconclusive, _, _}` — they never met before the deadline.
+%% Take complete rounds from every peer until the outcome is decidable. The
+%% decision turns on the WRITER's origin alone: every seed/early/late write is
+%% made on one node, and other origins routinely carry their own deficits.
+%% `{safe, _}` — the pre-truncation writes are readable, so there is no hole.
+%% `{blind, _}` — writes are missing AND the writer origin's maxima have MET,
+%% so the sync session's deficit check cannot see the loss.
+%% `{inconclusive, _, _}` — the maxima never met before the deadline.
 hole_probe_until(Node, Peers, Early, WriterOrigins, Deadline) ->
     _ = [
         try
@@ -924,9 +884,9 @@ writer_deficit(PeerFrontiers, LocalFrontiers, WriterOrigins) ->
 
 %% @private
 %% Per instance, the origins for which `Peer`'s stored frontier strictly
-%% exceeds `Local`'s — precisely what `frontier_deficit/2` computes, and
-%% therefore precisely what the gap check is able to see. Instances with
-%% no such origin are dropped.
+%% exceeds `Local`'s — precisely what `bondy_oplog_sync_session`'s deficit
+%% check computes, and therefore precisely what the gap check is able to see.
+%% Instances with no such origin are dropped.
 frontier_deficit_origins(PeerFrontiers, LocalFrontiers) ->
     Local = maps:from_list(LocalFrontiers),
     lists:filtermap(
@@ -1369,7 +1329,7 @@ avg(L) ->
     lists:sum(L) / length(L).
 
 %% Groups dispatch telemetry into a {Node, Peer} -> #{started => N, capped => N}
-%% histogram — the P-PEER-SKEW evidence.
+%% histogram — the per-peer dispatch skew evidence.
 peer_histogram(Events) ->
     lists:foldl(
         fun
@@ -1550,11 +1510,8 @@ do_recovery_diagnostics() ->
         registry_frontiers => Frontiers
     }.
 
-%% The concatenated RIB divergence list over every test realm on THIS node
-%% (`bondy_registry_rib:check/1` compares the replicated summary cells
-%% against the local members ground truth). `[]` = consistent.
 %% Every instance whose CURRENT root cannot be fully served on THIS
-%% node — the s16 page-loss tripwire. `[]` = all roots servable.
+%% node — the page-loss tripwire. `[]` = all roots servable.
 do_unservable_roots() ->
     [
         {I, D}
@@ -1570,6 +1527,9 @@ do_unservable_roots() ->
         maps:get(servable, D, true) =:= false
     ].
 
+%% The concatenated RIB divergence list over every test realm on THIS node
+%% (`bondy_registry_rib:check/1` compares the replicated summary cells
+%% against the local members ground truth). `[]` = consistent.
 do_rib_divergences() ->
     lists:append([
         bondy_registry_rib:check(
@@ -1594,12 +1554,9 @@ do_create_open_realm(Uri) ->
 %% Runs on a cluster node for `DurationMs`, writing a mix of registry
 %% (subscription) entries and durable `main` DB (`security_users`) entries
 %% spread across `Realms`, at whatever rate the node can sustain — real WAMP
-%% API calls, not synthetic oplog appends, so real shard placement.
-%%
-%% Every write's outcome is counted, never silently swallowed (a prior cut
-%% of this suite wrapped each write in a bare `catch`, which would have
-%% hidden a systematic failure of the subscription-add path — see
-%% `sub_ok`/`sub_err` below and the sample errors carried back).
+%% API calls, not synthetic oplog appends, so real shard placement. Every
+%% write's outcome is counted, never silently swallowed (see `sub_ok`/`sub_err`
+%% below and the sample errors carried back).
 do_drive_load(Realms, DurationMs) ->
     Deadline = erlang:monotonic_time(millisecond) + DurationMs,
     Stats0 = #{
@@ -1632,40 +1589,18 @@ do_write_one(RealmUri, N, Stats) ->
             ]),
             %% A `pid()` target with a REAL session id, matching what a real
             %% WAMP subscriber's ref looks like (a session always exists
-            %% before SUBSCRIBE is sent) — two bugs found via this suite,
-            %% both worked around here rather than in source:
-            %% 1. `{Mod, Fun}` gets normalised to a `callback`-type ref by
-            %%    `bondy_ref:validate_target/2`, which only the REGISTRATION
-            %%    path understands; used for a subscription it always
-            %%    raised `{error, function_clause}`.
-            %% 2. A session-LESS internal ref (`SessionId = undefined`) also
-            %%    always raises `function_clause` — in
-            %%    `bondy_registry_entry:key_pattern/3`, which only accepts
-            %%    `is_binary(SessionId)` or the wildcard atom `'_'`, never
-            %%    `undefined` — even though `bondy_registry:maybe_add/6`'s
-            %%    subscription branch explicitly anticipates and handles
-            %%    session-less subscribers in its own comments. That is a
-            %%    genuine production defect, reported separately; real WAMP
-            %%    subscribers always carry a session anyway, so this test
-            %%    uses one rather than exercising the broken path.
+            %% before SUBSCRIBE is sent). A `{Mod, Fun}` target is normalised
+            %% to a `callback` ref, which only the REGISTRATION path accepts,
+            %% and a session-LESS internal ref (`SessionId = undefined`) fails
+            %% `bondy_registry_entry:key_pattern/3`, which accepts only a
+            %% binary session id or the wildcard `'_'`.
             Ref = bondy_ref:new(internal, self(), bondy_session_id:new()),
             try
                 bondy_registry:add(
                     subscription, RealmUri, Uri, #{match => <<"exact">>}, Ref
                 )
             of
-                {ok, _, _} ->
-                    %% The documented 3-tuple shape.
-                    bump(Stats, sub_ok);
                 {ok, {_, _}} ->
-                    %% The shape actually observed at runtime — `add/5`'s
-                    %% own `-spec` says `{ok, Entry, IsFirstEntry}`, but a
-                    %% subscription add returns `{ok, {Entry, IsFirstEntry}}`
-                    %% (a 2-tuple pair, not a 3-tuple). Accepted here rather
-                    %% than treated as a third bug to chase — the write
-                    %% itself demonstrably succeeds (a real entry comes
-                    %% back), this is a spec/implementation mismatch, not a
-                    %% functional break.
                     bump(Stats, sub_ok);
                 Other ->
                     record_error(Stats, sub_err, {RealmUri, Uri, Other})
@@ -1680,14 +1615,10 @@ do_write_one(RealmUri, N, Stats) ->
         1 ->
             Tab = table_handle(security_users),
             %% Bounded churn — reuse ?USER_POOL_SIZE keys per (node, realm)
-            %% repeatedly, mirroring real update traffic, NOT an
-            %% ever-growing set of brand-new usernames. An unbounded key set
-            %% makes "the MST stayed big" ambiguous between "compaction
-            %% isn't keeping up" and "the test just kept creating more real,
-            %% legitimately-durable data" — which is exactly what happened
-            %% to `main/0`..`main/3` in the first two runs of this suite:
-            %% both survived even with the concurrency cap raised well past
-            %% any contention, because it was never a compaction problem.
+            %% repeatedly, mirroring real update traffic, NOT an ever-growing
+            %% set of usernames. An unbounded key set makes "the MST stayed
+            %% big" ambiguous between "compaction isn't keeping up" and "the
+            %% test kept creating legitimately-durable data".
             Key = iolist_to_binary([
                 "u",
                 integer_to_binary(node_seed()),

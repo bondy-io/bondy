@@ -498,7 +498,7 @@ password_token_crud_1(Config) ->
         bondy_oauth_token:lookup(Uri, RToken0)
     ),
 
-    % issued_at is seconds
+    %% issued_at is seconds
     timer:sleep(2000),
 
     {ok, Token1} = bondy_oauth_token:refresh(Uri, RToken0),
@@ -712,10 +712,9 @@ ticket_cleanup_prunes_expired_device_entries(Config) ->
 %% the same conclusion independently.
 %%
 %% That revocation is asynchronous, so a disable that fires it leaves the sweep
-%% racing it for the same ticket — and the sweep reports nothing whenever it
-%% loses. `disable_without_lifecycle/2` applies the disable the way a config
-%% apply or a replicated merge does, which IS the situation being tested: a
-%% node whose local revocation never ran.
+%% racing it for the same ticket. `disable_without_lifecycle/2` applies the
+%% disable the way a config apply or a replicated merge does: a node whose
+%% local revocation never ran.
 ticket_cleanup_reaps_disabled_user_tickets(Config) ->
     Uri = ?config(realm_uri, Config),
     U = new_user(Uri, <<"ticket_disabled">>),
@@ -862,16 +861,12 @@ reclaimer_timer_path_sweeps_and_reschedules(Config) ->
     ).
 
 %% A round the job queue refuses must be reported, and must not then wait the
-%% full interval before trying again.
-%%
-%% `enqueue_sweeps/0` reads what `bondy_jobs` answers. Discarding it would let
-%% a full queue skip reclamation with no log and six hours until the next
-%% attempt — and the queue is fullest under load, which is exactly when there is
-%% most to reclaim.
+%% full interval before trying again. `bondy_reclaimer` reads what
+%% `bondy_jobs` answers; discarding it would let a full queue skip reclamation
+%% with no log until the next attempt — and the queue is fullest under load.
 %%
 %% `bondy_jobs` is mocked rather than genuinely filled: the real queue holds
-%% roughly six hundred jobs per worker, which is a great deal of machinery to
-%% stand up in order to prove that one return value is read.
+%% roughly six hundred jobs per worker.
 reclaimer_retries_sooner_when_the_job_queue_is_full(_Config) ->
     {state, Ref0} = sys:get_state(bondy_reclaimer),
     ?assert(is_reference(Ref0)),
@@ -919,16 +914,10 @@ reclaimer_retries_sooner_when_the_job_queue_is_full(_Config) ->
 %% Disables a user the way a declarative config apply does: the cell is written,
 %% no lifecycle side-effect fires.
 %%
-%% `bondy_rbac_user:disable/2` publishes `{[bondy, user, updated], ...}`, and
-%% `bondy_event_wamp_publisher` handles it ASYNCHRONOUSLY by calling
-%% `bondy_ticket:revoke_all/2` and `bondy_oauth_token:revoke_all/2`. A sweep
-%% invoked straight after the disable therefore races that handler for the same
-%% state, and reports reclaiming nothing whenever the handler wins.
-%%
-%% The sweeps exist as the backstop for a node whose local revocation never ran
-%% — one that was partitioned or restarting, or that received the disable as a
-%% replicated merge. This reproduces that node's state exactly, so the sweep is
-%% the only thing that can reclaim and the assertions mean what they say.
+%% `bondy_rbac_user:disable/2` publishes `{[bondy, user, updated], ...}`, which
+%% `bondy_event_wamp_publisher` handles ASYNCHRONOUSLY by revoking the user's
+%% tickets and tokens. A sweep invoked straight after that disable races the
+%% handler; this helper reproduces a node whose local revocation never ran.
 disable_without_lifecycle(RealmUri, Username) ->
     {ok, _} = bondy_rbac_user:update(
         RealmUri, Username, #{enabled => false}, #{declarative => true}

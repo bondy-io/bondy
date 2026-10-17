@@ -350,11 +350,8 @@ do_next(Cursor, CState) ->
                     MaxBytes = bondy_oplog_config:sync_max_response_bytes(),
                     case cap_cells(InstanceId, Bucket, Pairs, MaxBytes) of
                         {oversized, OKey, OFrame} ->
-                            %% A single cell larger than the frame ceiling.
-                            %% It used to be skipped and advanced past, which
-                            %% lost it permanently while the bootstrap still
-                            %% adopted the peer frontier. Ship it in parts
-                            %% instead; the receiver reassembles.
+                            %% A single cell larger than the frame ceiling
+                            %% ships in parts; the receiver reassembles them.
                             OPartBytes = part_payload_bytes(
                                 Bucket, OKey, MaxBytes
                             ),
@@ -451,18 +448,13 @@ take_parts(B, K, F, PB, Total, Idx, Max, Used, Acc) ->
     end.
 
 %% @private
-%% Pack cells into a batch no larger than the sync byte ceiling (derived from
-%% Partisan's frame cap), mirroring the responder's page capping so bootstrap
-%% snapshots never exceed the transport frame.
-%%
-%% Returns either `{ok, Kept, AdvanceKey}` — the kept cells in key order and
-%% the last key kept — or `{oversized, Key, Frame}` for a single cell whose
-%% serialized size alone exceeds the ceiling, which the caller ships in parts.
-%%
-%% An oversized cell is surrendered ONLY when nothing has been kept yet; if
-%% cells are already accumulated they are returned first and the oversized one
-%% is met again at the head of the next round. So the cursor never advances
-%% past a key that has not been shipped.
+%% Pack cells into a batch no larger than the sync byte ceiling, mirroring the
+%% responder's page capping so bootstrap snapshots never exceed the transport
+%% frame. Returns `{ok, Kept, AdvanceKey}` (kept cells in key order, last key
+%% kept) or `{oversized, Key, Frame}` for a single cell that alone exceeds the
+%% ceiling, which the caller ships in parts. An oversized cell is surrendered
+%% only when nothing has been kept yet; otherwise the kept cells go first and
+%% the cursor meets it again next round, so it never passes an unshipped key.
 cap_cells(InstanceId, Bucket, Pairs, MaxBytes) ->
     cap_cells(InstanceId, Bucket, Pairs, MaxBytes, 0, [], undefined).
 
@@ -476,9 +468,8 @@ cap_cells(
     Size = erlang:external_size(Cell),
     if
         Size > MaxBytes andalso KeptRev =:= [] ->
-            %% Still reported, so the operator alarm and the
-            %% `max_message_size` guidance keep working — but it is now a
-            %% notice about transfer shape, not a data-loss event.
+            %% Reported so the operator alarm and the `max_message_size`
+            %% guidance keep working; the cell still ships, in parts.
             ok = bondy_oplog_sync_metrics:report_oversized(
                 cell, {InstanceId, Bucket, K}, Size, MaxBytes
             ),

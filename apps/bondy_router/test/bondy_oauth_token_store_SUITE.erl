@@ -8,15 +8,15 @@
 %% order-preserving composite whose user column leads), with the per-user bound
 %% `oauth2.max_tokens_per_user` enforced over the user's band of cells.
 %%
-%% This REVERSES the shape this suite used to ratify — one cell per user holding
-%% a bounded `bondy_oauth_token_set`. That shape made every write a
-%% read-modify-write of the whole set: two concurrent issues of different scopes
-%% for one user kept only the last writer's set, and a `revoke_all/2` that
-%% interleaved with an issue was overwritten by the issue's stale set, revoked
-%% tokens included (`bondy_oauth_token_concurrency_SUITE` demonstrated both).
-%% One cell per token makes every write a single cell, so neither can happen.
+%% One cell per user holding a bounded set would make every write a
+%% read-modify-write of the whole set: two concurrent issues of different
+%% scopes for one user would keep only the last writer's set, and a
+%% `revoke_all/2` interleaved with an issue would be overwritten by the issue's
+%% stale set, revoked tokens included. One cell per token makes every write a
+%% single cell (`bondy_oauth_token_concurrency_SUITE` drives both
+%% interleavings).
 %%
-%% What the bound means now: at most MAX cells per user AFTER an issue returns
+%% The bound: at most MAX cells per user AFTER an issue returns
 %% (the issuer trims its own band) and after `cleanup/0` (the authoritative
 %% evictor) — `prop_bondy_oauth_token_bound` holds both. These tests fail loudly
 %% if a change ever puts two tokens back in one cell, or lets a user's band grow
@@ -216,7 +216,7 @@ one_cell_per_token_not_per_user(_Config) ->
 reissue_in_scope_replaces_the_cell(_Config) ->
     %% Re-issuing for the same device overwrites that device's cell: the band
     %% does not grow, the new id is what the cell holds, and the previous
-    %% refresh-token string no longer names a token.
+    %% refresh-token string names no token.
     User = <<"reissue">>,
     ok = add_user(User),
     {ok, T1} = issue_token(User, device(1)),
@@ -328,7 +328,7 @@ refresh_token_of_access_only_grant_raises_badarg(_Config) ->
 
 credential_change_revokes_tokens(_Config) ->
     %% A password change fences every token issued before it — the
-    %% `token_version` they carry no longer matches the user's, so they cannot
+    %% `token_version` they carry differs from the user's, so they cannot
     %% authenticate. They are also removed from storage, off the
     %% credentials-changed event, which is what this pins: reclamation drops
     %% expired tokens and those whose user is gone, never fenced ones, so a

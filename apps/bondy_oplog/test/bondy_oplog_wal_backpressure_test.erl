@@ -10,7 +10,7 @@
 %%    refused regardless of head capacity.
 %% 4. `[bondy_oplog, wal, wal_full]` fires on refusal and is debounced.
 %% 5. `[bondy_oplog, wal, append]`, `fsync`, `rotate`,
-%%    `retention_sweep`, `durable` measurement shapes match §15.
+%%    `retention_sweep`, `durable` measurement shapes.
 %% 6. `info/1` exposes `bytes_total`, `live_segments_count`,
 %%    `backpressure`, `head_lag_ms`, `max_total_wal_size`,
 %%    `max_live_segments`.

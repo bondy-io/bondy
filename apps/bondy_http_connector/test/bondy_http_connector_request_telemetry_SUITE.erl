@@ -7,18 +7,18 @@
 
 -moduledoc """
 End-to-end tests for `bondy_http_connector_callee_handler:handle_wamp_call/3`
-— the real WAMP-to-HTTP request/retry orchestration, previously exercised
-nowhere in the suite tree (the other suites either test its pure helpers
-in isolation, per `bondy_http_connector_callee_handler_SUITE`, or need a
-full Bondy dealer/session boot to reach it, per
-`bondy_http_connector_callee_lifecycle_SUITE`, which never issues a call).
+— the real WAMP-to-HTTP request/retry orchestration. The other suites either
+test its pure helpers in isolation, per
+`bondy_http_connector_callee_handler_SUITE`, or need a full Bondy
+dealer/session boot to reach it, per
+`bondy_http_connector_callee_lifecycle_SUITE`, which never issues a call.
 
 Drives a real `bondy_http_connector_http_pool` against
 `mock_auth_http_server` and asserts on the resulting
 `bondy_http_connector_requests_total`, `..._request_duration_milliseconds`,
 `..._retries_total` and `..._token_cache_total` metric values — the request
-and retry orchestration's own telemetry, which nothing previously
-asserted on. Uses `bondy_http_connector_mock_auth` as the auth module so
+and retry orchestration's own telemetry. Uses `bondy_http_connector_mock_auth`
+as the auth module so
 these tests isolate the request/retry path from token-fetch/auth
 concerns (already covered by `bondy_http_connector_auth_integration_SUITE`
 and the token-cache suites).

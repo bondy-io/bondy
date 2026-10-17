@@ -22,8 +22,7 @@
 %% each one raises read from its source, so a NEW unresolvable site fails the
 %% test rather than disappearing from it. And the scan is scoped to
 %% applications whose name begins with `bondy`: no dependency in this build
-%% raises an alarm (checked by grepping `_build/default/lib/*/src` on
-%% 2026-08-30), and `os_mon` — whose `system_memory_high_watermark` would
+%% raises an alarm, and `os_mon` — whose `system_memory_high_watermark` would
 %% otherwise be an undeclared OTP alarm — is in no `.app.src` and not in the
 %% release's application list, so it never starts.
 -module(bondy_alarm_catalogue_test).
@@ -135,15 +134,12 @@ entries_have_producers(#{sites := Sites}) ->
 
 %% `detail_keys` is the catalogue's promise about what an alarm CARRIES, and
 %% an agent parsing `bondy.alarm.list` reads it to know which fields to expect
-%% under `details`. Nothing checked it until this case: all three entries with
-%% a non-empty `detail_keys` had producers passing exactly those keys as the
-%% alarm's DESCRIPTION, leaving `details` empty on every raise (measured
-%% 2026-08-30 by driving `bondy_mail_relay`'s term through the handler).
+%% under `details`. A producer that passes those keys as the alarm's
+%% DESCRIPTION leaves `details` empty on every raise.
 %%
 %% Checks one direction only: every declared key must be delivered. A producer
-%% passing MORE than it declares is not failed here — the agent under-uses the
-%% alarm rather than mis-parsing it — so this case would not catch an
-%% undeclared detail key.
+%% passing MORE than it declares is not failed here, so this case would not
+%% catch an undeclared detail key.
 declared_detail_keys_are_delivered(#{sites := Sites}) ->
     Checked = [
         {M, F, A, Id, Declared, Delivered}
@@ -169,7 +165,7 @@ declared_detail_keys_are_delivered(#{sites := Sites}) ->
 delivers({ok, Delivered}, Declared) -> Declared -- Delivered == [];
 delivers(_, _) -> false.
 
-%% The runbook join (design §9): what an agent may look at, and what it may do.
+%% The runbook join: what an agent may look at, and what it may do.
 %% A dangling reference is worse than an absent one — an agent sent at a
 %% procedure that is not there has to improvise, which is the behaviour the
 %% catalogue exists to remove.
@@ -189,11 +185,9 @@ runbook_tasks_are_catalogued() ->
         ]) >= 2
     ).
 
-%% The alarm reference in the docs site states that `realm_uri` is "present on
-%% `class = realm` alarms; names the affected tenant". Nothing checked it, and
-%% one of the three realm-class entries did not deliver it: the MCP name
-%% collision raised through the bare OTP 2-tuple, so a consumer following that
-%% rule got nothing and had to parse the id instead (found 2026-09-01).
+%% A realm-class alarm names its tenant in `realm_uri`, as the alarm reference
+%% in the docs site states. A producer that raises through the bare OTP
+%% 2-tuple delivers no options, and a consumer then has to parse the id.
 %%
 %% Checks the RAISE sites only. A `clear` carries no options and needs none.
 realm_class_alarms_carry_realm_uri(#{sites := Sites}) ->
@@ -204,10 +198,8 @@ realm_class_alarms_carry_realm_uri(#{sites := Sites}) ->
     %% Vacuity guard: this checks nothing if no entry is realm-class.
     ?assert(length(Realm) >= 3),
     %% An id built from variables reads as `unresolved`, so the site is
-    %% resolved through `unresolvable_sites/0` instead. This is not a corner:
-    %% the MCP name collision is the alarm this check was written for, and it
-    %% is the one site whose id cannot be read statically — checking only the
-    %% resolvable ones would have passed while the defect stood.
+    %% resolved through `unresolvable_sites/0` instead; checking only the
+    %% resolvable sites would miss the MCP name collision.
     Sets = [
         {M, F, A, resolve_id({M, F, A}, Id), Opts}
      || {M, F, A, set, Id, _Keys, Opts} <- Sites
@@ -233,10 +225,8 @@ delivers({ok, Keys}) -> lists:member(realm_uri, Keys);
 delivers(_) -> false.
 
 %% Every `config_keys` entry must name a setting the schema actually declares.
-%% `observe_with` and `tasks` were resolved from the start and this was not, so
-%% a renamed or removed key would have sent an operator to a knob that no
-%% longer exists — at the one moment they are least able to absorb it. Key rot
-%% is not hypothetical in this tree.
+%% A renamed or removed key sends an operator to a knob that does not exist,
+%% at the one moment they are least able to absorb it.
 %%
 %% A `$name` / `$service` segment is cuttlefish's variable, matched as a
 %% wildcard against the mapping's own declaration, which carries the same
@@ -542,8 +532,8 @@ site(_, _, _) ->
 %% `{Id, Description, Opts}` triple — `alarm_handler:set_alarm/1` is
 %% `gen_event:notify(alarm_handler, {set_alarm, Alarm})` for any term
 %% (sasl-4.4 `alarm_handler.erl:103`), so the triple reaches
-%% `bondy_alarm_handler:handle_event/2` unchanged. `clear_alarm/1` takes the
-%% id itself.
+%% `bondy_alarm_handler:handle_event/2` unchanged.
+%% `alarm_handler:clear_alarm/1` takes the id itself.
 id_of_alarm({tuple, _, [IdExpr, _Desc]}) -> pattern(IdExpr);
 id_of_alarm({tuple, _, [IdExpr, _Desc, _Opts]}) -> pattern(IdExpr);
 id_of_alarm(_) -> unresolved.
@@ -659,12 +649,9 @@ resolves(_, _, _) ->
 %% Every name passed to `bondy_metrics:declare/1` anywhere in the tree, read
 %% from abstract code rather than from the runtime registry: eunit does not
 %% start the applications that declare them, so an ETS read here would answer
-%% empty and make every metric reference look invalid.
-%%
-%% Metrics exported directly by a Prometheus collector (`bondy_alarm_active`,
-%% `bondy_alarms`, `bondy_node_ready` in `bondy_prometheus_db`) do NOT go
-%% through `declare/1` and are therefore not nameable here. That is a
-%% stated limit, not an oversight.
+%% empty and make every metric reference look invalid. Metrics exported
+%% directly by a Prometheus collector in `bondy_prometheus_db` do not go
+%% through `bondy_metrics:declare/1` and are not nameable here.
 declared_metrics() ->
     lists:usort(
         lists:append([

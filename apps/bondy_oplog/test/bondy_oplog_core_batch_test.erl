@@ -1,12 +1,12 @@
 %% =============================================================================
-%% Tests for `bondy_oplog_core:read_batch/2` (`MST_DB_DESIGN.md` §8).
+%% Tests for `bondy_oplog_core:read_batch/2`.
 %%
 %% Pins fence semantics (overlay events past the fence are excluded;
 %% projection cells past the fence are returned as-is), skew detection,
 %% the consistency-knob defaults, and per-shard freshness gating.
 %%
 %% Batch reads take 4-tuples `{NS, Index, Bucket, Key}` — Bucket is a
-%% first-class call-time parameter (`MST_DB_DESIGN.md` §18 item 14).
+%% first-class call-time parameter.
 %% =============================================================================
 
 -module(bondy_oplog_core_batch_test).

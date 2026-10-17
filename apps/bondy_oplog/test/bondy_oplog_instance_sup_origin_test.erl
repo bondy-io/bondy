@@ -5,7 +5,7 @@
 
 -module(bondy_oplog_instance_sup_origin_test).
 
-%% End-to-end coverage of the two PR-J6 follow-ups:
+%% End-to-end coverage of two supervisor behaviours:
 %%   1. supervisor resolves `origin` from disk when `storage_path` is
 %%      set, so kill -9 + restart picks up the same identity.
 %%   2. supervisor emits a one-shot loud warning when WAL has no

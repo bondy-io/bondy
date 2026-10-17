@@ -102,16 +102,11 @@ rather than a silently bound phantom listener.
 -define(TRANSPORTS, [tcp, tls, uds]).
 -define(PROTOCOLS, [http, wamp_rawsocket, bridge_relay]).
 
-%% Names an operator may not use freely.
-%%
 %% `?RESERVED_INTERNAL` names listeners this node injects through
-%% `resolve_internal/4`. They may not appear in a configured inventory at all.
-%% `?RESERVED_NAMES` adds the names an operator MAY define but may not disable.
-%%
-%% The second is defined in terms of the first so that an internal name is
-%% always also a reserved one. `assert_reserved/2` derives both rules from these
-%% lists rather than matching names literally, so adding a name here is what
-%% reserves it.
+%% `resolve_internal/4`; they may not appear in a configured inventory.
+%% `?RESERVED_NAMES` adds the names an operator MAY define but may not
+%% disable. `assert_reserved/2` derives both rules from these lists, so
+%% adding a name here is what reserves it.
 -define(RESERVED_INTERNAL, [admin_local]).
 -define(RESERVED_NAMES, [admin | ?RESERVED_INTERNAL]).
 
@@ -121,38 +116,13 @@ rather than a silently bound phantom listener.
 ]).
 
 %% The carrier settings an operator may override per listener, with the value
-%% each takes when the operator names it nowhere.
-%%
-%% Keys are the paths a `listeners.$name.<carrier>.*' mapping renders into the
-%% listener's option block, which is NOT always the conf key's own name:
-%% `websocket.compression_enabled' lands on `compress' and
-%% `websocket.deflate.level' on `deflate_opts.level'. The rendered path is what
-%% a consumer reads, so the rendered path is what belongs here.
-%%
-%% This is the ONLY statement of what a carrier setting defaults to. It is not
-%% rendered into a release's `etc/bondy.conf' the way a non-fuzzy schema default
-%% is, so an operator reading a generated conf sees no carrier default at all;
-%% `doc/guides/configuration/listeners.md' carries the table for them.
-%%
-%% ONE table rather than a path list beside a value map: the paths
-%% `resolve_carrier_config/3' reads are DERIVED from this map by `leaf_paths/1',
-%% so a carrier key with no default cannot be expressed and the two cannot
-%% drift. What it cannot express is a MAP-valued setting — `leaf_paths/1'
-%% descends into a map and would treat its members as separate keys. No carrier
-%% setting has one; a LIST-valued setting is fine.
-%%
-%% Only the carriers that HAVE settings appear; `carrier_defaults/1' answers
-%% `#{}' for any other. Those are exactly the carriers whose services name a
-%% `protocol', because a protocol is what has framing, timeouts and a keepalive
-%% to configure. An EXTENSION's carrier (`external_services/0') may name one
-%% and still answer `#{}', since the schema declares no
-%% `listeners.$name.<carrier>.*' mapping for it either.
-%%
-%% `wamp.websocket.buffer.{min,max}' are deliberately ABSENT. Since Cowboy
-%% 2.13 a WebSocket connection inherits the listener's `dynamic_buffer' and
-%% `cowboy_websocket' overrides any handler-supplied value, so a WS-specific
-%% setting cannot take effect (see the comment at bondy_config:setup_wamp/0).
-%% Exposing them per listener would ship two knobs that do nothing.
+%% each takes when the operator names it nowhere. Keys are the RENDERED paths
+%% a `listeners.$name.<carrier>.*' mapping lands on (`compress',
+%% `deflate_opts.level'), which is what a consumer reads. The paths
+%% `resolve_carrier_config/3' reads are derived from this map by
+%% `leaf_paths/1', so a MAP-valued setting cannot be expressed here; no
+%% carrier setting has one. `carrier_defaults/1' answers `#{}' for a carrier
+%% absent here. `doc/guides/configuration/listeners.md' carries the table.
 -define(CARRIER_DEFAULTS, #{
     websocket => #{
         compress => false,
@@ -307,9 +277,9 @@ timeouts and a keepalive. Every other carrier (`api_gateway`, `admin_api`,
 `admin`, `metrics`) is a route set rather than a connection style, and answers
 `#{}`, as does a carrier this module does not know.
 
-These are the values the global `wamp.<carrier>.*` mappings used to render.
-Those mappings are gone, so this is the only place a carrier default comes from
-and every listener that does not state a key gets its value from here.
+There are no global `wamp.<carrier>.*` mappings: this is the only place a
+carrier default comes from, and every listener that does not state a key gets
+its value from here.
 """.
 -spec carrier_defaults(Carrier :: atom()) -> map().
 
@@ -355,7 +325,7 @@ option_defaults(Transport, Protocol) ->
 
 The operator's value wins at every LEAF rather than at the block: a listener
 stating one `ping` key keeps the defaults for the siblings it did not state.
-That is what makes an enabled `ping` block complete by construction — every key
+That is what makes an enabled `ping` block complete — every key
 `bondy_wamp_tcp_connection_handler:maybe_enable_ping/2` and
 `bondy_bridge_relay_server:maybe_enable_ping/2` read with `maps:get/2` is there
 whether the operator wrote it or not.
@@ -515,8 +485,7 @@ carrier's set rather than a second route on the same path.
 
 It does NOT say which module serves the carrier: that depends on the carrier
 alone, so it lives in `carrier_module/1`. Two services naming one carrier
-therefore cannot disagree about who serves it — `api_gateway` and `admin_api`
-used to be the case in point, both naming a shared `rest` carrier.
+therefore share one serving module.
 
 Returns the atom `error` for a service name this application does not know,
 including one that no registered extension claims either.
@@ -568,8 +537,8 @@ The single definition of where a listener's certificate and key come from:
 `assert_tls_keys/3` validates through this function, and `bondy_cert_manager`
 reads a listener's certificate and key through it too
 (`server_cert_from_config/1`, for both boot-time preload and live rotation), so
-a certificate a validated listener carries is guaranteed visible to rotation as
-well — the two can no longer disagree because they are the same call.
+a certificate a validated listener carries is visible to rotation through the
+same call.
 """.
 -spec tls_material(Name :: atom(), Key :: atom(), GetFun :: get_fun()) ->
     term().
@@ -615,15 +584,12 @@ protocol_option_defaults(http) ->
         %% Cowboy's.
         protocol_opts => #{active_n => 100, idle_timeout => 15000},
         %% Priority-ordered HTTP versions the listener offers
-        %% (`listeners.$name.http.versions'). On a TLS listener the order is
-        %% the server's ALPN preference; on a clear listener membership gates
-        %% the HTTP/2 prior-knowledge and Upgrade paths. HTTP/2 first — the
-        %% same preference `cowboy:start_tls/3' ships — is safe for held
-        %% streams because their lifetime is connection-level on BOTH
-        %% versions: `held_stream_defaults/1' seats the connection timer, and
-        %% nothing per-stream remains for the versions to disagree on
-        %% (`bondy_http_sse_SUITE:held_stream_outlives_http_default_on_both_versions'
-        %% holds a quiet stream past the plain HTTP default on each).
+        %% (`listeners.$name.http.versions'): the server's ALPN preference
+        %% on TLS; on a clear listener membership gates the HTTP/2
+        %% prior-knowledge and Upgrade paths. HTTP/2 first is safe for held
+        %% streams because their lifetime is connection-level on both
+        %% versions (`bondy_http_sse_SUITE:
+        %% held_stream_outlives_http_default_on_both_versions').
         http_versions => [http2, http]
     };
 protocol_option_defaults(_Unknown) ->
@@ -655,20 +621,12 @@ stream_keepalive_defaults() ->
             timeout => 10000,
             max_attempts => 3
         },
-        %% `wamp.{tcp,tls}.linger.timeout' and
-        %% `bridge.listener.{tcp,tls}.linger.timeout' all defaulted to `1s', so
-        %% this belongs to the raw-socket shape rather than to one protocol.
-        %%
-        %% ONE, not 1000. `bondy_config:normalise_socket_opts/1' hands the value
-        %% to `{linger, {true, N}}', whose second component `inet' documents in
-        %% SECONDS (`kernel/src/inet.erl:1124', OTP 28.5). While the key's
-        %% datatype was `{duration, ms}' the shipped default rendered 1000 and
-        %% asked for a 1000-second blocking close, which is why this was withheld
-        %% until the datatype was corrected to `{duration, s}'.
-        %%
-        %% An HTTP listener gets none: Cowboy's own `linger_timeout' protocol
-        %% option covers it, reached through `listeners.$name.http.linger.timeout'
-        %% and genuinely in milliseconds.
+        %% The raw-socket shape, not one protocol: `wamp.{tcp,tls}' and
+        %% `bridge.listener.{tcp,tls}' share it. ONE, not 1000:
+        %% `bondy_config' hands the value to `{linger, {true, N}}', which
+        %% `inet' documents in SECONDS. An HTTP listener gets none: Cowboy's
+        %% `linger_timeout' protocol option
+        %% (`listeners.$name.http.linger.timeout') covers it, in milliseconds.
         transport_opts => #{socket_opts => #{linger_timeout => 1}}
     }.
 

@@ -298,7 +298,7 @@ round-trip, not the sum. Best-effort AP: an unreachable node is skipped.
 Ids are drawn independently per node from a 53-bit uniform range, so a
 cross-node collision is possible (astronomically unlikely); under one, the
 first responder wins. Making ids cluster-unique (node-tagged) would remove both
-the ambiguity and the broadcast — see `_design/REGISTRY_META_API.md`.
+the ambiguity and the broadcast.
 
 `{error, not_found}` is returned only when **every** targeted node answered
 definitively absent. If any node was unreachable or timed out — so its absence

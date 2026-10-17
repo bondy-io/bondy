@@ -15,8 +15,8 @@
 %% else in the tree). They answer `bondy.error.deprecated_procedure` instead.
 %%
 %% The set is DECLARED here rather than scanned out of `resolve/1`: a scanner
-%% over the same clauses agrees with them by construction, including when both
-%% are wrong.
+%% over the same clauses always agrees with them, including when both are
+%% wrong.
 -module(bondy_wamp_api_legacy_alias_test).
 
 -include_lib("eunit/include/eunit.hrl").

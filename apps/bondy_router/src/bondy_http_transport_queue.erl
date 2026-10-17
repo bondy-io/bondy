@@ -65,9 +65,8 @@ case is the one this module exists for.
   work coming IN, per WAMP flow, and sheds under its own capacity bound. A
   message passes through that pool once on ingress and arrives here only if its
   DESTINATION is an HTTP transport.
-- Not one of two queues per session any more. `bondy_http_transport_session`
-  used to keep the synchronous replies separately and drain them first; they
-  come here now, so there is one order and one set of bounds.
+- Not one of two queues per session. The synchronous replies come here too,
+  so there is one order and one set of bounds.
 
 ## One queue
 
@@ -77,10 +76,9 @@ and the protocol itself, which answers some inbound messages synchronously
 inline ERROR, a throttle rejection). Both are output for the same client on
 the same transport, so both come here.
 
-They used to be separate: `bondy_http_transport_session` kept the synchronous
-replies in a `reply_buffer` field and drained it BEFORE this queue. That made
-the transport not a FIFO pipe — a reply produced later was delivered first —
-and left that half unbounded, outside every limit below.
+A separate buffer for the synchronous replies, drained BEFORE this queue, would
+make the transport not a FIFO pipe — a reply produced later delivered first —
+and would leave that half unbounded, outside every limit below.
 
 ## Sharding
 

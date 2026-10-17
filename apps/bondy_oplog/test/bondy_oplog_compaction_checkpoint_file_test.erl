@@ -434,7 +434,7 @@ contains_corruption_marker(Term) ->
 %% Default-backend resolution
 %% =============================================================================
 %%
-%% PR-DEFAULT: when an instance has `storage_path` configured but no
+%% When an instance has `storage_path` configured but no
 %% explicit `compaction_checkpoint`, the file backend is picked
 %% automatically and the checkpoint file is written under the sharded
 %% per-instance directory. Without `storage_path`, instances stay on

@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PR-H (#24) dead-origin VV reaping — end-to-end through the real tier_2
+%% Dead-origin VV reaping — end-to-end through the real tier_2
 %% substrate (`bondy_db:apply/4` stamp → applier projection →
 %% `bondy_oplog_instance:reap_origins/2`).
 %%
@@ -88,7 +88,7 @@ mv_coevict_allows_next_write() ->
     {ok, _} = bondy_oplog_instance:reap_origins(Ia, [Ob]),
     %% The cell's context legitimately shrank (Ob gone). A same-origin
     %% write reads the shrunk context; the co-eviction of Ob from the
-    %% stamp-site guard is what keeps `vv_regressed/2` from refusing it.
+    %% stamp-site guard is what keeps `bondy_oplog_ctx_guard` from refusing it.
     %% Without co-eviction this returns `{error, {context_regression, …}}`.
     ?assertEqual(ok, bondy_db:apply(Ta, <<"r">>, <<"k">>, {set, <<"va3">>})),
     ?assertEqual([<<"va3">>], read_mv(Ta)).

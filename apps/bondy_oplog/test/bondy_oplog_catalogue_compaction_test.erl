@@ -253,16 +253,13 @@ remote_event_survives_catalogue_compaction() ->
         close_shard(BC, BP)
     end.
 
-%% Falsifies the cross-node compaction↔commit deadlock. With a remote event
-%% just delivered, the compaction handler must make ZERO synchronous calls
-%% to the applier — the applier's own synchronous `drain_install_queue`
-%% call (`commit_now/1`) deadlocks against any such call the moment a
-%% compaction overlaps a commit boundary. Every call from the instance
-%% process into `bondy_oplog_applier` during `compact/2` is traced; the
-%% only one allowed is the `advance_replayed_root/2` cast that re-anchors
-%% the replay cursor after a truncate. (The remote event `r` sits in the
-%% whole-tree truncation range, so the compaction has a remote event to be
-%% tempted by whether or not the replay has folded it.)
+%% Falsifies the cross-node compaction↔commit deadlock: with a remote event
+%% just delivered, the compaction handler must make ZERO synchronous calls to
+%% the applier, whose own synchronous `drain_install_queue` call
+%% (`commit_now/1`) deadlocks against any such call when a compaction overlaps
+%% a commit boundary. Every call from the instance into `bondy_oplog_applier`
+%% during `compact/2` is traced; the only one allowed is the
+%% `advance_replayed_root/2` cast that re-anchors the replay cursor.
 compaction_makes_no_synchronous_applier_call() ->
     AId = mk_id(),
     ANS = ns_of(AId),

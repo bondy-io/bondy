@@ -175,8 +175,9 @@ realm_delete_purges_registry(_Config) ->
     %% session, so nothing in the session close path can reach them. Deleting
     %% the realm must, or every created-and-deleted realm leaves a node-local
     %% entry behind, and with it the RIB summary count that
-    %% `bondy_registry_rib:apply_removed/1` would have decremented — a routing
-    %% summary this node keeps advertising to its peers until it restarts.
+    %% `bondy_registry_rib:on_entry_removed/3` would have decremented — a
+    %% routing summary this node keeps advertising to its peers until it
+    %% restarts.
     Uri = <<"session.cleanup.ephemeral.realm">>,
     Realm = bondy_realm:create(Uri),
     ok = bondy_realm:disable_security(Realm),

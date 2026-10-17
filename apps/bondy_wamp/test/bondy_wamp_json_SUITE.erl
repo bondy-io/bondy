@@ -306,9 +306,10 @@ test_decode_tail(_) ->
     Result4b = bondy_wamp_json:decode_tail(Tail4b),
     ?assertEqual([undefined, 5], Result4b),
 
-    %% Note: Tails with nested arrays (e.g., "null,[1,2,3]]") have an edge case
-    %% where binary:match finds the first ] instead of checking if tail ends with ]
-    %% This is a known limitation. Use the comma-prefixed version for nested arrays:
+    %% A tail produced by `decode_head/2` starts with the comma that
+    %% followed the last head element, or is the closing bracket alone.
+    %% A comma-less tail whose last element is itself an array is
+    %% ambiguous and is not a shape `decode_head/2` produces.
     Tail4c = <<",null,[1,2,3]]">>,
     Result4c = bondy_wamp_json:decode_tail(Tail4c),
     ?assertEqual([undefined, [1, 2, 3]], Result4c),

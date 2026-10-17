@@ -10,7 +10,7 @@ Top supervisor for `bondy_mcp`.
 
 Supervises no static children: a node with no listener naming the `mcp`
 service receives no inbound MCP request, and the outbound client
-direction (§13) runs only where `mcp.upstreams` declares it — so nothing
+direction runs only where `mcp.upstreams` declares it — so nothing
 in this application should be running by default. Anything this
 application comes to own is created on demand: the inbound servers on
 first use, the upstream supervisor at application start when (and only
@@ -80,7 +80,7 @@ start_door() ->
 
 -doc """
 Starts the upstream supervisor (`bondy_mcp_upstream_sup`, the client
-direction §13). Called by `bondy_mcp_app` at application start when
+direction). Called by `bondy_mcp_app` at application start when
 `mcp.upstreams` declares at least one upstream; an invalid declaration
 set fails the start, and with it the application — see that supervisor's
 own doc for what is validated.

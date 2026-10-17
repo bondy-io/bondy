@@ -21,7 +21,8 @@ custom_header_test() ->
         v(#{~"X-Campaign" => ~"spring-2026"})
     ).
 
-%% Sorted, so a message built twice from one request is byte-identical.
+%% Sorted by name, so a message built twice from one request orders its
+%% headers alike.
 ordering_is_stable_test() ->
     Map = #{~"X-C" => ~"3", ~"X-A" => ~"1", ~"X-B" => ~"2"},
     ?assertEqual(

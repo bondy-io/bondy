@@ -43,8 +43,8 @@ batch_shares_one_dot_test() ->
     ?assertEqual(1, Hlc).
 
 %% The eager arrival-order fold equals the canonical key-sorted
-%% interpret_cog over the same log when the log contains a batch event —
-%% the §4.3 ship gate, with packing. Here the batch (dot {o,2}, context
+%% interpret_cog over the same log when the log contains a batch event,
+%% with packing. Here the batch (dot {o,2}, context
 %% observing {o,1}) removes the earlier k1 (cross-event causality) while its
 %% own put of k2 and rmv of k1 share the dot/context (intra-batch).
 batch_eager_equals_group_test() ->

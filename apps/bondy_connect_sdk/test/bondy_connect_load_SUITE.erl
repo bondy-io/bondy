@@ -83,15 +83,12 @@ reset_zeroes_in_flight(_) ->
     L3 = bondy_connect_load:reset(L2),
     ?assertEqual(0, bondy_connect_load:in_flight(L3)).
 
-%% The bucket must own NO row in the regulator's shared table. That table is
-%% the only place a per-connection bucket could outlive its connection: its old
-%% key was `{bondy_connect_load, Pid, unique_integer()}`, which nothing could
-%% reconstruct, so a connection that died before its teardown ran orphaned the
-%% row permanently. Owning no row is what makes that unreachable — the atomics
-%% array is freed with the value.
-%%
-%% This is the falsifier for that leak: it fails if anyone re-registers the
-%% bucket, whether or not a teardown is also added.
+%% The bucket owns NO row in the regulator's shared table. That table is the
+%% only place a per-connection bucket could outlive its connection: a row
+%% keyed by a term nothing can reconstruct is orphaned for good by a connection
+%% that dies before its teardown runs. Owning no row makes that unreachable —
+%% the atomics array is freed with the value. This fails if anyone
+%% re-registers the bucket, whether or not a teardown is also added.
 rate_bucket_is_unregistered(_) ->
     Before = ets:info(?REG_TAB, size),
 

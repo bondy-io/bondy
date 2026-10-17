@@ -52,7 +52,7 @@ Whether this node should be sent traffic.
 
 The single readiness oracle: `bondy_admin_ready_http_handler` (`/ready`) and
 the `bondy_node_ready` Prometheus gauge both answer from here, so a load
-balancer and a dashboard cannot disagree about the same node.
+balancer and a dashboard read the same answer for a node.
 
 Four independent conditions, each read from exactly one source:
 
@@ -143,18 +143,12 @@ start_substrate_and_services() ->
     }),
 
     %% Load every module of every application loaded so far, BEFORE the
-    %% supervisor can start anything that decodes wire bytes with
-    %% `binary_to_term/2` `[safe]' (the bridge relay, both ends — a
-    %% configured bridge dials from bondy_bridge_relay_manager's
-    %% handle_continue, i.e. during bondy_router_sup startup). `[safe]' refuses
-    %% atoms absent from the atom table, and the interactive code loader
-    %% interns a module's atoms only when the module loads: measured on
-    %% a fresh edge node, the bridge server's own cryptosign CHALLENGE
-    %% bounced on `channel_binding', and since the decode failure
-    %% precedes any interning, every reconnect bounced identically. In a
-    %% release this covers every release app: the generated start.script
-    %% runs all `application:load' instructions before the first
-    %% `start_boot' (verified on 1.0.0-rc-sunlight). Falsifier:
+    %% supervisor starts anything that decodes wire bytes with
+    %% `binary_to_term/2` `[safe]' (the bridge relay dials during
+    %% bondy_router_sup startup). `[safe]' refuses atoms absent from the atom
+    %% table, and the interactive code loader interns a module's atoms only
+    %% when the module loads, so an unloaded module's atoms would bounce every
+    %% decode. In a release the start.script loads all apps first. Falsifier:
     %% `bondy_bridge_relay_rpc_SUITE:boot_loads_every_app_module'.
     ok = ensure_app_modules_loaded(),
 
@@ -639,15 +633,11 @@ maybe_setup_oplog_replication() ->
     end.
 
 suspend_listeners() ->
-    %% We stop accepting new connections on the client-facing listeners.
-    %% Existing connections are unaffected.
-    %%
-    %% The NORMAL phase only. `early' is the phase that carries `/ping',
-    %% `/ready' and `/metrics', and this runs at the START of a drain that then
-    %% sleeps for the whole grace period: suspending those paths would make an
-    %% orchestrator read the draining node as dead and hard-kill it, which is
-    %% the outcome the grace period exists to avoid. `stop/1' takes them down
-    %% once the drain is over.
+    %% The NORMAL phase only. `early' carries `/ping', `/ready' and
+    %% `/metrics', and this runs at the START of a drain that then sleeps for
+    %% the grace period: suspending those paths would make an orchestrator
+    %% read the draining node as dead and hard-kill it. `stop/1' takes them
+    %% down once the drain is over. Existing connections are unaffected.
     ?LOG_NOTICE(#{
         description =>
             "Suspending the normal-phase listeners. No new connections will be "

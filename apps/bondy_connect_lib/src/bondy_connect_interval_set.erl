@@ -377,11 +377,10 @@ filter(Pred, S) when is_function(Pred, 1) ->
 %% Total order on elements: a bare integer `N` is read as `{N, N}` and pairs
 %% compare lexicographically on `{Low, High}`. Non-strict, so it composes with
 %% `lists:usort/2`, which drops members comparing equal in both directions.
-%%
-%% Antisymmetry on distinct elements is the property that matters and the one
-%% the ancestor violated: `9` must sort strictly before `{9, 10}` because the
-%% highs differ. Without it `usort/2` treated them as duplicates and
-%% `from_list([9, {9,10}])` returned `[9]`, losing the point 10.
+%% Antisymmetry on distinct elements is the property that matters: `9` sorts
+%% strictly before `{9, 10}` because the highs differ; otherwise `usort/2`
+%% would treat them as duplicates and `from_list([9, {9,10}])` would lose
+%% the point 10.
 compare_lex({H1, T1}, {H2, T2}) ->
     (H1 < H2) orelse (H1 =:= H2 andalso T1 =< T2);
 compare_lex({H, T}, N) when is_integer(N) ->

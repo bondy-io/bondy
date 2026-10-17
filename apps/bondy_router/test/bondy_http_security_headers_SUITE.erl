@@ -222,7 +222,7 @@ partial_block_keeps_the_default_headers(_Config) ->
         <<"max-age=31536000">>,
         maps:get(<<"strict-transport-security">>, Headers)
     ),
-    %% The two the defaults supply, and which a partial block used to drop.
+    %% The two the defaults supply.
     ?assertEqual(<<"SAMEORIGIN">>, maps:get(<<"x-frame-options">>, Headers)),
     ?assertEqual(
         <<"nosniff">>, maps:get(<<"x-content-type-options">>, Headers)

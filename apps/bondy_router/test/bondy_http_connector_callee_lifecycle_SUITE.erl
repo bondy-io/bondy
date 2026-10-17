@@ -40,16 +40,12 @@ init_per_suite(Config) ->
     [{realm_uri, ?REALM_URI} | Config].
 
 %% @private
-%% Several bondy_http_connector suites (e.g. bondy_http_connector_http_pool_SUITE)
-%% start `bondy_metrics` standalone (bypassing supervision) and deliberately
-%% leave it running, unlinked, for the rest of their own test run. If one of
-%% those runs earlier in the same VM, its `bondy_metrics` process squats on
-%% the registered name; `bondy_oplog_sup` (started by `bondy_ct:start_bondy/0`
-%% via `bondy_router`) then fails to start its own supervised child with
-%% `{already_started, Pid}` -- a fatal application-start failure that takes
-%% the whole node down, not a catchable error. Only relevant before the
-%% first real boot in this VM (`bondy_ct:start_bondy/0` is a no-op after
-%% that), so reclaim the name defensively before booting for real.
+%% Several bondy_http_connector suites start `bondy_metrics` standalone and
+%% leave it running, unlinked, for the rest of the VM. Its process then squats
+%% on the registered name, and `bondy_oplog_sup` fails to start its own
+%% supervised child with `{already_started, Pid}` — an application-start
+%% failure that takes the node down. Only relevant before the first real boot
+%% in this VM (`bondy_ct:start_bondy/0` is a no-op after that).
 maybe_reclaim_metrics_name() ->
     IsBooted = lists:keymember(
         bondy_oplog, 1, application:which_applications()
@@ -59,7 +55,7 @@ maybe_reclaim_metrics_name() ->
             try
                 gen_server:stop(Pid)
             catch
-                _:_ -> ok
+                exit:noproc -> ok
             end,
             ok;
         _ ->

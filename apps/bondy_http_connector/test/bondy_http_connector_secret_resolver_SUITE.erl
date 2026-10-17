@@ -104,13 +104,11 @@ init_per_group(Group, Config) when
     %% Stub mocks (NOT passthrough): the resolver only ever calls
     %% `erlcloud_aws:auto_config/0`, `erlcloud_aws:service_config/3` and
     %% `erlcloud_sm:get_secret_value/3`, so mocking exactly those is enough.
-    %% `[passthrough]` recompiles the whole (large) erlcloud modules to forward
-    %% unmocked calls — and when this suite runs after another suite has started
-    %% bondy (which loads erlcloud), that recompile blocks the meck server long
-    %% enough for the CT watchdog to kill the case. Stub mocks need no recompile,
-    %% so they are immune to that ordering (the suite passed in isolation only
-    %% because nothing had loaded erlcloud yet). `no_link` keeps a meck-server
-    %% fault from cross-killing the test process.
+    %% `[passthrough]` recompiles the whole (large) erlcloud modules, and when
+    %% bondy (which loads erlcloud) is already running in this VM that
+    %% recompile blocks the meck server long enough for the CT watchdog to
+    %% kill the case; stub mocks need no recompile. `no_link` keeps a
+    %% meck-server fault from cross-killing the test process.
     ok = meck:new(erlcloud_aws, [no_link]),
     ok = meck:new(erlcloud_sm, [no_link]),
 

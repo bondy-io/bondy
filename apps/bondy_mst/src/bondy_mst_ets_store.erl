@@ -13,6 +13,12 @@
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
 Read-concurrent, MST backend using `ets`.
+
+`free/3` only tombstones a page: under structural sharing a freed hash may
+still be referenced by an older root, a pinned peer root or a merge
+accumulator, and the table is `public` with `concurrent_writes => true`, so
+hard deletion is never sound here. `gc/2` reclaims by reachability from the
+keep-roots (`bondy_mst_free_reachable_test`).
 """).
 
 %%% 'public' unconditionally: the store's capabilities/1 advertises
@@ -181,19 +187,14 @@ has(#?MODULE{tab = Tab}, Hash) ->
     live | {tombstoned, integer()} | absent.
 
 page_state(#?MODULE{tab = Tab}, Hash) ->
-    %% Forensic accessor: distinguishes the three states a "missing" page can
-    %% actually be in, which is what tells a diagnosing operator WHICH layer
-    %% is at fault.
-    %%
-    %% - `absent`      — the row is gone. Something DELETED a page a live root
-    %%                   references: a store-layer fault (or a consumer that
-    %%                   collected without establishing liveness).
-    %% - `{tombstoned, FreedAt}` — the row is intact but `free/3` marked it.
-    %%                   The page is readable, so a walk that called it
-    %%                   missing did NOT get that from this store: an
-    %%                   oplog-layer/read-path fault.
-    %% - `live`        — present and unmarked: the miss was transient
-    %%                   (observed before the insert became visible).
+    %% Forensic accessor: the three states a "missing" page can be in name
+    %% the layer at fault. `absent`: the row is gone, so something DELETED a
+    %% page a live root references (a store-layer fault, or a consumer that
+    %% collected without establishing liveness). `{tombstoned, FreedAt}`: the
+    %% row is intact but `free/3` marked it; the page is readable, so a walk
+    %% that called it missing did not get that from this store (an
+    %% oplog-layer/read-path fault). `live`: present and unmarked, so the
+    %% miss was transient (observed before the insert became visible).
     case ets:lookup(Tab, Hash) of
         [] -> absent;
         [{_, _, undefined}] -> live;
@@ -239,28 +240,13 @@ list(#?MODULE{tab = Tab}) ->
 -spec free(T :: t(), Hash :: binary(), Page :: page()) -> T :: t().
 
 free(#?MODULE{tab = Tab} = T, Hash, _Page0) ->
-    %% TOMBSTONE ONLY — never a hard delete, and not configurable.
-    %%
-    %% `free/3` is called by every path-copying operation on the pages of the
-    %% spine it rewrote (`put`, `split_page`, `truncate_at`, `delete`). Under
-    %% structural sharing that hash may STILL be referenced: by an older root
-    %% the caller retains (the whole point of a persistent structure — e.g.
-    %% `bondy_mst:diff_to_list/2` against a previously captured root), by a
-    %% peer root pinned mid-pull, or by a merge accumulator. Deleting it
-    %% outright therefore breaks live trees — a root referencing a page that
-    %% is no longer there.
-    %%
-    %% This backend cannot opt out of that: its `capabilities/1` declares
-    %% `concurrent_writes => true` (pages live in a shared, public ETS table
-    %% any holder may write), so another process may be mid-operation on this
-    %% very hash at any instant. Hard deletion is only ever sound for a
-    %% backend that declares `concurrent_writes => false` AND whose consumer
-    %% retains no old roots — see the `free/3` note on `bondy_mst_store`.
-    %% Reclamation happens in `gc/2` instead, where liveness is established.
-    %%
-    %% `update_element` writes a single tuple slot rather than re-copying the
-    %% whole page, so the cost is independent of page size, and a concurrent
-    %% reader still sees the intact page.
+    %% TOMBSTONE ONLY — never a hard delete, and not configurable. A freed
+    %% hash may still be referenced by an older root the caller retains, a
+    %% peer root pinned mid-pull, or a merge accumulator, and this backend's
+    %% `concurrent_writes => true` means another process may be mid-operation
+    %% on it. Reclamation happens in `gc/2`, where liveness is established.
+    %% `update_element` writes one tuple slot, so the cost is independent of
+    %% page size and a concurrent reader still sees the intact page.
     _ = ets:update_element(Tab, Hash, {?FREED_AT_POS, erlang:monotonic_time()}),
     T.
 
@@ -363,25 +349,14 @@ estimate_bloomfi_capacity(#?MODULE{} = T) ->
 prune_unreachable(#?MODULE{} = T, KeepRoots) ->
     Tab = T#?MODULE.tab,
 
-    %% CANDIDATE SET FIRST, then mark. The order is load-bearing.
-    %%
-    %% The sweep may only delete pages that were already present when the mark
-    %% walk observed the keep-roots. With the inverse order a page inserted
-    %% between mark and select is swept ON ARRIVAL — absent for the filter,
-    %% present for the select — and its writer (the sync session's concurrent
-    %% `put_page`) then publishes a root that references it: an unservable
-    %% root. Snapshotting first makes the race harmless: a page inserted
-    %% after the snapshot is not a candidate, survives this cycle, and is
-    %% collected by the next one if it really is garbage. Deleting late is a
-    %% bounded memory cost; deleting early is data loss.
-    %%
-    %% The lock is `bondy_mst_gc_guard_test:
-    %% sweep_spares_pages_inserted_after_snapshot_test` — deterministic: it
-    %% injects the insert inside the collection at `bloomfi:new/1`, which
-    %% lands after the snapshot under this order and inside the mark window
-    %% under the inverse. It is the ONLY lock: the concurrent stress suite's
-    %% servability oracle walks the mutator's own root, and an
-    %% arrival-swept page is an inserter page not yet reachable from it.
+    %% CANDIDATE SET FIRST, then mark. The sweep may only delete pages that
+    %% were present when the mark walk observed the keep-roots: in the inverse
+    %% order a page inserted between mark and select is swept ON ARRIVAL and
+    %% its writer (the sync session's `put_page`) then publishes a root that
+    %% references it. A page inserted after the snapshot is not a candidate;
+    %% the next cycle collects it if it is garbage. The lock is
+    %% `bondy_mst_gc_guard_test:
+    %% sweep_spares_pages_inserted_after_snapshot_test`.
     MS = [{{'$1', '_', '_'}, [{'=/=', '$1', ?ROOT_KEY}], ['$1']}],
     All = ets:select(Tab, MS),
 
@@ -423,8 +398,7 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
     ),
 
     W1 = ets:info(Tab, memory),
-    %% `ets:info(_, memory)` reports words; convert the freed delta to
-    %% bytes (was `memory:words/1`, no longer exported by the dep).
+    %% `ets:info(_, memory)` reports words; convert the freed delta to bytes.
     Bytes = (W0 - W1) * erlang:system_info(wordsize),
     Meta = #{
         name => T#?MODULE.name,

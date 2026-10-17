@@ -3,20 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%%--------------------------------------------------------------------
 %% @doc DAG-CBOR (IPLD) profile test suite for `bondy_cbor'.
 %%
-%% Exercises the `dag' profile against:
-%%
-%% <ul>
-%%   <li>the upstream IPLD cross-codec fixtures (round-trip every fixture and
-%%       assert the re-encoded bytes are identical - the canonical-form test);
-%%       see {@link //bondy_cbor/dag_cbor_fixtures/README.md};</li>
-%%   <li>the data-model representation (links, strings, bytes, map keys);</li>
-%%   <li>the strictness rules a conformant decoder must enforce.</li>
-%% </ul>
-%% @end
-%%--------------------------------------------------------------------
+%% Exercises the `dag' profile against the upstream IPLD cross-codec
+%% fixtures in `test/dag_cbor_fixtures/' (every fixture round-trips and
+%% re-encodes to identical bytes), the data-model representation (links,
+%% strings, bytes, map keys), and the strictness rules a conformant
+%% decoder enforces.
 
 -module(bondy_cbor_dag_tests).
 

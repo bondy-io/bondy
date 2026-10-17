@@ -5,8 +5,8 @@
 -module(bondy_mcp_cluster_SUITE).
 
 -moduledoc """
-Cross-node forwarding for the handshake era (design §12.1's cluster
-affinity, built as `bondy_mcp_handshake`'s per-node door): a session is
+Cross-node forwarding for the handshake era (cluster affinity, built as
+`bondy_mcp_handshake`'s per-node door): a session is
 OWNED by the node that served its `initialize`, and every operation a
 request on another member makes — dispatch binding checks, subscribes,
 in-flight registration, cancellation, close, and the held `GET` stream
@@ -162,16 +162,13 @@ init_per_suite(Config) ->
     Owner = spawn_callee_owner(),
 
     %% The callee's REGISTRATIONS must be visible on both members before any
-    %% case runs, and that is a separate fact from the manifest above: the
-    %% manifest comes from the replicated interface/overlay, the registration
-    %% from the callee's live WAMP session. `spawn_callee_owner/0` returns as
-    %% soon as the OWNING node accepts each register, so without this the
-    %% first case races the registry's replication of them.
-    %%
-    %% It races it in both directions — `?ECHO` and `?GET_USER` join node 1
-    %% and are called through node 2, `?SLOW` joins node 2 and is called
-    %% through node 1 — so every procedure is required on every member rather
-    %% than only where each case happens to need it.
+    %% case runs, a separate fact from the manifest above: the manifest comes
+    %% from the replicated interface/overlay, the registration from the
+    %% callee's live WAMP session. `spawn_callee_owner/0` returns as soon as
+    %% the OWNING node accepts each register, so without this the first case
+    %% races the registry's replication — in both directions (`?ECHO` and
+    %% `?GET_USER` join node 1 and are called through node 2, `?SLOW` the
+    %% reverse), so every procedure is required on every member.
     _ = [
         ok = wait_until(
             fun() ->
@@ -363,7 +360,7 @@ stream_serves_across_nodes(Config) ->
         req(1, <<"resources/subscribe">>, #{<<"uri">> => <<"users:///9">>})
     ),
     %% Published while NO stream is connected: buffered in the OWNER's
-    %% queue (§12.2).
+    %% queue.
     ok = publish(Config, <<"com.example.mcp.cx.user.9.changed">>, [], #{}),
     %% The GET stream lands on node 2; the owner-side proxy drains the
     %% backlog and pushes it door-to-door.

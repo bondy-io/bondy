@@ -1,6 +1,6 @@
 %% =============================================================================
-%% Tests for `bondy_oplog_core` telemetry instrumentation (`MST_DB_DESIGN.md`
-%% §16). Each event is exercised by triggering a path that fires it and
+%% Tests for `bondy_oplog_core` telemetry instrumentation.
+%% Each event is exercised by triggering a path that fires it and
 %% asserting on the captured measurements + metadata maps. A telemetry
 %% handler routes every event into the test process mailbox; the test
 %% drains and decodes by event name.

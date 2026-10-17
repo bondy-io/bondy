@@ -36,11 +36,11 @@ init([]) ->
     SupFlags = #{
         %% TODO move to one_for_one
         %% We can only use one_for_one when each partition can rebuild the its
-        %% trie from plum_db on init
+        %% trie from the store on init
         strategy => one_for_all,
-        % max restarts
+        %% max restarts
         intensity => 20,
-        % seconds
+        %% seconds
         period => 60,
         auto_shutdown => never
     },

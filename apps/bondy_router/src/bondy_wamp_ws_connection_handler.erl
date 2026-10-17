@@ -108,16 +108,11 @@ init(Req0, RouteState) ->
     %% This callback is called from the temporary (HTTP) request process and
     %% the websocket_ callbacks from the connection process.
 
-    %% `RouteState' is built once per listener by
-    %% `bondy_http_services:carrier_state/3', which always sets `protocols'
-    %% and `config' unconditionally, so this performs no configuration
-    %% lookup per connection and a missing key here means the route state was
-    %% built some other way.
-    %%
-    %% `Protocols' is the listener's operator-chosen subprotocol families
-    %% (`wamp', `bamp', ...); `Config' is this carrier's resolved option map
-    %% (the per-listener override, or else the global fallback — see
-    %% `bondy_listener_config:resolve_carrier_config/3').
+    %% `RouteState' is built once per listener by `bondy_http_services',
+    %% which always sets `protocols' and `config', so no configuration
+    %% lookup runs per connection. `Protocols' is the listener's subprotocol
+    %% families (`wamp', `bamp', ...); `Config' is this carrier's resolved
+    %% option map (`bondy_listener_config').
     Protocols = maps:get(protocols, RouteState),
     Config = maps:get(config, RouteState),
     Listener = maps:get(listener, RouteState),
@@ -721,7 +716,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
     Retry = bondy_connect_retry:init(
         ping_timeout,
         #{
-            % disable, use max_retries only
+            %% disable, use max_retries only
             deadline => 0,
             interval => Timeout,
             max_retries => Attempts,

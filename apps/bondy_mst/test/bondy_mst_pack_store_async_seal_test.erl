@@ -4,7 +4,7 @@
 %% =============================================================================
 %%
 %% EUnit suite for the `bondy_mst_pack_store` asynchronous-seal orchestration:
-%% the `seal_mode = async` switch (put no longer seals inline), the
+%% the `seal_mode = async` switch (put does not seal inline), the
 %% `maybe_roll_for_seal/1` → `run_seal_job/1` → `complete_seal/2` pipeline,
 %% the in-flight=1 defer, and the read-union seen through the store while a
 %% seal is in flight. Operates on the raw store record directly (the

@@ -577,11 +577,11 @@ sealed_packs(Dir) ->
 %%
 %% Sealing is asynchronous and OFF the apply path: `await_apply/1` returns
 %% when events are applied, while the seal job runs for hundreds of ms in a
-%% monitored worker and only `complete_seal/2` commits the pack file. So
-%% "append `N` with `auto_seal_records` `M` ⇒ a sealed pack exists" is only
-%% *eventually* true, and asserting it instantaneously is a race that loses
-%% under whole-suite load. The bounded wait keeps the premise honest: if
-%% seals never complete, this still fails — loudly, after the deadline.
+%% monitored worker; only `bondy_mst_pack_writer:complete_seal/2` commits the
+%% pack file. So "append `N` with `auto_seal_records` `M` ⇒ a sealed pack
+%% exists" is only *eventually* true, and asserting it instantaneously is a
+%% race that loses under whole-suite load. The bounded wait keeps the premise
+%% honest: if seals never complete, this still fails after the deadline.
 await_sealed_packs(Dir, Min, DeadlineMs) when DeadlineMs > 0 ->
     case length(sealed_packs(Dir)) >= Min of
         true ->

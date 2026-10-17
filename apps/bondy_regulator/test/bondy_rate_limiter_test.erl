@@ -27,11 +27,10 @@ setup() ->
     %% Start the shared `bondy_regulator` APP rather than its registered
     %% gen_servers directly: `ensure_all_started/1` is idempotent, the
     %% supervisor owns the children, and the app staying up serves every
-    %% sibling. The previous shape (`whereis` + direct `start_link/0`)
-    %% left UNSUPERVISED registered orphans behind — a later fixture's
-    %% `application:start(bondy_regulator)` then failed with
-    %% `{already_started, _}` on the sup child (measured: it cancelled
-    %% bondy_rate_limit_test's whole fixture in full-eunit runs).
+    %% sibling. A direct `start_link/0` leaves an UNSUPERVISED registered
+    %% orphan behind, and a later fixture's
+    %% `application:start(bondy_regulator)` then fails with
+    %% `{already_started, _}` on the sup child.
     {ok, _} = application:ensure_all_started(bondy_regulator),
     ok.
 

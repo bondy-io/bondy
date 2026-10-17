@@ -296,8 +296,7 @@ a_zero_memory_limit_means_no_limit(_) ->
 %%
 %% Each case uses its OWN realm, which is what makes each of these a RAISE
 %% rather than a restatement of the previous case's alarm: the id is
-%% `{retained_messages_count_limit, Realm}`. That used to need
-%% `init_per_testcase/2` to clear a node-wide alarm between cases.
+%% `{retained_messages_count_limit, Realm}`.
 trip_the_count_limit(Realm, Event) ->
     Old = bondy_config:get([wamp_message_retention, max_messages]),
     ok = bondy_config:set([wamp_message_retention, max_messages], 2),

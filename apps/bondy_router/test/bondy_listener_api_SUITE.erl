@@ -120,14 +120,10 @@ too_many_arguments_is_reported(Config) ->
 -doc """
 A call with no arguments is refused on ARITY.
 
-It did not used to be. `bondy_wamp_api_utils:validate_admin_call_args/3` reads
-the first positional argument as a realm URI and SUBSTITUTES the caller's realm
-when it is missing, so a no-argument call reached `phase/1` carrying
-`com.leapsight.bondy` and was refused only because `phase/1` is total. The
-procedure now uses `admin_call_args/3`, which checks the count and nothing
-else, so the refusal names the real fault. Both refusals report
-`?WAMP_INVALID_ARGUMENT`, which is why this assertion did not change and why
-the comment had to.
+The procedure uses `bondy_wamp_api_utils:admin_call_args/3`, which checks the
+argument count and nothing else, so the refusal names the real fault rather
+than a realm mismatch. This case does not distinguish the two refusals on the
+wire: both report `?WAMP_INVALID_ARGUMENT`.
 """.
 no_arguments_is_refused_rather_than_defaulted(Config) ->
     E = call_error(?BONDY_LISTENER_SUSPEND, [], Config),

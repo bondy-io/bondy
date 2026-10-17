@@ -776,7 +776,7 @@ apply_legacy_write(Table, Band, Key, Value, C) ->
 %% `bondy_db:apply_many/1` — one fsync per shard per `?IMPORT_BATCH`-sized flush
 %% rather than one fsync per entry, which is the difference between an import
 %% taking minutes and seconds. tier_2 (ew/mv/aw) cells stamp a per-cell causal
-%% context that `apply_many/1` refuses, so they are applied individually.
+%% context that `bondy_db:apply_many/1` refuses, so they are applied one by one.
 buffer_write(Handle, Band, Key, Event, C) ->
     case maps:get(causal_tier, Handle, tier_0) of
         tier_2 ->
@@ -793,7 +793,8 @@ buffer_write(Handle, Band, Key, Event, C) ->
     end.
 
 %% @private
-%% Apply the buffered tier_0 writes as one `apply_many/1` (grouped into one
+%% Apply the buffered tier_0 writes as one `bondy_db:apply_many/1` (grouped into
+%% one
 %% atomic WAL frame per shard) and credit them to `written_count`.
 flush_writes(#{writes := Buf, writes_n := N} = C) when Buf =/= [] ->
     ok = bondy_db:apply_many(lists:reverse(Buf)),

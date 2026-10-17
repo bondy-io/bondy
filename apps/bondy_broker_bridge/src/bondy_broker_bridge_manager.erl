@@ -313,13 +313,14 @@ validate_spec(Map) ->
 %% =============================================================================
 
 init([]) ->
-    %% Without this the supervisor's `shutdown` exit kills this process
-    %% outright and `terminate/2` never runs -- so no bridge was ever
-    %% terminated and, worse, no subscriber was ever unsubscribed. The
-    %% subscribers live under `bondy_subscribers_sup` in the router app, not
-    %% under this app's tree, so nothing else was cleaning them up: restarting
-    %% the bridge left the previous generation of subscribers running and
-    %% every event was delivered once per generation.
+    %% Without `trap_exit` the supervisor's `shutdown` exit kills this process
+    %% outright and `terminate/2` never runs, so no bridge is terminated and
+    %% no subscriber is unsubscribed. The subscribers live under
+    %% `bondy_subscribers_sup` in the router app, not under this app's tree,
+    %% so nothing else cleans them up: a restart would leave the previous
+    %% generation of subscribers running and deliver every event once per
+    %% generation (`bondy_broker_bridge_manager_SUITE`,
+    %% `resubscribe_after_restart_delivers/1`).
     _ = process_flag(trap_exit, true),
 
     Bridges = application:get_env(bondy_broker_bridge, bridges, []),
@@ -479,8 +480,7 @@ init_bridges(State) ->
 
 terminate_bridges(Reason, #state{bridges = Map} = State) ->
     %% Only bridges that were initialised carry a `ctxt` key, so only those get
-    %% terminated. The callback is `terminate/2` — calling `terminate/1` used to
-    %% fail with `undef` on every shutdown.
+    %% terminated. The behaviour callback is `terminate/2`.
     Fun = fun(Bridge, Bridge0, Acc) ->
         _ =
             case maps:find(ctxt, Bridge0) of
@@ -712,7 +712,7 @@ all_subscribers(State) ->
     lists:append([subscribers(Id) || Id <- Ids]).
 
 subscribers(Bridge) ->
-    %% {{{p,l,bondy_broker_bridge},<0.2738.0>},<0.2738.0>,Bridge},
+    %% {{{r,l,bondy_broker_bridge},<0.2738.0>},<0.2738.0>,Bridge},
     MatchSpec = [
         {
             {{r, l, bondy_broker_bridge}, '$1', Bridge},

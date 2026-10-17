@@ -130,7 +130,7 @@ ciphertext_when_enabled(_Config) ->
     Vals = sensitive_values(raw_keys(Uri)),
     ?assert(Vals =/= []),
     %% EVERY stored sensitive field is an encryption envelope — this is exactly
-    %% what a `bondy_export` backup would now contain (S-2 export leak closed).
+    %% what a `bondy_export` backup contains.
     ?assertEqual(
         [],
         [V || V <- Vals, not is_encrypted(V)],

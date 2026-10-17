@@ -54,8 +54,8 @@ bounded_batch_converges() ->
 
     Tab = ets:new(get_pages_batches, [public, bag]),
     meck:new(bondy_oplog_transport_inline, [passthrough]),
-    %% Both request shapes are captured: the reciprocal 4-tuple the session
-    %% now sends, and the legacy 2-tuple retained for mixed-version clusters.
+    %% Both `get_pages` request shapes `bondy_oplog_responder` dispatches are
+    %% captured: the reciprocal 4-tuple and the 2-tuple.
     meck:expect(
         bondy_oplog_transport_inline,
         request,

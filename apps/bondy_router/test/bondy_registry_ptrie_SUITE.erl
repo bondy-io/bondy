@@ -7,12 +7,9 @@
 -moduledoc """
 Property-based and unit tests for `bondy_registry_ptrie`.
 
-Phase 1 (this file): sequential correctness of path-copied insert, remove,
-lookup, and fold against a naive `map()` reference.
-
-Later phases will add: CAS-retry tests with multiple writers, QSBR
-reclamation tests, and wildcard/prefix matching once those features land in
-the module.
+Sequential correctness of path-copied insert, remove, lookup, and fold
+against a naive `map()` reference; concurrent writers and readers; and QSBR
+reclamation with and without a `bondy_registry_ptrie_janitor`.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -468,10 +465,10 @@ concurrent_writers_shared_keys(Config) ->
 concurrent_readers_no_crash(Config) ->
     %% While a single writer is inserting, many readers traverse the trie.
     %% Readers must never crash with `badarg` or similar from touching
-    %% concurrently-retired nodes. This is the reader-safety claim — the
-    %% janitor isn't running yet (not implemented) so retired nodes just
-    %% accumulate in the retire table, which is the "conservative" case
-    %% for reclamation-safety. Still, readers may traverse nodes that were
+    %% concurrently-retired nodes. This is the reader-safety claim — no
+    %% janitor runs in this case, so retired nodes just accumulate in the
+    %% retire table, which is the "conservative" case for reclamation
+    %% safety. Still, readers may traverse nodes that were
     %% fresh at the time of snapshot but unreachable at the time of lookup.
     H = ?config(handle, Config),
     clear(H),
@@ -682,8 +679,8 @@ reclaim_blocked_by_active_reader(Config) ->
     ok.
 
 reclaim_progresses_after_reader_releases(Config) ->
-    %% Same setup as the previous test, but we now reclaim AFTER the reader
-    %% releases. Everything should drain.
+    %% Same setup as `reclaim_blocked_by_active_reader`, but reclamation runs
+    %% AFTER the reader releases, so everything drains.
     H = ?config(handle, Config),
     clear(H),
     ok = bondy_registry_ptrie:insert(H, <<"pinned">>, original),
@@ -710,7 +707,7 @@ reclaim_progresses_after_reader_releases(Config) ->
 reclaim_safe_under_concurrent_readers(Config) ->
     %% The aggressive test: readers run continuously while a writer fires
     %% mutations and the janitor reclaims. Readers must never observe a
-    %% `badarg` from an ETS row that was reclaimed mid-traversal. If our
+    %% `badarg` from an ETS row that was reclaimed mid-traversal. If the
     %% QSBR protocol is correct, readers always see a consistent snapshot.
     H = ?config(handle, Config),
     clear(H),

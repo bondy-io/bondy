@@ -649,15 +649,12 @@ start_probe(RealmUri, Subscriptions, Procedures, ReplyMode) ->
     ok.
 
 %% @private
-%% A stored session backs the entries (the registry requires one on add,
-%% and the owner self-clean sweep reaps entries whose session cannot be
-%% looked up); a client-type ref delivers EVENT and INVOCATION straight to
-%% this process. Same shape as bondy_router_ordering_SUITE's probe, but
-%% recording each delivery's DETAILS map. `ReplyMode' selects how the
-%% probe answers an INVOCATION through the router, as a callee client
-%% would: `yield' — an empty YIELD; `error' — a WAMP ERROR; `none' —
-%% record only. The settlement is what the latency/outcome cases
-%% observe.
+%% A stored session backs the entries (the registry requires one on add, and
+%% the owner self-clean sweep reaps entries whose session cannot be looked
+%% up); a client-type ref delivers EVENT and INVOCATION straight to this
+%% process, recording each delivery's DETAILS map. `ReplyMode' selects how the
+%% probe answers an INVOCATION, as a callee client would: `yield' — an empty
+%% YIELD; `error' — a WAMP ERROR; `none' — record only.
 probe_init(RealmUri, Subscriptions, Procedures, ReplyMode, Parent) ->
     Roles =
         case Procedures of
@@ -681,7 +678,6 @@ probe_init(RealmUri, Subscriptions, Procedures, ReplyMode, Parent) ->
 
     _ = [
         case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
-            {ok, _, _} -> ok;
             {ok, _} -> ok;
             Other -> error({subscription_add_failed, Other})
         end

@@ -34,12 +34,9 @@ memory_test_() ->
 %% The memory topology anchors every per-shard resource — the projection
 %% table, the read cache, and the `bondy_oplog_core_registry` row — in a
 %% dedicated DB-scoped process (`bondy_db_topology_memory_owner`),
-%% decoupled from the transient process that calls `open_table/3`. This
-%% proves full ephemeral survival end-to-end: kill the facade caller and
-%% a fresh process can still drive a write + read through the surviving
-%% substrate. Against the pre-fix code — caller-owned projection + cache,
-%% registry monitor on the caller — killing it wiped the tables (applier
-%% crashes on a dead tid) and dropped the registry row (reads fail).
+%% decoupled from the transient process that calls `open_table/3`. Kill the
+%% facade caller and a fresh process can still drive a write + read through
+%% the surviving substrate.
 ets_owner_survives_caller_death_test_() ->
     {setup,
         fun() ->
@@ -367,7 +364,7 @@ ets_owner_survives_caller_death() ->
     ok = bondy_db_topology_memory_owner:stop(Owner).
 
 %% =============================================================================
-%% PB-2 — per-table projection backend (durable leveled vs ephemeral ets)
+%% Per-table projection backend (durable leveled vs ephemeral ets)
 %% =============================================================================
 
 %% An `ets`-backed (ephemeral) table provisioned *inside a leveled DB*.

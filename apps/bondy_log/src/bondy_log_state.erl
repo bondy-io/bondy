@@ -83,10 +83,8 @@ disk, never a partial mix.
     %% recovery, clamped to the largest frame-start offset ≤ the file
     %% value, with `≤ last_valid_offset_of(committed_segment)` enforced.
     committed_frame_offset :: non_neg_integer(),
-    %% key of the last applied event. `undefined` for a never-committed
-    %% WAL.
-    %% The committed record key; `committed_hlc` on disk, the name the
-    %% file had when only the oplog wrote it.
+    %% Key of the last applied record; `undefined` for a never-committed
+    %% log. Stored on disk under the name `committed_hlc`.
     committed_key :: bondy_log_record:key() | undefined,
     %% Monotonic counter incremented on every commit. Diagnostic only.
     commit_count :: non_neg_integer(),

@@ -4,15 +4,15 @@
 %% `snapshot.watermark` (retention watermark).
 %%
 %% Tests cover:
-%% 1. `new_consumer_offset/0` defaults — segment 0, offset at the
-%%    segment header boundary, no HLC, count 0.
-%% 2. Read of a missing consumer.offset returns `new_consumer_offset/0`
-%%    (a never-committed WAL is indistinguishable from a fresh-and-empty
-%%    one).
+%% 1. `bondy_log_state:new_consumer_offset/0` defaults — segment 0, offset at
+%%    the segment header boundary, no key, count 0.
+%% 2. Read of a missing consumer.offset returns
+%%    `bondy_log_state:new_consumer_offset/0` (a never-committed WAL is
+%%    indistinguishable from a fresh-and-empty one).
 %% 3. Consumer-offset write/read round-trip preserves all fields.
 %% 4. Atomic rename — after a successful write the `.tmp` is gone.
 %% 5. Parse errors — bad terms, missing fields, unsupported version.
-%% 6. with_position / with_hlc / with_commit_count setters.
+%% 6. with_position / with_key / with_commit_count setters.
 %% =============================================================================
 
 -module(bondy_oplog_wal_state_test).

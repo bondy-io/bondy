@@ -7,10 +7,10 @@
 
 -moduledoc """
 Callee invocation + subscriber FIFO dispatch + worker lifecycle for a
-`bondy_connect_sdk` connection — a **pure(-ish) data** helper extracted from
+`bondy_connect_sdk` connection — a **pure(-ish) data** helper used by
 `bondy_connect_connection`.
 
-It owns the three previously-scattered `gen_statem` maps (in-flight callee
+It owns the three `gen_statem` maps (in-flight callee
 `invocations`, the monitor reverse-index `mons`, and the per-subscription FIFO
 `queues`) plus the `bondy_connect_load` regulator, and answers the connection's
 dispatch questions by returning **a new state and a list of effects** the
@@ -31,7 +31,7 @@ via `worker_started/4`, which records the monitor (or, on failure, releases the
 load token / advances the FIFO). The single recursive spawn site is the FIFO
 drain — `event_done/2`, `worker_down/3` and a failed event spawn all emit at most
 one further `{spawn, event, …}`, so the connection's effect interpreter drains
-the queue hop-by-hop, mirroring the pre-A2 `next_event/4` recursion.
+the queue hop-by-hop.
 
 `erlang:monitor/2` happens in the connection (it needs the spawned pid);
 `erlang:demonitor/2` stays **inline here**, paired with the map writes, so the

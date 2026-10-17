@@ -11,7 +11,7 @@ asserts the degraded posture `bondy_router_app:start_services/1` documents actua
 holds end-to-end, next to an identically configured CONTROL node whose store
 opens fine.
 
-The degraded contract on this branch:
+The degraded contract:
 
   1. the node STANDS UP: `bondy_router` is running, `main_status/0` is
      `failed`, the `bondy_db_main_unavailable` alarm is raised;
@@ -25,18 +25,17 @@ The degraded contract on this branch:
      `bondy_router_sup` child that is up on every boot, holds no bridges because its
      store load is part of `start_bridges/0`, which the degraded path never
      calls;
-  4. the supervision tree HOLDS over a window: the pre-fix failure modes were
-     a VM halt (`configure_services/0` raising through `bondy_router_app:start/2`,
-     observed in production on 2026-09-02) and a crash loop
-     (`bondy_bridge_relay_manager` reading the store from its `init/1`
-     continuation until `reached_max_restart_intensity` collapsed
-     `bondy_router_sup`);
+  4. the supervision tree HOLDS over a window: no VM halt from
+     `configure_services/0` raising through `bondy_router_app:start/2`, and no
+     crash loop from `bondy_bridge_relay_manager` reading the store in its
+     `init/1` continuation until `reached_max_restart_intensity` collapses
+     `bondy_router_sup`;
   5. durable operations fail with their documented error instead of killing
      the node, and the ephemeral registry half is alive.
 
 The whole boot runs against the poisoned directory, so any OTHER boot-path
 consumer of the durable tables that raises fails `init_per_suite/1` here —
-the suite covers the property, not the call sites that were fixed. The
+the suite covers the property, not individual call sites. The
 control node pins the other half of every gate: a healthy node takes the
 durable path, IS ready, and has all of its listeners.
 
@@ -168,8 +167,8 @@ supervision_tree_holds(Config) ->
     Node = degraded_node(Config),
     Pids0 = supervised_pids(Node),
     lists:foreach(fun(P) -> ?assert(is_pid(P)) end, Pids0),
-    %% The pre-fix bridge-relay failure was a crash LOOP, so liveness is
-    %% asserted across a window, not at an instant: the same pids after the
+    %% A crash LOOP passes an instant check, so liveness is asserted across a
+    %% window, not at an instant: the same pids after the
     %% window means no process in the set was restarted during it.
     ok = timer:sleep(3000),
     ?assertEqual(Pids0, supervised_pids(Node)).
@@ -409,8 +408,8 @@ while_held_loop(Ref, Node, Held) ->
     end.
 
 %% @private
-%% The processes whose death was each pre-fix failure mode, plus the root
-%% supervisor they would have taken down.
+%% The processes whose death is each failure mode the suite guards, plus the
+%% root supervisor they would take down.
 supervised_pids(Node) ->
     [
         erpc:call(Node, erlang, whereis, [Name])

@@ -72,7 +72,7 @@ utf8_error_bodies_test_() ->
 %% by an upstream service, not by us. Rendering it whole turns a small
 %% malformed request into an arbitrarily large 400 body and log line.
 %% `bondy_connect_error:format_term/1` caps it; a bare `io_lib:format("~p", ...)` at
-%% the call site does not, which is what these modules used to do.
+%% the call site does not.
 body_is_bounded() ->
     Expr = <<"{{action.result}}">>,
     Big = binary:copy(<<"A">>, 200_000),
@@ -158,17 +158,12 @@ caught(Fun) ->
         throw:T -> T
     end.
 
-%% Encodability alone is a weak oracle for `rest_handler`, which already
-%% survived `json:encode/1` before this was fixed — but only by accident.
-%% `bondy_connect_error:to_binary/1` gates on `is_utf8/1` and falls back to rendering
-%% the whole message with `~p` when it fails, so a latin-1 message came out
-%% escaped end-to-end and mojibake'd:
-%%
-%%   <<"<<\"...with value '<<\\\"cafÃ©\\\">>'\">>">>
-%%
-%% i.e. double-wrapped in `<<" ">>` and with `é` shown as `Ã©`. Building the
-%% message as UTF-8 in the first place keeps that fallback from firing, so
-%% these assertions are what actually pin the `rest_handler` change.
+%% Encodability alone is a weak oracle for `rest_handler`:
+%% `bondy_connect_error:to_binary/1` gates on UTF-8 validity and falls back to
+%% rendering the whole message with `~p` when that fails, so a latin-1 message
+%% comes out escaped end-to-end and mojibake'd (double-wrapped in `<<" ">>`,
+%% `é` shown as `Ã©`). Building the message as UTF-8 in the first place keeps
+%% that fallback from firing; these assertions pin that.
 message_is_readable() ->
     Expr = <<"{{action.result}}">>,
     Value = <<"caf", 233>>,

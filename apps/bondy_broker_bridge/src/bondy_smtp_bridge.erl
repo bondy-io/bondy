@@ -8,11 +8,10 @@
 -moduledoc """
 Bridge implementation that sends email through `bondy_mail`.
 
-Thin by construction: a `mops`-expanded action becomes a send request and is
-handed to `bondy_mail:send_async/3`. No transport, no MIME, no retry, no
-authority logic -- all of that lives one layer down, in the module the
-`bondy.mail.*` API also passes through, so the two surfaces cannot drift apart
-on what is allowed.
+Thin by design: a `mops`-expanded action becomes a send request and is handed
+to `bondy_mail:send_async/3`. No transport, no MIME, no retry, no authority
+logic -- all of that lives one layer down, in the module the `bondy.mail.*` API
+also passes through, so the two surfaces share one rule on what is allowed.
 
 ## Why `send_async/2` and not `send/2`
 
@@ -214,11 +213,10 @@ terminate(_Reason, _State) ->
     ok.
 
 -doc """
-Arity-1 form, kept for a manager that has not been updated.
+Arity-1 form.
 
-`bondy_broker_bridge` declares `terminate/2`; the manager called `terminate/1`
-for a long time, which meant `undef` at every shutdown. Both are exported until
-no caller is left.
+`bondy_broker_bridge` declares `terminate/2`, which the manager calls. This
+export remains for any other caller.
 """.
 terminate(_Reason) ->
     ok.

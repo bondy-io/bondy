@@ -479,15 +479,11 @@ list(RealmUri, Opts) ->
     %% The synthetic `?ANONYMOUS` group is not stored; it always heads the list.
     case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
         undefined ->
-            %% Whole-realm listing — streamed through a bounded keyset fold so
-            %% it never materialises the raw cell set.
-            %%
-            %% `global` because this branch's result is user-visible and has
-            %% always come back in groupname order; `bondy_relation:fold/4`
-            %% follows the relation's mode, so the default `partition` would
-            %% silently change that ordering. It costs one read per shard per
-            %% row — the price of the alphabetical listing, now paid where it
-            %% is asked for.
+            %% Whole-realm listing, streamed through a bounded keyset fold.
+            %% `global` because the result is user-visible in groupname order
+            %% and `bondy_relation:fold/4` follows the relation's mode, so the
+            %% default `partition` would change that ordering. It costs one
+            %% read per shard per row.
             {ok, Acc} = bondy_relation:fold(
                 relation(global),
                 RealmUri,
@@ -714,16 +710,11 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
 
 %% @private
 store(RealmUri, Name, Group, #{declarative := true}) ->
-    %% Declarative config apply: write WITHOUT firing the lifecycle event, and
-    %% IDEMPOTENTLY (a write only when the value changes). Re-reading the same
-    %% config file on every boot must not re-stamp the group cell with a fresh
-    %% HLC — that would diverge cross-node convergence. The op-based CRDT
-    %% + anti-entropy handle convergence, so no deterministic-version write is
-    %% needed.
-    %%
-    %% The RBAC invalidation is NOT a lifecycle side-effect and is therefore not
-    %% skipped here: `bondy_rbac:grant/4` invalidates on this path too. An
-    %% unchanged config reconciles to no write, so the common boot emits none.
+    %% Declarative config apply: write WITHOUT firing the lifecycle event,
+    %% and only when the value changes. Re-reading the same config on every
+    %% boot must not re-stamp the group cell with a fresh HLC. The RBAC
+    %% invalidation is not a lifecycle side-effect, so it runs here too; an
+    %% unchanged config reconciles to no write.
     invalidate_rbac_on(
         bondy_db:reconcile(table(), RealmUri, Name, Group), RealmUri
     );

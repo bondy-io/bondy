@@ -408,9 +408,7 @@ counter_inc_round_trip({_Topo, Db, _Sup, _LDir, _PDir}) ->
     %% Exercise `bondy_db:counter_inc/4` end-to-end against a
     %% leveled-backed `pn_counter` table. Multiple positive/negative
     %% increments must converge to the sum (per-Origin Seq dedup is
-    %% native to the WAL key — duplicate sends are no-ops). Closes
-    %% out the PR-3 carry-over that requested a write-then-read e2e
-    %% for `counter_inc/4` (§4.7).
+    %% native to the WAL key — duplicate sends are no-ops).
     {ok, T} = bondy_db:open_table(Db, counters, #{
         fold_module => bondy_oplog_crdt_pn_counter
     }),

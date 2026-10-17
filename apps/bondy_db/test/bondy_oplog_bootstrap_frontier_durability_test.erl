@@ -88,7 +88,7 @@ adopted_frontier_is_durable_at_bootstrap() ->
         ),
 
         %% 2. Durable on disk NOW, before any `terminate/2`. Read the actual
-        %%    checkpoint files (what `boot_frontier/2` reads on restart),
+        %%    checkpoint files (what the instance reads on restart),
         %%    not the registry cache: a freshly-bootstrapped shard that has
         %%    neither compacted nor been cleanly stopped writes none unless
         %%    the bootstrap itself does.
@@ -103,8 +103,8 @@ adopted_frontier_is_durable_at_bootstrap() ->
                     %% The payload also carries the own-origin MINTED seq
                     %% (`bondy_oplog_instance:minted_from_checkpoint/1`) and
                     %% the frontier's provenance stamp
-                    %% (`checkpoint_provenance/1`), neither of which this case
-                    %% says anything about.
+                    %% (`bondy_oplog_instance:checkpoint_provenance/1`),
+                    %% neither of which this case says anything about.
                     {checkpoint_v1, _W,
                         {projection_managed, frontier, VV, _Minted, _Prov}} ->
                         ?assertEqual(

@@ -133,7 +133,7 @@ new_style_block_produces_inventory(Config) ->
     ).
 
 omitted_carrier_key_is_absent(Config) ->
-    %% The regression guard for the default-free rule. If any
+    %% The guard for the default-free rule. If any
     %% `listeners.$name.*' mapping gains a `{default, ...}',
     %% `cuttlefish_generator:add_fuzzy_default/4' materialises it for EVERY
     %% listener name mentioned under the prefix, the key becomes
@@ -181,19 +181,14 @@ unset_option_block_is_absent(Config) ->
     ).
 
 ip_is_parsed_at_spec_top_level(Config) ->
-    %% `bondy_listener_config:resolve_ip/3' reads `ip' from the spec and its own
-    %% fallback is a tuple, and the value reaches ranch's `socket_opts' through
+    %% `bondy_listener_config' reads `ip' from the spec and its own fallback
+    %% is a tuple, and the value reaches ranch's `socket_opts' through
     %% `bondy_config:listener_transport_opts/2', so no later step converts a
-    %% string.
-    %%
-    %% The address and `ip_version' AGREE here on purpose. They land at
-    %% different paths, which is what this case pins, but they are not
-    %% independent settings: `bondy_config:normalise_socket_opts/1' derives one
-    %% socket family from the pair and an address decides its own family, so a
-    %% v4 address under `ip_version = 6' would render cleanly and then bind as
-    %% inet, silently ignoring the version an operator wrote.
-    %% `explicit_ipv6_binds_without_an_ip_version' in `bondy_listener_SUITE'
-    %% binds that precedence over a real socket.
+    %% string. The address and `ip_version' AGREE here on purpose: they land at
+    %% different paths, which is what this case pins, but `bondy_config'
+    %% derives one socket family from the pair and an address decides its own
+    %% family. `explicit_ipv6_binds_without_an_ip_version' in
+    %% `bondy_listener_SUITE' binds that precedence over a real socket.
     [{pub, Spec}] = inventory(Config, [
         "listeners.pub.transport = tcp\n",
         "listeners.pub.protocol = wamp_rawsocket\n",
@@ -270,7 +265,7 @@ widened_datatypes_accept_raw_socket_values(Config) ->
     ).
 
 partial_cors_and_security_header_blocks_are_not_completed(Config) ->
-    %% Both consumers now merge their own `default_config/0' UNDER whatever
+    %% Both consumers merge their own `default_config/0' UNDER whatever
     %% arrives (`bondy_http_cors:config_from_req/1',
     %% `bondy_http_security_headers:init/1'), so restating the values here is a
     %% second copy of a security-relevant policy — two places that must agree
@@ -324,15 +319,13 @@ partial_cors_and_security_header_blocks_are_not_completed(Config) ->
     ?assertNot(maps:is_key(security_headers, NSpec)).
 
 a_rendered_partial_block_does_not_defeat_the_hsts_default(Config) ->
-    %% Spans the render and the transport/protocol defaults, because that is
-    %% where the completion did its damage and neither half shows it alone.
-    %%
+    %% Spans the render and the transport/protocol defaults, because neither
+    %% half shows the property alone.
     %% `bondy_listener_config:option_defaults(tls, http)` supplies HSTS, and
-    %% `with_option_defaults/1` merges it UNDER the operator's block. While the
-    %% translation completed that block, a TLS listener stating one unrelated
-    %% header also arrived carrying `hsts => undefined` — an operator value,
-    %% which wins — so stating `frame_options` silently switched HSTS off on
-    %% exactly the listeners it exists for.
+    %% `with_option_defaults/1` merges it UNDER the operator's block. A
+    %% translation that completed the block with `hsts => undefined` — an
+    %% operator value, which wins — would switch HSTS off on exactly the
+    %% listeners it exists for whenever one unrelated header is stated.
     [{pub, Spec}] = inventory(Config, [
         "listeners.pub.transport = tls\n",
         "listeners.pub.protocol = http\n",
@@ -351,13 +344,9 @@ a_rendered_partial_block_does_not_defeat_the_hsts_default(Config) ->
     ).
 
 an_empty_security_header_value_is_a_syntax_error(Config) ->
-    %% Pins a fact about the operator surface, so that the empty-string clause
-    %% the deleted completion carried is not "restored" later as if an operator
-    %% could reach it.
-    %%
-    %% `bondy_http_security_headers:build_headers/1' drops an `undefined' member,
-    %% which is how a header is suppressed, and the completion turned its own
-    %% default of `""' into that `undefined'. An operator has no spelling for it.
+    %% Pins a fact about the operator surface: no `bondy.conf' spelling reaches
+    %% the `undefined' that `bondy_http_security_headers' drops to suppress a
+    %% header, so no translation may map an empty value to it.
     %%
     %% Asserted against `cuttlefish_conf:file/1' rather than through `render/2':
     %% the parser answers `{errorlist, _}' and `cuttlefish_generator:map/2' has no
@@ -462,8 +451,7 @@ no_listener_configured_renders_no_inventory_key(Config) ->
     %% A `bondy.conf' that names no listener must leave `bondy_router.listeners'
     %% ABSENT, not render an empty list: `bondy_listener_manager:init/0'
     %% distinguishes the two, and `[]' would start no listeners at all.
-    %%
-    %% This holds because the section is default-free.
+    %% This holds because the section is default-free:
     %% `cuttlefish_generator:apply_mappings/2' keeps a translation only when at
     %% least one of its mappings has a default or appears in the conf
     %% (:144-167), so with neither, `bondy_router.listeners' lands in
@@ -499,20 +487,15 @@ port_out_of_range_is_refused(Config) ->
     ?assertMatch({error, apply_translations, _}, Result).
 
 stream_and_http_integer_options_reject_non_positive_values(Config) ->
-    %% Each key below inherited a legacy `{validators, ["pos_integer"]}':
-    %% `acceptors_pool_size' and `backlog' from both `api_gateway.http.*' and
-    %% `wamp.tcp.*'; `ping.max_attempts' from `wamp.tcp.*' alone;
-    %% `websocket.ping.max_attempts' from `wamp.websocket.*'; and
-    %% `http.max_headers' from the 23-key `api_gateway.http.*' group that
-    %% gained the `http.' prefix. None of their datatypes admit an atom, so
-    %% checking the raw conf value cannot reject a legitimate default.
+    %% None of the datatypes of the keys below admit an atom, so checking the
+    %% raw conf value cannot reject a legitimate default.
     %%
-    %% `http.max_cookies' is the one that inherited nothing: cowlib's own type
-    %% for it is `non_neg_integer()', and zero there means every request
+    %% `http.max_cookies' is checked as a positive integer with the rest:
+    %% cowlib's
+    %% own type for it is `non_neg_integer()', and zero there means every
+    %% request
     %% carrying a Cookie header at all is answered with a 400 — which would
-    %% break the OIDC and CSRF flows on the listener. It is checked as a
-    %% positive integer with the rest rather than admitting a value whose only
-    %% effect is that outage.
+    %% break the OIDC and CSRF flows on the listener.
     Base = [
         "listeners.pub.transport = tcp\n",
         "listeners.pub.protocol = http\n",
@@ -577,10 +560,10 @@ linger_timeout_rejects_below_minus_one(Config) ->
     ?assertMatch({error, apply_translations, _}, Result).
 
 linger_timeout_is_in_seconds(Config) ->
-    %% `bondy_config:normalise_socket_opts/1' passes this value straight into
-    %% `{linger, {true, N}}', and `inet' documents that component as SECONDS
-    %% (`kernel/src/inet.erl:1124', OTP 28.5). The datatype was `{duration, ms}',
-    %% so `1s' rendered 1000 and asked the kernel for a 1000-SECOND blocking
+    %% `bondy_config' passes this value straight into `{linger, {true, N}}',
+    %% and `inet' documents that component as SECONDS
+    %% (`kernel/src/inet.erl:1124', OTP 28.5). A `{duration, ms}' datatype
+    %% would render `1s' as 1000 and ask the kernel for a 1000-SECOND blocking
     %% close. The assertion is `1'.
     Linger = fun(Value) ->
         [{raw, Spec}] = inventory(Config, [
@@ -603,7 +586,7 @@ linger_timeout_is_in_seconds(Config) ->
     %% "linger briefly", it is abort on close — discard the send buffer, send
     %% RST — so a `500ms' that floored to zero would silently turn a graceful
     %% close into a reset. `cuttlefish_duration:parse/2' uses
-    %% `cuttlefish_util:ceiling/1'; measured.
+    %% `cuttlefish_util:ceiling/1'.
     ?assertEqual(1, Linger("500ms")),
     ?assertEqual(1, Linger("1ms")),
     ?assertEqual(2, Linger("1500ms")),
@@ -617,9 +600,9 @@ linger_timeout_is_in_seconds(Config) ->
     ?assertEqual(-1, Linger("-1")).
 
 a_security_header_can_be_switched_off_on_its_own(Config) ->
-    %% `security_headers.enabled = off' is all-or-nothing, so without a per-header
-    %% value meaning "off" there was no way to keep two headers and drop the
-    %% third. It matters most for `hsts', which a TLS listener now sends by
+    %% `security_headers.enabled = off' is all-or-nothing, so a per-header
+    %% value meaning "off" is the only way to keep two headers and drop the
+    %% third. It matters most for `hsts', which a TLS listener sends by
     %% default.
     [{pub, Spec}] = inventory(Config, [
         "listeners.pub.transport = tls\n",

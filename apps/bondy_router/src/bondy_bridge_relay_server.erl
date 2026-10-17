@@ -255,9 +255,6 @@ connecting(state_timeout, connection_setup, State) ->
         {active, once}
     ],
 
-    %% If Transport == ssl, upgrades a gen_tcp, or equivalent socket to an SSL
-    %% socket by performing the TLS server-side handshake, returning a TLS
-    %% socket.
     ok = Transport:setopts(Socket, SocketOpts),
 
     ok = logger:set_process_metadata(#{
@@ -995,15 +992,10 @@ table_cells(?BONDY_DB_REALM_TAB = TableName, RealmUri) ->
     Table = sync_table(TableName),
     case bondy_db:read(Table, <<>>, RealmUri) of
         {ok, {_Stored, Hlc}} ->
-            %% The stored identity cell has ALL key material stripped — the
-            %% keys live in the separate `bondy_realm_keys` cell, which is NOT
-            %% in ?SYNC_TABLES. Reading the raw identity cell here would ship a
-            %% key-LESS realm, so a bridge client could not verify tokens the
-            %% server realm signs. Merge the keys back via `bondy_realm:fetch/1`
-            %% (it reads the identity cell + the keys cell), then strip only the
-            %% PRIVATE keys for the wire (public keys are preserved, per the
-            %% realm-key model). The Hlc is the identity cell's, carrying the
-            %% realm record's LWW timestamp.
+            %% The stored identity cell carries no key material; the keys live
+            %% in the `bondy_realm_keys` cell, which is NOT in ?SYNC_TABLES.
+            %% `bondy_realm:fetch/1` merges the keys back, and only the PRIVATE
+            %% keys are stripped for the wire. The Hlc is the identity cell's.
             Realm = bondy_realm:fetch(RealmUri),
             Value = bondy_realm:strip_private_keys(Realm),
             [{TableName, <<>>, RealmUri, Value, Hlc}];
@@ -1060,7 +1052,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
     Retry = bondy_connect_retry:init(
         ping_timeout,
         #{
-            % disable, use max_retries only
+            %% disable, use max_retries only
             deadline => 0,
             interval => Timeout,
             max_retries => Attempts,

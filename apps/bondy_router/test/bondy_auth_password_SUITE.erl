@@ -55,7 +55,7 @@ all() ->
 
         multiple_source_cidrs,
 
-        %% CP-for-security (§9.8) — the AE fence refuses non-bearer methods too
+        %% The AE fence refuses non-bearer methods too
         aae_fence_refuses_password_when_stale
     ].
 
@@ -374,9 +374,9 @@ user2_allowed_within_cidr(Config) ->
     ).
 
 aae_fence_refuses_password_when_stale(Config) ->
-    %% §9.8: the AE freshness fence lives in the common `bondy_auth:authenticate/4`
+    %% The AE freshness fence lives in the common `bondy_auth:authenticate/4`
     %% path, so a stale/isolated node refuses EVERY method — not just the
-    %% bearer-token path. Proven here for password auth (a non-oauth2 method).
+    %% bearer-token path. This case covers password auth (a non-oauth2 method).
     %%
     %% The refusal is conditional on clustering being enabled: with clustering
     %% disabled there is no peer to lag and the node authenticates (asserted

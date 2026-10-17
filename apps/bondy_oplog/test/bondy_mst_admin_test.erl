@@ -177,7 +177,8 @@ verify_detects_hash_mismatch() ->
         {ok, _} = bondy_mst_admin:backup(Src, Dst),
         Target = filename:join(Dst, "a.bin"),
         ok = file:write_file(Target, <<"tampered">>),
-        %% Same byte size 5 -> 8 actually different. Force matched size.
+        %% `HELLO` has the original's byte size (5), so `verify/1` must
+        %% detect the tamper by hash, not by size.
         ok = file:write_file(Target, <<"HELLO">>),
         ?assertMatch(
             {error, {file, <<"a.bin">>, hash_mismatch}},

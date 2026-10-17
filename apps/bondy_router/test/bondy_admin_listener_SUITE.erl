@@ -87,28 +87,13 @@ admin_api_is_absent_from_the_public_listener(_Config) ->
     ?assertEqual(404, Status).
 
 stored_specs_are_absent_from_the_admin_listeners(_Config) ->
-    %% The other direction of the split, and the one the previous case cannot
-    %% cover: a listener declaring `admin_api` must NOT serve the specifications
-    %% in storage. This is what keeps a customer's API specification off the
-    %% listener that administers realms, users and grants.
-    %%
-    %% TWO independent mechanisms produce that outcome, and the weaker one hides
-    %% the stronger one, so both are pinned separately:
-    %%
-    %%   1. `bondy_http_gateway:rebuild_dispatch_tables/0` recompiles only
-    %%      listeners declaring `api_gateway`, so a spec stored at runtime never
-    %%      reaches an admin listener's table at all.
-    %%   2. A listener that does not declare `api_gateway` has no `api_gateway`
-    %%      CARRIER, so `bondy_http_services:dispatch/1` never runs the clause
-    %%      that asks the gateway for stored routes — they are absent even when
-    %%      the table IS rebuilt, which is what happens on every listener start.
-    %%
-    %% Asserting only over HTTP tests (1) and leaves (2) unfalsified: with (2)
-    %% defeated the admin listener still answers 404, because its table was
-    %% compiled before this suite stored anything. Verified when (2) was a
-    %% `services` membership test inside `routes/3` — removing that test left
-    %% every case green. Since the carrier split it is not a test to remove:
-    %% `resolve_carriers/3` would have to produce a carrier no service named.
+    %% The other direction of the split: a listener declaring `admin_api` must
+    %% NOT serve the specifications in storage. Two mechanisms produce that:
+    %% `bondy_http_gateway:rebuild_dispatch_tables/0` recompiles only
+    %% `api_gateway` listeners, and a listener without an `api_gateway` carrier
+    %% never asks the gateway for stored routes. The HTTP assertion alone tests
+    %% only the first, because the admin table predates the stored spec; the
+    %% recompile below falsifies the second.
     {ok, Public, _, _} = get_path(?PUBLIC, ?SPEC_PATH),
     ?assertNotEqual(404, Public),
 
@@ -387,12 +372,8 @@ load_stored_spec() ->
 %% Routed AND served. Not 404 means the route exists; not 5xx means the handler
 %% ran to completion. 200, 401 and 403 all satisfy this, and which one is
 %% returned depends on authentication, which this suite does not exercise.
-%%
-%% The 5xx half is not decoration. An HTTP listener with no `proxy_protocol`
-%% option block — `admin_local` has none — made
-%% `bondy_http_proxy_protocol:source_ip/1` fail with `function_clause` on every
-%% request reaching `bondy_http_gateway_rest_handler:init/2`, which is a 500 on
-%% a route that exists and which a not-404 assertion passes.
+%% A handler crash is a 500 on a route that exists, which a not-404 assertion
+%% alone passes.
 assert_routed(Status) ->
     ct:pal("status ~p", [Status]),
     ?assertNotEqual(404, Status),
@@ -402,10 +383,10 @@ assert_routed(Status) ->
 `/ready` answers 503 while an alarm declaring `affects_ready` is raised, and
 204 once it clears.
 
-This is the only hop between `bondy_router_app:is_ready/0` and a load balancer, and it
-was the one leg of the readiness path with no coverage: `bondy_router_app_readiness_test`
-drives the real `alarm_handler` manager and the published `atomics` cell, but
-stops at the boolean. The mapping below it — true to 204, false to 503 — is
+This is the only hop between `bondy_router_app:is_ready/0` and a load balancer.
+`bondy_router_app_readiness_test` drives the real `alarm_handler` manager and
+the published `atomics` cell, but stops at the boolean. The mapping below it —
+true to 204, false to 503 — is
 four lines with one branch, and inverting them would take every node out of
 rotation permanently or keep every failed node in it.
 

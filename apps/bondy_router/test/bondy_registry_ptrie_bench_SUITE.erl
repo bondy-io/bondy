@@ -18,12 +18,6 @@ Each case exercises one dimension of the design:
 
 Output is `ct:pal` lines with timing summaries. The suite does not assert
 on absolute numbers — thresholds would be flaky on varied hardware.
-
-Historical context: during the ART→ptrie migration this suite ran
-side-by-side against `art`, which Bondy used for prefix/wildcard matches
-via a gen_server (`bondy_registry_partition:execute/4`). The ART
-comparison code was deleted once ptrie shipped; see the final numbers
-captured in `_design/PATTERN_MATCHING_DESIGN_v2.md`.
 """.
 
 -include_lib("common_test/include/ct.hrl").

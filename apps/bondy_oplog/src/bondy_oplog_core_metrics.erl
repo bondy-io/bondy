@@ -395,17 +395,12 @@ subscriber_count(NS) ->
 
 %% @private
 %% PRIMARY shards only, because that is the set the auth freshness fence
-%% evaluates: `bondy_auth` -> `bondy_db:ensure_fresh/2` ->
-%% `bondy_oplog_core:ensure_fresh/2`, which iterates
-%% `bondy_oplog_core_registry:primary_shards_for/1`.
-%%
-%% A secondary index shard is not a freshness participant and reporting one
-%% here is a category error, not a worse number: only `{NS, primary, Shard}`
-%% is ever an `ae_target` (`bondy_db:start_or_join_shard_instance/…`), so
-%% nothing bumps a secondary's atomic and its "lag" is just time since boot.
-%% Nothing is lost by excluding it — a secondary index is written from the
-%% same cell apply as its primary (`dispatch_index_ops/4`), so it carries no
-%% freshness independent of the primary shard it rides on.
+%% evaluates (`bondy_oplog_core:ensure_fresh/2` iterates
+%% `bondy_oplog_core_registry:primary_shards_for/1`). A secondary index shard
+%% is not a freshness participant: only `{NS, primary, Shard}` is ever an
+%% `ae_target`, so nothing bumps a secondary's atomic and its "lag" is just
+%% time since boot. A secondary index is written from the same cell apply as
+%% its primary, so it carries no freshness independent of that primary.
 freshness_lag_max_ms(NS, NowMs) ->
     case bondy_oplog_core_registry:primary_shards_for(NS) of
         [] ->

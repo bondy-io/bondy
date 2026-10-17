@@ -17,13 +17,9 @@
 -ifndef(BONDY_OPLOG_HRL).
 -define(BONDY_OPLOG_HRL, true).
 
-%% Rows a range read returns when the caller passes no `limit`. THE single
-%% definition of that default: the substrate's `range/5` and `range_all/5`,
-%% both projection adapters' `range/5`, and `bondy_db`'s stale-index
-%% fallback all resolve to it. It was previously a literal repeated at each
-%% of those five sites, with only a comment recording that they were meant
-%% to agree. A default, not a bound — every range API takes an explicit
-%% `limit`, and a caller that passes one is unaffected.
+%% Rows a range read returns when the caller passes no `limit`.
+%% `bondy_oplog_core` and both projection adapters resolve to it. A default,
+%% not a bound: every range API takes an explicit `limit`.
 -define(DEFAULT_RANGE_LIMIT, 1000).
 
 %% Origin identifier: opaque binary. 16 bytes is the recommended default
@@ -40,7 +36,7 @@
 %% A *peer id* identifies a remote replica to the library. The library
 %% treats it as opaque — it is the consumer's choice (a node atom, a
 %% binary URL, a `{ip, port}` tuple, etc.). The transport behaviour
-%% (Stage 4) interprets peer ids; the peer-state ETS keys on them.
+%% interprets peer ids; the peer-state ETS keys on them.
 -type peer_id() :: term().
 
 %% The HLC pack layout (`?BONDY_HLC_LOGICAL_*`) comes from the clock's own
@@ -73,15 +69,13 @@
     signature :: undefined | binary()
 }).
 
-%% Overlay row shape (`ordered_set`, public, per-instance). Keyed by
-%% the event key; carries the encoded value (so reads can return
-%% without going back to the WAL), the event's HLC for CAS-eviction,
-%% an origin tag for future eager-push support, and the process alias
-%% (`erlang:alias/0`) of the appender awaiting this event's apply — or
-%% `undefined`. Whoever evicts the row answers the alias:
-%% `{Alias, ok}` once the event is installed, `{Alias, {error,
-%% rejected}}` when the applier refused it. Tuple positions are
-%% stable; they appear in match-specs.
+%% Overlay row shape (`ordered_set`, public, per-instance), keyed by the
+%% event key. The value slot carries the encoded value so reads need not
+%% go back to the WAL; the HLC slot serves CAS-eviction; the notify slot
+%% holds the process alias (`erlang:alias/0`) of the appender awaiting the
+%% apply, or `undefined`. Whoever evicts the row answers the alias:
+%% `{Alias, ok}` once the event is installed, `{Alias, {error, rejected}}`
+%% when the applier refused it. Tuple positions appear in match-specs.
 -define(OVERLAY_KEY_POS, 1).
 -define(OVERLAY_VALUE_POS, 2).
 -define(OVERLAY_HLC_POS, 3).

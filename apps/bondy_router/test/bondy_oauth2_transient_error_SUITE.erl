@@ -7,8 +7,8 @@
 %% write, or the AE freshness fence refusing to authenticate — is reported to
 %% the OAuth2 client as `service_unavailable` / `temporarily_unavailable`
 %% (503 + `retry-after`), never as `internal_error` remapped to 400 nor as
-%% `invalid_client` / `invalid_grant`. Every case here asserts the status the
-%% old code produced is NOT what the client gets.
+%% `invalid_client` / `invalid_grant`. Every case here asserts the wrong status
+%% is NOT what the client gets.
 %%
 %% The store refusal is injected at the facade (`bondy_db:apply/4`, passthrough
 %% for every table but the token table) rather than by saturating a shard: the
@@ -186,9 +186,9 @@ revoke_refused_write_is_service_unavailable(_Config) ->
 
 fence_replies_503_not_401(_Config) ->
     %% The AE freshness fence lives in `bondy_auth:authenticate/4` and reaches
-    %% the handler as a thrown `temporarily_unavailable` from
-    %% `do_authenticate/3`. The generic catch used to answer 401
-    %% `invalid_client`; the client's credentials were never the problem.
+    %% the handler as a thrown `temporarily_unavailable`. A 401
+    %% `invalid_client` would be wrong: the client's credentials are not the
+    %% problem.
     ok = meck:new(bondy_auth, [passthrough, no_link]),
     ok = meck:expect(bondy_auth, authenticate, fun(_M, _S, _R, _C) ->
         {error, temporarily_unavailable}
@@ -246,7 +246,7 @@ token_endpoint_replies_503_under_memory_pressure(_Config) ->
     %% `retry-after' as every transient refusal and a message naming the
     %% condition. The state is the real sampler's
     %% (`bondy_ct:with_memory_high/1'), not a forced status. Back to normal,
-    %% the same request is a 200 with a token, and now auth ran.
+    %% the same request is a 200 with a token, and auth ran.
     ok = meck:new(bondy_auth, [passthrough, no_link]),
     Body = <<
         "grant_type=password&username=owner_1&password=aWe11KeptSecret"
@@ -332,7 +332,7 @@ token_endpoint_gate_disabled_admits_when_busy(_Config) ->
 crafted_refresh_string_with_nul_is_refused_not_crashed(_Config) ->
     %% A refresh string is client input that becomes a store key (the
     %% legacy-pointer lookup). One carrying the key codec's separator byte
-    %% used to be decoded as a column by the table's `leading_col` routing
+    %% must not be decoded as a column by the table's `leading_col` routing
     %% and crash the request with `function_clause`; it is a string this
     %% module never minted, and is answered like any other unknown token.
     Crafted = <<"not-a-token", 0, "x">>,
@@ -401,15 +401,12 @@ client_request(ClientId, Password) ->
 %% @private
 %% `POST /token` through the handler's own callbacks, with this process
 %% playing cowboy's stream: the handler runs in a spawned process whose
-%% request names this one as the connection, so the body read
-%% (`cowboy_req:read_urlencoded_body/1` casts `read_body` to the
-%% connection and waits for `request_body`) and an error reply
-%% (`cowboy_req:reply/4` casts `response`) both arrive here as the messages
-%% cowboy would exchange. A refusal at `is_authorized/2` stops the request
-%% before any body is read, so the body is served only if asked for. A
-%% successful grant is `{true, Req, St}` with the token in `Req`'s response
-%% body — cowboy_rest, not the handler, sends that 200 — so it is read off
-%% the returned request. Returns `{Status, Headers, Body}` either way.
+%% request names this one as the connection, so the body read and an error
+%% reply arrive here as the `read_body` and `response` messages cowboy would
+%% exchange. A refusal at `is_authorized/2` stops the request before any body
+%% is read. A successful grant is `{true, Req, St}` with the token in `Req`'s
+%% response body, read off the returned request. Returns `{Status, Headers,
+%% Body}`.
 post_token(ClientId, Password, Body) ->
     Req0 = maps:merge(client_request(ClientId, Password), #{
         path => <<"/token">>,

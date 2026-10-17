@@ -274,23 +274,14 @@ with_cell_state(Adapter, Handle, Kernel, Bucket, Key, NotFound, Fun) ->
 %% REAP — dead-origin causal-context GC
 %% =============================================================================
 
-%% A tier_2 CRDT carries one version-vector entry per origin that ever
-%% wrote a cell; a decommissioned node leaves those entries behind forever
-%% — the one cost that grows with cluster *churn*, not with live data.
-%% `reap/4` drops only the value-preserving (causal-history-only) entries
-%% of the supplied retired origins, so the cell's *value* is unchanged.
-%%
-%% The caller owns the causal-context stamp-site guard
-%% (`bondy_oplog_ctx_guard`): a reaped cell's context legitimately shrinks,
-%% which `bondy_oplog_ctx_guard:stamp/5` would otherwise flag as a
-%% regression, so `reap/4` returns the guard with every reaped cell
-%% co-evicted (`bondy_oplog_ctx_guard:coevict/2`) — the caller stores the
-%% returned guard back into its own state.
-%%
-%% A reap rewrites the projection checkpoint, not the MST, so it is undone
-%% by a subsequent **live re-bootstrap** (which re-folds the full MST) and
-%% skips **fully-compacted** cells — re-run it after a re-bootstrap. Both
-%% are bounded-by-churn, not convergence bugs.
+%% A tier_2 CRDT carries one version-vector entry per origin that ever wrote
+%% a cell; a decommissioned node leaves those entries behind, the one cost
+%% that grows with cluster churn rather than live data. `reap/4` drops only
+%% the causal-history entries of the supplied retired origins, so the cell's
+%% value is unchanged. The caller owns the `bondy_oplog_ctx_guard`: a reaped
+%% context legitimately shrinks, so `reap/4` returns the guard with every
+%% reaped cell co-evicted (`bondy_oplog_ctx_guard:coevict/2`). A reap rewrites
+%% the projection, not the MST, so a live re-bootstrap undoes it: re-run it.
 
 -doc """
 Reaps `RetiredOrigins`'s value-preserving causal-context entries from
@@ -469,34 +460,14 @@ reap_report(Supported, Scanned, OriginsReaped) ->
 %% STABILIZE — causally-stable CRDT cell reclamation sweep
 %% =============================================================================
 
-%% Reads each cell's CURRENT projection state — not the event history —
-%% and asks the fold's `stabilize/2` callback what survives once every op
-%% that could ever compare against it is causally stable (below
-%% `StableHlc`): `keep`, `discard` (the cell is dead — e.g. a disabled
-%% flag, an emptied group — and physically removed), or `{keep, Reduced}`
-%% (causal-stabilization reduction, e.g. a struct field's per-origin
-%% sub-op runs folded into synthetic ops — persisted as a
-%% value-preserving frame rewrite, see `apply_stabilize/10`). Folds that
-%% declare no `stabilize/2` are left untouched (`not_supported`).
-%%
-%% Overlay fence: a cell can only be *deleted* from the projection once
-%% its overlay (the WAL-appended, not-yet-installed events pending
-%% promotion into the MST) holds nothing at all for that key — reading an
-%% ABSENT cell restarts overlay replay from HLC 0, so removing a cell
-%% widens the replay window; a pending event older than the state just
-%% judged stale would replay and resurrect a value. `Ctx`'s `shard_key`
-%% resolves the shard's overlay table exactly as the applier's own
-%% founding ctx does — the fence is instance-wide, not per-registered-table.
-%%
-%% Representation divergence: a `{keep, Reduced}` rewrite (like a reap)
-%% makes the projection FRAME a local representation — two replicas that
-%% reduce at different stability points hold different (semantically
-%% equal) state bytes for the same cell. This is sound only while frames
-%% never feed hash-compared state: AAE ships EVENTS (MST pages), the
-%% convergence oracle is the applied-frontier VV, and catalogue bootstrap
-%% replaces frames wholesale. Anything that ever starts hashing or
-%% diffing projection frames across replicas must first re-derive them
-%% canonically (e.g. re-fold from events).
+%% Reads each cell's CURRENT projection state and asks the fold's `stabilize/2`
+%% callback what survives once every op that could compare against it is
+%% causally stable (below `StableHlc`): `keep`, `discard` (the cell is removed)
+%% or `{keep, Reduced}` (a value-preserving rewrite, `apply_stabilize/10`).
+%% Overlay fence: a cell is deleted only when its overlay holds nothing for the
+%% key, since reading an absent cell restarts overlay replay from HLC 0 and a
+%% pending older event would resurrect a value. A reduction makes the frame a
+%% local representation, sound only while no path hash-compares frames.
 
 -doc """
 One bounded sweep pass over `Source`'s member tables' cells, judging

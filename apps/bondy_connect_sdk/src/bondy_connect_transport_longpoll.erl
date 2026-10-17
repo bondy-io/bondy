@@ -504,9 +504,7 @@ request(post, Path, Body, Timeout, #state{conn_pid = ConnPid}) ->
     %%
     %% NOT `gun:await_up/2' first. That waits for a `gun_up' MESSAGE, and gun
     %% sends one per connect — already consumed by `connect/2' — so on a
-    %% healthy, already-up connection it blocks until the timeout instead of
-    %% returning. MEASURED: every case in the long-poll suite failed with
-    %% `{connection_error, timeout}' when this was `await_up'.
+    %% healthy, already-up connection it blocks until the timeout.
     case do_request(ConnPid, Path, Body, Timeout) of
         {error, Reason} = Error ->
             case transient(Reason) of
@@ -546,28 +544,23 @@ do_request(ConnPid, Path, Body, Timeout) ->
 
 %% @private
 %% `longpoll' is plaintext, `longpolls' is TLS — the same `scheme' the
-%% connection passes for `ws'/`wss', and the same shared secure-by-default TLS
-%% set (`m:bondy_connect_tls'). Keyed on the SCHEME rather than on whether a
-%% `tls' block is present, because `bondy_connect_config:validate/1' fills that
-%% block in for every connection: keying on it would send a plaintext endpoint
-%% into a TLS handshake, which the server answers in cleartext and the client
-%% reports as `{unsupported_record_type, 72}' — the `H' of `HTTP/1.1'.
-%%
-%% `protocols => [http]' pins HTTP/1.1. This transport is built on request
-%% semantics the poller relies on, and it is not worth having its behaviour
-%% depend on whether ALPN happened to negotiate h2.
+%% connection passes for `ws'/`wss', and the same shared TLS set
+%% (`m:bondy_connect_tls'). Keyed on the SCHEME, not on whether a `tls' block
+%% is present: `bondy_connect_config:validate/1' fills that block in for every
+%% connection, so keying on it would send a plaintext endpoint into a TLS
+%% handshake. `protocols => [http]' pins HTTP/1.1: the poller relies on
+%% request semantics, independent of whether ALPN negotiates h2.
 gun_opts(Host, Opts) ->
     Base = #{
         protocols => [http],
         %% NOT `retry => 0' as the socket transports use. The send connection is
         %% SUPPOSED to sit idle — a long-poll client sends only when it has
         %% something to say — and the listener closes an idle HTTP connection
-        %% after `listeners.$name.http.idle_timeout' (15s by default). With no
-        %% retry, that ordinary event took the whole session down; MEASURED by
-        %% `longpoll_survives_server_poll_timeout', which idles 35s and failed
-        %% with `connection_closed' before this. gun's connection PROCESS
-        %% survives a reconnect, so the pid held in `#state{}' stays valid,
-        %% which matters because `send/2' cannot update transport state.
+        %% after `listeners.$name.http.idle_timeout' (15s by default); with no
+        %% retry that ordinary event takes the whole session down
+        %% (`longpoll_survives_server_poll_timeout' idles 35s). gun's connection
+        %% PROCESS survives a reconnect, so the pid held in `#state{}' stays
+        %% valid, which matters because `send/2' cannot update transport state.
         retry => 5,
         retry_timeout => 250,
         http_opts => #{keepalive => infinity}

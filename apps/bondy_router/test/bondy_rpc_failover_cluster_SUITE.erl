@@ -108,9 +108,9 @@ dead_node_callee_is_skipped(Config) ->
     Before = erpc:call(N1, ?MODULE, do_probe_count, []),
     ok = erpc:call(N1, ?MODULE, do_call_seq, [Uri, Proc, ?POST_KILL_CALLS]),
 
-    %% Every one of them must land locally. Before the fix the rotation
-    %% would still hand half of them to the dead node, where they would be
-    %% lost and the caller would wait out its timeout.
+    %% Every one of them must land locally. A rotation that still hands half
+    %% of them to the dead node loses them, and the caller waits out its
+    %% timeout.
     ok = wait_count_at_least(
         N1, Before + ?POST_KILL_CALLS, "local callee after the kill"
     ),

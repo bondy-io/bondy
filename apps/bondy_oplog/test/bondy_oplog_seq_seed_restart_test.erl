@@ -353,9 +353,6 @@ checkpoint_records_the_minted_seq(Dir) ->
 %% Helpers
 %% =============================================================================
 
-%% This instance's checkpoint files. The tree is shared by every instance the
-%% case set opens under `Dir`, so filter by instance id — asserting over a
-%% sibling's checkpoint would fail on its unrelated origin.
 failed_datasync_does_not_remint_its_seq(Dir) ->
     InstId = mk_id(),
     NS = ns_of(InstId),
@@ -514,6 +511,9 @@ with_io_fault_lock(Body) ->
         infinity
     ).
 
+%% This instance's checkpoint files. The tree is shared by every instance the
+%% case set opens under `Dir`, so filter by instance id — asserting over a
+%% sibling's checkpoint would fail on its unrelated origin.
 checkpoint_files(Dir, InstId) ->
     Files = [
         F

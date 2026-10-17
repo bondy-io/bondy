@@ -119,8 +119,9 @@ collect_bondy_metrics_families(CB) ->
     ).
 
 %% @private
-%% The type is fixed per name at first touch (`bondy_metrics:operate/3`),
-%% so inspecting the first row is authoritative for the family.
+%% `bondy_metrics` fixes a family's type at first touch and answers
+%% `{error, {wrong_type, _}}` to any other type (see its `counter/1`,
+%% `gauge/1` and `histogram/1` docs), so the first row's type is the family's.
 emit_family(CB, Name, Help, [#{type := histogram} | _] = Rows) ->
     Specs = [
         {
@@ -148,8 +149,8 @@ label_pairs(Label) when is_map(Label) ->
 %% Converts a sparse ascending `[{BucketIndex, Count}]` snapshot into the
 %% Prometheus cumulative form `[{UpperBound, CumulativeCount}]`,
 %% terminated with the mandatory `+Inf` bucket. Bounds come from the
-%% log-linear layout's inclusive upper bounds (`hist_bucket_high/1`),
-%% which is exactly the `le` semantic.
+%% log-linear layout's inclusive upper bounds
+%% (`bondy_metrics:hist_bucket_high/1`), which is exactly the `le` semantic.
 cumulative_buckets(#{count := Total, buckets := Sparse}) ->
     {Buckets, _} = lists:mapfoldl(
         fun({I, C}, Acc0) ->

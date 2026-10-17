@@ -6,11 +6,11 @@
 -module(bondy_mcp_audit).
 
 -moduledoc """
-Audit record construction and emission (design §14).
+Audit record construction and emission.
 
 One record per tool call, resource read, policy decision and upstream
 call, in the fixed v1 shape of `t/0`. Every key is always present
-(`undefined` when it does not apply): the record schema is the §14.2
+(`undefined` when it does not apply): the record schema is the
 forward-compatibility contract, so `agent`, `delegation`, `derivation`
 and `obligation` exist from the first release even though nothing
 populates them yet.
@@ -20,7 +20,7 @@ populates them yet.
 `new/2` builds a record at the call site. Argument and result payloads
 are handed in as `args_payload` / `result_payload` and NEVER stored: they
 are reduced to SHA-256 digests here, after the entry's redaction policy
-(§14.3) has removed its declared top-level fields — so a redacted field
+has removed its declared top-level fields — so a redacted field
 influences nothing that is captured, and a digest cannot be used to
 confirm a guessed low-entropy value of one. The record carries the policy
 that applied, inline.
@@ -35,7 +35,7 @@ acceptance.
 
 `record/2` constructs the record and emits it in the metadata of the
 telemetry event `[bondy, mcp, audit, record]` — the attachment point for
-an audit sink. This node persists nothing itself (MCP-D27): durable,
+an audit sink. This node persists nothing itself: durable,
 tamper-evident audit storage is Bondy Streams' job, and audit is planned
 as its first producer; until that sink attaches, records are observable
 to any attached telemetry handler and otherwise discarded.
@@ -52,9 +52,9 @@ failure is a policy this module does not impose.
         T == upstream_call)
 ).
 
-%% `upstream_call` is the client direction (§13): a projected procedure's
+%% `upstream_call` is the client direction: a projected procedure's
 %% outbound `tools/call` against an upstream MCP server, its `derivation`
-%% naming the shared service account the call rode (§13.1).
+%% naming the shared service account the call rode.
 -type type() :: tool_call | resource_read | policy_decision | upstream_call.
 -type status() ::
     success | tool_error | denied | internal_error | input_required.
@@ -145,7 +145,7 @@ new(Type, Fields) when ?IS_TYPE(Type) ->
         derivation => maps:get(derivation, Fields, undefined),
         obligation => maps:get(obligation, Fields, undefined),
         session_id => maps:get(session_id, Fields, undefined),
-        %% §11: the MRTR continuation id, shared by every audit record of
+        %% The MRTR continuation id, shared by every audit record of
         %% one logical multi-round-trip call — the initial `input_required`
         %% leg and each resume — and by nothing else. `undefined` on a
         %% single-round-trip record.

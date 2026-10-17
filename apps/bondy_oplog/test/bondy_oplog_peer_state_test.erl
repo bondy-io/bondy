@@ -8,8 +8,7 @@ setup() ->
     ok.
 
 cleanup(_) ->
-    %% Clear all state by forgetting every peer touched in this run.
-    %% Tests use unique peer ids so this is best-effort.
+    %% Tests use unique peer ids, so no peer state needs forgetting.
     ok.
 
 peer_state_test_() ->
@@ -190,11 +189,6 @@ touch_peer_refreshes_last_seen() ->
     sync(),
     ?assertEqual([P], bondy_oplog_peer_state:get_known_peers(I, Cutoff)).
 
-%% Helpers
-
-%% Force the gen_server's cast queue to drain by issuing a synchronous
-%% round-trip. (`info/0` is intentionally lock-free and does not enter
-%% the gen_server, so it cannot be used for this.)
 %% A completed round whose peer reported no frontier, or an empty one, advances
 %% the peer's recency, so the last-sync age stays truthful, but must NEVER
 %% count as confirmation; and once a frontier IS recorded, later empty reports
@@ -238,6 +232,11 @@ empty_report_refreshes_without_confirming() ->
         bondy_oplog_peer_state:confirmed_peer_states(I, [P])
     ).
 
+%% Helpers
+
+%% Force the gen_server's cast queue to drain by issuing a synchronous
+%% round-trip. (`info/0` is intentionally lock-free and does not enter
+%% the gen_server, so it cannot be used for this.)
 sync() ->
     bondy_oplog_peer_state:sync().
 

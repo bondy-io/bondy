@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% IDX-3 — secondary writer + dispatch (end-to-end).
+%% Secondary writer + dispatch (end-to-end).
 %%
 %% Drives the real path: `bondy_db:apply/4` → primary applier
 %% `compute_one_cell` term-diff → `bondy_oplog_secondary_writer` →
@@ -175,7 +175,7 @@ lww_index_range_after_writes({Db, _Sup, _Dir}) ->
     ),
     ok = bondy_db:close_table(T).
 
-%% Since IDX-4 the mandatory startup backfill freshens every secondary
+%% The mandatory startup backfill freshens every secondary
 %% shard at open, so a finite max_lag read of the (empty) index passes
 %% immediately — it is fresh, not "stale until first write". A subsequent
 %% write+flush surfaces the row, still fresh.

@@ -13,7 +13,7 @@
 
 -define(REALM, <<"com.example.reactor">>).
 -define(USER, <<"alice">>).
-%% G-1 realm-folded security_users cell key: <<Realm, 0, Username>>.
+%% Realm-folded security_users cell key: <<Realm, 0, Username>>.
 -define(USER_KEY, <<?REALM/binary, 0, ?USER/binary>>).
 %% bondy_realm global-band cell key on the folding main topology: <<0, Uri>>.
 -define(REALM_KEY, <<0, ?REALM/binary>>).
@@ -142,7 +142,7 @@ remote_set_does_not_tear_down_realm_test() ->
         meck:unload(bondy_realm)
     end.
 
-%% A remote grant change re-evaluates the realm's RBAC contexts in place (§9.5),
+%% A remote grant change re-evaluates the realm's RBAC contexts in place,
 %% for BOTH a grant (`set`) and a revoke (`clear`) — it never tears the session
 %% down (react_grant only invalidates; it does not call any close function).
 remote_grant_invalidates_realm_rbac_test() ->
@@ -285,18 +285,15 @@ unfold_member_key_test() ->
     ?assertEqual(?REALM, bondy_aae_reactor:unfold_member_key(?MEMBER_KEY)).
 
 %% =============================================================================
-%% REGISTRY PRESENCE REACTIONS (§9.6)
+%% REGISTRY PRESENCE REACTIONS
 %% =============================================================================
 
-%% `react_rib/3` is now a thin dispatcher: resolve `Type` from `Table` and
-%% delegate everything else — reading the cell's current converged value,
-%% self-vs-peer routing, and stub-store maintenance — to
-%% `bondy_registry_rib:on_remote_merge/2` (covered by
-%% `bondy_registry_rib_test.erl` and `bondy_aae_cluster_SUITE.erl`'s RIB
-%% cases). `Op` is irrelevant here — the per-field CRDT write path has no
-%% single op that represents "the current summary" the way the pre-migration
-%% whole-blob `lww_register` cell's `{set, V}` did, so `on_remote_merge/2`
-%% re-reads the cell instead — this test pins only the table→Type dispatch.
+%% `react_rib/3` is a thin dispatcher: it resolves `Type` from `Table` and
+%% delegates the rest to `bondy_registry_rib:on_remote_merge/2` (covered by
+%% `bondy_registry_rib_test` and the RIB cases of `bondy_aae_cluster_SUITE`).
+%% `Op` is irrelevant: the per-field CRDT write path has no single op that
+%% represents the current summary, so `on_remote_merge/2` re-reads the cell.
+%% This test pins only the table→Type dispatch.
 react_rib_dispatches_by_table_test() ->
     ok = meck:new(bondy_registry_rib, [passthrough]),
     ok = meck:expect(bondy_registry_rib, on_remote_merge, fun(_, _) -> ok end),
@@ -480,15 +477,13 @@ remote_group_invalidates_realm_rbac_test() ->
         meck:unload(bondy_session_manager)
     end.
 
-%% Every reaction above is only ever reached if BOTH ends are wired: the reactor
-%% must route the table, and the catalogue entry must publish its merges. Either
-%% half missing leaves a reaction that is dead code and still passes its own
-%% test — which is exactly how the inheritance edge went uninvalidated, the
-%% reactor having no `security_groups` subscription to route to.
-%%
-%% This is the reaction→flag direction. The flag→consumer direction is
-%% `bondy_rbac_SUITE:every_publishing_table_has_a_live_subscriber/1`, which
-%% needs a running dispatcher and covers consumers other than this reactor.
+%% Every reaction above is only reached if BOTH ends are wired: the reactor
+%% must route the table, and the catalogue entry must publish its merges.
+%% Either half missing leaves a reaction that is dead code and still passes
+%% its own test. This is the reaction→flag direction. The flag→consumer
+%% direction is
+%% `bondy_rbac_SUITE:every_publishing_table_has_a_live_subscriber/1`,
+%% which needs a running dispatcher and covers other consumers.
 reacted_tables_publish_their_merges_test() ->
     Reacted = bondy_aae_reactor:reacted_table_names(),
     ?assertNotEqual([], Reacted),

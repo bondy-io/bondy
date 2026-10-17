@@ -132,7 +132,7 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
         allow_null => false,
         datatype => binary,
         validator => fun
-            % Cowboy needs an atom
+            %% Cowboy needs an atom
             (<<"_">>) -> {ok, '_'};
             (Val) -> {ok, Val}
         end
@@ -537,43 +537,43 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
     <<"delete">> => #{
         alias => delete,
         required => false,
-        % To support mop expressions
+        %% To support mop expressions
         datatype => [binary, map]
     },
     <<"get">> => #{
         alias => get,
         required => false,
-        % To support mop expressions
+        %% To support mop expressions
         datatype => [binary, map]
     },
     <<"head">> => #{
         alias => head,
         required => false,
-        % To support mop expressions
+        %% To support mop expressions
         datatype => [binary, map]
     },
     <<"options">> => #{
         alias => options,
         required => false,
-        % To support mop expressions
+        %% To support mop expressions
         datatype => [binary, map]
     },
     <<"patch">> => #{
         alias => patch,
         required => false,
-        % To support mop expressions
+        %% To support mop expressions
         datatype => [binary, map]
     },
     <<"post">> => #{
         alias => post,
         required => false,
-        % To support mop expressions
+        %% To support mop expressions
         datatype => [binary, map]
     },
     <<"put">> => #{
         alias => put,
         required => false,
-        % To support mop expressions
+        %% To support mop expressions
         datatype => [binary, map]
     },
     <<"summary">> => #{
@@ -1185,7 +1185,7 @@ build_dispatch_table(L, RulesToAdd, OnMissingRealm) ->
     PMS = {function, collect, [?VAR(path), ?VAR(mod), ?VAR(state)]},
     Proj1 = {?VAR(scheme), ?VAR(host), {as, PMS, ?VAR(pms)}},
 
-    % [{scheme, host, [{path, mode, state}]}]
+    %% [{scheme, host, [{path, mode, state}]}]
     R2 = leap_relation:summarize(R1, Proj1, #{}),
     HPMS = {function, collect, [?VAR(host), ?VAR(pms)]},
     Proj2 = {?VAR(scheme), {as, HPMS, ?VAR(hpms)}},
@@ -1690,16 +1690,12 @@ dispatch_table_version(Host, Realm, {_Name, Version}) ->
         <<"paths">> := Paths
     } = Version,
 
-    %% The security scheme endpoints are a property of the version, so they are
-    %% emitted here rather than being left to `dispatch_table_path/6`. Without
-    %% this a version declaring no paths at all — which is exactly what an API
-    %% that exists only to expose `/oidc/login` and the verify endpoint looks
-    %% like, see `examples/config/oidc_api_spec.json` — would mount nothing.
-    %%
-    %% `dispatch_table_path/6` still emits them too, for the case where an
-    %% individual path overrides `security` with a scheme the version does not
-    %% declare. Identical rules collapse in `build_dispatch_table/3`, which
-    %% loads them into a `leap_relation` (a set).
+    %% The security scheme endpoints are a property of the version, so they
+    %% are emitted here: a version declaring no paths (an API that exists
+    %% only to expose `/oidc/login` and the verify endpoint, see
+    %% `examples/config/oidc_api_spec.json`) would otherwise mount nothing.
+    %% `dispatch_table_path/6` emits them too for a path that overrides
+    %% `security`; identical rules collapse in the `leap_relation` set.
     Sec = maps:get(<<"security">>, Version, #{}),
     Schemes = maps:get(<<"schemes">>, Version, ?DEFAULT_SCHEMES),
     SecurityRules = [
@@ -1940,7 +1936,7 @@ content_types_provided(<<"application/msgpack; charset=utf-8">>) ->
 content_types_provided(Bin) ->
     {3, {Bin, provide}}.
 
-% @TODO Avoid doing this and require the user to setup the environment first!
+%% @TODO Avoid doing this and require the user to setup the environment first!
 check_realm_exists(Uri) ->
     case bondy_realm:lookup(Uri) of
         {ok, _} ->
@@ -1960,15 +1956,11 @@ mops_eval(Expr, Ctxt) ->
         error:{invalid_expression, [Expr, Term]} ->
             throw(#{
                 <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
-                %% Both interpolated fragments are untrusted: `Term` is
-                %% whatever the action returned and `Expr` is echoed back
-                %% by `mops` as handed. Each is made UTF-8 on its own —
-                %% `format_term/1` renders and bounds the value,
-                %% `to_binary/1` passes a valid-UTF-8 expression through and
-                %% renders one that is not — so the frame around them stays
-                %% readable text rather than the whole message being
-                %% rendered as a term when one fragment is bad. Pinned by
-                %% `bondy_gateway_error_utf8_test`.
+                %% Both fragments are untrusted: `Term` is whatever the action
+                %% returned and `Expr` is echoed by `mops`. Each is made UTF-8
+                %% on its own (`bondy_connect_error:format_term/1` and
+                %% `to_binary/1`), so the frame stays readable text when one
+                %% fragment is bad. Pinned by `bondy_gateway_error_utf8_test`.
                 <<"message">> => iolist_to_binary([
                     <<"There was an error evaluating the MOPS expression '">>,
                     bondy_connect_error:to_binary(Expr),

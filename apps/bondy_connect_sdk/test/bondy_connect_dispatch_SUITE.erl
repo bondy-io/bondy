@@ -7,8 +7,8 @@
 
 -moduledoc """
 Pure unit tests for `bondy_connect_dispatch` — the callee invocation + subscriber
-FIFO + worker lifecycle subsystem extracted from the connection statem (review
-A2). No sockets, no live workers: each test drives the module's
+FIFO + worker lifecycle subsystem of the connection statem.
+No sockets, no live workers: each test drives the module's
 `{Dispatch, [Effect]}` API and interprets the effects with a **stub** spawn
 result, asserting on the returned effects and (via `inspect/1`) the internal
 maps. The `invariant_check/1` helper cross-checks the `mons` reverse-index

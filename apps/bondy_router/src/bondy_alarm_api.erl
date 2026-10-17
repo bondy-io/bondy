@@ -8,7 +8,7 @@
 `bondy_wamp_api` implementation exposing the alarm subsystem as read-only WAMP
 procedures: `bondy.alarm.list`, `.get`, `.history` and `.catalogue`.
 
-Read-only by construction — there is no acknowledge, no silence and no clear.
+Read-only: the module exposes no acknowledge, silence or clear procedure.
 An alarm states a condition that is true now; clearing one without fixing the
 condition would make the surface lie, and silencing is the operator's job in
 Alertmanager, not Bondy's.
@@ -83,10 +83,9 @@ produces one.
 
 ## `bondy.alarm.history` walks the cluster ONE NODE AT A TIME
 
-D2 makes the ring explicitly per-node, and the design once concluded from that
-that history could not be a cluster-wide answer: merging rings from several
-nodes would need their clocks ordered, which nothing here can do. The walk
-sidesteps that rather than solving it. It never MERGES: it drains this node's
+The ring is per-node. Merging rings from several nodes would need their clocks
+ordered, which nothing here can do. The walk sidesteps that rather than
+solving it. It never MERGES: it drains this node's
 ring, then the next member's, then the next, and CONCATENATES. Two transitions
 from different nodes are never compared, so no cross-node clock ordering is
 asserted and none is needed. Each event names the node that recorded it.
@@ -140,21 +139,14 @@ readings.
 
 %% Total budget for ONE REPLY's fan-out: the whole of `bondy.alarm.list`, and
 %% one PAGE of `bondy.alarm.history`. A member that has not answered by then is
-%% reported rather than made to hold up the reply: the operator asking what is
-%% wrong is usually asking BECAUSE a node is unwell, and that is the worst
-%% moment to block on it.
-%%
-%% It was per-NODE for the history walk until 2026-09-01, so a walk over n
-%% unreachable peers took 5n seconds and reported nothing about them. What is
-%% pinned on one node is that an unreachable peer is NAMED —
-%% `bondy_alarm_api_SUITE:every_page_reports_the_nodes_it_did_not_reach`.
-%% That the budget is SHARED rather than spent afresh per node needs two nodes
-%% and a forced deadline to observe, and is not covered yet.
+%% reported rather than made to hold up the reply.
+%% `bondy_alarm_api_SUITE:every_page_reports_the_nodes_it_did_not_reach` pins
+%% that an unreachable peer is NAMED. That the budget is SHARED across the
+%% walk needs two nodes and a forced deadline to observe, and is not covered.
 -define(FANOUT_TIMEOUT, 5000).
-%% Binds a history cursor to the walk it was minted for. Bumped whenever the
-%% cursor payload or the node-walk order changes, so a cursor from an older
-%% release is rejected as stale rather than paged wrongly. v2 added the
-%% `unreached` field.
+%% Binds a history cursor to the walk it was minted for. A change to the cursor
+%% payload or the node-walk order changes this value, so a cursor from an
+%% older release is rejected as stale rather than paged wrongly.
 -define(HISTORY_FP, ~"bondy_alarm_history_v2").
 -define(HISTORY_PAGE_DEFAULT, 100).
 -define(HISTORY_PAGE_MAX, 1000).
@@ -295,8 +287,8 @@ This node's active alarms, tagged with this node's name.
 
 The RPC entry point of the fan-out, and the one place a remote member is asked
 for anything. It is tagged rather than positional so a reply carries its own
-provenance: `answered` is then read off the replies themselves and cannot drift
-from whatever bookkeeping the transport does.
+provenance: `answered` is then read off the replies themselves rather than
+off the transport's own bookkeeping.
 """.
 -spec local_alarms() -> {node(), [map()]}.
 
@@ -418,7 +410,7 @@ history_page(Deadline, Limit, Cursor) ->
 %% left in the cursor's order.
 %%
 %% A node that has LEFT is not `not_reached`. Nothing failed: alarm history is
-%% never replicated (D2), so a departing node takes its ring with it and there
+%% never replicated, so a departing node takes its ring with it and there
 %% is nothing left to be unable to reach. Naming it would tell an operator to
 %% go and look at a node that is gone.
 %%
@@ -522,17 +514,9 @@ next([Node | Rest] = Nodes, Limit, Acc, Deadline, Unreached) ->
         0 ->
             %% The budget is spent with nodes still to walk. The page stops
             %% here and its cursor resumes AT them, so nothing is skipped.
-            %%
-            %% They are deliberately NOT in `not_reached`: they were never
-            %% asked, the next page asks them, and a set that named them could
-            %% not also be the accumulated truth — a later page would have to
-            %% REMOVE a node from it, which is the one thing an accumulated
-            %% set cannot do.
-            %%
-            %% NOT COVERED on one node: naming them here passes every case in
-            %% `bondy_alarm_api_SUITE` (mutation-checked 2026-09-01). Observing
-            %% it needs the budget to expire with a peer still to walk, which
-            %% needs a second node.
+            %% They are NOT in `not_reached`: the next page asks them, and an
+            %% accumulated set cannot later remove a node. Observing this
+            %% needs a second node; `bondy_alarm_api_SUITE` runs on one.
             done(Acc, Nodes, undefined, Unreached);
         _ ->
             visit(Node, Rest, undefined, Limit, Acc, Deadline, Unreached)

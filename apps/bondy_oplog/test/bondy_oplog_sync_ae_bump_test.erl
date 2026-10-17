@@ -1,6 +1,6 @@
 %% =============================================================================
 %% End-to-end tests for the substrate read-side AE-bump on the
-%% anti-entropy round-completion path (MST_DB_DESIGN §11 + §18 item 8).
+%% anti-entropy round-completion path.
 %%
 %% Verifies:
 %%   - A successful sync round bumps every shard in the instance's

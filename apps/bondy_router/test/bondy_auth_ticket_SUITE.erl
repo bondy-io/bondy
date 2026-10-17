@@ -112,9 +112,7 @@ add_realm(RealmUri, KeyPairs) ->
             %% The delegation cases run under sessions restricted to
             %% g1/g2, which do NOT carry the user-keyed grants above —
             %% without this grant a restricted session cannot issue at
-            %% all and the superset case passes VACUOUSLY (measured: the
-            %% refusal came from scope authorization, not the subset
-            %% check).
+            %% all and the superset case passes VACUOUSLY.
             #{
                 permissions => [
                     <<"bondy.issue">>
@@ -139,9 +137,8 @@ add_realm(RealmUri, KeyPairs) ->
                 groups => []
             },
             %% The delegation cases' user: session `authroles => []`
-            %% builds the RBAC context from the USER's groups (measured:
-            %% giving ?U1 groups changed `local_scope`'s authorization
-            %% outcome), so the role-restricted cases get their own user
+            %% builds the RBAC context from the USER's groups, so the
+            %% role-restricted cases get their own user
             %% rather than leaking grants into every ?U1 expectation.
             #{
                 username => <<"deleg_user">>,
@@ -501,7 +498,7 @@ ticket_method_not_available_outside_cidr(Config) ->
 %% =============================================================================
 
 -doc """
-Regression: the scope survives the ticket as JSON, so its wildcards decode as
+The scope survives the ticket as JSON, so its wildcards decode as
 `~"all"` rather than the atom `all`. `verify/1` must normalise them, otherwise
 `scope_type/1` classifies the decoded scope differently from the issued one, the
 derived storage key differs, and `lookup/3` can never find the persisted claims.
@@ -675,7 +672,7 @@ restricted_ticket_caps_session_roles(Config) ->
     ),
     %% One live ticket per (authid, scope): a second issue on the same
     %% scope REPLACES the stored claims and revokes the first ticket
-    %% (`no_match`) — measured — so each ticket is exercised fully
+    %% (`no_match`), so each ticket is exercised fully
     %% before the next is issued.
     {ok, Restricted, _} =
         bondy_ticket:issue(Session, #{authroles => [<<"g1">>]}),

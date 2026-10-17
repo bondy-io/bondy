@@ -3,15 +3,9 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %% EUnit coverage for the broker-publish stage split in `bondy_prometheus`
-%% (`handle_net_event/4`), the sink for `[bondy, broker, publish]` emitted by
-%% `bondy_broker:do_publish/2`.
-%%
-%% Why the split exists: a slow PUBLISH is otherwise unattributable. A wide
-%% fanout and an expensive subscription match look identical from outside, and
-%% both look identical to a downstream relay-ingress backlog. `match` and
-%% `fanout` separate the first two; a tail visible in NEITHER is downstream
-%% (`bondy_router_flow_queue_microseconds`, or the subscriber's own connection
-%% process).
+%% (`handle_net_event/4`), the sink for `[bondy, broker, publish]`. `match`
+%% and `fanout` separate a wide fanout from an expensive subscription match;
+%% a tail visible in neither is downstream of the publisher's process.
 -module(bondy_prometheus_broker_publish_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -69,8 +63,8 @@ malformed() ->
     ?assertEqual(ok, emit(not_a_map)).
 
 %% Relay-ingress tasks arrive from a peer with no local dispatch timestamp, so
-%% `bondy_router_flow_queue_microseconds` records nothing for them — the flow
-%% pool's ONLY data-plane role was unobservable. Depth is the substitute.
+%% `bondy_router_flow_queue_microseconds` records nothing for them; depth is
+%% the substitute backlog signal.
 ingress_depth() ->
     D0 = count(bondy_router_flow_queue_depth),
     ok = flow(#{service => 90, depth => 7}, relay),
@@ -112,11 +106,8 @@ count(Name) ->
 %% EGRESS — the last hop before the wire
 %% =============================================================================
 %% `match`/`fanout` cover the publisher's connection process and
-%% `router_flow_ingress/3` covers relay ingress; egress is the subscriber's own
-%% connection process, and it was the only unmeasured segment of the delivery
-%% path. Fly runs S28-S30 showed a delivery tail that appeared in NONE of the
-%% router stages (all sub-400us at p99) and no relay-ingress backlog (mean
-%% mailbox depth 0.046), which is what motivated measuring here.
+%% `ingress_depth/0` covers relay ingress; egress is the subscriber's own
+%% connection process, the last segment of the delivery path.
 
 egress_metrics_test_() ->
     {setup, fun setup/0, fun cleanup/1, [

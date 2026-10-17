@@ -235,14 +235,12 @@ start(Instance, Peer, Opts, Iterations) ->
 
 %% @private
 %% A session against a peer this node cannot reach is an expected outcome in a
-%% cluster, not an operational problem: the scheduler offers one session per
-%% instance per tick, so a single absent node would otherwise produce a warning
-%% per instance per tick for as long as it is away. Those go to debug and are
-%% counted through the `[bondy_oplog, sync, error]` telemetry event, which is
-%% where the rate belongs. Every other failure — a protocol error, a timeout, a
-%% peer that answers wrongly — stays a warning. The exit reason is unchanged
-%% either way: the scheduler reads it to drive backoff and re-bootstrap
-%% decisions.
+%% cluster: the scheduler offers one session per instance per tick, so a
+%% single absent node would otherwise produce a warning per instance per tick
+%% for as long as it is away. Those go to debug and are counted through the
+%% `[bondy_oplog, sync, error]` telemetry event. Every other failure — a
+%% protocol error, a timeout, a wrong answer — stays a warning. The exit
+%% reason is unchanged either way; the scheduler reads it for backoff.
 log_failure(Instance, Peer, Reason) ->
     case is_peer_unreachable(Reason) of
         true ->
@@ -733,7 +731,7 @@ do_run(Instance, Peer, Transport, TransportOpts, MaxIterations) ->
                 PeerFp
             );
         {ok, PeerRoot} ->
-            %% Legacy peer (pre-fingerprint reply): no topology check.
+            %% A reply without a fingerprint gets no topology check.
             pull_if_compatible(
                 Instance,
                 Peer,
@@ -951,15 +949,13 @@ pull_until_complete(
     end.
 
 %% @private
-%% The peer could not serve pages of `OldRoot` — re-request its current root and
-%% continue the round against that (budget-decremented, so a peer truncating
-%% faster than we can chase ends in `sync_round_budget_exhausted` and retries
-%% next round). Only when the peer has NOT moved, or the refresh fails, does the
-%% applied-frontier deficit decide: no deficit means the unpullable pages cover
-%% only events this replica already applied, so the round ends benign recording
-%% nothing (`skip` — the session-start root was never fully held, so neither
-%% recency nor root may be checkpointed); a strict deficit is the terminal
-%% error, and the scheduler flags the catalogue re-bootstrap.
+%% The peer could not serve pages of `OldRoot`: re-request its current root and
+%% continue the round against that, budget-decremented, so a peer truncating
+%% faster than this node can chase ends in `sync_round_budget_exhausted`. Only
+%% when the peer has not moved, or the refresh fails, does the applied-frontier
+%% deficit decide: no deficit means the unpullable pages cover only events this
+%% replica already applied, so the round ends `skip` (nothing checkpointed);
+%% a strict deficit is the terminal error that flags a catalogue re-bootstrap.
 chase_refreshed_root(
     Instance, Peer, Transport, TransportOpts, OldRoot, Budget, Batch
 ) ->
@@ -1014,11 +1010,9 @@ chase_refreshed_root(
     end.
 
 %% @private
-%% Builds the page request, preferring the reciprocal 4-tuple form. Falls back
-%% to the legacy 2-tuple when the transport cannot name us — a peer running an
-%% older version answers the 2-tuple and simply does not reciprocate, so a
-%% mixed-version cluster degrades to the previous behaviour rather than
-%% failing.
+%% Builds the page request. The reciprocal 4-tuple form carries this node's id
+%% and root; when the transport does not export `self_id/1` the request is the
+%% 2-tuple form and the responder does not reciprocate.
 get_pages_request(Instance, Transport, Batch) ->
     try Transport:self_id(Instance) of
         SelfId ->
@@ -1094,22 +1088,13 @@ maybe_report_frontier(_, _, _, _, _, _, _) ->
     ok.
 
 %% @private
-%% THE UNSERVABLE-BEHIND ESCALATION EVIDENCE. A peer whose responder answers
-%% `{error, {root_unservable, _}}` is refusing to serve a dangling root,
-%% designed as a benign transient (a truncate/GC race window, healed by the next
-%% tick). But a peer whose OWN root pages are permanently lost stays unservable
-%% forever, and because every round ERRORS rather than completing, the
-%% frontier-gap verdict can never fire — a recovery deadlock in which no page
-%% round can deliver what the peer holds, yet no re-bootstrap is ever scheduled.
-%%
-%% This helper turns the error into escalation EVIDENCE when, and only when, the
-%% peer actually has something we lack: its pre-round applied frontier (captured
-%% before `get_root`) strictly ahead of ours after the local settle. The
-%% scheduler debounces consecutive `root_unservable_behind` strikes into a
-%% catalogue re-bootstrap, whose snapshot producer reads the peer's PROJECTION —
-%% complete and servable even when its MST is not. A plain `root_unservable`
-%% with no deficit stays benign, which is also the loop protection: once the
-%% frontiers are level, later unservable rounds stop escalating.
+%% A peer answering `{error, {root_unservable, _}}` refuses a dangling root, a
+%% benign transient (the truncate/GC race window) that the next tick heals. A
+%% peer whose own root pages are permanently lost stays unservable, and because
+%% every round errors the frontier-gap verdict never fires. This helper turns
+%% the error into escalation evidence only when the peer's pre-round applied
+%% frontier is strictly ahead of ours after the local settle; the scheduler
+%% debounces those strikes into a catalogue re-bootstrap from the projection.
 maybe_unservable_behind(
     {error, {root_unservable, _}} = E, Instance, PeerFrontier
 ) when is_map(PeerFrontier), map_size(PeerFrontier) > 0 ->
@@ -1126,39 +1111,13 @@ maybe_unservable_behind(Result, _Instance, _PeerFrontier) ->
     Result.
 
 %% @private
-%% THE FRONTIER-GAP CHECK. Fires on a SUCCESSFUL round when the peer's PRE-round
-%% applied frontier is still strictly ahead of ours after the round.
-%%
-%% The frontier adoption in this module rests on "a peer having dropped an
-%% event from its tree implies this node already held it". Compaction keeps
-%% that, as do the watermark door and the unservable-root rebuild: each waits
-%% for every member (`bondy_oplog_instance:compaction_witnesses/1`;
-%% `bondy_oplog_bootstrap_rederive_test:applier_door_keeps_what_a_member_lacks/0`).
-%% Two truncations do not: `mst_retention` truncates by local policy with no
-%% confirmation, and the operator's `truncate_prefix/2` truncates where told.
-%% The missing events then can never arrive by page-sync, so adopting would flip the
-%% convergence oracle to CONVERGED over silently missing data. The session fails
-%% with `{frontier_gap, Origins}` instead and the scheduler flags a catalogue
-%% rebootstrap, whose install + rederive supply BOTH the data and the frontier
-%% (`bondy_oplog_compaction_cluster_SUITE`'s prefix-hole case). A further cause
-%% — this replica withheld the peer's frontier at its last bootstrap
-%% (`bondy_oplog_applier:commit_stage/4`) — resolves the same way;
-%% `bondy_oplog_sync_scheduler:maybe_flag_rebootstrap/3` enumerates them.
-%%
-%% On an applier-backed instance the pulled events reach the projection, and the
-%% applied-frontier VV its max-merge advances, ASYNCHRONOUSLY — the
-%% `integrate_peer_root` handler casts `replay_cell_events` to the APPLIER — so
-%% a first-pass deficit may be nothing but replay lag: settle the whole local
-%% pipeline and re-check before declaring a gap. The settle is two barriers, the
-%% instance's overlay drain (`await_apply/1`) and the applier barrier
-%% (`bondy_oplog_applier:barrier/1`, served after the integrate-time replay cast
-%% already in its queue and running the I1 fence, so even a LOST cast is
-%% replayed). A fused instance has no applier and replayed inline at integrate,
-%% so only the overlay drain applies. With the peer's answer
-%% installed-consistent and the round complete, a residual deficit after this
-%% settle is deterministic evidence. The exit reason's origins list is bounded
-%% to keep it log-safe; the full per-origin deficit goes out on the
-%% `[bondy_oplog, sync_session, frontier_gap]` telemetry event.
+%% THE FRONTIER-GAP CHECK: fires on a successful round when the peer's pre-round
+%% applied frontier is still strictly ahead of ours after the local settle, so
+%% replay lag is not read as a gap. Adoption rests on "a peer dropped an event
+%% only if this node held it"; compaction and the watermark door keep that
+%% (bondy_oplog_bootstrap_rederive_test:applier_door_keeps_what_a_member_lacks)
+%% while `mst_retention` and `truncate_prefix/2` do not. The session therefore
+%% fails `{frontier_gap, Origins}` and the scheduler flags a rebootstrap.
 maybe_frontier_gap({ok, _} = Result, _Instance, _Peer, _PeerFrontier, skip) ->
     %% Benign incomplete round: a deficit here is expected transfer lag,
     %% not evidence of compacted-away history. The next complete round
@@ -1222,14 +1181,13 @@ maybe_frontier_gap(Result, _Instance, _Peer, _PeerFrontier, _PeerRoot) ->
     Result.
 
 %% @private
-%% Forensic probe on a residual deficit: is each behind `{Origin, Seq}`
-%% event present in the LOCAL log (MST + overlay — `fold_range/5`
-%% captures both in one instance callback)? `true` ⇒ the round delivered
-%% the event and the deficit is local apply-side lag the settle barriers
-%% did not cover; `false` ⇒ the peer's answered frontier counted an
-%% event its served tree never shipped (peer-side over-claim). Bounded:
-%% probes at most 10 missing seqs per behind origin. `#{}` for an empty
-%% log; the instance calls raise as they do everywhere else.
+%% Forensic probe on a residual deficit: is each behind `{Origin, Seq}` event
+%% present in the local log (MST + overlay, which `fold_range/5` reads in one
+%% instance callback)? `true` means the round delivered the event and the
+%% deficit is apply-side lag the settle barriers did not cover; `false` means
+%% the peer's frontier counted an event its served tree never shipped. Probes
+%% at most 10 missing seqs per behind origin. `#{}` for an empty log; the
+%% instance calls raise as they do everywhere else.
 deficit_presence(Instance, Deficit) ->
     case
         {
@@ -1322,16 +1280,12 @@ frontier_deficit(Instance, PeerFrontier) ->
 
 %% @private
 %% Substrate read-side freshness wiring. After a successful AE round, bump every
-%% shard the consumer registered for this instance so long-quiet shards (no
-%% writer activity) do not trip `{stale, _}` purely on inactivity. Uses
-%% `bondy_oplog_core_registry:bump_ae_targets/2` so the AE-side bump shares a
-%% primitive — and timing semantics — with the applier-side bump. An empty
-%% target list is a strict no-op.
-%%
-%% This is the `synced` site (we reached a peer this round). Under the `quorum`
-%% isolation policy the bump is additionally gated on a connected majority, so a
-%% minority partition that can still sync internally does not self-certify
-%% fresh. `refuse` / `proceed` always bump here.
+%% shard the consumer registered for this instance so long-quiet shards do not
+%% trip `{stale, _}` purely on inactivity. Uses
+%% `bondy_oplog_core_registry:bump_ae_targets/2`, the primitive the applier-side
+%% bump also uses. An empty target list is a no-op. This is the `synced` site;
+%% under the `quorum` isolation policy the bump is gated on a connected
+%% majority, so a minority partition does not self-certify fresh.
 bump_ae_on_sync(Instance, Peer) ->
     case should_certify_freshness(synced) of
         true -> do_bump_ae_targets(Instance, #{peer => Peer, site => synced});
@@ -1383,14 +1337,12 @@ isolation_policy() ->
 
 %% @private
 %% Whether a freshness certification is permitted now under the isolation
-%% policy, for a bump arising from `Site` (`synced` = a successful round
-%% that reached a peer; `isolated` = a tick with no peers in membership).
-%%
-%% With clustering disabled the node certifies unconditionally: there is no
-%% peer its local view could lag. With clustering enabled a membership of this
-%% node alone is not evidence of that, since a member that has just restarted
-%% lists only itself (`bondy_oplog_instance:reclamation_members/0`), so the
-%% policy decides.
+%% policy, for a bump arising from `Site` (`synced` = a successful round that
+%% reached a peer; `isolated` = a tick with no peers in membership). With
+%% clustering disabled the node certifies unconditionally: no peer exists for
+%% its local view to lag. With clustering enabled a membership of this node
+%% alone is not evidence of that, since a just-restarted member lists only
+%% itself (`bondy_oplog_instance:reclamation_members/0`), so the policy decides.
 should_certify_freshness(Site) ->
     case bondy_cluster:enabled() of
         false ->

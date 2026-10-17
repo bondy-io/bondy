@@ -131,7 +131,7 @@ call_timeout_merge_test(_) ->
     ?assertEqual(#{}, Merge(0, #{})),
     ?assertEqual(#{}, Merge(undefined, #{})).
 
-%% Regression test: the action `timeout` (inherited from `defaults.timeout`)
+%% The action `timeout` (inherited from `defaults.timeout`)
 %% must survive parsing and, once merged, govern the WAMP call options.
 call_timeout_spec_flow_test(_) ->
     Spec = #{

@@ -10,30 +10,14 @@
 
 -compile([nowarn_export_all, export_all]).
 
-%% A 2-node Partisan cluster (bondy_db AAE on) that proves the applied-frontier
-%% version vector (`bondy_oplog_instance:frontier/1`) is a faithful cross-node
-%% convergence oracle where the MST root is NOT — specifically under ASYMMETRIC
-%% compaction, the failure mode the root cannot survive:
-%%
-%%   - FALSE DIVERGED: one node compacts (empty MST ⇒ `undefined` root) while the
-%%     other has not (full MST ⇒ binary root) for IDENTICAL data. An MST-root
-%%     comparison reports DIVERGED; the frontier is compaction-invariant, stays
-%%     equal, and reports IN SYNC. `asymmetric_compaction_keeps_oracle_in_sync`.
-%%   - FALSE IN SYNC (the dangerous one): once BOTH nodes compact, both roots are
-%%     `undefined`, so a root comparison reports IN SYNC with nothing actually
-%%     verifying the projections match. The frontier still genuinely agrees when
-%%     they match (equal AND non-empty) AND detects a real divergence injected
-%%     while both roots stay `undefined`.
-%%     `both_compacted_frontier_detects_real_divergence`.
-%%
-%% Both tests drive the PRODUCTION paths: writes through `bondy_db`, the live
-%% per-instance frontier (`bondy_oplog_instance:frontier/1`), and the peer
-%% frontier fetched over the AAE Partisan transport with the `get_frontier`
-%% request — the same request `bondy_observer_cli_sync` uses. The sync scheduler
-%% is quiesced (`set_dispatch(undefined)`) for the compaction phases so the
-%% asymmetric state stays frozen: a live scheduler would re-pull the compacted
-%% node's MST back from its peer, which is the very false-DIVERGED re-pull the
-%% frontier oracle exists to avoid.
+%% A 2-node Partisan cluster with bondy_db AAE on, showing the applied-frontier
+%% version vector (`bondy_oplog_instance:frontier/1`) is a cross-node
+%% convergence oracle where the MST root is NOT, under ASYMMETRIC compaction:
+%% one compacted node (`undefined` root) against one uncompacted node (binary
+%% root) holding IDENTICAL data reads DIVERGED by root and IN SYNC by frontier;
+%% once BOTH compact, equal `undefined` roots read IN SYNC while the frontier
+%% still detects an injected divergence. The sync scheduler is quiesced for
+%% the compaction phases so a live sync cannot re-pull the compacted MST.
 
 %% GC is disabled at BOOT, not after it. `bondy_ct:freeze_gc/1` can only run
 %% once the cluster is up, and the default `bondy_oplog_gc_scheduler` ticks
@@ -180,9 +164,10 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
         ),
 
         %% N1 was compacted (roots settle to `undefined`); N2 was not (roots
-        %% stay binary). Snapshot each side at its steady state so a `root_hash/1`
-        %% call that transiently times out under CT load — swallowed to
-        %% `undefined` by `do_instance_sigs/1` — cannot flake the root assertions.
+        %% stay binary). Snapshot each side at its steady state so a
+        %% `bondy_oplog_instance:root_hash/1` call that transiently times out
+        %% under CT load — swallowed to `undefined` by `do_instance_sigs/1` —
+        %% cannot flake the root assertions.
         Sigs1b = await_instance_sigs(N1, Targets, fun(R) -> R =:= undefined end),
         Sigs2b = await_instance_sigs(N2, Targets, fun erlang:is_binary/1),
 
@@ -307,8 +292,9 @@ both_compacted_frontier_detects_real_divergence(Config) ->
             ]
         ),
         %% The synchronous `do_apply` re-grew `DivInst`'s MST; snapshot at the
-        %% steady state so a load-induced `root_hash/1` timeout (swallowed to
-        %% `undefined` by `do_instance_sigs/0`) cannot flake `is_binary(PostR)`.
+        %% steady state so a load-induced `bondy_oplog_instance:root_hash/1`
+        %% timeout (swallowed to `undefined` by `do_instance_sigs/0`) cannot
+        %% flake `is_binary(PostR)`.
         SigsDpre = await_instance_sigs(N1, [DivInst], fun erlang:is_binary/1),
         {PostF, PostR} = maps:get(DivInst, SigsDpre),
         ct:pal("sym: divergent write ~s frontier ~p -> ~p", [
@@ -409,20 +395,12 @@ unquiesce(N1, N2) ->
 
 %% @private
 %% The data-bearing, converged instances: non-empty frontier, binary root, and
-%% the same frontier + a binary root on the peer's snapshot. These are the
-%% meaningful compaction targets.
-%%
-%% MAIN instances only, deliberately — `do_instance_sigs/0` filters them ON
-%% THE NODE (`bondy_oplog:db_of/1` is a registry lookup, so it answers
-%% `undefined` for every cluster instance when called here on the CT
-%% controller; asking it locally made both tests select zero targets). The
-%% ephemeral REGISTRY instances can transiently qualify (both nodes hold
-%% internal registrations) but their cross-node MST contents are not required
-%% to equalise — entries are node-local and session-scoped (owner
-%% self-cleanup removes them without a cross-node contract) — so a registry
-%% bystander in the target set makes the baseline root assertions flake on
-%% state this suite does not test. Both tests here assert the DURABLE main
-%% DB's compaction/frontier semantics.
+%% the same frontier + a binary root on the peer's snapshot. MAIN instances
+%% only: `do_instance_sigs/0` filters them ON THE NODE, because
+%% `bondy_oplog:db_of/1` is a registry lookup that answers `undefined` on the
+%% CT controller. Registry instances are node-local and session-scoped, so
+%% their roots need not equalise; a registry bystander in the target set
+%% makes the baseline root assertions flake.
 converged_data_targets(Sigs1, Sigs2) ->
     [
         I
@@ -488,43 +466,23 @@ now_ms() ->
 
 %% @private
 %% Re-reads `Node`'s instance signatures until every `Target` instance's root
-%% satisfies `Pred` (bounded by `?CONVERGE_MS`).
-%%
-%% `do_instance_sigs/0` wraps `root_hash/1` in a `catch` and maps any non-binary
-%% result — INCLUDING a swallowed gen_server-call timeout — to `undefined`. Under
-%% full-suite CT load a busy instance (draining, sealing, or GC-hibernating) can
-%% transiently exceed the call timeout, so an unguarded snapshot of a live,
-%% uncompacted node occasionally reads `undefined` for a root it still holds.
-%% Polling to the steady state removes that flake without masking a real loss: if
-%% the roots never settle to `Pred` the wait fails loudly rather than silently
-%% reading a transient value.
+%% satisfies `Pred` (bounded by `?CONVERGE_MS`). `do_instance_sigs/0` maps any
+%% non-binary `bondy_oplog_instance:root_hash/1` result, including a swallowed
+%% call timeout, to `undefined`, so under CT load a one-shot snapshot of an
+%% uncompacted node can read `undefined` for a root it still holds. Polling to
+%% the steady state removes that flake without masking a real loss: roots that
+%% never settle to `Pred` fail the wait loudly.
 await_instance_sigs(Node, Targets, Pred) ->
     await_instance_sigs(Node, Targets, Pred, now_ms() + ?CONVERGE_MS).
 
 %% @private
-%% Poll BOTH nodes until every target instance reports the SAME applied
-%% frontier, with a servable (binary) MST root on each.
-%%
-%% The barrier waits on the frontier, NOT on byte-equal roots, because equal
-%% roots are not a post-condition of convergence — which is the very claim
-%% this suite exists to make. Two nodes holding identical data disagree on
-%% their roots whenever one has truncated and the other has not: the
-%% watermark door drops tree entries the applied frontier says the projection
-%% already holds, so a node carrying a watermark keeps a strictly smaller
-%% tree than an uncompacted peer, permanently and correctly. Waiting for
-%% those roots to meet is waiting for something that will never happen.
-%%
-%% Data equality is established before this barrier by `seed_and_converge/3`,
-%% which reads every seeded cell back through `bondy_db` on both nodes. What
-%% remains to settle here is the oracle. See the baseline comment in
-%% `asymmetric_compaction_keeps_oracle_in_sync/1` for why a one-shot snapshot
-%% is not enough. Errors with per-node diagnostics at the deadline.
-%% Pre-freeze use (sync still LIVE): drive the pull-only sync on both nodes each
-%% poll so a load-starved background scheduler cannot leave the lagging MST pages
-%% undelivered past the deadline — the same active drive `seed_and_converge`
-%% uses. This is only safe while the cluster is unfrozen and nothing is
-%% compacted; a post-`quiesce` caller MUST pass `DriveSync = false` (a trigger
-%% then would re-pull and defeat the freeze).
+%% Polls BOTH nodes until every target instance reports the SAME applied
+%% frontier, with a servable (binary) MST root on each. The barrier waits on
+%% the frontier, NOT on byte-equal roots: a node carrying a watermark keeps a
+%% strictly smaller tree than an uncompacted peer, permanently and correctly.
+%% Data equality is established before this barrier by `seed_and_converge/3`.
+%% Pre-freeze use only (sync still LIVE): each poll drives the pull-only sync
+%% on both nodes; a post-`quiesce/2` caller MUST pass `DriveSync = false`.
 await_pairwise_sigs(N1, N2, Targets) ->
     await_pairwise_sigs(N1, N2, Targets, true).
 
@@ -610,19 +568,13 @@ await_instance_sigs(Node, Targets, Pred, Deadline) ->
     end.
 
 %% @private
-%% Per-target diagnosis captured when a barrier times out: is the instance
-%% process alive, what does a bounded `root_hash` read actually return or
-%% raise, and — the piece that distinguishes "never dispatched" from
-%% "dispatched but stuck" — is there a live/bootstrap sync session currently
-%% in flight for this instance, and for how long has it been running?
-%% `Read` distinguishes "deregistered" (`no_pid`) from "alive but starved"
-%% (`{read_failed, ...}` / timeout) from "genuinely empty root"
-%% (`root_undefined`); `Inflight` turns "roots never equalised" into either
-%% "no session is even trying" (`[]`) or "a session has been running for
-%% AgeMs without completing" (`[{Pid, Kind, Peer, AgeMs}]`) — the latter,
-%% with a large `AgeMs`, is the fingerprint of a stuck session rather than
-%% ordinary bulk-sync latency. Runs ON the node (via erpc) so
-%% `is_process_alive/1` sees a local pid.
+%% Per-target diagnosis captured when a barrier times out. `Read` distinguishes
+%% "deregistered" (`no_pid`) from "alive but starved" (`{read_failed, ...}` /
+%% timeout) from "genuinely empty root" (`root_undefined`). `Inflight` turns
+%% "roots never equalised" into "no session is trying" (`[]`) or "a session
+%% has run for AgeMs without completing" (`[{Pid, Kind, Peer, AgeMs}]`); a
+%% large `AgeMs` is the fingerprint of a stuck session. Runs ON the node (via
+%% erpc) so `is_process_alive/1` sees a local pid.
 do_target_diag(InstIds) ->
     [
         begin
@@ -656,16 +608,12 @@ do_target_diag(InstIds) ->
 
 %% @private
 %% Counts, per instance, the events that route an instance's convergence
-%% through a CATALOGUE bootstrap rather than page-sync.
-%%
-%% A catalogue bootstrap installs a projection snapshot and adopts the peer's
-%% applied frontier; the events behind the adopted maxima are not shipped
-%% (`bondy_oplog_applier:commit_stage/4`). Such a replica is
-%% converged by the frontier oracle while holding a smaller EVENT tree than
-%% its peer — and therefore a different MST root, permanently. That is the
-%% one benign way this suite's root barrier can fail, so distinguishing it
-%% from real page-transfer loss needs the count, not an inference from the
-%% content signature.
+%% through a CATALOGUE bootstrap rather than page-sync. A catalogue bootstrap
+%% installs a projection snapshot and adopts the peer's applied frontier
+%% without shipping the events behind the adopted maxima
+%% (`bondy_oplog_applier:commit_stage/4`), so such a replica converges by the
+%% frontier oracle while holding a different MST root, permanently. That is
+%% the one benign way this suite's root barrier can fail.
 do_install_bootstrap_counter() ->
     case ets:whereis(?BOOTSTRAP_TAB) of
         undefined ->
@@ -769,15 +717,13 @@ do_bootstrap_counts(InstId) ->
     end.
 
 %% @private
-%% The instance's watermark and the events its tree still holds at or below it.
-%%
-%% `do_integrate_peer_root/2` runs every merged tree through
-%% `watermark_door/2`, which re-truncates at or below the watermark and spares
-%% only entries the applied VV does not already cover. That VV is a per-origin
-%% MAXIMUM, so an event sitting inside a hole BELOW the maximum tests as
-%% already-applied and is truncated back out — silently, without an
-%% `integrate_doored` report, on every round. A watermark above the events a
-%% node is missing, with a zero doored count, is that signature.
+%% The instance's watermark and the events its tree still holds at or below
+%% it. Integrating a peer root re-truncates at or below the watermark and
+%% spares only entries the applied VV does not already cover. That VV is a
+%% per-origin MAXIMUM, so an event inside a hole BELOW the maximum tests as
+%% already-applied and is truncated back out silently, on every round. A
+%% watermark above the events a node is missing, with a zero doored count,
+%% is that signature.
 do_watermark(InstId) ->
     try bondy_oplog_instance:current_watermark(InstId) of
         W -> {watermark, W}
@@ -787,13 +733,10 @@ do_watermark(InstId) ->
 
 %% @private
 %% How many cells the instance's PROJECTION holds, alongside what its tree
-%% holds (`do_content_sig/1`).
-%%
-%% This is the reading that decides whether a short tree is loss or design.
-%% The watermark door drops tree entries the applied frontier says the
-%% projection already folded, so a replica whose projection is complete
-%% SHOULD have a shorter tree than an uncompacted peer — the frontier is the
-%% convergence oracle, not the root. A projection that is short by the same
+%% holds (`do_content_sig/1`). This reading decides whether a short tree is
+%% loss or design: the watermark door drops tree entries the applied frontier
+%% says the projection already folded, so a complete replica SHOULD have a
+%% shorter tree than an uncompacted peer. A projection short by the same
 %% events as the tree is the opposite: the events are gone from both places
 %% and the frontier is over-claiming.
 do_projection_size(InstId) ->
@@ -805,15 +748,12 @@ do_projection_size(InstId) ->
     end.
 
 %% @private
-%% Which seeded cells this node cannot READ, per seeding tag.
-%%
-%% The tree and the projection are separate stores, and the watermark door
-%% drops tree entries the applied frontier says the projection already holds.
-%% So a node whose tree is short of its peer's is only LOSING data if the
-%% cells are missing from the projection too. Read through `bondy_db` — the
-%% production path, the same one `wait_converge/4` uses — rather than an
-%% adapter's `info/1`, whose shape differs per backend and which reports no
-%% cell count on leveled at all.
+%% Which seeded cells this node cannot READ, per seeding tag. The tree and
+%% the projection are separate stores, and the watermark door drops tree
+%% entries the projection already holds, so a short tree is only LOSING data
+%% if the cells are missing from the projection too. Reads through
+%% `bondy_db`, the production path `wait_converge/4` uses, rather than an
+%% adapter's `info/1`, whose shape differs per backend.
 do_projection_read() ->
     maps:from_list([
         {Tag, [
@@ -836,16 +776,11 @@ do_lifecycle(InstId) ->
 %% @private
 %% What this node's NEXT sync round would see, asked over the same transport
 %% the scheduler uses: the root each peer advertises right now, and how many
-%% of that root's pages we are still missing.
-%%
-%% This is what separates the two ways a round can complete without pulling.
-%% `bondy_oplog_sync_session:pull_from_root/6` short-circuits when the
-%% advertised root equals ours, and a round that errors records nothing new
-%% but still refreshes recency — so a `do_peer_states/1` row whose root equals
-%% our OWN root, with a recent `last_sync`, is consistent with both. Reading
-%% the live answer tells them apart: `{ok, Root, _}` equal to our root means
-%% the peer really is advertising it, whereas an error means the recorded root
-%% is a preserved stale value.
+%% of that root's pages this node is still missing. A round short-circuits
+%% when the advertised root equals ours, and a round that errors records
+%% nothing new but still refreshes recency, so a `do_peer_states/1` row is
+%% consistent with both. `{ok, Root, _}` equal to our root means the peer
+%% really advertises it; an error means the recorded root is stale.
 do_peer_probe(InstId) ->
     Opts = bondy_oplog_config:sync_session_opts(),
     Transport = maps:get(transport, Opts, bondy_oplog_transport_inline),
@@ -881,15 +816,12 @@ do_peer_probe(InstId) ->
     ].
 
 %% @private
-%% How many pages of the peer's CURRENT root this node is still missing —
-%% the same read `bondy_oplog_sync_session:pull_until_complete/6` makes to
-%% decide whether to fetch pages or integrate.
-%%
-%% This is the discriminator when a node reports round after round of
-%% successful syncs while its content signature stays short of the peer's.
-%% A non-empty missing set says page transfer is not delivering; an EMPTY
-%% one says the pages are already here and the integrate is folding
-%% nothing. Read-only on both sides.
+%% How many pages of the peer's CURRENT root this node is still missing: the
+%% read a sync session makes to decide whether to fetch pages or integrate.
+%% This is the discriminator when a node reports successful syncs round after
+%% round while its content signature stays short of the peer's: a non-empty
+%% missing set says page transfer is not delivering; an EMPTY one says the
+%% pages are here and the integrate folds nothing. Read-only on both sides.
 do_missing_for_peer_root(InstId, Peer, Transport, TOpts) ->
     Root =
         try Transport:request(Peer, InstId, get_root, TOpts) of
@@ -943,19 +875,13 @@ do_peer_states(InstId) ->
     end.
 
 %% @private
-%% An order-independent signature of what an instance actually HOLDS,
-%% computed by folding its events rather than by reading its MST root.
-%%
-%% This is the discriminator when a pairwise barrier reports equal frontiers
-%% and unequal roots. The frontier is the REGISTRY frontier, which a sync round
-%% adopts from the peer, so equal frontiers say only that adoption ran.
-%%
-%% Returns `{Count, KeyXor, EventXor}`. An MST root is a function of both keys
-%% and values, so the two digests separate the three cases: differing `Count` /
-%% `KeyXor` means page transfer has not delivered; equal keys with differing
+%% An order-independent signature of what an instance actually HOLDS, computed
+%% by folding its events rather than by reading its MST root: the
+%% discriminator when a pairwise barrier reports equal frontiers and unequal
+%% roots. Returns `{Count, KeyXor, EventXor}`: differing `Count` / `KeyXor`
+%% means page transfer has not delivered; equal keys with differing
 %% `EventXor` means the same events carry different payloads; all three equal
-%% with unequal roots means the nodes hold identical data and the disagreement
-%% is in the root itself.
+%% with unequal roots means the disagreement is in the root itself.
 do_content_sig(InstId) ->
     From = bondy_oplog_event:min_key(),
     To = bondy_oplog_event:max_key_for_hlc(16#FFFFFFFFFFFFFFFF),
@@ -1004,7 +930,7 @@ table_handle(Table) ->
 
 %% @private
 %% The oplog instance id the cell `(Realm, Key)` of `Table` routes to — the same
-%% placement `apply/4`/`read/3` derive (`shard_for/3` then the table's
+%% placement `apply/4`/`read/3` derive (`bondy_db:shard_for/3` then the table's
 %% shard→instance map).
 do_instance_for(Table, Realm, Key) ->
     #{instance_ids := Ids} = T = table_handle(Table),
@@ -1032,18 +958,15 @@ do_band_on_target(Table, Bands, Targets) ->
 %% @private
 %% `InstanceId => {Frontier, Root}` over every live instance on this node
 %% (`Frontier` is the applied version vector `#{Origin => max Seq}`; `Root` is
-%% `undefined` for an empty / compacted MST).
-%%
-%% `Root` is read with a GENEROUS timeout (`?ROOT_HASH_TIMEOUT_MS`), not
-%% `root_hash/1`'s 5s default: under the CPU pressure of a full CT run a
+%% `undefined` for an empty / compacted MST). `Root` is read with the GENEROUS
+%% `?ROOT_HASH_TIMEOUT_MS`, not the 5s default of
+%% `bondy_oplog_instance:root_hash/1`: under full-CT CPU pressure a
 %% live-but-starved instance blows the 5s call and the read collapses to
-%% `undefined` for a root that is in fact binary — making the
-%% `await_instance_sigs/4` barrier poll a value that never settles and time out.
-%% The value read is the SAME live `root_hash` snapshot (via the instance
-%% gen_server, for AAE consistency); only the patience differs.
+%% `undefined` for a root that is in fact binary, so the
+%% `await_instance_sigs/4` barrier never settles.
 do_instance_sigs() ->
     %% The main DB's instances only; see `converged_data_targets/2`. Runs on
-    %% the node, where the registry can answer `db_of/1`.
+    %% the node, where the registry can answer `bondy_oplog:db_of/1`.
     Main = bondy_namespace_catalog:main_db_name(),
     do_instance_sigs([
         I
@@ -1053,15 +976,13 @@ do_instance_sigs() ->
 
 %% @private
 %% Signatures for a SPECIFIC set of instances. `await_instance_sigs/4` passes
-%% just its `Targets` (typically 1-2 instances) rather than reading EVERY oplog
-%% instance on the node (dozens, per-table × shard) on every 200ms poll: that
-%% whole-node `root_hash` gen_server fan-out, five times a second for up to 120s,
-%% was itself a heavy CPU load that could starve the very instances it reads,
-%% collapsing their `root_hash` to a swallowed `undefined` and making the barrier
-%% time out (`instance_sigs_unsettled`). Reading only the targets removes that
-%% self-inflicted observer effect. `InstIds` is intersected with the live set so
-%% a target that has since deregistered is simply absent (same as the /0 fold),
-%% never a crash in `frontier/1`.
+%% just its `Targets` rather than reading EVERY oplog instance on the node on
+%% every poll: that whole-node `root_hash` fan-out is itself a CPU load that
+%% can starve the instances it reads, collapsing their `root_hash` to
+%% `undefined` and timing the barrier out (`instance_sigs_unsettled`).
+%% `InstIds` is intersected with the live set, so a target that has
+%% deregistered is simply absent, never a crash in
+%% `bondy_oplog_instance:frontier/1`.
 do_instance_sigs(InstIds) ->
     Live = bondy_oplog:list_instances(),
     Wanted = [I || I <- InstIds, lists:member(I, Live)],

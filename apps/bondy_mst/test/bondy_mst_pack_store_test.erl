@@ -136,8 +136,8 @@ reopen_with_unreadable_manifest_names_the_file_test() ->
         S = open_store(Dir),
         ok = bondy_mst_store:close(S),
         Path = bondy_mst_pack_manifest:path(Dir),
-        %% A byte that `file:consult/1` rejects as invalid UTF-8 — the exact
-        %% shape the `~p` encoder used to write for a printable-latin1 root.
+        %% A byte that `file:consult/1` rejects as invalid UTF-8 — the shape a
+        %% `~p`-rendered binary takes for a printable-latin1 root.
         ok = file:write_file(
             Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
         ),
@@ -165,10 +165,8 @@ reopen_with_missing_manifest_starts_fresh_test() ->
 %% If this ever stops being true, the routing decision in
 %% `bondy_mst_pack_store:open_writer/4` should be revisited.
 %%
-%% It also pins the SECOND of the three doors into
-%% `bondy_mst_pack_manifest:read/1`. Classifying at one caller left this one
-%% (reachable from `bondy_mst_pack_store:recover_and_retry/4`) still emitting
-%% the bare reason for an identical file and cause.
+%% It also pins the second door into `bondy_mst_pack_manifest:read/1`, the one
+%% reachable from `bondy_mst_pack_store:recover_and_retry/4`.
 recovery_cannot_repair_an_unreadable_manifest_test() ->
     with_tmp_dir(fun(Dir) ->
         S = open_store(Dir),
@@ -1246,7 +1244,7 @@ gc_through_bondy_mst_test() ->
     end).
 
 %% =============================================================================
-%% gc — retry on transient open_sealed_view failure (#16)
+%% gc — retry on transient open_sealed_view failure
 %% =============================================================================
 
 gc_open_view_succeeds_after_transient_failure_test() ->
@@ -1386,12 +1384,10 @@ install_index_open_expectation(N, Reason) when is_integer(N), N >= 1 ->
 %% Tombstones-flush debounce
 %% =============================================================================
 %%
-%% `delete/2` (and the MST's spine-revision `free/3` via `put/2`) used
-%% to fsync the `tombstones` file on every call — ~5 such writes per
-%% MST put under steady-state churn. The store now keeps the free_set
-%% in memory and flushes under the same debounce shape as `set_root/2`:
-%% threshold-on-records OR wall-clock, with seal / GC / close as
-%% forced-flush boundaries.
+%% `delete/2` (and the MST's spine-revision `free/3` via `put/2`) does not
+%% fsync the `tombstones` file on every call: the store keeps the free_set in
+%% memory and flushes on the `set_root/2` debounce shape (records threshold OR
+%% wall-clock), with seal / GC / close as forced-flush boundaries.
 
 ts_disk_set(Dir) ->
     Path = bondy_mst_pack_tombstones:path(Dir),
@@ -1503,17 +1499,13 @@ page_state_distinguishes_live_tombstoned_and_absent_test() ->
                 bondy_mst_store:page_state(S1, crypto:hash(sha256, <<"nope">>))
             ),
 
-            %% Freed. The epoch slot is `undefined` here because this backend
-            %% tombstones by set membership and keeps no per-hash free time.
-            %%
-            %% Note the page REMAINS READABLE: on this backend the `free_set`
-            %% gates physical reclamation and `list/1` enumeration only, and is
-            %% deliberately NOT a read mask (see `get/2` there). That is what
-            %% makes `tombstoned` mean "the store still had it, so the miss came
-            %% from the walk" — assert it, because if `get/2` ever started
-            %% masking again, `page_state/2` would still say `tombstoned` while
-            %% the read path reported a dangling root, and the diagnosis would
-            %% point at the wrong layer.
+            %% Freed. The epoch slot is `undefined`: this backend tombstones by
+            %% set membership and keeps no per-hash free time. The page REMAINS
+            %% READABLE: the `free_set` gates physical reclamation and `list/1`
+            %% only, never reads, which is what makes `tombstoned` mean "the
+            %% store still had it, so the miss came from the walk". If `get/2`
+            %% masked again, `page_state/2` would still say `tombstoned` while
+            %% the read path reported a dangling root.
             S2 = bondy_mst_store:free(S1, Hash, P),
             ?assertEqual(
                 {tombstoned, undefined}, bondy_mst_store:page_state(S2, Hash)

@@ -94,17 +94,14 @@ typically the same process that fires the
 -callback refresh(State :: term()) ->
     {ok, NewState :: term()} | {error, Reason :: term()}.
 
-%% Optional capability advertisement: return `true` only if
-%% `sign_event/2` is a pure function of its arguments — i.e. it
-%% returns the same `{SignedEvent, State}` for the same `{Event,
-%% State}` and **never mutates** any external state (in the
+%% Optional capability advertisement: return `true` only if `sign_event/2` is
+%% a pure function of its arguments, returning the same `{SignedEvent, State}`
+%% for the same `{Event, State}` and never mutating external state (in the
 %% callback module or process state). Validators that advertise
 %% `is_stateless() -> true` are eligible for the lock-free
-%% `bondy_oplog_instance:append_fast/2,3` path which signs in the
-%% caller's process using a cached, immutable validator state. The
-%% default (callback absent) is `false` — signing is routed
-%% through the instance gen_server so the validator can mutate its
-%% state safely.
+%% `bondy_oplog_instance:append_fast/2,3` path, which signs in the caller's
+%% process using a cached, immutable validator state. The default (callback
+%% absent) is `false`: signing routes through the instance gen_server.
 -callback is_stateless() -> boolean().
 
 -optional_callbacks([detect_equivocation/2, refresh/1, is_stateless/0]).

@@ -1133,7 +1133,7 @@ session_rbac_invalidated_on_revoke(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.s95.foo">>, Ctxt)
     ),
 
-    %% Revoke — §9.5 must invalidate the live session's cached context so the
+    %% Revoke must invalidate the live session's cached context so the
     %% NEXT authorize re-reads current grants, WITHOUT closing the session.
     ok = bondy_rbac:revoke(Uri, #{
         <<"permissions">> => [<<"wamp.call">>],
@@ -1271,7 +1271,7 @@ explicit_groups_oidc(_) ->
         bondy_rbac:authorize(<<"wamp.publish">>, <<"com.admin.x">>, C)
     ).
 
-%% Regression (found by prop_rbac_statem): explicit-groups contexts must NOT
+%% Explicit-groups contexts must NOT
 %% fold in grants from the user's LOCALLY-STORED group memberships. The
 %% explicit (IdP-claimed) list is the sole authority on group-derived
 %% permissions — a local membership outside the claims would otherwise
@@ -1361,33 +1361,10 @@ nested_group_inheritance_deep(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.deep.resource">>, C)
     ).
 
-%% @doc Tests that `bondy_rbac:get_context/3` (the OIDC explicit-groups path)
-%% correctly computes the transitive closure of group inheritance up to 4
-%% levels deep, with grants assigned at every level.
-%%
-%% Group hierarchy:
-%%
-%%   level_0  (root)         — grants wamp.call   on com.l0.
-%%     ^
-%%     |  member-of
-%%   level_1                 — grants wamp.register on com.l1.
-%%     ^
-%%     |  member-of
-%%   level_2                 — grants wamp.subscribe on com.l2.
-%%     ^
-%%     |  member-of
-%%   level_3  (leaf)         — grants wamp.publish on com.l3.
-%%
-%% Also tests diamond inheritance:
-%%
-%%   level_0
-%%     ^       ^
-%%     |       |
-%%   level_1  level_1b
-%%     ^       ^
-%%     |       |
-%%     level_2d
-%%
+%% `bondy_rbac:get_context/3` (the OIDC explicit-groups path) computes the
+%% transitive closure of group inheritance four levels deep (`level_0` to
+%% `level_3`), with grants at every level, and across a diamond (`level_2d`
+%% under both `level_1` and `level_1b`, which share `level_0`).
 explicit_groups_deep_inheritance(_) ->
     Uri = <<"com.test.oidc_deep_groups">>,
     _ = bondy_realm:create(#{
@@ -1662,7 +1639,7 @@ grant_to_any_resource(_) ->
     ).
 
 %% =============================================================================
-%% REVERSE GRANTS — "who can act on resource R" (piece #2 by_resource index)
+%% REVERSE GRANTS — "who can act on resource R"
 %% =============================================================================
 
 reverse_grants_on_resource(_) ->
@@ -1710,7 +1687,7 @@ reverse_grants_on_resource(_) ->
     ),
 
     %% Realm isolation: the SAME resource granted in a different realm must not
-    %% leak into this realm's reverse query (piece #1 realm-scoping).
+    %% leak into this realm's reverse query.
     Uri2 = <<"com.test.reverse_grants_other">>,
     _ = bondy_realm:create(#{
         uri => Uri2,
@@ -1735,14 +1712,13 @@ reverse_grants_on_resource(_) ->
 
 reverse_grants_drop_on_revoke(_) ->
     %% The `by_resource` index is a second structure derived from the grant
-    %% cells, and a revoke has to reach both. It does: the index entry is
-    %% retracted with its grant, asserted here on the raw index rows and not
-    %% only on what the reverse query returns — `grants_on_resource/3` re-reads
-    %% each candidate primary and drops the ones that are gone, so an index full
-    %% of stale rows would still read correctly and hide the leak. That fetch is
-    %% the second line of defence, covering the window before the asynchronous
-    %% index writer catches up; retraction is the first, and it is what this
-    %% case pins.
+    %% cells, and a revoke has to reach both: the index entry is retracted with
+    %% its grant, asserted here on the raw index rows and not only on what the
+    %% reverse query returns — that query re-reads each candidate primary and
+    %% drops the ones that are gone, so an index full of stale rows would still
+    %% read correctly and hide the leak. That fetch covers the window before
+    %% the asynchronous index writer catches up; retraction is what this case
+    %% pins.
     Uri = <<"com.test.reverse_grants_revoke">>,
     _ = bondy_realm:create(#{
         uri => Uri,
@@ -1854,20 +1830,13 @@ every_publishing_table_has_a_live_subscriber(_) ->
     %% `publish => true` on a table spec only wires the change-event hook; the
     %% side-effect it exists for lives in a consumer that has to subscribe to
     %% that table's namespace. The flag and the consumer are declared in
-    %% different modules, so either half can be added without the other and
-    %% nothing complains: an unconsumed flag is a reaction that silently never
-    %% happens (`security_groups` shipped that way, leaving role inheritance the
-    %% one permission edge with no cache invalidation). Asserted against the
-    %% live dispatcher rather than a list of module names, so it holds whoever
-    %% the consumer is.
-    %%
-    %% Only `missed_events => must_not_miss` tables (the default) carry the
-    %% live-subscriber invariant: events are the only thing correcting their
-    %% consumer's derived state, so an unattached window is a correctness
-    %% hole. A `recovered_on_attach` table's consumer rebuilds from current
-    %% table contents whenever it subscribes (e.g. `bondy_mcp_gateway`,
-    %% started on demand), so subscriber liveness is deliberately NOT an
-    %% invariant there and asserting it would fail on a healthy node.
+    %% different modules, so an unconsumed flag is a reaction that silently
+    %% never happens. Asserted against the live dispatcher rather than a list
+    %% of module names, so it holds whoever the consumer is. Only
+    %% `missed_events => must_not_miss` tables (the default) carry the
+    %% invariant:
+    %% a `recovered_on_attach` consumer rebuilds from the table when it
+    %% subscribes.
     Publishing = [
         Name
      || #{name := Name} = Spec <- bondy_namespace_catalog:tables(),

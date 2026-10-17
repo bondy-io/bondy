@@ -358,9 +358,8 @@ do_get_pages(InstanceId, Hashes) ->
 %% the peer. What does not fit costs one more round: the requester merges what
 %% it gets and re-derives its `missing_set`. At least one fitting page is
 %% always included, so an empty map keeps its error meaning. A page larger
-%% than the ceiling on its own is skipped and reported rather than allowed to
-%% poison the peer connection; it cannot replicate until the cap is raised
-%% above it.
+%% than the ceiling on its own is skipped and reported; it cannot replicate
+%% until the cap is raised above it.
 cap_pages(InstanceId, Pages) ->
     MaxBytes = bondy_oplog_config:sync_max_response_bytes(),
     {Capped, _Used} = maps:fold(

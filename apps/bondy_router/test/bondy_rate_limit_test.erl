@@ -6,11 +6,10 @@
 -module(bondy_rate_limit_test).
 
 -moduledoc """
-The scope-aware rate-limit chain (design:
-`_plans/2026-08-29-rate-limit-scopes-design.md`): node → listener
+The scope-aware rate-limit chain: node → listener
 composition is AND with no refunds, each scope independently enabled,
-and the node-only surface byte-compatible with the pre-scopes module.
-Deterministic by construction: every bucket uses `rate => 1` (refill of
+and the node-only surface unchanged (`node_only_is_unchanged/0`).
+Deterministic: every bucket uses `rate => 1` (refill of
 1 token/second — negligible within a test) and a fresh key per test.
 """.
 
@@ -43,8 +42,7 @@ realm_dimension_fails_open_without_the_realm_store() ->
 
 %% The listener splat publishes `bondy.conf`-declared blocks as nested
 %% PROPLISTS while an app-env inventory yields maps — the reader must
-%% accept both, or conf-file budgets are a silent no-op (the exact shape
-%% bug the NODE scope had until 2026-08-26).
+%% accept both, or conf-file budgets are a silent no-op.
 listener_block_may_be_a_proplist() ->
     ok = bondy_config:set([security, rate_limit], #{enabled => false}),
     L = listener(),
@@ -60,9 +58,8 @@ listener_block_may_be_a_proplist() ->
 setup() ->
     %% Under the FULL eunit battery an earlier fixture can leave
     %% bondy_regulator half-torn-down, and `ensure_all_started/1` then
-    %% fails on the leftover (measured: `{bondy_regulator_app, start, _}`
-    %% failure here while the standalone run is green). A stop-then-start
-    %% resets the app to a known state either way.
+    %% fails on the leftover. A stop-then-start resets the app to a known
+    %% state either way.
     ok =
         case application:ensure_all_started(bondy_regulator) of
             {ok, _} ->

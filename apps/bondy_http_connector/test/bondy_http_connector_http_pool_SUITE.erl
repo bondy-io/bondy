@@ -156,19 +156,13 @@ liveness_probe_duration_count(ServiceName) ->
     end.
 
 %% @private
-%% Stock `alarm_handler:get_alarms/0` hardcodes `gen_event:call(alarm_handler,
-%% alarm_handler, get_alarms)` — i.e. it assumes the installed handler's id
-%% is the atom `alarm_handler` itself. That's only true for OTP's default
-%% handler; a full Bondy boot elsewhere in the same test VM swaps in
-%% `bondy_alarm_handler` (a different id), which breaks it with
-%% `{error, bad_module}`. Ask the event manager which handler is actually
-%% installed instead — both implementations answer `get_alarms`.
-%% The two handlers do not return the same SHAPE, either: Bondy's projects
-%% `{Id, Description}` pairs, while OTP's returns the raw term the producer
-%% raised — which for this alarm is the `{Id, Description, Opts}` triple that
-%% carries `details`. Normalise to the pair here so the cases below filter on
-%% the id without every one of them encoding a tuple size; an arity-bound
-%% comprehension pattern would SKIP the triple silently rather than fail.
+%% Stock `alarm_handler:get_alarms/0` assumes the installed handler's id is
+%% the atom `alarm_handler`; a full Bondy boot elsewhere in this VM swaps in
+%% `bondy_alarm_handler` (a different id), which answers `{error, bad_module}`.
+%% Ask the event manager which handler is installed instead; both answer
+%% `get_alarms`, but not in the same SHAPE: Bondy's returns `{Id, Description}`
+%% pairs, OTP's the raw `{Id, Description, Opts}` triple. Normalise to the
+%% pair so cases filter on the id without encoding a tuple size.
 current_alarms() ->
     case gen_event:which_handlers(alarm_handler) of
         [Handler | _] ->

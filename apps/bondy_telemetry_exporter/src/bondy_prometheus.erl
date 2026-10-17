@@ -424,9 +424,8 @@ declare_partisan_families() ->
 
 %% @private
 %% Declares the socket and session families captured wait-free via
-%% `bondy_metrics` (see `handle_net_event/4`). Names are historical;
-%% `bondy_sessions_closed_total` gains the `reason` label (the WAMP
-%% close reason URI).
+%% `bondy_metrics` (see `handle_net_event/4`). `bondy_sessions_closed_total`
+%% carries the `reason` label (the WAMP close reason URI).
 declare_net_session_families() ->
     ok = bondy_metrics:declare(#{
         name => bondy_sockets_total,
@@ -884,7 +883,8 @@ handle_net_event(_, _, _, _) ->
 
 %% @private
 %% Telemetry sink for `[bondy, realm, event]` and `[bondy, user, event]`
-%% (emitted by `bondy_telemetry:realm_event/2` / `user_event/3`). Same
+%% (emitted by `bondy_telemetry:realm_event/2` and
+%% `bondy_telemetry:user_event/3`). Same
 %% discipline as the other sinks: wait-free `bondy_metrics` writes only,
 %% total.
 handle_lifecycle_event([bondy, Subject, event], _Meas, Meta, _Config) ->

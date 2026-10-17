@@ -13,13 +13,12 @@ The per-cell projection **kernel** — the single seam through which the
 applier maintains a catalogue cell's materialised state and value.
 
 A kernel is `{crdt, Mod}` where `Mod` is a native `bondy_oplog_crdt`
-operation-based CRDT. Every cell type is a native CRDT; the legacy
-state-based fold path has been retired.
+operation-based CRDT. Every cell type is a native CRDT.
 
 `from_modules/2` selects the module: a configured `crdt_module` wins;
 otherwise the `fold_module` *label* is resolved to its native CRDT via
-`default_crdt_for_fold/1` (a zero-migration alias — every former fold has a
-byte-identical CRDT twin). An unknown label has no twin and is an error.
+`default_crdt_for_fold/1` (the `bondy_oplog_crdt_*_golden_test` suites pin
+the frame layouts). An unknown label has no twin and is an error.
 
 ## Why a kernel
 
@@ -27,7 +26,7 @@ The applier's per-cell compute (`bondy_oplog_cell_apply`) reads the old cell,
 applies one operation, and encodes a new frame. Routing every step through
 this module keeps the projection seam in one place.
 
-## `apply/6` — the eager projection step (Option B)
+## `apply/6` — the eager projection step
 
 `apply(Kernel, OldState, OldValueOpt, Op, Key, Context)` returns everything
 the frame encoder needs: `{NewState, Hlc, StateBytes, ValueBytes,
@@ -39,7 +38,7 @@ the write's causal `Context`) equals `interpret_cog` over the cell's group,
 so applying one operation onto the materialised state is correct without
 re-folding history. The value is `to_value(NewState)` directly — no delta.
 A **non-commutative** CRDT has no correct O(1) eager step; the kernel
-refuses it with a clear error (the per-cell live-log is a later step).
+refuses it with `{non_commutative_crdt_eager_unsupported, Mod}`.
 
 For a CRDT whose context is over event dots (`dotted_context/0`), an event
 whose dot the cell's causal context already covers leaves the state unchanged. The replay hold delivers a cell's events causally
@@ -58,6 +57,13 @@ overlay events on top of the projection state (key-ordered), and
 `decode_value_bytes/2` turns a stored HEAD value-slot back into the
 user-facing value. The read path therefore *interprets a COG*; it never
 folds events through a state-based `apply_event`.
+
+Stored frame bytes are this node's own: its applier wrote them, and peer
+state reaches this node as terms the sync transport already decoded. The
+kernel and every CRDT's `decode_state/1` therefore decode them without
+`[safe]`, which would refuse an atom the VM has not interned since a
+restart (falsifier:
+`bondy_aae_cluster_SUITE:runtime_atom_cell_read_after_restart_measured`).
 """).
 
 -export([from_modules/2]).
@@ -106,11 +112,11 @@ from_modules(FoldModule, undefined) ->
 Map a short label to its native operation-based CRDT module, or
 `undefined` when none exists. Two kinds of label resolve here:
 
-- **Legacy fold names** — every former commutative fold has a
-  byte-identical CRDT twin, so `fold_module => lww_register` (or the
-  fully-qualified `bondy_oplog_fold_lww_register`) resolves to
-  `bondy_oplog_crdt_lww_register` and durable cells decode unchanged.
-- **Convenience aliases** for CRDTs that never had a fold — e.g.
+- **Fold names**: `fold_module => lww_register` (or the fully-qualified
+  `bondy_oplog_fold_lww_register`) resolves to
+  `bondy_oplog_crdt_lww_register`, which decodes that fold's durable cells
+  (the `bondy_oplog_crdt_*_golden_test` suites pin the frames).
+- **Convenience aliases** for CRDTs with no fold name — e.g.
   `two_p_set`, `aw_set`, `rw_set`, `ew_flag`, `dw_flag` resolve to their
   `bondy_oplog_crdt_*` modules.
 
@@ -283,7 +289,7 @@ apply({crdt, Mod}, OldState, _OldValueOpt, Op, Key, Context) ->
             {NewState, Hlc, StateBytes, ValueBytes, ValueEqualsState};
         false ->
             %% Non-commutative CRDTs need their live group re-interpreted
-            %% on write; the per-cell live-log is a later rollout step.
+            %% on write, which the kernel does not implement.
             error({non_commutative_crdt_eager_unsupported, Mod})
     end.
 
@@ -325,13 +331,7 @@ decode_value_bytes({crdt, Mod}, ValueBytes) when is_binary(ValueBytes) ->
             State = Mod:decode_state(ValueBytes),
             Mod:to_value(State);
         false ->
-            %% Plain decode — these bytes are this node's own projection
-            %% frames (written by its applier/instance); peer state reaches
-            %% this node as terms already decoded by the sync transport,
-            %% never as bytes here. `[safe]` would refuse the frame's own
-            %% atoms after a restart whose log replay no longer interns
-            %% them (falsifier: `bondy_aae_cluster_SUITE:
-            %% runtime_atom_cell_read_after_restart_measured`).
+            %% Own projection bytes, so no `[safe]`: see the moduledoc.
             binary_to_term(ValueBytes)
     end.
 

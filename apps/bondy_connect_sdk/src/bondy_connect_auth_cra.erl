@@ -9,8 +9,7 @@
 WAMP-CRA authentication. Given the raw password and the `CHALLENGE.Extra`
 (`challenge`, `salt`, `iterations`, `keylen`), it derives the salted password
 and computes the HMAC response via `bondy_wamp_cra:response/3` — the same
-primitive the router uses to compute the expected signature, so the response
-matches by construction.
+primitive the router uses to compute the expected signature.
 
 Config: `#{password => binary()}`.
 """.

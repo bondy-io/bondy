@@ -3,17 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Falsifiers for the §14 audit capture seam:
-%%
-%% - the v1 record schema is TOTAL — every §14.1 field plus §14.2's
-%%   `derivation`/`obligation`/`agent`/`delegation` present on every record
-%%   (the MCP-D07 pin: the shape must not change when those populate);
-%% - §14.3 redaction at capture: a redacted field influences nothing the
-%%   digest captures, in both directions;
-%% - `record/2` emits the constructed record in the metadata of
-%%   `[bondy, mcp, audit, record]` — the attachment point the future
-%%   Streams sink rides (MCP-D27) — and is fail-open: a construction
-%%   failure returns an error and emits nothing, it never raises.
+%% Falsifiers for the audit capture seam: the v1 record schema is TOTAL —
+%% every base field plus `derivation`/`obligation`/`agent`/`delegation`
+%% present on every record (the shape does not change when those populate);
+%% redaction at capture: a redacted field influences nothing the digest
+%% captures, in both directions; `record/2` emits the constructed record in
+%% the metadata of `[bondy, mcp, audit, record]` — the attachment point an
+%% audit sink rides — and is fail-open: a construction failure returns an
+%% error and emits nothing, it never raises.
 -module(bondy_mcp_audit_test).
 
 -include_lib("eunit/include/eunit.hrl").

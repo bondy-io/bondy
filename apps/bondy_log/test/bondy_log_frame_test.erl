@@ -166,9 +166,8 @@ unknown_flag_v1_test() ->
     ).
 
 unknown_flag_v2_test() ->
-    %% v2's mask now includes bit 0 (compressed_body); bit 2 is still
-    %% outside the mask, so a v2 frame setting it must be rejected
-    %% rather than silently accepted.
+    %% Bit 2 is outside the v2 mask, so a v2 frame that sets it is
+    %% rejected.
     ?assertEqual(
         {error, unknown_flag},
         decode(handcraft_frame(2, 16#000004, <<"body">>))
@@ -271,9 +270,8 @@ default_encoded_frame_is_v2_test() ->
         decode(Frame)
     ).
 
-%% A v2 reader (this one) must continue to round-trip v1-encoded
-%% frames byte-for-byte. Production has v1-frame segments on disk from
-%% before PR1; recovery must keep reading them.
+%% A v2 reader decodes v1-encoded frames unchanged; segments on disk hold
+%% v1 frames and recovery reads them.
 v1_frame_decoded_by_v2_reader_test() ->
     Body = <<"legacy body">>,
     Frame = encode(Body, [{version, 1}]),
@@ -309,17 +307,12 @@ handcraft_frame(Version, Flags, Body) when is_binary(Body) ->
     <<?MAGIC:32, FrameLen:32, Crc:32, Version:8, Flags:24, Body/binary>>.
 
 %% =============================================================================
-%% Byte identity with the pre-move encoder
+%% Byte identity
 %% =============================================================================
 %%
-%% The hex below was produced by `bondy_log_frame:encode/1,2` on the
-%% commit that preceded the move into `bondy_log`, on these exact inputs,
-%% under the oplog's magic ("BDOP", `?OPLOG_MAGIC`) — the value the oplog
-%% adapter still names, spelled out here because the core owns no magic.
-%% Any drift in the header layout, the CRC scope or the CRC algorithm
-%% shows up here as a byte difference, independently of the round-trip
-%% tests above (which would keep passing if encode and decode drifted
-%% together).
+%% The hex below is the reference encoding under the oplog's magic ("BDOP",
+%% `?OPLOG_MAGIC`); a drift in header layout, CRC scope or CRC algorithm
+%% shows up here as a byte difference that the round-trip tests miss.
 
 -define(OPLOG_MAGIC, 16#42444F50).
 

@@ -155,7 +155,9 @@ Used for adding proxy entries only as it skips all checks.
 Fails with `badarg` if  `Entry` is not a proxy entry.
 """.
 -spec add(entry()) ->
-    {ok, IsFirstEntry :: boolean()} | {error, already_exists} | no_return().
+    {ok, {entry(), IsFirstEntry :: boolean()}}
+    | {error, already_exists}
+    | no_return().
 
 add(Entry) ->
     bondy_registry_entry:is_proxy(Entry) orelse
@@ -756,14 +758,10 @@ maybe_add(subscription = Type, RealmUri, Uri, Opts, Ref, Partition) ->
             );
         SessionId ->
             %% The idempotent-SUBSCRIBE check: a session already holding a
-            %% subscription for `(Uri, MP)` gets the existing entry back
-            %% (the broker answers SUBSCRIBED with the existing id). It is
-            %% valid for a subscriber to subscribe to both {foo, exact}
-            %% and {foo, prefix}. A bounded session-index probe — its
-            %% cost must not depend on how many subscriptions the session
-            %% already holds, or a session's subscribe burst turns
-            %% quadratic (this runs in the caller's process per
-            %% SUBSCRIBE).
+            %% subscription for `(Uri, MP)` gets the existing entry back. A
+            %% bounded session-index probe: its cost must not depend on how
+            %% many subscriptions the session holds, or a subscribe burst
+            %% turns quadratic (this runs per SUBSCRIBE in the caller).
             case
                 bondy_registry_partition:find_session_entry(
                     Partition, Type, RealmUri, SessionId, Uri, MP
@@ -887,16 +885,11 @@ add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
             Entry = new_registration(RealmUri, Ref, Uri, Opts),
             bondy_registry_partition:add(Partition, Entry);
         L ->
-            %% Shared Registration (RFC 13.3.9)
-            %% When shared registrations are supported, then the first
-            %% Callee to register a procedure for a particular URI
-            %% MAY determine that additional registrations for this URI
-            %% are allowed, and what Invocation Rules to apply in case
-            %% such additional registrations are made.
-            %% When invoke is not 'single', Dealer MUST fail
-            %% all subsequent attempts to register a procedure for the
-            %% URI where the value for the invoke option does not match
-            %% that of the initial registration.
+            %% Shared Registration (WAMP RFC 13.3.9): the first Callee to
+            %% register a URI determines whether additional registrations are
+            %% allowed and their Invocation Rules. When invoke is not
+            %% 'single', the Dealer MUST fail a later registration whose
+            %% invoke option does not match the initial one.
 
             SessionId = bondy_ref:session_id(Ref),
             Invoke = maps:get(invoke, Opts, ?INVOKE_SINGLE),
@@ -1048,7 +1041,7 @@ resolve_duplicates([H | T]) ->
             Error
     end;
 resolve_duplicates([]) ->
-    %% No duplicates or all the entries were inconsistent (indices vs plum_db).
+    %% No duplicates or all the entries were inconsistent (indices vs store).
     ok.
 
 %% @private

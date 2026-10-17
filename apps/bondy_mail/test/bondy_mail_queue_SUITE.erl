@@ -186,10 +186,9 @@ killing_a_worker_does_not_strand_its_reservation(Config) ->
 -doc """
 A `low` priority message waits behind a `normal` one that arrived after it.
 
-`priority` was accepted, documented and inert: every message went into one
-queue and the field decided nothing. It decides which lane a message joins, and
-a worker absorbs everything already sent to it before choosing the next one --
-which is what makes a lane mean anything.
+`priority` decides which lane a message joins, and a worker absorbs everything
+already sent to it before choosing the next one -- which is what makes a lane
+mean anything.
 """.
 normal_priority_is_served_before_low(Config) ->
     ok = start(Config, #{pool_size => 1}),

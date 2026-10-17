@@ -3,9 +3,9 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Integration test for the API Gateway spec store after its cut-over from
-%% plum_db to bondy_db (design §11.4). Booting bondy_router exercises the
-%% cut-over end to end: `bondy_namespace_catalog` provisions the durable
+%% Integration test for the API Gateway spec store on bondy_db. Booting
+%% bondy_router exercises the store end to end: `bondy_namespace_catalog`
+%% provisions the durable
 %% `api_gateway` bondy_db table by default, and `bondy_http_gateway` reads /
 %% writes it and subscribes to its change events. The CRUD round-trip proves
 %% load → lookup → list → delete all flow through bondy_db.
@@ -49,16 +49,12 @@ catalogue_provisions_api_gateway_test(_) ->
 
 %% A catalogue-snapshot bootstrap installs the api_gateway projection
 %% WHOLESALE and emits no per-cell event, so the gateway is told with a
-%% `bondy_oplog_core_bootstrap_event` instead. Two things must hold, and the
-%% first is the one that bites: `handle_info/2` runs in the gateway's OWN
-%% gen_server, so an exception there kills the process that owns every HTTP
-%% route on the node. A fresh replica would lose its routes entirely and have
-%% nothing to rebuild them until the next live spec change.
-%%
-%% Asserts the process SURVIVES and stays responsive, and that the rebuild it
-%% performs is itself callable. Deliberately not mecking
-%% `bondy_listener_ranch` — replacing a module under a live listener stack to
-%% observe one call would be a bigger risk than the thing under test.
+%% `bondy_oplog_core_bootstrap_event` instead. `handle_info/2` runs in the
+%% gateway's OWN gen_server, so an exception there kills the process that
+%% owns every HTTP route on the node. Asserts the process SURVIVES and stays
+%% responsive, and that the rebuild it performs is itself callable.
+%% Deliberately not mecking `bondy_listener_ranch`: replacing a module under
+%% a live listener stack is a bigger risk than the thing under test.
 bootstrap_event_rebuilds_and_does_not_kill_the_gateway_test(_) ->
     Pid = whereis(bondy_http_gateway),
     ?assert(is_pid(Pid)),

@@ -97,7 +97,7 @@ and keeps its stacktrace.
 -define(VERSION, ~"1.1").
 
 -define(NOW, erlang:system_time(second)).
-% 0 mins
+%% 0 mins
 -define(LEEWAY_SECS, 2 * 0).
 -define(IS_GRANT_TYPE(X),
     (X == client_credentials orelse
@@ -114,19 +114,14 @@ and keeps its stacktrace.
 ).
 -define(REFRESH_TOKEN_TTL, bondy_config:get([oauth2, refresh_token_duration])).
 -define(MAX_TOKENS, bondy_config:get([oauth2, max_tokens_per_user])).
-%% Legacy-backup compatibility (bondy_export legacy import): a refresh token
-%% from a legacy backup is a bare opaque string, carrying none of the subject or
-%% scope the current self-describing format uses to locate a token. On import a
-%% pointer from that string to the imported token's `{key, id}` — its cell key
-%% and id — is stored in this same table under the composite key
-%% `[?LEGACY_COL, LegacyString]` (`legacy_key/1`). Every key of the table is
-%% such a composite: the codec keeps the columns free of the separator byte,
-%% which the table's `leading_col` routing decodes — a raw client string
-%% carrying a `0` would otherwise be decoded as a column and crash the read
-%% (`bondy_oauth2_transient_error_SUITE`). The `legacy` column is never a
-%% user's hash, so a pointer falls in no user's band.
-%% The first refresh presenting the legacy string resolves it through the
-%% pointer, issues a current token and clears it, so the string works once.
+%% Legacy-backup compatibility (bondy_export legacy import): a legacy refresh
+%% token is a bare opaque string carrying no subject or scope. On import a
+%% pointer from that string to the imported token's `{key, id}` is stored in
+%% this table under `[?LEGACY_COL, LegacyString]` (`legacy_key/1`); the codec
+%% keeps columns free of the separator byte that `leading_col` routing
+%% decodes (`bondy_oauth2_transient_error_SUITE`). The `legacy` column is never
+%% a user's hash, so a pointer falls in no user's band. The first refresh
+%% presenting the string resolves it, issues a current token and clears it.
 -define(LEGACY_POINTER, legacy_refresh_pointer).
 -define(LEGACY_COL, <<"legacy">>).
 

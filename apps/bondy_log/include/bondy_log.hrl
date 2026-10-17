@@ -25,8 +25,7 @@
 %% Frame schema versions. v2 differs from v1 only in the on-wire
 %% `FrameVersion` byte and the set of flag bits its reader accepts:
 %% bits 0 (compressed_body) and 1 (encrypted_body) are active in v2;
-%% bit 2 (CRC32C) is reserved on-disk but unused (the upgrade was
-%% evaluated and deferred).
+%% bit 2 (CRC32C) is reserved on-disk and outside both known-flags masks.
 -define(BONDY_LOG_FRAME_VERSION_V1, 1).
 -define(BONDY_LOG_FRAME_VERSION_V2, 2).
 
@@ -56,9 +55,6 @@
 %%      3    12    IV            (96-bit per AES-GCM)
 %%     15    16    Tag           (GCM authentication tag)
 %%     31   var    Ciphertext    (encrypted body bytes)
-%%
-%% AES-256-GCM is the only algorithm supported today; the id widens
-%% the same way the compression-algorithm id does.
 -define(BONDY_LOG_CODEC_CIPHER_AES_256_GCM, 1).
 -define(BONDY_LOG_CODEC_IV_BYTES, 12).
 -define(BONDY_LOG_CODEC_TAG_BYTES, 16).
@@ -75,13 +71,9 @@
 
 %% Bitmask of flag bits each frame version's reader understands. Bits
 %% outside the mask are rejected (encode-side `badarg`, decode-side
-%% `unknown_flag`). v1 implemented neither codec nor algorithm choice
-%% so the mask is zero; v2's mask covers bits 0 (compressed_body) and
-%% 1 (encrypted_body). Bit 2 (CRC32C) is reserved on-disk via
-%% `FLAG_CRC32C` but excluded from this mask — the upgrade was
-%% evaluated and deferred; a future activation
-%% widens this mask and adds a `compute_crc(crc32c, _)` clause without
-%% a wire-format change.
+%% `unknown_flag`). The v1 mask is zero; the v2 mask covers bits 0
+%% (compressed_body) and 1 (encrypted_body). Bit 2 (CRC32C) is reserved
+%% on-disk as `BONDY_LOG_FRAME_FLAG_CRC32C` and stays outside both masks.
 -define(BONDY_LOG_FRAME_KNOWN_FLAGS_V1, 16#000000).
 -define(BONDY_LOG_FRAME_KNOWN_FLAGS_V2,
     (?BONDY_LOG_FRAME_FLAG_COMPRESSED bor
@@ -193,7 +185,7 @@
 -define(BONDY_LOG_GROUP_COMMIT_MAX_DEFAULT, 1024).
 
 %% -----------------------------------------------------------------------------
-%% Atomic batches (§3, §8.3 — Q9)
+%% Atomic batches (§3, §8.3)
 %% -----------------------------------------------------------------------------
 
 %% Hard upper bound on the encoded body of a single atomic batch frame.

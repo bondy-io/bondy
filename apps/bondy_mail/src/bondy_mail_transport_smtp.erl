@@ -125,17 +125,13 @@ transport_options(starttls, Relay) ->
     [{ssl, false}, {tls, always}, {tls_options, tls_options(Relay)}];
 transport_options(tls, Relay) ->
     %% `sockopts`, not `tls_options`. gen_smtp reads `tls_options` only when it
-    %% upgrades an established plaintext connection; the options for a
-    %% connection that is encrypted from the first byte come from `sockopts`,
-    %% which it passes to `smtp_socket:connect/5`
-    %% (`gen_smtp_client.erl:849-875`).
-    %%
-    %% Putting them in `tls_options` therefore does not fail -- it is silently
-    %% ignored, and `ssl:connect/4` runs on its own defaults. A relay declared
-    %% `transport = tls` with `tls.verify = verify_peer` would have connected
-    %% with whatever the runtime defaults to rather than with the verification
-    %% the operator asked for. Caught by `bondy_mail_mailpit_SUITE`, which is
-    %% the first test to speak implicit TLS to anything.
+    %% upgrades an established plaintext connection; a connection encrypted
+    %% from the first byte takes its options from `sockopts`, which it passes
+    %% to `smtp_socket:connect/5` (`gen_smtp_client.erl:849-875`). Options put
+    %% in `tls_options` are silently ignored and `ssl:connect/4` runs on its
+    %% own defaults, so a relay declared `transport = tls` with `tls.verify =
+    %% verify_peer` would connect without the verification the operator asked
+    %% for. `bondy_mail_mailpit_SUITE` speaks implicit TLS and covers this.
     [{ssl, true}, {tls, never}, {sockopts, tls_options(Relay)}].
 
 %% @private

@@ -65,8 +65,8 @@ end_per_suite(Config) ->
     {save_config, Config}.
 
 %% An SSO user's tickets are bucketed by the AUTH realm (`S`), not by the realm
-%% they connected to (`M1`). `revoke_all/2` scanned only the realm it was given,
-%% so disabling or deleting an SSO user left every ticket of theirs working.
+%% they connected to (`M1`). `bondy_ticket:revoke_all/2` reaches that bucket
+%% when given the connected realm; otherwise a disabled SSO user keeps working.
 revoke_all_user_reaches_the_sso_bucket(_Config) ->
     Scope = ticket_scope(?M1),
     ok = bondy_ticket:store_ticket(?SSO, ?USER, ticket_claims(?SSO, Scope)),
@@ -386,7 +386,8 @@ sso_token_accepted_by_issuing_member(_Config) ->
 
 sso_token_accepted_by_sibling_member(_Config) ->
     %% The legitimate SSO use case: a token minted under S via M1 is accepted by
-    %% sibling member M2 (both trust S). This is what A-1's fix must NOT break.
+    %% sibling member M2 (both trust S). The unrelated-realm rejection below
+    %% must not break this case.
     JWT = issue_sso_jwt(),
     ?assertMatch({ok, _}, bondy_oauth_jwt:verify(?M2, JWT)),
     ok.
@@ -398,7 +399,7 @@ sso_token_accepted_by_issuer_realm(_Config) ->
     ok.
 
 sso_token_rejected_by_unrelated_realm(_Config) ->
-    %% THE A-1 ATTACK: a token minted under SSO realm S (aud = S, scope = all)
+    %% A token minted under SSO realm S (aud = S, scope = all)
     %% must be rejected by an unrelated realm X that does not trust S — even
     %% though the token verifies against S's own key and the `all` scope would
     %% otherwise match any realm.
@@ -414,7 +415,8 @@ sso_token_rejected_by_unrelated_realm(_Config) ->
 %% =============================================================================
 
 sso_ticket_rejected_by_unrelated_realm(_Config) ->
-    %% The ticket analogue of the A-1 attack: an SSO ticket (authrealm = S,
+    %% The ticket analogue of the unrelated-realm case: an SSO ticket (authrealm
+    %% = S,
     %% scope.realm = undefined) presented to unrelated realm X is rejected at the
     %% ticket auth boundary.
     Ticket = issue_sso_ticket(),

@@ -979,7 +979,7 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
     Retry = bondy_connect_retry:init(
         ping_timeout,
         #{
-            % disable, use max_retries only
+            %% disable, use max_retries only
             deadline => 0,
             interval => Timeout,
             max_retries => Attempts,

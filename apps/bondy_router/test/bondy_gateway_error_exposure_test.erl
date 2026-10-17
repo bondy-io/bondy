@@ -101,10 +101,8 @@ the_default_response_is_clean_test() ->
 %% THE CORRELATION ID
 %% =============================================================================
 
-%% The alternative the lint points authors at. `{{action.error.id}}` has to
-%% BE something before telling anyone to render it, and before this the error
-%% path logged nothing at all — the only way to see why an endpoint was failing
-%% was to put the error itself in the response.
+%% The alternative the lint points authors at: `{{action.error.id}}` has to
+%% BE something before telling anyone to render it.
 the_error_carries_the_request_id_test() ->
     Ctxt = bondy_http_gateway_rest_handler:update_context(
         {error, #{~"status_code" => 500, ~"uri" => ~"com.example.boom"}},

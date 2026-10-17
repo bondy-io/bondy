@@ -342,13 +342,10 @@ make_event(N) ->
 %% into `bondy_http_transport_queue' while nobody was polling, and — LATER — a
 %% reply the protocol produced synchronously while handling the client's own
 %% POST. A transport is a FIFO pipe, so the first poll must return the first
-%% one.
-%%
-%% Reachable in an established session, not a synthetic ordering: an inbound
-%% whose `bondy_router:forward/2' answers `{reply, M, _}' is answered inline
-%% (`bondy_wamp_protocol.erl:504') — an ERROR for an unroutable call, a
-%% throttle rejection — while EVENTs for the same session arrive through the
-%% queue.
+%% one. Reachable in an established session: an inbound whose
+%% `bondy_router:forward/2' answers `{reply, M, _}' is answered inline by
+%% `bondy_wamp_protocol' (an ERROR for an unroutable call, a throttle
+%% rejection), while EVENTs for the same session arrive through the queue.
 queued_message_precedes_later_synchronous_reply(_Config) ->
     RealmUri = <<"com.leapsight.test.longpoll_ordering">>,
     _ = bondy_realm:create(RealmUri),

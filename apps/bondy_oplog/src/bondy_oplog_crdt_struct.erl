@@ -400,11 +400,9 @@ encode_state({_Schema, _Fields, _CC, _Hlc} = State) ->
 -spec decode_state(binary()) -> state().
 
 decode_state(<<?ENC_V1, Bin/binary>>) ->
-    %% Own-persisted projection bytes — plain decode per the C-2
-    %% own-bytes rule (rationale:
-    %% `bondy_oplog_cell_kernel:decode_value_bytes/2`). Under `[safe]`
-    %% the schema's CRDT-module atoms were also a cold-read hazard: a
-    %% restart decodes frames before those modules are loaded.
+    %% Own projection bytes, so no `[safe]`: see `bondy_oplog_cell_kernel`.
+    %% Under `[safe]` the schema's CRDT-module atoms are also a cold-read
+    %% hazard: a restart decodes frames before those modules are loaded.
     uncanon(binary_to_term(Bin)).
 
 %% =============================================================================

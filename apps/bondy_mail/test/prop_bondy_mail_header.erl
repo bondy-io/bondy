@@ -52,7 +52,7 @@ prop_accepted_headers_carry_no_controls() ->
     ).
 
 -doc """
-A header that is safe by construction is accepted, unchanged.
+A header generated without control characters is accepted, unchanged.
 
 Without this, `prop_accepted_headers_carry_no_controls` would hold vacuously: a
 validator that refused everything satisfies it perfectly. This is the property
@@ -164,14 +164,12 @@ prop_an_accepted_display_name_round_trips() ->
 No control character, anywhere, survives into a display name.
 
 Sharper than the CRLF property above and aimed at the rule rather than at the
-attack. CR and LF are what makes injection work, and they were refused
-everywhere from the start; the rest of the control range was refused in a
-custom header and accepted in a display name, because the two were checked by
-two different hand-written lists. A vertical tab in the display name of a
-`From` reached the wire unencoded -- harmless, and one edit away from not being.
+attack. CR and LF are what makes injection work, but a display name checked by
+a list of its own would let a vertical tab in a `From` reach the wire
+unencoded -- harmless, and one edit away from not being.
 
-There is now one predicate, `bondy_mail_header:has_control/1`, and this is the
-statement that a display name is held to it.
+One predicate, `bondy_mail_header:has_control/1`, holds for every header, and
+this is the statement that a display name is held to it.
 """.
 prop_no_control_survives_into_a_display_name() ->
     ?FORALL(

@@ -308,12 +308,11 @@ functions(Forms) ->
 %% @private
 %% `#{Uri => N}`: the number of POSITIONAL arguments each dispatch clause
 %% accepts, read from the `bondy_wamp_api_utils:validate_call_args/3` or
-%% `validate_admin_call_args/3` literal that clause reaches. Two of the
-%% catalogued procedures (`bondy.listener.{suspend,resume}`) decode their
-%% arguments in a shared local helper rather than in the clause body, so one
-%% level of local call is followed; deeper is not chased, and a clause whose
-%% arity cannot be read yields NOTHING rather than a guess — the caller then
-%% reports it as a mismatch instead of passing over it.
+%% `validate_admin_call_args/3` literal that clause reaches. Two catalogued
+%% procedures (`bondy.listener.{suspend,resume}`) decode their arguments in a
+%% shared local helper, so one level of local call is followed; deeper is not
+%% chased, and a clause whose arity cannot be read yields NOTHING rather than
+%% a guess — the caller then reports it as a mismatch.
 arity_clauses({function, _, Name, N, Cs}, Fns) when
     (Name == handle_call orelse Name == do_handle_call) andalso
         (N == 2 orelse N == 3)

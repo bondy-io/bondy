@@ -162,8 +162,8 @@ live_instance_fans_out_per_peer_syncs() ->
     %% per tick — the live-mode fan-out happens inside the default
     %% dispatch we replaced. The point of this test is to assert the
     %% scheduler still routes peers to the dispatch for a live
-    %% instance; the per-peer fan-out is covered by the existing
-    %% `dispatch_per_running_instance` test.
+    %% instance; the per-peer fan-out is covered by
+    %% `bondy_oplog_sync_scheduler_test:dispatch_per_running_instance/0`.
     receive
         {Ref, dispatched, Inst, [{p, a}, {p, b}]} -> ok
     after 1000 ->

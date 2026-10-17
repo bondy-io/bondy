@@ -329,21 +329,19 @@ eval_expr(Bin0, #state{acc = [], is_string = false} = St0) when
                     [Pre, Rest] = binary:split(Unquoted, St0#state.sp),
                     eval_expr(Rest, acc(St1#state{is_string = true}, Pre));
                 _ ->
-                    %% An invalid expression as:
-                    %% - we found quotes that are in the middle of the string %% e.g. <<"   \"foo\"">> or <<"\"foo\"   ">>
-                    %% - or we have no closing quote
-                    %% - or this is not a string and we have no quotes but
-                    %% chars before opening mustache
+                    %% An invalid expression: quotes in the middle of the
+                    %% string (e.g. <<"   \"foo\"">> or <<"\"foo\"   ">>), no
+                    %% closing quote, or a non-string with chars before the
+                    %% opening mustache.
                     error({badarg, Bin0})
             end
     end;
 eval_expr(Bin, #state{is_open = true, is_string = true} = St0) when
     is_binary(Bin)
 ->
-    %% Split produces a list of binaries that are all referencing Bin.
-    %% This means that the data in Bin is not copied to new binaries,
-    %% and that Bin cannot be garbage collected until the results of the split
-    %% are no longer referenced.
+    %% `binary:split/2` returns sub-binaries of `Bin`, so `Bin` stays alive
+    %% until every piece of the split is dropped. The clause below has the
+    %% same hazard.
     case binary:split(Bin, St0#state.ep) of
         [Expr, Rest] ->
             St1 = St0#state{is_open = false},
@@ -354,10 +352,6 @@ eval_expr(Bin, #state{is_open = true, is_string = true} = St0) when
 eval_expr(Bin, #state{is_open = false, is_string = true} = St) when
     is_binary(Bin)
 ->
-    %% Split produces a list of binaries that are all referencing Bin.
-    %% This means that the data in Bin is not copied to new binaries,
-    %% and that Bin cannot be garbage collected until the results of the split
-    %% are no longer referenced.
     case binary:split(Bin, St#state.sp) of
         [Pre, Rest] ->
             eval_expr(Rest, acc(St#state{is_open = true}, Pre));

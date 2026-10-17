@@ -31,19 +31,9 @@ An implementation of the `app_config` behaviour.
 -endif.
 
 -define(CONFIG, [
-    %% The following are configured via bondy.conf:
-    %% - exchange_tick_period <- cluster.exchange_tick_period
-    %% - lazy_tick_period <- cluster.lazy_tick_period
-    %% - peer_port <- cluster.peer_port
-    %% - parallelism <- cluster.parallelism
-    %% - max_message_size <- cluster.max_message_size
-    %% - peer_service_manager <- cluster.overlay.topology
-    %% - partisan.tls <- cluster.tls.enabled
-    %% - partisan.tls_server_options.* <- cluster.tls.server.*
-    %% - partisan.tls_client_options.* <- cluster.tls.client.*
-    %% - tls_handshake_timeout <- cluster.tls.handshake_timeout
-    %% - rpc_max_concurrency <- cluster.rpc_max_concurrency
-    %% - connection_high_watermark <- cluster.connection_high_watermark
+    %% The `cluster.*` mappings in `schema/bondy.schema` override these
+    %% values (tick periods, peer_port, parallelism, max_message_size,
+    %% overlay topology, tls, handshake timeout, rpc concurrency, watermark).
     {partisan, [
         %% Overlay topology
         %% Required for peer_service_manager ==
@@ -183,16 +173,11 @@ init(Args) ->
 
     ok = app_config:init(?BONDY, #{callback_mod => ?MODULE}),
 
-    %% Resolve the listener inventory before anything consumes it:
-    %% `bondy_cert_manager:init/0` below loads server certificates and client
-    %% auth per TLS listener, and `setup_wamp/0` normalises `dynamic_buffer` per
-    %% HTTP listener. Both ask the manager which listeners exist.
-    %%
-    %% Must run after `app_config:init/2` above, the first point at which
-    %% configuration is readable at all. It also calls
-    %% `splat_listener_blocks/1`, which is what puts a listener's option blocks
-    %% where `bondy_cert_manager:init/0` reads `[Name, tls, ...]` from for both
-    %% the server certificate and the mTLS policy.
+    %% Resolves the listener inventory before `bondy_cert_manager:init/0` and
+    %% `setup_wamp/0` ask the manager which listeners exist. Has to run after
+    %% `app_config:init/2`, the first point at which configuration is
+    %% readable; it also splats each listener's option blocks to where
+    %% `bondy_cert_manager:init/0` reads `[Name, tls, ...]`.
     ok = bondy_listener_manager:init(),
 
     ok = bondy_cert_manager:init(),
@@ -308,17 +293,11 @@ the configured family.
     map().
 
 listener_transport_opts(Name, Ip) ->
-    %% `ip` is dropped from the transport options. It is not a ranch transport
-    %% option, and `key_value:to_map/1` is shallow, so an `ip` sitting at the top
-    %% of a listener's `transport_opts` block survives this merge into the map
-    %% handed to `ranch:start_listener/5`.
-    %% `ranch:validate_transport_opt/3`'s catch-all answers `false` for an
-    %% unknown key, so the bind fails with `{error, {bad_option, ip}}` and
-    %% aborts the boot — verified directly by
-    %% `top_level_ip_does_not_reach_ranch` in `bondy_listener_SUITE`, which fails
-    %% with that exact tuple without this line. The address reaches the socket
-    %% options through the `Ip` parameter instead, where it is reconciled with
-    %% `ip_version`, so the raw value has no remaining purpose here.
+    %% `ip` is not a ranch transport option, and `key_value:to_map/1` is
+    %% shallow, so a top-level `ip` in a listener's `transport_opts` would
+    %% reach `ranch:start_listener/5` and fail the bind with
+    %% `{error, {bad_option, ip}}` (`bondy_listener_SUITE`:
+    %% `top_level_ip_does_not_reach_ranch`). The address arrives through `Ip`.
     Opts = maps:remove(
         ip,
         maps:merge(
@@ -340,7 +319,7 @@ listener_transport_opts(Name, Ip) ->
     SocketOpts = bondy_cert_manager:maybe_inject_sni_fun(Name, SocketOpts1),
 
     Opts#{
-        % the default, made explicit
+        %% the default, made explicit
         num_conns_sups => NumAcceptors,
         socket_opts => SocketOpts
     }.
@@ -514,41 +493,25 @@ setup_wamp() ->
     %% operate i.e. all dependencies, and are private.
 
     %% ROUTER
-    %% Dynamic buffer, HTTP listeners only (not RAW TCP sockets). The schema
-    %% maps <listener>.buffer.min/max to a {min, max} property list at
-    %% [Listener, protocol_opts, dynamic_buffer]; Cowboy requires
-    %% `dynamic_buffer => {Min, Max} | false', so normalise the value in
-    %% place. When unset the key is left ABSENT and Cowboy's default
-    %% ({512, 131072}, adaptive) applies. There is no WebSocket-specific
-    %% equivalent to list here: since Cowboy 2.13 a WebSocket connection
-    %% INHERITS the listener's dynamic_buffer (cowboy_websocket overrides any
-    %% handler-supplied value), so a WS-specific setting cannot take effect,
-    %% which is why `?CARRIER_DEFAULTS' has no `dynamic_buffer' entry either.
+    %% Dynamic buffer, HTTP listeners only. The schema maps
+    %% <listener>.buffer.min/max to a {min, max} property list; Cowboy requires
+    %% `dynamic_buffer => {Min, Max} | false', so normalise in place. Unset
+    %% leaves the key ABSENT and Cowboy's default applies. Since Cowboy 2.13 a
+    %% WebSocket connection inherits the listener's dynamic_buffer, so
+    %% `?CARRIER_DEFAULTS' has no `dynamic_buffer' entry.
     Keys = [
         [Name, protocol_opts, dynamic_buffer]
      || Name <- bondy_listener_manager:http_listeners()
     ],
     ok = lists:foreach(fun set_dynamic_buffer/1, Keys),
 
-    %% Every WAMP feature Bondy announces, seated from the code. A feature is a
-    %% CAPABILITY, not a setting: it tells a client which parts of the advanced
-    %% profile this build implements. A client asks for a subset in HELLO,
-    %% `bondy_session:parse_roles/1' intersects that request with these values
-    %% (`merge_feature_flags/2'), and from then on every message consults the
-    %% resulting SESSION flags. An operator has no say at any point in that
-    %% chain, which is why none of these is a `bondy.conf' key.
-    %%
-    %% `?BROKER_FEATURES' and `?DEALER_FEATURES' are the value tables;
+    %% Every WAMP feature Bondy announces. A feature is a CAPABILITY, not a
+    %% setting: `bondy_session' intersects a client's HELLO request with these
+    %% values, so none of them is a `bondy.conf' key.
     %% `?BROKER_FEATURES_SPEC' and `?DEALER_FEATURES_SPEC' in `bondy_wamp.hrl'
-    %% are the matching name sets, which is what makes the pair an oracle rather
-    %% than one more copy of the list.
-    %%
-    %% Seated as CONFIGURATION rather than returned as literals from
-    %% `bondy_dealer:features/0' and `bondy_broker:features/0', because both
-    %% modules also answer `is_feature_implemented/1' straight out of
-    %% configuration;
-    %% one value here is what keeps the two answers from disagreeing, and is what
-    %% `bondy_router:roles/0' advertises in WELCOME.
+    %% are the matching name sets. Seated as configuration because
+    %% `bondy_dealer:features/0', `bondy_broker:features/0' and their
+    %% `is_feature_implemented/1' all read it, as does `bondy_router:roles/0'.
     ok = lists:foreach(
         fun({Role, Features}) ->
             maps:foreach(
@@ -755,20 +718,12 @@ normalise_socket_opts(SocketOpts0) ->
 
     %% We default to listen on any i.e. 0.0.0.0 or :: depending on IPVer
     IP0 = key_value:get(ip, SocketOpts1, any),
-    %% `inet` rather than `any`, because `any` is not a family:
-    %% `bondy_router_utils:get_ipaddr/2` has clauses for `(any, inet)` and
-    %% `(any, inet6)` but none for `(any, any)`, so an absent `ip_version` used
-    %% to raise `function_clause` here — naming no listener — instead of
-    %% listening on 0.0.0.0.
-    %%
-    %% `listeners.$name.ip_version` carries no default and, being a fuzzy
-    %% mapping, cannot — so the key is absent for every listener that did not
-    %% state it, which is what this fallback covers.
-    %%
-    %% Note the precedence this establishes: `get_ipaddr_family/2` below derives
-    %% the family from the ARITY of the resolved address, so a configured
-    %% address always wins and `ip_version` decides only which wildcard an
-    %% address-less listener binds.
+    %% `inet` rather than `any`: `bondy_router_utils:get_ipaddr_family/2`
+    %% has no clause for `(any, any)`. `listeners.$name.ip_version` is a fuzzy
+    %% mapping and carries no default, so the key is absent for a listener
+    %% that did not state it. A configured address always wins:
+    %% `get_ipaddr_family/2` derives the family from the address arity, so
+    %% `ip_version` decides only which wildcard an address-less listener binds.
     {Family0, SocketOpts2} = take(ip_version, SocketOpts1, inet),
     {IP, Family} = bondy_router_utils:get_ipaddr_family(IP0, Family0),
     SocketOpts3 = key_value:put(ip, IP, SocketOpts2),

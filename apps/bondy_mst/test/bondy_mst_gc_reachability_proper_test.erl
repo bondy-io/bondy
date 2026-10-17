@@ -15,15 +15,16 @@
 %%   - local installs        → `put/3`
 %%   - a peer pull + merge   → `put_page/2` of the peer subtree's pages into
 %%                             OUR store (the sync session's writes), then
-%%                             `merge(T, T, PeerRoot)` — the production call in
-%%                             `do_integrate_peer_root/2`, guarded by the same
+%%                             `merge(T, T, PeerRoot)` — the production call
+%%                             peer integration makes in
+%%                             `bondy_oplog_instance`, guarded by the same
 %%                             `missing_set/2` pre-check
 %%   - a PARTIAL pull        → only a random subset of the peer pages adopted;
 %%                             the missing-set guard must then refuse the merge
 %%                             (this is the pin-expiry / mid-pull-compaction
 %%                             scenario: swept or not-yet-fetched pages)
-%%   - compaction            → `gc(truncate(T, W), Pins)` — verbatim
-%%                             `truncate_below_or_equal/4`, with pins drawn
+%%   - compaction            → `gc(truncate(T, W), Pins)` — verbatim the
+%%                             `bondy_oplog_instance` compaction, pins drawn
 %%                             from live AND stale peer roots (a stale pin is a
 %%                             pin whose pages compaction already swept)
 %%
@@ -211,7 +212,7 @@ apply_op({compact, Frac, PinSel}, {T0, Model0, Roots, ok}) ->
             undefined ->
                 bondy_mst:gc(T0, Pins);
             _ ->
-                %% Verbatim `truncate_below_or_equal/4` (ets branch).
+                %% Verbatim the `bondy_oplog_instance` compaction (ets branch).
                 bondy_mst:gc(bondy_mst:truncate(T0, Watermark), Pins)
         end,
     Model =

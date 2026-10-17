@@ -488,21 +488,12 @@ configured_path() ->
 
 %% @private
 %% Applies a batch of retirements. PERSIST FIRST, enforce only on success.
-%%
-%% That order is not a preference. `proofs/tla/OriginRetirementSet.tla` with
-%% `RetirementDurable = FALSE` — a replica may enforce a retirement it has
-%% not persisted — violates `SpuriousGap` in 9 steps: mint, depart, sync,
-%% depart, retire, REAP, RESTART, join. The restart forgets the retirement
-%% while the reap it licensed is already gone from the frontier, so the node
-%% reads a peer's surviving entry as a deficit for data it holds, on every
-%% round, forever. `RetirementDurable = TRUE` is exhaustively clean
-%% (2,538,102 distinct states).
-%%
-%% So a failed write must leave NOTHING enforced, which it does here: the
-%% ETS insert is downstream of the persist
+%% `proofs/tla/OriginRetirementSet.tla` with `RetirementDurable = FALSE` (a
+%% replica may enforce a retirement it has not persisted) violates
+%% `SpuriousGap`: a restart forgets the retirement while the reap it licensed
+%% is gone from the frontier, so the node reads a peer's surviving entry as a
+%% deficit forever. A failed write therefore leaves NOTHING enforced
 %% (`bondy_oplog_origin_bans_test:a_failed_persist_enforces_nothing/0`).
-%% A failed directory fsync after `persist/2`'s rename also leaves nothing
-%% enforced; `load_retired/1` syncs before it enforces what that write left.
 do_retire(_Pairs, #state{path = undefined} = State) ->
     {reply, {error, not_persistent}, State};
 do_retire(Pairs, State0) ->

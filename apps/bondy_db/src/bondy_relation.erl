@@ -13,9 +13,8 @@ that every "list the things in a realm" call needs:
 
 - **Keyset (cursor) pagination** — `list/3` returns a bounded
   `t:result_set/0` and an opaque `t:cursor/0` to resume from, instead of
-  materialising the whole realm. This is the fix for the
-  `bondy_db:list/2`-then-`lists:sublist/2` pattern that can OOM a node
-  when an operator lists a large realm.
+  materialising the whole realm. A `bondy_db:list/2`-then-`lists:sublist/2`
+  pattern can OOM a node when an operator lists a large realm.
 - **A bounded streaming `fold/4`** — for the internal "touch every row"
   operations (rename, bulk-delete) that must be complete but must not
   hold the whole table in memory.
@@ -283,10 +282,9 @@ Ordering follows the relation's **mode**, exactly as `list/3`'s does:
 - `global` scatter-merges and is globally key-ordered, at the cost of
   re-reading the band once per shard.
 
-This used to ignore the mode and always scatter, so a `partition` relation's
-`fold/4` silently cost `O(rows x shards)` while the `list/3` beside it cost
-`O(rows)`. A caller that needs its whole-relation output sorted declares
-`mode => global` and pays for it visibly.
+A `partition` relation's `fold/4` costs `O(rows)`, like the `list/3` beside
+it. A caller that needs its whole-relation output sorted declares
+`mode => global` and pays `O(rows x shards)` visibly.
 
 Returns `{ok, Acc}` or a substrate `{error, _}`.
 """.

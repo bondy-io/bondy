@@ -5,7 +5,7 @@
 
 %% Test-only fixture: a trivial commutative CRDT that exports the tier_2
 %% `apply_op/4` step and RECORDS every `(Op, Context)` it is handed. Used
-%% to prove the kernel/contract extension (PR-B) routes to `apply_op/4`
+%% to prove the kernel routes a tier_2 write to `apply_op/4`
 %% and threads the write's causal context (the event `meta`). State is the
 %% reversed list of recorded `(Op, Context)` pairs.
 

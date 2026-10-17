@@ -83,7 +83,7 @@ authenticate(Ticket, _, Ctxt, State) ->
             } = Claims} when
             Uri == all orelse Uri == RealmUri
         ->
-            %% A-1: the ticket's issuer (`authrealm`) must be trusted by the
+            %% The ticket's issuer (`authrealm`) has to be trusted by the
             %% target realm (itself or its SSO realm); the `scope.realm`
             %% guard above is not sufficient — an SSO ticket carries
             %% `scope.realm = all` and would otherwise be accepted by

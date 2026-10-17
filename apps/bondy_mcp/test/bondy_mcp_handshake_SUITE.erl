@@ -5,7 +5,7 @@
 -module(bondy_mcp_handshake_SUITE).
 
 -moduledoc """
-The handshake protocol era (design §12, §21 increment 8) over a real
+The handshake protocol era over a real
 socket: `initialize` creates a `bondy_http_transport_session`-backed
 session named by `Mcp-Session-Id`; every subsequent request authenticates
 at the HTTP layer AND binds to the session's principal; the held `GET`
@@ -228,7 +228,7 @@ carrier_config() ->
     }.
 
 %% =============================================================================
-%% CASES — lifecycle (§12.1)
+%% CASES — lifecycle
 %% =============================================================================
 
 initialize_negotiates_and_mints_a_session(Config) ->
@@ -250,7 +250,7 @@ initialize_negotiates_and_mints_a_session(Config) ->
             binary_to_list(SessionId)
         )
     ),
-    %% Capabilities and serverInfo per §12.1.
+    %% Capabilities and serverInfo.
     ?assertMatch(
         #{
             <<"tools">> := #{<<"listChanged">> := true},
@@ -338,9 +338,8 @@ established_requests_require_the_session(Config) ->
         [{"mcp-session-id", Fake}],
         req(2, <<"tools/list">>, #{})
     ),
-    %% A session owned by another node answers the same 404 (forwarding
-    %% is a recorded deviation; re-initializing here is the recovery the
-    %% spec mandates).
+    %% A session owned by an unreachable node answers the same 404;
+    %% re-initializing is the recovery the spec mandates.
     {404, _, #{<<"error">> := #{<<"code">> := -32001}}} = post_hs(
         Config,
         ?OPEN_REALM,
@@ -447,7 +446,7 @@ tools_call_round_trip_shares_the_session_identity(Config) ->
     ),
     %% Both audit records carry the SAME session id — the MCP session's
     %% stored WAMP session — where modern per-request records each mint
-    %% their own. This is the §14 identity the handshake era adds.
+    %% their own. This is the audit identity the handshake era adds.
     [S1, S2] = [
         maps:get(session_id, Record)
      || Record <- collect_audit(Ref, 2)
@@ -458,7 +457,7 @@ tools_call_round_trip_shares_the_session_identity(Config) ->
     ok = delete_session(Config, ?OPEN_REALM, SessionId, []).
 
 input_required_callee_is_a_plain_tool_error(Config) ->
-    %% The MRTR result type does not exist in these revisions: the §11.1
+    %% The MRTR result type does not exist in these revisions: the MRTR
     %% callee signal surfaces as an ordinary tool error, never as an
     %% InputRequiredResult.
     SessionId = initialize(Config, ?OPEN_REALM, []),
@@ -511,7 +510,8 @@ lists_and_stale_cursor(Config) ->
     ],
     ?assert(lists:member(?ECHO, Names)),
     ?assert(lists:member(<<"region_tool">>, Names)),
-    %% Change the manifest, then present the old cursor: §12.7 requires
+    %% Change the manifest, then present the old cursor: the cursor rule
+    %% requires
     %% the stale answer, and the client restarts the listing.
     ok = bondy_mcp_gateway:load(#{
         <<"id">> => <<"mcp_hs_overlay2">>,
@@ -603,7 +603,7 @@ resource_lists(Config) ->
     ok = delete_session(Config, ?OPEN_REALM, SessionId, []).
 
 %% =============================================================================
-%% CASES — the GET stream and subscriptions (§12.2, §12.4)
+%% CASES — the GET stream and subscriptions
 %% =============================================================================
 
 resources_subscribe_round_trip(Config) ->
@@ -661,7 +661,7 @@ resources_subscribe_round_trip(Config) ->
     ok = delete_session(Config, ?OPEN_REALM, SessionId, []).
 
 notifications_buffer_while_disconnected(Config) ->
-    %% §12.2's backlog falsifier: events published while NO GET stream is
+    %% The backlog falsifier: events published while NO GET stream is
     %% connected are waiting when one connects.
     SessionId = initialize(Config, ?OPEN_REALM, []),
     {200, _, #{<<"result">> := #{}}} = post_session(
@@ -739,7 +739,7 @@ list_changed_reaches_the_stream(Config) ->
     ok = delete_session(Config, ?OPEN_REALM, SessionId, []).
 
 %% =============================================================================
-%% CASES — cancellation and shutdown (§12.5, §12.8)
+%% CASES — cancellation and shutdown
 %% =============================================================================
 
 cancelled_notification_cancels_the_call(Config) ->
@@ -795,7 +795,7 @@ cancelled_notification_cancels_the_call(Config) ->
 
 delete_terminates_the_session(Config) ->
     SessionId = initialize(Config, ?OPEN_REALM, []),
-    %% DELETE without the header is 400 (§12.8).
+    %% DELETE without the header is 400.
     {ok, {{_, 400, _}, _, _}} = httpc:request(
         delete, {url(Config, ?OPEN_REALM), []}, [], []
     ),
@@ -814,7 +814,7 @@ delete_terminates_the_session(Config) ->
     ).
 
 idle_timeout_ignores_the_open_stream(Config) ->
-    %% §12.8: only POSTs reset the idle timer — an open GET stream does
+    %% Only POSTs reset the idle timer — an open GET stream does
     %% not. The session is started under a 1.5s TTL; its stream is held
     %% open the whole time; the first inactivity check (the substrate's
     %% 5s floor) must stop it.
@@ -838,7 +838,7 @@ idle_timeout_ignores_the_open_stream(Config) ->
     ).
 
 %% =============================================================================
-%% CASES — §15 metrics (delta-based: the node is shared across the run)
+%% CASES — metrics (delta-based: the node is shared across the run)
 %% =============================================================================
 
 metrics_session_and_call_series(Config) ->
@@ -867,7 +867,7 @@ metrics_session_and_call_series(Config) ->
             <<"name">> => ?ECHO, <<"arguments">> => #{<<"n">> => 1}
         })
     ),
-    %% In this era the §11.1 input-required signal is an ordinary tool
+    %% In this era the MRTR input-required signal is an ordinary tool
     %% error — and must be COUNTED as one (a status classification
     %% collapsed to `success` fails here).
     {200, _, #{<<"result">> := #{<<"isError">> := true}}} = post_session(
@@ -909,7 +909,7 @@ metrics_version_refused_series(Config) ->
 
     SessionId = initialize(Config, ?OPEN_REALM, []),
     %% A client-invented version must aggregate under `other` — the raw
-    %% value never mints a Prometheus series (§15.2).
+    %% value never mints a Prometheus series.
     {400, _, _} = post_hs(
         Config,
         ?OPEN_REALM,
@@ -1020,18 +1020,12 @@ metrics_notifications_series(Config) ->
 
 %% Every close reason is counted at ONE seat — the transport session's
 %% terminate — and the active-sessions gauge returns to rest after each.
-%% Coverage per sub-scenario (and what each does NOT cover):
-%% - client_close: the DELETE path, end to end. Exactly +1 — a second
-%%   emission left at the DELETE handler would fail here.
-%% - idle_timeout: the check is TRIGGERED DIRECTLY (the message the
-%%   timer would send), so this pins the classification, the distinct
-%%   `{shutdown, idle_timeout}` stop reason, and the emission — NOT the
-%%   timer's scheduling (`idle_timeout_ignores_the_open_stream` rides
-%%   the real timer).
-%% - crash: `sys:terminate/2` with a non-shutdown reason reaches
-%%   `terminate/2` as-is (probed); classified `crash`.
-%% - stored_session_closed: the WAMP session is closed underneath the
-%%   transport; the next request's liveness check closes it.
+%% Per sub-scenario: `client_close` is the DELETE path end to end (exactly
+%% +1); `idle_timeout` TRIGGERS the check directly, pinning classification,
+%% the `{shutdown, idle_timeout}` stop reason and the emission but NOT the
+%% timer (`idle_timeout_ignores_the_open_stream` rides the real timer);
+%% `crash` reaches `terminate/2` via `sys:terminate/2` with a non-shutdown
+%% reason; `stored_session_closed` closes the WAMP session underneath.
 transport_lifecycle_close_reasons_and_active_gauge(Config) ->
     Node = bondy_config:node(),
     SLabel = #{node => Node, realm => ?OPEN_REALM, listener => ?LISTENER},

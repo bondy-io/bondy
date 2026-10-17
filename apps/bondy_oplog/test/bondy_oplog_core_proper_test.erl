@@ -1,16 +1,16 @@
 %% =============================================================================
 %% PropEr invariants for the read-side substrate.
 %%
-%% Covers the eight checkable invariants in `MST_DB_DESIGN.md` §17:
+%% Covers eight checkable invariants:
 %%
-%%   - prop_read_returns_latest_fold/0       (§17 D1 — read consistency)
-%%   - prop_cache_coherence_write_through/0  (§17 D2 — cache coherence)
-%%   - prop_fenced_read_excludes_past_fence/0 (§17 D3 — fenced reads)
-%%   - prop_range_monotonicity/0             (§17 D4 — range scans)
-%%   - prop_ensure_fresh_correctness/0       (§17 D5 — freshness predicate)
-%%   - prop_subscription_delivers_matches/0  (§17 D6 — subscription delivery)
-%%   - prop_overlay_projection_merge/0       (§17 D7 — overlay-projection merge)
-%%   - prop_concurrent_readers_observe_lineage/0 (§17 D8 — reader safety)
+%%   - prop_read_returns_latest_fold/0       (read consistency)
+%%   - prop_cache_coherence_write_through/0  (cache coherence)
+%%   - prop_fenced_read_excludes_past_fence/0 (fenced reads)
+%%   - prop_range_monotonicity/0             (range scans)
+%%   - prop_ensure_fresh_correctness/0       (freshness predicate)
+%%   - prop_subscription_delivers_matches/0  (subscription delivery)
+%%   - prop_overlay_projection_merge/0       (overlay-projection merge)
+%%   - prop_concurrent_readers_observe_lineage/0 (reader safety)
 %% =============================================================================
 
 -module(bondy_oplog_core_proper_test).
@@ -117,7 +117,7 @@ overlay_events_gen() ->
 %% Properties
 %% =============================================================================
 
-%% D1 — Read consistency. After folding a sequence of events (any
+%% Read consistency. After folding a sequence of events (any
 %% interleaving of `set`/`clear`) in HLC order, `read/3` must return
 %% the same `{Value, Hlc}` the model computes.
 prop_read_returns_latest_fold() ->
@@ -132,7 +132,7 @@ prop_read_returns_latest_fold() ->
         end)
     ).
 
-%% D7 — Overlay-projection merge correctness. A pre-materialised
+%% Overlay-projection merge correctness. A pre-materialised
 %% projection cell at HLC=H_proj with a pending overlay event E at
 %% HLC > H_proj must read back as `fold(S, [E])`.
 prop_overlay_projection_merge() ->
@@ -159,7 +159,7 @@ prop_overlay_projection_merge() ->
         )
     ).
 
-%% D3 — Fenced read consistency. For a fence T, overlay events with
+%% Fenced read consistency. For a fence T, overlay events with
 %% HLC > T must NOT contribute to the result.
 prop_fenced_read_excludes_past_fence() ->
     ?FORALL(
@@ -182,7 +182,7 @@ prop_fenced_read_excludes_past_fence() ->
         )
     ).
 
-%% D4 — Range monotonicity. Range scans return keys in sorted order
+%% Range monotonicity. Range scans return keys in sorted order
 %% and cover exactly the cells in `[Low, High)`.
 prop_range_monotonicity() ->
     ?FORALL(
@@ -245,7 +245,7 @@ prop_range_pages_every_live_cell(WithShard) ->
         end)
     ).
 
-%% D5 — Freshness predicate correctness. A registered NS is fresh iff
+%% Freshness predicate correctness. A registered NS is fresh iff
 %% every shard has lag ≤ MaxLag.
 prop_ensure_fresh_correctness() ->
     ?FORALL(
@@ -274,7 +274,7 @@ prop_ensure_fresh_correctness() ->
         end)
     ).
 
-%% D6 — Subscription delivery. Every published event matching the
+%% Subscription delivery. Every published event matching the
 %% subscriber's pattern is delivered, in publish order.
 prop_subscription_delivers_matches() ->
     ?FORALL(
@@ -303,7 +303,7 @@ prop_subscription_delivers_matches() ->
         end
     ).
 
-%% D2 — Cache coherence (§3.6). `bondy_oplog_core:write_through/4`
+%% Cache coherence. `bondy_oplog_core:write_through/4`
 %% **invalidates** the cache entry rather than folding the event into the
 %% cached value; the next read repopulates from the projection, which here
 %% still holds the pre-event state because this test never drives the
@@ -348,7 +348,7 @@ prop_cache_coherence_write_through() ->
         )
     ).
 
-%% D8 — Concurrent reader safety. With N readers and 1 writer, every
+%% Concurrent reader safety. With N readers and 1 writer, every
 %% observation must correspond to a valid prefix-fold of the event
 %% log (i.e. there must exist some i s.t. observed value equals
 %% fold(initial, events[1..i])).

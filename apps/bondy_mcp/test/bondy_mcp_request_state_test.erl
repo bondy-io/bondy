@@ -3,17 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Falsifiers for the §11.1 `requestState` envelope's pure core. The spec's
+%% Falsifiers for the MRTR `requestState` envelope's pure core. The spec's
 %% MUSTs are the targets: state failing verification is rejected, and the
 %% principal, expiry and originating-request identity bound inside the
 %% AEAD-protected payload are each verified on receipt. Every rejection is
-%% the uniform `{error, invalid}` — these tests also pin the two distinct
-%% failure shapes of the underlying jose decrypt (a tampered ciphertext
-%% RETURNS an error tuple, a wrong key RAISES) landing in that one answer.
-%%
-%% Keys are exercised in the `jose_jwk:to_map/1` form — the exact shape
-%% `bondy_realm:get_random_encryption_key/1` hands the realm-facing
-%% wrappers.
+%% the uniform `{error, invalid}`; these tests also pin the two failure
+%% shapes of the underlying jose decrypt (a tampered ciphertext RETURNS an
+%% error tuple, a wrong key RAISES) landing in that one answer. Keys are in
+%% the `jose_jwk:to_map/1` form of `bondy_realm:get_random_encryption_key/1`.
 -module(bondy_mcp_request_state_test).
 
 -include_lib("eunit/include/eunit.hrl").

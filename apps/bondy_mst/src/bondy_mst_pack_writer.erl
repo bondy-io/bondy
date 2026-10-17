@@ -129,17 +129,12 @@ unsynced pages on recovery. Callers that need stricter durability
     sync_every_ms :: pos_integer() | infinity,
     unsynced_count = 0 :: non_neg_integer(),
     last_sync_ms :: integer(),
-    %% Root-flush debounce. `set_root/2` rewrites the manifest, which
-    %% costs tmp+datasync+rename+fsync_dir (4 fsyncs) — ~40-200 ms per
-    %% call on macOS APFS. Without debouncing the MST applier (one
-    %% set_root per drain batch) serialises on this fsync chain.
-    %% Same shape as the append batching above: flush when EITHER
-    %% `root_unsynced_count >= root_flush_every_records` OR
-    %% `monotonic_ms - last_root_flush_ms >= root_flush_every_ms`,
-    %% checked on each `set_root/2` call. Seal paths reset these
-    %% counters because they already rewrite the manifest with the
-    %% current in-memory root. `close/1` and `flush/1` force a flush
-    %% so clean shutdown is lossless.
+    %% Root-flush debounce: `set_root/2` rewrites the manifest (4 fsyncs), so
+    %% the manifest is flushed when EITHER `root_unsynced_count >=
+    %% root_flush_every_records` OR `monotonic_ms - last_root_flush_ms >=
+    %% root_flush_every_ms`, checked on each `set_root/2` call. Seal paths
+    %% reset the counters because they rewrite the manifest with the current
+    %% in-memory root; `close/1` and `flush/1` force a flush.
     root_flush_every_records :: pos_integer() | infinity,
     root_flush_every_ms :: pos_integer() | infinity,
     root_unsynced_count = 0 :: non_neg_integer(),
@@ -1280,7 +1275,7 @@ next_pack_id_from(Manifest) ->
     Highest + 1.
 
 %% @private
-%% Orphan sealed-pack scanner (design doc §10.1, step 2).
+%% Orphan sealed-pack scanner.
 %%
 %% A crash between the sealed `.pack`/`.idx` rename-into-place (seal
 %% step 3) and the manifest swap (seal step 4) leaves on-disk files
@@ -1534,13 +1529,12 @@ do_seal(
         instance_hash = IH,
         hash_algo = HashAlgo,
         manifest = M,
-        incoming_fd = Fd,
         pending = Pending,
         next_pack_id = PackId
     } = W
 ) ->
     Hashes = lists:sort(maps:keys(Pending)),
-    Reader = pending_reader(Fd, Pending),
+    Reader = pending_reader(Pending),
     case
         bondy_mst_pack_seal:create_sealed_pack(
             Dir, IH, HashAlgo, PackId, Hashes, Reader
@@ -1553,18 +1547,14 @@ do_seal(
     end.
 
 %% @private
-%% A reader closure over the writer's incoming.pack fd + in-memory
-%% pending map. The streaming sealed-pack writer calls this once per
-%% hash in sorted order; we pread the body without materialising the
-%% rest of the pending set.
-pending_reader(Fd, Pending) ->
-    fun(Hash) -> read_pending_body(Fd, Pending, Hash) end.
+%% A reader closure over the in-memory pending map. The streaming
+%% sealed-pack writer calls it once per hash in sorted order. Bodies are
+%% resident in the map, so nothing is read back from `incoming.pack`.
+pending_reader(Pending) ->
+    fun(Hash) -> read_pending_body(Pending, Hash) end.
 
 %% @private
-%% Bodies are resident in the pending map so the seal stream can
-%% return them directly without pread'ing back from `incoming.pack`.
-%% Fd is kept in the signature for symmetry / future fallback.
-read_pending_body(_Fd, Pending, Hash) ->
+read_pending_body(Pending, Hash) ->
     case maps:find(Hash, Pending) of
         {ok, {_Offset, _Len, Body}} ->
             {ok, Body};

@@ -49,7 +49,8 @@ format_status(_Config) ->
         [S || S <- [{}, {wamp_state}]]
     ),
 
-    % No sensitive info at wamp_state level, the reformatting is delegated to other modules.
+    %% No sensitive info at wamp_state level, the reformatting is delegated to
+    %% other modules.
     lists:foreach(
         fun(
             {SubProtocol, AuthMethod, AuthClaims, AuthContext, AuthTime, Name,
@@ -113,7 +114,7 @@ format_status(_Config) ->
     ?WAMP2_MSGPACK,
     ?WAMP2_CBOR,
     ?WAMP2_BERT,
-    % not supported
+    %% not supported
     ?WAMP2_ERL,
     ?WAMP2_CBOR_BATCHED,
     ?WAMP2_MSGPACK_BATCHED,
@@ -191,7 +192,7 @@ validate_subprotocol(_Config) ->
 
 abort_message_preauth_is_generic(_Config) ->
     %% Every pre-authentication credential/identity failure must produce a
-    %% byte-identical client-facing ABORT (same reason_uri AND details), so a
+    %% identical client-facing ABORT (same reason_uri AND details), so a
     %% client cannot distinguish "no such user" / "disabled" from "bad password".
     Reasons = [
         {no_such_user, <<"ghost">>},
@@ -408,14 +409,14 @@ sess_key() ->
 terminate(_Config) ->
     SubProtocol = {raw, binary, erl},
 
-    % undefined context
+    %% undefined context
     StateNoContext =
         {wamp_state, SubProtocol, cryptosign, undefined, #{}, 123, failed,
             undefined, undefined, undefined},
     ?assertEqual(undefined, bondy_wamp_protocol:context(StateNoContext)),
     ?assertEqual(ok, bondy_wamp_protocol:terminate(StateNoContext)),
 
-    % no session
+    %% no session
     Peer = {{127, 0, 0, 1}, 7},
     {ok, State} = bondy_wamp_protocol:init(SubProtocol, Peer, #{}),
     Context = bondy_wamp_protocol:context(State),
@@ -427,7 +428,7 @@ terminate(_Config) ->
 %% -----------------------------------------------------------------------------
 
 handle_inbound(_Config) ->
-    % Unsupported protocol
+    %% Unsupported protocol
     EncodingUnsupported = unsupported,
     SubProtocolInvalid = {ws, text, EncodingUnsupported},
     StateInvalidSP =

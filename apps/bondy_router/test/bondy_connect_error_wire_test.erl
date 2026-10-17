@@ -120,8 +120,8 @@ derived_status_test() ->
      || {Term, Status} <- Expected
     ].
 
-%% Context has always been readable at the top level of the payload, so it stays
-%% there even though it now also appears under `details'.
+%% Context is readable at the top level of the payload and also under
+%% `details'.
 context_keys_stay_at_the_top_level_test() ->
     Map = bondy_connect_error:to_map(
         bondy_connect_error:from_term({invalid_value, ~"k", ~"v"})
@@ -277,10 +277,8 @@ bondy_connect_error_timeout_macro_has_a_status_test() ->
 %% HTTP STATUS
 %% =============================================================================
 
-%% The two tables this replaced disagreed on exactly these rows, and both
-%% carried a %% REVIEW comment. Resolved on WAMP semantics: not_authorized is
-%% the peer being refused, authorization_failed is the router being unable to
-%% decide.
+%% On WAMP semantics, not_authorized is the peer being refused;
+%% authorization_failed is the router being unable to decide.
 reconciled_status_rows_test() ->
     ?assertEqual(
         ?HTTP_FORBIDDEN, bondy_http_utils:http_status(?WAMP_NOT_AUTHORIZED)

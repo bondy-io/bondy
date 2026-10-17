@@ -3,18 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Falsifiers for the explicit trace-context surface:
-%%
-%% - `attach/2` / `extract/1` are inverses over the wire keys, for a full
-%%   and a traceparent-only context;
-%% - `tracestate` and `baggage` are never surfaced without a
-%%   `traceparent` (the W3C rule), and never invented;
-%% - `attach(Opts, undefined)` is exactly `Opts`, and attach never
-%%   disturbs unrelated option keys;
-%% - `ensure_wamp_extensions/0` MERGES the client's declarations into the
-%%   `wamp` environment — pre-existing entries survive, nothing is
-%%   duplicated, and a second run changes nothing (both start orders when
-%%   co-located with a router).
+%% Falsifiers for the explicit trace-context surface: `attach/2` / `extract/1`
+%% are inverses over the wire keys, for a full and a traceparent-only context;
+%% `tracestate` and `baggage` are never surfaced without a `traceparent` (the
+%% W3C rule), and never invented; `attach(Opts, undefined)` is exactly `Opts`,
+%% and attach never disturbs unrelated option keys; `ensure_wamp_extensions/0`
+%% MERGES the client's declarations into the `wamp` environment — pre-existing
+%% entries survive, nothing is duplicated, and a second run changes nothing
+%% (both start orders when co-located with a router).
 -module(bondy_connect_trace_test).
 
 -include_lib("eunit/include/eunit.hrl").

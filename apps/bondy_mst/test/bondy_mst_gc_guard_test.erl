@@ -151,21 +151,13 @@ gc_aborts_on_unservable_root_test() ->
     end.
 
 %% The reachability sweep's candidate snapshot precedes the mark walk —
-%% `prune_unreachable/2`'s order is load-bearing. A page inserted while
-%% the collection runs but after the snapshot must survive the cycle
-%% regardless of reachability: with the inverse order (mark, then
-%% select) such a page is swept ON ARRIVAL — absent while the
-%% keep-roots are walked so not in the filter, yet present for the
-%% select. In production the concurrent inserter is the sync session's
-%% `put_page` (the `concurrent_writes` capability), and the writer that
-%% then publishes a root referencing the swept page holds a permanently
-%% unservable root.
-%%
-%% `bloomfi:new/1` is called exactly once per reachability collection,
-%% at the start of the mark walk, so an insert injected there lands
-%% after the snapshot under the correct order and inside the
-%% mark-before-select window under the inverse — a deterministic probe
-%% of the ordering contract, no timing involved.
+%% `prune_unreachable/2`'s order is load-bearing. A page inserted after the
+%% snapshot must survive the cycle regardless of reachability; with the
+%% inverse order (mark, then select) it is swept ON ARRIVAL, and the writer
+%% that then publishes a root referencing it holds an unservable root.
+%% `bloomfi:new/1` is called exactly once per collection, at the start of the
+%% mark walk, so an insert injected there lands after the snapshot under the
+%% correct order and inside the mark-before-select window under the inverse.
 sweep_spares_pages_inserted_after_snapshot_test() ->
     {ok, _} = application:ensure_all_started(telemetry),
     T0 = new_tree(),
@@ -279,14 +271,10 @@ drop_root_referenced_page(Tab) ->
     {Ref, Row}.
 
 %% The publication/collection post-conditions (`verify_published_root/2`,
-%% `verify_post_sweep/2`) are the ONLY thing in the tree that catches a merge
-%% publishing a root whose pages were never copied into the receiver's store —
-%% the Fly s16/s25 page loss — because that fault has never been reproduced by
-%% any targeted test. They therefore ride along on every test run, armed by
-%% `{d, BONDY_MST_VERIFY}` in this app's test profile.
-%%
-%% If that define is ever dropped the checks compile out silently and the whole
-%% suite goes on reporting green while verifying nothing, so assert the net is
-%% actually up.
+%% `verify_post_sweep/2`) are the only check in the tree that catches a merge
+%% publishing a root whose pages were never copied into the receiver's store;
+%% they ride along on every test run, armed by `{d, BONDY_MST_VERIFY}` in this
+%% app's test profile. If that define is dropped the checks compile out
+%% silently, so assert the net is up.
 post_conditions_are_armed_in_test_builds_test() ->
     ?assert(bondy_mst:verify_default()).

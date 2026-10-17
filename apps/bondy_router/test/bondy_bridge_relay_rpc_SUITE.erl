@@ -89,15 +89,10 @@ end_per_suite(Config) ->
 %% Every module of every application present at boot is LOADED on a
 %% freshly booted node, so every atom those modules name is in the atom
 %% table before the first `[safe]` wire decode (the bridge relay wire,
-%% both ends). The apps listed are the ones loaded before
-%% `bondy_router_app:start/2` reaches its supervisor in every context: a
-%% release boot script loads ALL release apps before starting any (all
-%% `application:load` instructions precede the first `start_boot` in the
-%% generated start.script — verified on 1.0.0-rc-sunlight), and under CT
-%% these are pulled in by the `ensure_all_started` calls that precede
-%% `bondy_router_sup:start_link/0`. This case does NOT cover apps loaded later
-%% under CT/shell (bondy_mcp, bondy_mail, ...) — in a release the sweep
-%% covers them too, but no fresh-node harness here boots from a release.
+%% both ends). A release boot script loads ALL release apps before starting
+%% any; under CT the `ensure_all_started` calls that precede
+%% `bondy_router_sup:start_link/0` pull in the apps listed. This case does
+%% NOT cover apps loaded later under CT/shell (bondy_mcp, bondy_mail, ...).
 boot_loads_every_app_module(Config) ->
     Apps = [
         tuplespace,
@@ -156,7 +151,7 @@ bridged_call_hop_trace_steps(Core, Edge, KeyPair, Pub) ->
     Port = erpc:call(Core, ranch, get_port, [bridge]),
     ok = erpc:call(Edge, ?MODULE, do_add_bridge, [Port, ?REALM, KeyPair]),
 
-    %% The core now holds a proxy entry (a bridge_relay-typed local
+    %% The core holds a proxy entry (a bridge_relay-typed local
     %% entry) for the edge's registration.
     ok = wait_proxy_registration(Core, ?REALM, ?PROC, Edge),
 
@@ -261,10 +256,9 @@ bridged_encoded_publish_keeps_payload(Config) ->
 %% with the configured backoff and stopping at the retry limit, where
 %% its permanent supervisor child restarts it on a fresh budget (a
 %% bridge cycles at the backoff pace by design; it never redials in a
-%% tight loop). The budget used to reset both on TCP establishment and
-%% on re-entering `connecting`, so this exact server was redialed
-%% unboundedly fast and no limit was ever reached. The accept counter
-%% bounds the dial rate; the pid change pins the exhaustion.
+%% tight loop). A budget that resets on TCP establishment never reaches
+%% the limit. The accept counter bounds the dial rate; the pid change pins
+%% the exhaustion.
 crashing_server_redials_with_backoff(Config) ->
     [_, {_, Edge, _}] = proplists:get_value(nodes, Config),
     Self = self(),
@@ -297,7 +291,7 @@ crashing_server_redials_with_backoff(Config) ->
         %% permanent supervisor child restarts it on a fresh budget —
         %% by design a bridge cycles at the backoff pace, it never
         %% gives up and never tight-loops. A budget that resets
-        %% mid-episode (the bug class) never reaches the limit and
+        %% mid-episode never reaches the limit and
         %% never emits this warning.
         ok = await_exhaustion_warning(
             Edge, erlang:monotonic_time(millisecond) + 8000
@@ -383,8 +377,7 @@ do_unloaded_modules(Apps) ->
 %% CAPPED: a crash loop on a peer (e.g. a server that dies on every
 %% inbound connection while the client reconnects) emits large crash
 %% reports continuously, and an unbounded relay copies every one into
-%% the CT process mailbox — measured at tens of GB over a one-minute
-%% wait. The first few reports carry all the signal.
+%% the CT process mailbox. The first few reports carry all the signal.
 do_attach_log_relay(To) ->
     _ = logger:remove_handler(ct_bridge_log_relay),
     logger:add_handler(ct_bridge_log_relay, ?MODULE, #{

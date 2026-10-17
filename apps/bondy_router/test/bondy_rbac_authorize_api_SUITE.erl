@@ -10,21 +10,15 @@
 the `bondy.cert_manager.*` family.
 
 Both are the same underlying subject — which realm a `bondy.*` procedure lets a
-caller act on — and both were defects found on 2026-08-31 while auditing
-`bondy_wamp_api_utils`'s argument validators.
+caller act on.
 
 `bondy.rbac.authorize` reads a REALM as its first positional argument, so
-`validate_call_args/3`'s realm comparison is the rule: an ordinary realm's
-session may name only its own realm, a master-realm session may name any. It
-previously took three arguments with the realm read from the context, which put
-the `authid` in the slot the validator reads as a realm — and since a username
-never equals a realm URI, every tenant session was refused. Only a master
-session got through, able to ask solely about master-realm principals, so the
-procedure could not do what `docs/router/reference/wamp_api/rbac.md` says it
-does for any caller at all.
+`bondy_wamp_api_utils:validate_call_args/3`'s realm comparison is the rule: an
+ordinary realm's session may name only its own realm, a master-realm session
+may name any.
 
 The `bondy.cert_manager.*` procedures take no realm and are node state, so the
-rule there is simply master-or-nothing. Two of the six validated nothing.
+rule there is simply master-or-nothing.
 
 WHAT THIS DOES NOT COVER: the RBAC grant itself. Every case here runs against
 realms with security disabled, so `bondy_rbac:authorize/3` short-circuits and
@@ -176,8 +170,7 @@ too_many_arguments_is_an_arity_error(_) ->
 %% bondy.cert_manager.* — master or nothing
 %% =============================================================================
 
-%% Both of these validated NOTHING before 2026-08-31: they ignored the context
-%% and ran. The CA trust store and a listener's certificate are node state, so a
+%% The CA trust store and a listener's certificate are node state, so a
 %% tenant session reloading them reaches every other realm the node serves —
 %% and in a realm with security disabled, which these are,
 %% `bondy_rbac:authorize/3` short-circuits and this check is all that is left.

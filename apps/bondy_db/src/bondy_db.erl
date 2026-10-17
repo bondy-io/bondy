@@ -48,7 +48,7 @@ The `Namespace` atom is derived deterministically as
 so two DBs with a colliding `EntityType` on the same node get distinct
 substrate identities.
 
-## Realm → Bucket and storage-key mapping (G-1)
+## Realm → Bucket and storage-key mapping (the realm fold)
 
 Realm separation happens in one of two places, decided by the topology.
 The facade asks the topology — via
@@ -63,7 +63,7 @@ storage-layer **Bucket**, then derives the **storage key** with
 - **Realm-in-key** topologies (`shared_shards`, `memory`) use the bare
   EntityType as the Bucket — so a per-shard instance can multiplex
   tables by bucket — and the facade folds the realm into the storage
-  key instead: `<<Realm/binary, 0, Key/binary>>` (G-1). The NUL
+  key instead: `<<Realm/binary, 0, Key/binary>>` (the realm fold). The NUL
   separator makes realm-scoped scans a contiguous band
   (`[<<Realm,0>>, <<Realm,1>>)`) because realm URIs are NUL-free text;
   the caller's key bytes after the separator are preserved verbatim.
@@ -186,7 +186,7 @@ shuts down the topology (and any Bookies still owned by it).
 %% reach its rejection branch.
 -export([assert_fused_requires_ephemeral/2]).
 %% Exposed so the strategy-aware routing can be pinned directly without
-%% standing up real shards. (`shard_for/3` is now a public API — see above.)
+%% standing up real shards.
 -export([aggregate_root/2]).
 -endif.
 
@@ -484,8 +484,8 @@ open_table_provision(
     OplogOpts = maybe_enable_publish(OplogOpts1, NS, Merged),
     %% Native operation-based CRDT for the cell projection. An explicit
     %% `crdt_module` wins; otherwise `bondy_oplog_cell_kernel:
-    %% default_crdt_for_fold/1` maps the `fold_module` to its byte-identical
-    %% op-based twin, so durable cells decode either way. Threaded only into
+    %% default_crdt_for_fold/1` maps the `fold_module` to its op-based twin,
+    %% which is meant to write the same durable cell frames. Threaded only into
     %% the registry Config: putting it in the oplog instance opts would engage
     %% the monolithic CRDT path.
     CrdtModule =
@@ -604,8 +604,8 @@ rollback_indexes_on_error(Ok, _NS, _IndexMap) ->
 %% @private
 %% Resolve the table's projection backend, rejecting impossible combos.
 %% `bondy_db_topology_memory` has no leveled capability, so it is
-%% ets-only; every other topology defaults to leveled (preserving prior
-%% behaviour) and may opt a table into ets.
+%% ets-only; every other topology defaults to leveled and may opt a table
+%% into ets.
 resolve_backend(bondy_db_topology_memory, Merged) ->
     case maps:get(projection_backend, Merged, ets) of
         ets ->
@@ -1109,11 +1109,11 @@ group_batch([Bad | _], _Acc) ->
 
 %% @private
 %% One barrier per group, taken before its append, because a group's events
-%% are answered separately (`bondy_oplog:append_many/3`); `await_applied/3`
-%% releases it whatever the outcome, so no barrier outlives the call. A
-%% group refused at the append releases the already-appended groups'
-%% barriers without awaiting them — those frames are durable and will be
-%% applied, but the batch's answer is the refusal.
+%% are answered separately (`bondy_oplog:append_many/3`);
+%% `bondy_oplog:await_applied/3` releases it whatever the outcome, so no
+%% barrier outlives the call. A group refused at the append releases the
+%% already-appended groups' barriers without awaiting them — those frames are
+%% durable and will be applied, but the batch's answer is the refusal.
 commit_batch_groups(Groups) ->
     case append_batch_groups(Groups, []) of
         {ok, Pending} ->
@@ -1319,9 +1319,10 @@ probe_dispatch(InstanceId, Mod, Op) ->
 %% @private
 %% The instance's effective CRDT module — resolved exactly as the applier
 %% does: from its shard's `bondy_oplog_core_registry` entry via
-%% `from_modules/2` (`crdt_module` wins, else the `fold_module` twin), reached
-%% through the applier's `cell_apply_target` like the write path.
-%% `undefined` when the instance has no projection target (not probeable).
+%% `bondy_oplog_cell_kernel:from_modules/2` (`crdt_module` wins, else the
+%% `fold_module` twin), reached through the applier's `cell_apply_target` like
+%% the write path. `undefined` when the instance has no projection target (not
+%% probeable).
 probe_module(InstanceId) ->
     case cell_apply_target_for(InstanceId) of
         {ok, {NS, Index, Shard}} ->
@@ -1421,8 +1422,8 @@ Increment the PN-Counter at `(Realm, Key)` in `Table` by `Delta`.
 Convenience wrapper over `apply/4` for tables backed by the
 `pn_counter` fold. `Delta` may be negative (a "decrement" is just
 `counter_inc(_, _, _, -K)`). The fold absorbs the event under the
-per-Origin Seq number tracked in the WAL event key — duplicate
-delivery and replay are no-ops by construction.
+per-Origin Seq number tracked in the WAL event key, so duplicate
+delivery and replay are meant to be no-ops.
 
 That idempotence covers SUBSTRATE re-delivery only. A CALLER retry
 after `{error, timeout}` mints a fresh event and is a genuine second
@@ -1798,7 +1799,7 @@ fold(#{db_topology := Topology} = Table, Realm, Low, High, Fun, Acc0, Opts) when
     is_function(Fun, 2),
     is_map(Opts)
 ->
-    %% G-1: fold the realm into both bounds, and recover the caller's keys on
+    %% Fold the realm into both bounds, and recover the caller's keys on
     %% the way out — the walk itself works in storage keys throughout.
     Lo = cell_key(Topology, Realm, Low),
     Hi = fold_high(Topology, Realm, High),
@@ -1843,7 +1844,7 @@ or replay each cell independently. Restoring a global order would mean
 scatter-merging every chunk across every shard, which costs one read per shard
 per row (see `walk_shards/7`).
 
-## Partial by construction
+## Only realm-folding topologies
 
 Only realm-FOLDING topologies can be scanned this way — `?FOLDS_REALM`, i.e.
 `bondy_db_topology_memory` and `bondy_db_topology_shared_shards`, which is
@@ -1883,7 +1884,7 @@ This is the keyset-pagination primitive for globally-ordered windows: a
 realm's keys are spread across shards by the table's partition strategy
 (`aggregate` hashes each key's `(Realm, Aggregate)`; `entity` hashes
 `{Bucket, Key}`), so a single-shard `range/5` returns only the fraction
-of the window that hashes to one shard — an incomplete page. The G-1
+of the window that hashes to one shard — an incomplete page. The folded
 realm band bounds each per-shard scan to the realm; this function
 assembles the global window across shards.
 
@@ -1935,7 +1936,7 @@ matches the stored terms, then resolved to the single secondary shard
 that holds it (`phash2({SecBucket, Term}, SecShardCount)`) and scanned
 over that term's contiguous key window.
 
-The scan is **realm-scoped**: under a realm-folding topology (G-1) the
+The scan is **realm-scoped**: under a realm-folding topology the
 index entry key is `<<enc(Term), 0, Realm, 0, Key>>` (the primary key is
 realm-folded), so one realm's entries for a term are a contiguous
 sub-band and the read restricts to `[<<enc(Term),0,Realm,0>>,
@@ -2098,7 +2099,7 @@ collation tuple (the fact's indexed columns, in collation order) and
 `Projections` is the denormalised-columns map (`#{}` when none). This is the
 covering read: a single prefix scan answers the query without a primary fetch.
 
-Realm-scoped: on a realm-folding topology (G-1) the composite index is keyed
+Realm-scoped: on a realm-folding topology the composite index is keyed
 realm-first (`«Realm, 0, enc(Tuple), 0, Key»`), so the prefix band stays inside
 `Realm`; on a non-folding topology the index bucket already isolates the realm.
 The scan scatters across all secondary shards (a composite index is sharded by
@@ -2416,10 +2417,10 @@ namespace_atom(DbName, EntityType) ->
 
 %% @private
 %% A table may be packed via `apply_batch/4` only when its CRDT advertises
-%% `batchable/0` — the dot-store / grow-set types, whose ops are identified
-%% per sub-key/value. Counters and scalar registers dedup / resolve by the
-%% event Seq or HLC and would collapse ops sharing one packed identity, so
-%% they are refused here.
+%% `bondy_oplog_crdt_commutative:batchable/0` — the dot-store / grow-set types,
+%% whose ops are identified per sub-key/value. Counters and scalar registers
+%% dedup / resolve by the event Seq or HLC and would collapse ops sharing one
+%% packed identity, so they are refused here.
 assert_batchable(#{crdt_module := Mod}) when Mod =/= undefined ->
     case bondy_oplog_crdt_commutative:is_batchable(Mod) of
         true -> ok;
@@ -2886,7 +2887,7 @@ start_shard_instance(
     %% source in `{dir, _}` mode keyed by this table's entity-type bucket, so
     %% sibling tables can join the shared instance via
     %% `bondy_oplog_instance:register_table/4`. `undefined` (`per_table_shard`)
-    %% keeps the single-table source, byte-identical to the pre-collapse path.
+    %% keeps the single-table source.
     CallerApplier =
         case MaybeBucket of
             undefined -> CallerApplier0;
@@ -3243,8 +3244,8 @@ provision_index_shards(
 %% `bondy_oplog_secondary_writer` — no oplog instance. The
 %% `bondy_oplog_crdt_index_entry` CRDT gives the substrate's read/range path
 %% the right decode; the writer (started after the row is registered so its
-%% `set_writer_pid/4` stamp lands) drains dispatched index ops into the
-%% projection.
+%% `bondy_oplog_core_registry:set_writer_pid/4` stamp lands) drains dispatched
+%% index ops into the projection.
 provision_index_shard(
     NS,
     Name,
@@ -3412,7 +3413,7 @@ with_writer_key(WriterKey, Fun) ->
 %% applier (term-diff + dispatch). `sec_shard_count` defaults to the
 %% primary's shard count, matching `provision_index/5`.
 index_descriptors(Specs, DefaultShardCount, Topology) ->
-    %% Composite (collation) indexes on a realm-folding topology (G-1) are keyed
+    %% Composite (collation) indexes on a realm-folding topology are keyed
     %% realm-FIRST («Realm,0,enc(Tuple),0,Key») so a prefix/range scan stays
     %% inside one realm. Scalar indexes keep their term-first layout regardless
     %% (realm-scoped via the equality sub-band, `index_eq_bounds/4`). `?FOLDS_REALM`
@@ -3826,7 +3827,7 @@ read_index(Topology, Realm, NS, IndexName, SecBucket, Low, High, RangeOpts) ->
 %% Recover the primary key from the composite and decode the columns.
 %%
 %% `PrimaryKey` is the cell's storage key, which a realm-folding topology
-%% (G-1) has NUL-prefixed with the realm — undo that so callers get the key
+%% has NUL-prefixed with the realm — undo that so callers get the key
 %% they wrote (and can feed back to `read/3`).
 %%
 %% The secondary index bucket is realm-agnostic, so cross-realm entries sharing
@@ -3995,10 +3996,10 @@ realm_prefix(Realm, _Depth) ->
     Realm.
 
 %% @private
-%% Realm separation (G-1). The topology does pure shard placement and never
-%% sees realms — see `bondy_db_topology:route/2`: "realm separation is done
-%% above the topology, by the facade folding Realm into the cell key". The
-%% bucket-as-entity-type topologies need this: their Bucket is just the
+%% Realm separation (the realm fold). The topology does pure shard placement
+%% and never sees realms — see `bondy_db_topology:route/2`: "realm separation
+%% is done above the topology, by the facade folding Realm into the cell key".
+%% The bucket-as-entity-type topologies need this: their Bucket is just the
 %% EntityType (so a `per_shard` instance can multiplex tables by bucket), and
 %% two realms with the same Key would otherwise collide on one cell — so the
 %% facade folds Realm into the key instead. `shared_shards` and `memory` are
@@ -4027,13 +4028,14 @@ cell_key(Topology, Realm, Key) when is_binary(Realm), is_binary(Key) ->
     end.
 
 %% @private
-%% G-1's injectivity precondition, ENFORCED. A NUL inside `Realm` makes the
-%% fold non-injective — realms `<<"a">>` and `<<"a",0,"b">>` collide distinct
-%% `(Realm, Key)` pairs onto one storage cell — and `realm_scan_range/2`'s
-%% band for the shorter realm then CONTAINS the longer realm's rows, leaking
-%% reads across the tenancy boundary. Realm URIs are validated upstream, but
-%% this facade's contract cannot borrow another app's validation: one
-%% comparison here, cold next to the I/O it fronts, closes the boundary.
+%% The realm fold's injectivity precondition, ENFORCED. A NUL inside `Realm`
+%% makes the fold non-injective — realms `<<"a">>` and `<<"a",0,"b">>` collide
+%% distinct `(Realm, Key)` pairs onto one storage cell — and the
+%% `realm_scan_range/2` band for the shorter realm then CONTAINS the longer
+%% realm's rows, leaking reads across the tenancy boundary. Realm URIs are
+%% validated upstream, but this facade's contract cannot borrow another app's
+%% validation: one comparison here, cold next to the I/O it fronts, closes
+%% the boundary.
 assert_nul_free_realm(Realm) ->
     binary:match(Realm, <<0>>) =:= nomatch orelse
         error({badarg, {realm_contains_nul, Realm}}),
@@ -4206,7 +4208,7 @@ fold_high(Topology, Realm, High) when is_binary(High) ->
 
 %% @private
 %% Realm-scoped equality bounds for `index_get/5`. An index entry key is
-%% `<<enc(Term), 0, PrimaryKey>>`. Under a realm-folding topology (G-1) the
+%% `<<enc(Term), 0, PrimaryKey>>`. Under a realm-folding topology the
 %% `PrimaryKey` is itself `<<Realm, 0, Key>>`, so within a term's band the
 %% entries group by realm and one realm's entries are the contiguous
 %% sub-band `[<<enc(Term),0,Realm,0>>, <<enc(Term),0,Realm,1>>)` — the same
@@ -4217,7 +4219,8 @@ fold_high(Topology, Realm, High) when is_binary(High) ->
 %% after that entry: `<<…, After, 0>>` is the smallest key greater than
 %% `After`'s, so its own entry is excluded and the next page begins.
 %% Non-folding topologies isolate the realm in the bucket, so they scan the
-%% plain term band (`equality_bounds/1`) with the same `After` successor.
+%% plain term band (`bondy_oplog_index_key:equality_bounds/1`) with the same
+%% `After` successor.
 index_eq_bounds(Topology, Realm, Norm, After) ->
     Enc = bondy_oplog_index_key:encode_term(Norm),
     case ?FOLDS_REALM(Topology) of
@@ -4251,7 +4254,7 @@ composite_enc(Spec, Cols) ->
 
 %% @private
 %% Realm-scoped prefix-equality bounds for a composite index. Under a folding
-%% topology (G-1) the index key is realm-FIRST («Realm,0,enc(Tuple),0,Key»), so
+%% topology the index key is realm-FIRST («Realm,0,enc(Tuple),0,Key»), so
 %% the band stays inside `Realm`; non-folding topologies isolate the realm in the
 %% bucket and scan the plain prefix band. `Enc` is the prefix's tuple encoding,
 %% so the `0`/`1` suffix selects every fact whose leading columns match.

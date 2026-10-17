@@ -6,8 +6,8 @@
 -module(bondy_mcp_wamp_api).
 
 -moduledoc """
-The `bondy.mcp.*` Meta API: management of MCP overlay documents (design
-§18.4) over WAMP — the overlay's ONLY management surface; no operator flow
+The `bondy.mcp.*` Meta API: management of MCP overlay documents over
+WAMP — the overlay's ONLY management surface; no operator flow
 goes through a console.
 
 Reached through `bondy_wamp_api:register_handler/2` (registered by

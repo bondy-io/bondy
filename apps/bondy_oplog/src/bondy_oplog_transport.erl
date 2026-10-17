@@ -119,8 +119,8 @@ the `Opts` argument.
     | {get_pages, [bondy_mst:hash()] | sets:set(bondy_mst:hash())}
     %% Reciprocal form: carries the requester's peer id and root so the
     %% responder learns, for free, that it is behind and can schedule its own
-    %% exchange in the opposite direction. The 2-tuple form above remains
-    %% supported so a mixed-version cluster keeps working.
+    %% exchange in the opposite direction. A transport that does not export
+    %% `self_id/1` sends the 2-tuple form above.
     | {get_pages, Peer :: peer_id(), Root :: bondy_mst:hash(), [
         bondy_mst:hash()
     ]}
@@ -155,11 +155,8 @@ the `Opts` argument.
                 binary()
             ]}}}
     | {ok, {batch, {bondy_oplog_catalogue_cursor:cursor(), [cell()]}}}
-    %% Emitted ONLY when a cell is too large to frame whole. A peer built
-    %% before part-shipping existed has no clause for this and fails the
-    %% bootstrap loudly — which is the intended trade: that same situation
-    %% previously advanced past the cell and lost it silently while still
-    %% adopting the peer frontier.
+    %% Emitted only when a cell is too large to frame whole; the initiator
+    %% reassembles the parts before it installs the cell.
     | {ok,
         {chunked_batch,
             {

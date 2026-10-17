@@ -7,29 +7,29 @@
 
 -moduledoc """
 The MCP overlay document that exposes the alarm and task subsystem to an SRE
-agent (design §7.5, §9.4; MCP-D32).
+agent.
 
 One document, `bondy_sre_read`: the six read procedures of the alarm and task
 APIs as **tools**, and the three alarm topics as **resources**. It names the
-master realm, because that is the only realm those procedures answer in (D4).
+master realm, because that is the only realm those procedures answer in.
 
 Bondy SHIPS it and does not load it. `mcp.manifest.mode` defaults to
 `curated`, so a node exposes no `bondy.*` procedure over MCP until an operator
 loads a document, and loading is the operator's deliberate act — the posture
-MCP-D31 rests on. `bondy.mcp.overlay.suggested` hands the operator this
+`curated` mode rests on. `bondy.mcp.overlay.suggested` hands the operator this
 document; `bondy.mcp.overlay.load` is what puts it into effect.
 
-## Why there is no shipped ACTION document (MCP-D32)
+## Why there is no shipped ACTION document
 
-An earlier build of this module also shipped `bondy_sre_tasks`, one tool per
-`bondy_task_catalogue` entry. It was withdrawn before release, and the reason
-is worth reading before anyone adds it back.
+Bondy ships no action document: no tool per `bondy_task_catalogue` entry
+(`bondy_mcp_gateway_SUITE:sre_overlay_ships_no_task_tool` pins that). The
+reason matters to anyone who considers adding one.
 
-MCP-D14 makes it a BOOT ERROR for one listener to carry both `mcp` and
-`admin_api`, because putting an agent-driven surface on the socket that
-administers realms, users and grants is one misconfiguration away from the
-wrong audience. A shipped task document reaches that same audience by a route
-D14 does not watch: the realm is a path segment, not a listener property
+A listener that carries both `mcp` and `admin_api` refuses to boot, because
+putting an agent-driven surface on the socket that administers realms, users
+and grants is one misconfiguration away from the wrong audience. A shipped
+task document reaches that same audience by a route that guard does not
+watch: the realm is a path segment, not a listener property
 (`bondy_mcp_http_service`), so one MCP listener serves every realm a principal
 can authenticate into — the master realm included. The guard never fires,
 because nothing has declared `admin_api`.
@@ -37,21 +37,22 @@ because nothing has declared `admin_api`.
 Three things make that worse than an ordinary privilege question:
 
 - **A tool description is prompt.** Everything in `tools/list` enters a
-  model's context. §23's own Q5 already records that a rewritten tool
-  description is "a prompt-injection vector rather than a cosmetic problem"
-  for an agent-facing surface. An action tool turns every document the agent
+  model's context. A rewritten tool description is a prompt-injection
+  vector, not a cosmetic problem, for an agent-facing surface. An action
+  tool turns every document the agent
   reads into an argument about whether to run it.
-- **RBAC would be the only control.** D14's value is that a socket boundary
-  does not depend on a grant having been written correctly. §6 and §7.4 rule
-  the listener out as an authorization dimension, so the action surface cannot
+- **RBAC would be the only control.** The listener guard's value is that a
+  socket boundary
+  does not depend on a grant having been written correctly. The listener is
+  not an authorization dimension, so the action surface cannot
   have that second control — where the shipped read surface does not need one.
 - **The failure modes are asymmetric**, the same asymmetry that made `curated`
   the default. Loading a read document and finding it dull costs an afternoon.
   Loading a shipped action document to see what it does, on a cluster where an
   agent already holds broad grants, is an incident.
 
-So the exposure decision stays with the operator, exactly as the grants do
-(§9.4). An agent using this document still plans: `bondy.task.catalogue` tells
+So the exposure decision stays with the operator, exactly as the grants do.
+An agent using this document still plans: `bondy.task.catalogue` tells
 it which procedures are sanctioned, what each one's `impact` and
 `blast_radius` are, and which arguments each takes, so it can RECOMMEND a
 remediation with its consequence stated. Executing it is a human's call, or an
@@ -103,13 +104,11 @@ read_document() ->
 %% @private
 %% `{Uri, Args, Kwargs, Description}` — `Args` is one schema per POSITIONAL
 %% argument, so `[]` is a procedure taking none; `Kwargs` is the whole KWArgs
-%% object schema, or `undefined` for a procedure that takes none.
-%%
-%% The two are separate because MCP's `arguments` object is not: an agent's
-%% `@args` key becomes the positional list and everything else becomes the
-%% CALL's KWArgs (`bondy_mcp_wamp:call_args/1`), so a procedure's KWArgs are
-%% reachable over MCP with no translation — but only if they are DECLARED,
-%% because `tools/list` is the whole of what the agent knows.
+%% object schema, or `undefined` for a procedure that takes none. The two are
+%% separate because MCP's `arguments` object is not: an agent's `@args` key
+%% becomes the positional list and everything else becomes the CALL's KWArgs
+%% (`bondy_mcp_wamp:call_args/1`), so a procedure's KWArgs are reachable over
+%% MCP untranslated — but only if DECLARED, since `tools/list` is all it knows.
 read_tools() ->
     [
         {?BONDY_ALARM_LIST, [], undefined, <<
@@ -163,7 +162,7 @@ read_tools() ->
     ].
 
 %% @private
-%% The alarm topics (D4: published in the master realm). A resource entry
+%% The alarm topics (published in the master realm). A resource entry
 %% binds a TOPIC, which is what makes these resources where the read
 %% procedures above are tools.
 read_resources() ->
@@ -216,7 +215,6 @@ read_resource({Topic, Description}) ->
 %% A procedure taking no positional arguments declares no `args_schema` at
 %% all: an empty tuple schema would say "send `@args: []`", and the agent's
 %% call is simpler and equally correct without it.
-%%
 %% Bondy does NOT validate a call against this schema — no code in
 %% `bondy_mcp_http_handler` reads `inputSchema` — so it is a description for
 %% the agent. Its LENGTH is checked by calling the procedure
@@ -243,10 +241,9 @@ maybe_kwargs(Entry, Schema) ->
 
 %% @private
 %% `bondy.alarm.history` is paginated, and its knobs are KWARGS rather than
-%% CALL options: the option form was removed on 2026-09-01 because it never
-%% reached a callee at all (`bondy_wamp_api_utils:page_limit/3`). That change
-%% is what makes them declarable here — an agent cannot set a CALL option, but
-%% every non-`@args` key of its `arguments` object lands in KWArgs.
+%% CALL options, which is what makes them declarable here: an agent cannot
+%% set a CALL option, but every non-`@args` key of its `arguments` object
+%% lands in KWArgs.
 %%
 %% The bounds are READ from the procedure rather than restated, so a schema
 %% that disagrees with the clamp is not expressible.

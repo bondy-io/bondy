@@ -224,81 +224,49 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     %% `cell_apply_ctx` above stays the founding ctx for the single-table
     %% read-side handle_calls.
     cell_apply_source :: ctx_source(),
-    %% tier_2 stamp-site context-regression guard. Per locally stamped
-    %% cell `{Bucket, Key}`, the highest causal context this applier has
-    %% handed out on the tier_2 write path (`{cell_context, _, _}`). A
-    %% correct substrate only ever advances a cell's context (the
-    %% projection DVV grows monotonically), so a context that regressed
-    %% between two successive local stamps of the same cell means durable
-    %% state for that cell was lost or corrupted in process — the
-    %% precondition that keeps a same-origin write from re-minting a used
-    %% dot has been violated. The stamp refuses such a write
-    %% (`{error, {context_regression, _, _}}`) and telemeters, turning a
-    %% SILENT permanent fork into a loud, recoverable failure. Only the
-    %% tier_2 stamp populates this (tier_0/tier_1 carry no context), so
-    %% it is empty for every non-tier_2 instance. It is an in-process
-    %% guard: it resets on restart (by design — the durable projection is
-    %% the cross-restart reference, see `bondy_db_tier2_durability_test`)
-    %% and is cleared on a catalogue install (the projection it tracks is
-    %% replaced wholesale). See `bondy_oplog_ctx_guard` (shared with the
-    %% fused instance path) for the coarse-clear bound.
+    %% tier_2 stamp-site context-regression guard: per locally stamped cell
+    %% `{Bucket, Key}`, the highest causal context this applier has handed out
+    %% on the tier_2 write path (`{cell_context, _, _}`). A cell's context only
+    %% ever advances, so a regression between two local stamps means durable
+    %% state was lost, and a same-origin write could re-mint a used dot; the
+    %% stamp refuses it (`{error, {context_regression, _, _}}`) and telemeters.
+    %% In-process only: it resets on restart (`bondy_db_tier2_durability_test`
+    %% pins the durable projection as the reference) and on a catalogue install.
     ctx_guard = bondy_oplog_ctx_guard:new() :: bondy_oplog_ctx_guard:guard(),
-    %% Demand-based flow control toward the instance gen_server. The
-    %% applier increments slot 1 of `install_in_flight` before each
-    %% `gen_server:cast({install_local_batch, …})`; the instance
-    %% decrements it after handling the cast. When the value would
-    %% reach `max_install_in_flight`, the applier defers reading the
-    %% next WAL batch and waits for the instance to send a
-    %% `drain_resume` cast. Bounds the instance's mailbox; without
-    %% it, sustained write throughput overruns the install path and
-    %% builds an unbounded backlog (observable as an 8 GB+ RES set
-    %% under stress, and ultimately a `gen_server:call` timeout on
-    %% `drain_install_queue` during commit).
-    %%
-    %% NOTE: the cap bounds the *number* of in-flight casts, not
-    %% their size. Each `install_local_batch` cast now carries up to
-    %% `apply_batch_max_events` events (the coalescing soft cap), so the
-    %% worst-case instance-side backlog is
-    %% `max_install_in_flight * apply_batch_max_events` events
-    %% (default 16 * 256 = 4096). Raising BOTH knobs together multiplies
-    %% the backlog — keep their product in mind to avoid reintroducing
-    %% the OOM above.
+    %% Demand-based flow control toward the instance gen_server. The applier
+    %% increments slot 1 of `install_in_flight` before each
+    %% `gen_server:cast({install_local_batch, …})`; the instance decrements it
+    %% after handling the cast. When the value would reach
+    %% `max_install_in_flight` the applier defers the next WAL read until the
+    %% instance sends `drain_resume`. The cap bounds the NUMBER of in-flight
+    %% casts, each carrying up to `apply_batch_max_events` events, so the
+    %% worst-case instance-side backlog is the product of the two knobs.
     install_in_flight :: atomics:atomics_ref() | undefined,
     max_install_in_flight :: pos_integer() | undefined,
     %% Set when the applier deferred a drain because the cap was
     %% reached. The next `drain_resume` cast (or, defensively, the
     %% backstop poll timer) re-arms `self() ! drain`.
     drain_deferred = false :: boolean(),
-    %% Drain-stall detection. `drain_max_pos` is the highest consumer
-    %% position ever COMMITTED (`{Segment, FrameOffset}` — segment ids are
-    %% never reused, so lexicographic order is total); only a commit BEYOND
-    %% it counts as progress, so a drain that keeps re-reading old ground
-    %% cannot masquerade as healthy. `drain_progress_at` is when progress
-    %% (or a caught-up idle) was last observed; actively processing frames
-    %% for longer than `drain_stall_alarm_ms` without it raises the
-    %% `{bondy_oplog_drain_stalled, InstanceId}` alarm (cleared on the next
-    %% progress). `0` disables the detector.
+    %% Drain-stall detection. `drain_max_pos` is the highest consumer position
+    %% ever COMMITTED (`{Segment, FrameOffset}`; segment ids are never reused,
+    %% so lexicographic order is total); only a commit beyond it counts as
+    %% progress, so a drain that keeps re-reading old ground cannot masquerade
+    %% as healthy. `drain_progress_at` is when progress (or a caught-up idle)
+    %% was last observed; actively processing frames for longer than
+    %% `drain_stall_alarm_ms` without it raises the
+    %% `{bondy_oplog_drain_stalled, InstanceId}` alarm. `0` disables it.
     drain_progress_at :: integer() | undefined,
     drain_max_pos :: {non_neg_integer(), non_neg_integer()} | undefined,
     drain_stalled = false :: boolean(),
     drain_stall_alarm_ms = 60000 :: non_neg_integer(),
-    %% Root hash of the MST snapshot whose `cell_apply` events have
-    %% already been folded into the projection. `do_replay_cell_events/1`
-    %% diffs the live MST against this root via `bondy_mst:diff_to_list/2`
-    %% and only re-applies the new entries — so the cost of a replay is
-    %% O(events since last sync), not O(events in MST). `undefined`
-    %% triggers a one-time full fold. `init/1` sets it from
-    %% `bondy_oplog_instance:replay_anchor/1`, which returns `undefined`
-    %% exactly when the live MST holds a cell event the restored frontier does
-    %% not claim — a received-but-not-materialised event, which nothing else
-    %% would re-present. Advanced exclusively from
-    %% `do_replay_cell_events/1` after the diff fold completes — *not*
-    %% from `commit_now/1`, because a peer `integrate_peer_root` can
-    %% interleave with the WAL drain and land remote pages under the
-    %% post-barrier root, and those remote events have not been folded
-    %% into the projection until the replay path runs. Advancing the
-    %% watermark from `commit_now/1` regresses convergence (Jepsen
-    %% OR-set: 27/226 lost adds).
+    %% Root hash of the MST snapshot whose `cell_apply` events have already
+    %% been folded into the projection. `do_replay_cell_events/1` diffs the
+    %% live MST against it (`bondy_mst:diff_to_list/2`) and re-applies only
+    %% the new entries; `undefined` triggers a full fold. `init/1` sets it from
+    %% `bondy_oplog_instance:replay_anchor/1`, which answers `undefined` when
+    %% the live MST holds a cell event the restored frontier does not claim.
+    %% Advanced only from `do_replay_cell_events/1`, never from `commit_now/1`,
+    %% as `integrate_peer_root` can land unfolded remote pages under the root.
     last_replayed_root = undefined :: undefined | bondy_mst:hash(),
     %% A tree event may not have reached a fold yet, and only a diff from
     %% `last_replayed_root` presents it: the boot anchor found one unclaimed,
@@ -314,51 +282,40 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     replayed_remote_gen = 0 :: non_neg_integer(),
     %% Bootstrap lifecycle handle (`bondy_oplog_bootstrap_lifecycle`).
     %% Cached once at `init/1` from the registry; the gate check in
-    %% `drain_loop/1` is then a single `atomics:get/2`. `undefined`
-    %% means the entry hasn't published one yet (race with the
-    %% instance's `init/1`) and is treated as `live` for backward
-    %% compatibility — the instance's publish is idempotent and will
-    %% catch up by the next backstop tick.
+    %% `drain_loop/1` is then a single `atomics:get/2`. `undefined` means the
+    %% entry has not published one yet (race with the instance's `init/1`)
+    %% and is treated as `live`; the instance's publish is idempotent and
+    %% catches up by the next backstop tick.
     lifecycle :: bondy_oplog_bootstrap_lifecycle:handle() | undefined,
     %% Monitor reference of the parked idle-wait helper process (see
     %% `arm_idle_waiter/1`). `undefined` when the applier is actively
     %% draining or about to. The helper blocks on the WAL's
     %% `await_durable/3`; its monitor `DOWN` wakes the applier to
-    %% re-drain. Event-driven replacement for the historical busy poll.
+    %% re-drain.
     idle_waiter = undefined :: undefined | reference(),
     %% Callers parked on `await_drain/1` (the cold-start rebuild barrier),
     %% replied `ok` the next time the WAL drain reaches end-of-log. Empty in
     %% steady state.
     drain_waiters = [] :: [gen_server:from()],
-    %% Per-boot WAL-drain gate, distinct from the durable bootstrap
-    %% `lifecycle`. A collapsed per-shard instance (`shared_shards`) is founded
-    %% by the FIRST table opened on its shard, but its single WAL holds cells
-    %% for EVERY table sharing the shard. If the applier drained at init —
-    %% before the sibling tables register their cell-apply buckets — those
-    %% siblings' cells would resolve to no ctx and be skipped (lost: the MST
-    %% install is unconditional, so resume advances past them). `gated` defers
-    %% the drain until the provisioning orchestrator (the catalogue) has
-    %% registered every table on the shard and releases it via
-    %% `open_drain_gate/1`. Unlike `lifecycle`, this gate is NOT durable: it
-    %% re-engages on every boot, because the registration race recurs on every
-    %% boot, but not when the applier restarts within one
-    %% (`bondy_oplog_instance_keeper:drain_released/1`). Defaults to `open`
-    %% so single-table (`per_table_shard`) instances and tests are
-    %% byte-identical to the pre-gate path.
+    %% Per-boot WAL-drain gate, distinct from the durable bootstrap `lifecycle`.
+    %% A collapsed per-shard instance (`shared_shards`) is founded by the first
+    %% table opened on its shard, but its single WAL holds cells for every table
+    %% sharing the shard; a drain before the siblings register their buckets
+    %% would skip their cells for good (the MST install is unconditional).
+    %% `gated` defers the drain until the catalogue has registered every table
+    %% and releases it via `open_drain_gate/1`. Not durable: it re-engages on
+    %% every boot, not on an applier restart within one. Defaults to `open`.
     drain_gate = open :: open | gated,
     %% The staged catalogue install (`install_catalogue_batch/3`).
     install_stage :: install_stage(),
     %% Boot WAL-replay logging state machine (opt-in via `log_boot_replay`).
-    %% Emits exactly ONE log when this instance's WAL replay begins and ONE
-    %% when the first drain reaches end-of-log (boot catch-up complete) — a
-    %% per-WAL boot progress marker, not a per-batch trace. `disabled` (the
-    %% default) is a no-op; only the durable `main` shards opt in (set by the
-    %% catalogue), so tests and ephemeral instances stay quiet.
-    %%   disabled            — logging off.
-    %%   armed               — opted in, replay not started.
-    %%   {running, T0, N}    — replay started at `T0` (monotonic µs), `N`
-    %%                         events applied so far.
-    %%   done                — end-of-log logged; steady-state drains are silent.
+    %% Emits ONE log when this instance's WAL replay begins and ONE when the
+    %% first drain reaches end-of-log; a per-WAL boot progress marker, not a
+    %% per-batch trace. `disabled` (the default) is a no-op; only the durable
+    %% `main` shards opt in, so tests and ephemeral instances stay quiet.
+    %% `armed`: opted in, replay not started. `{running, T0, N}`: replay
+    %% started at `T0` (monotonic µs), `N` events applied so far. `done`:
+    %% end-of-log logged; steady-state drains are silent.
     boot_replay = disabled ::
         disabled | armed | {running, integer(), non_neg_integer()} | done
 }).
@@ -399,12 +356,12 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
     apply_batch_max_events => pos_integer(),
     %% OldValue frame-cache. When `true`, the applier keeps a
     %% private, write-through cache of the last durable cell frame per
-    %% `{Bucket, Key}`, so `compute_one_cell/11`'s OldValue read can
+    %% `{Bucket, Key}`, so the per-event compute's OldValue read can
     %% skip the projection `get/3` (the dominant per-event cost on the
-    %% durable stack) on a hit. Default `false` (behaviour byte-identical
-    %% unchanged). `oldstate_cache_max` bounds the entry count; when
-    %% exceeded the cache is cleared (coarse evict — it is rebuildable
-    %% from the projection, so a clear only costs re-warm misses).
+    %% durable stack) on a hit. Default `false`. `oldstate_cache_max`
+    %% bounds the entry count; when exceeded the cache is cleared (coarse
+    %% evict: it is rebuildable from the projection, so a clear only costs
+    %% re-warm misses).
     oldstate_cache => boolean(),
     oldstate_cache_max => pos_integer(),
     poll_interval_ms => pos_integer(),
@@ -473,12 +430,8 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
 -export([bootstrap_publish_decision/3]).
 -export([cell_context/3]).
 %% State-free drain leaves reused verbatim by the ephemeral fused-writer
-%% mode in `bondy_oplog_instance` (fused-writer rollout, Steps 3-4). Exposed
-%% so the fused instance runs an identical drain + remote replay without
-%% this gen_server. Exporting them does not change applier behaviour
-%% (additive only): `diff_pairs/3` is the state-free MST-diff that
-%% `do_replay_cell_events/1` already uses; the fused remote path
-%% (`integrate_peer_root` inline replay) calls it directly.
+%% mode in `bondy_oplog_instance`, so the fused instance runs an identical
+%% drain + remote replay without this gen_server.
 -export([resolve_cell_apply_ctx/1]).
 -export([build_cell_apply_source/3]).
 -export([resolve_cell_ctx/3]).
@@ -511,17 +464,14 @@ TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
 %% Cells a snapshot install reads per page while deleting the local cells the
 %% snapshot lacks.
 -define(PRUNE_PAGE, 256).
-%% Coarser applier batching. The drain loop coalesces consecutive
-%% WAL frames into a single applier batch until the accumulated event
-%% count reaches this threshold (or the reader hits `end_of_log`), so the
-%% two co-dominant per-batch storage costs — the pack-store spine rebuild
-%% (`install_local_batch` → `bondy_mst:put_batch/2`) and the leveled
-%% projection `put_batch` — amortise over many more events. It is a soft
-%% cap: a frame is never split, so a batch may exceed it by at most the
-%% last frame's size. Set to `1` to disable
-%% one-frame-per-apply behaviour exactly. Engages only when a WAL backlog
-%% already exists — when caught up only one frame is available before
-%% `end_of_log`, so steady-state apply latency is unchanged.
+%% Coarser applier batching. The drain loop coalesces consecutive WAL frames
+%% into a single applier batch until the accumulated event count reaches this
+%% threshold (or the reader hits `end_of_log`), so the two co-dominant
+%% per-batch storage costs, the pack-store spine rebuild and the leveled
+%% projection `put_batch`, amortise over many more events. A soft cap: a frame
+%% is never split, so a batch may exceed it by the last frame's size. `1`
+%% restores one-frame-per-apply. Engages only under a WAL backlog; when
+%% caught up only one frame is available before `end_of_log`.
 -define(DEFAULT_APPLY_BATCH_MAX_EVENTS, 256).
 %% Default OldValue frame-cache entry cap. Bounds memory; when
 %% exceeded the cache is cleared (it is rebuildable from the projection).
@@ -672,14 +622,10 @@ advance_replayed_root(ApplierPid, NewRoot) when is_pid(ApplierPid) ->
     %% MUST be a cast, NOT a call. The instance issues this from inside its
     %% compaction commit handler, and the applier issues a synchronous
     %% `drain_install_queue` call back to the instance on every commit
-    %% boundary (`commit_now/1`). A synchronous call here would let the two
-    %% gen_servers wait on each other with `infinity` timeouts whenever a
-    %% compaction overlaps a commit — a hard deadlock that freezes the whole
-    %% pipeline under sustained writes (instance stops installing, applier
-    %% stops applying, the MST stops being bounded). Re-anchoring is a
-    %% non-critical perf hint (`diff_pairs/3` safely falls back to a
-    %% full `to_list/1` over the now-bounded tree if it is momentarily stale),
-    %% so fire-and-forget is correct.
+    %% boundary (`commit_now/1`), so a call here would deadlock the two
+    %% gen_servers whenever a compaction overlaps a commit. Re-anchoring is a
+    %% perf hint: `diff_pairs/2` falls back to a full `to_list/1` over the
+    %% now-bounded tree if the anchor is momentarily stale.
     gen_server:cast(ApplierPid, {advance_replayed_root, NewRoot}).
 
 -spec rederive_projection_sync(pid(), reference()) ->
@@ -700,20 +646,12 @@ rederive_projection_sync(ApplierPid, Token) when is_pid(ApplierPid) ->
 
 %% @private
 %% Sets instance `Id`'s applied frontier after the install whose reply is
-%% `Installed`: to `PeerFrontier`, the frontier the session read from its
-%% source before the stream, when every cell the source shipped landed, and to
-%% `#{}` otherwise (`bondy_oplog_registry:replace_frontier/2`). The re-fold
-%% that follows then folds the retained events the frontier does not claim onto
-%% the installed cells, which are meant to be the fold of exactly that
-%% frontier: the install is whole and the source serves only while it owes no
-%% re-fold and has replayed (`bondy_oplog_instance:serving/1`)
-%% (`proofs/tla/JoinInstall.tla`, `Rederive`).
-%%
-%% A cell carries no origin and no seq, so the install cannot say which origin
-%% lost history when a cell did not land, and the rule is all-or-nothing:
-%% adopting regardless is a proved over-claim
-%% (`Bucket_Skip_Soundness.unconditional_adoption_unsound`,
-%% `proofs/tla/MuxBucketSkip_Minus_AdoptIfComplete.cfg`).
+%% `Installed`: to `PeerFrontier` (the source's pre-stream frontier) when every
+%% cell the source shipped landed, else `#{}`
+%% (`bondy_oplog_registry:replace_frontier/2`); the re-fold that follows folds
+%% the unclaimed events onto the installed cells (`proofs/tla/JoinInstall.tla`,
+%% `Rederive`). A cell carries no origin or seq, so the rule is all-or-nothing;
+%% adopting regardless over-claims (`unconditional_adoption_unsound`).
 adopt_frontier(Id, {ok, #{unclaimable := []}}, PeerFrontier) ->
     bondy_oplog_registry:replace_frontier(Id, PeerFrontier);
 adopt_frontier(Id, _Installed, _PeerFrontier) ->
@@ -1251,23 +1189,14 @@ do_init_2(
         {ok, InstP, WalP, MST, _Watermark} ->
             CO = read_consumer_offset(WalDir),
             Stage = new_install_stage(WalDir),
-            %% Choose the resume position from the backend's DURABILITY (a
-            %% static capability), never from the MST's live state:
-            %%
-            %%  - durable backend (the pack store): the MST + projection
-            %%    survive a restart, so resume from the WAL's own committed
-            %%    consumer offset. This is robust to a stale/absent MST root —
-            %%    the failure that, under the old MST-derived resume, regressed
-            %%    to `beginning` and re-read the whole WAL every drain (the
-            %%    livelock). Any uncommitted tail is re-applied idempotently
-            %%    via the MST's HLC dedup (at-least-once).
-            %%  - volatile backend (ets/map): the MST does NOT survive a
-            %%    restart, so the committed offset would skip past data the
-            %%    fresh MST lacks — replay from `beginning` to rebuild it.
-            %%
-            %% Either way the WAL is just a byte log positioned by a cursor; it
-            %% never depends on MST state. `bondy_mst:capabilities/1` reads the
-            %% store record (pure), so it is safe off the instance process.
+            %% Choose the resume position from the backend's durability (a
+            %% static capability), never from the MST's live state. A durable
+            %% backend (the pack store) keeps the MST + projection across a
+            %% restart, so resume from the WAL's committed consumer offset;
+            %% any uncommitted tail re-applies idempotently via the MST's HLC
+            %% dedup. A volatile backend (ets/map) loses the MST, so the
+            %% committed offset would skip data the fresh MST lacks: replay
+            %% from `beginning`. `bondy_mst:capabilities/1` is a pure read.
             StartPos =
                 case maps:get(durable, bondy_mst:capabilities(MST), false) of
                     true -> start_pos_from_consumer_offset(CO);
@@ -1365,8 +1294,7 @@ do_init_2(
 %% MST does not re-read: it resumes at the committed consumer offset. It runs
 %% first because a drained write's dot would cover such an own event and the
 %% kernel would then skip it (`write_after_lost_fold_keeps_the_add` in
-%% `bondy_oplog_bootstrap_rederive_test`;
-%% `proofs/tla/JoinInstall_Truncation_CompactMembers_NoRefoldFirst.cfg`).
+%% `bondy_oplog_bootstrap_rederive_test`).
 start_folding() ->
     ok = gen_server:cast(self(), replay_cell_events),
     self() ! drain,
@@ -1392,15 +1320,14 @@ resolve_cell_apply_ctx(
                 bondy_oplog_core_registry:entry_causal_tier(Entry),
             {ok, #{
                 shard_key => Key,
-                %% The table's event namespace (`undefined` unless it
-                %% opted in via `publish => true`). The replay path in
+                %% The table's event namespace (`undefined` unless it opted in
+                %% via `publish => true`). The replay path in
                 %% `bondy_oplog_cell_apply:apply_cell_pairs/4` gates
-                %% merge-event emission on it, and a multiplexing
-                %% instance's LOCAL publish resolves it per bucket
-                %% (`publish_batch_dir/2`). Read from the registry
-                %% ENTRY (the restart-surviving source) so a
-                %% restart-rebuilt ctx keeps emitting; falls back to
-                %% the opts for a raw, non-`bondy_db` registration.
+                %% merge-event emission on it, and a multiplexing instance's
+                %% LOCAL publish resolves it per bucket (`publish_batch_dir/2`).
+                %% Read from the registry ENTRY (the restart-surviving source)
+                %% so a restart-rebuilt ctx keeps emitting; falls back to the
+                %% opts for a raw, non-`bondy_db` registration.
                 publish_ns => entry_or_opt(
                     bondy_oplog_core_registry:entry_publish_ns(Entry),
                     publish_ns,
@@ -1503,15 +1430,13 @@ entry_or_opt(EntryVal, _OptKey, _Opts, _Default) ->
     EntryVal.
 
 %% @private
-%% Build the cell-apply source at init. A `per_shard` (collapsed) instance —
-%% flagged by a `cell_apply_bucket` in its opts — rebuilds its full per-bucket
-%% directory from the durable registry (every primary entry whose `instance_id`
-%% matches), so a `one_for_all` subtree restart restores routing for EVERY table
-%% on the shard, not just the founding one whose opts the supervisor replays. On
-%% a fresh start only the founding entry is registered, so the directory is
-%% `{Bucket => CellCtx}` exactly as before; on a restart the siblings' entries
-%% are present too and the directory is whole again. A single-table
-%% (`per_table_shard`) instance keeps the keyless `{single, CellCtx}` source.
+%% Build the cell-apply source at init. A `per_shard` (collapsed) instance,
+%% flagged by a `cell_apply_bucket` in its opts, rebuilds its full per-bucket
+%% directory from the durable registry (every primary entry whose
+%% `instance_id` matches), so a `one_for_all` subtree restart restores routing
+%% for every table on the shard, not just the founding one whose opts the
+%% supervisor replays. A single-table (`per_table_shard`) instance keeps the
+%% keyless `{single, CellCtx}` source.
 build_cell_apply_source(InstanceId, CellCtx, Opts) ->
     case maps:get(cell_apply_bucket, Opts, undefined) of
         Bucket when is_binary(Bucket) ->
@@ -1590,18 +1515,12 @@ handle_call(
 ) ->
     %% I1 (prepare-after-deliver) applies to the sweep as it does to the
     %% tier_2 PREPARE: the sweep judges "the state at StableHlc", so the
-    %% projection must reflect every event delivered to this replica —
-    %% including remote events integrated into the MST whose replay cast
-    %% is still in flight (a different sender, unordered against this
-    %% call) — before any cell is discarded or reduced. See the theorem
-    %% at `ensure_remote_caught_up/1`. Steady-state cost: one atomic read.
-    %%
-    %% A FAILED catch-up does not abort the sweep (same policy as the
-    %% `cell_context` fence): the fence stays armed for the next call,
-    %% and proceeding is promptness-not-soundness — a delivered event the
-    %% sweep missed replays later onto whatever the sweep left (a reduced
-    %% frame absorbs it as a new entry; a discarded cell is re-created by
-    %% the replay), so both directions converge.
+    %% projection must reflect every event delivered to this replica,
+    %% including remote events whose replay cast is still in flight, before
+    %% any cell is discarded or reduced (`ensure_remote_caught_up/1`). A
+    %% FAILED catch-up does not abort the sweep: the fence stays armed for
+    %% the next call, and a delivered event the sweep missed replays later
+    %% onto whatever the sweep left, so both directions converge.
     #state{
         cell_apply_ctx = Ctx,
         cell_apply_source = Source,
@@ -1640,10 +1559,10 @@ handle_call({register_table, Bucket, Target, TableOpts}, _From, State) ->
             ok = bondy_oplog_registry:set_ae_targets(
                 State#state.instance_id, AeTargets
             ),
-            %% The directory just gained a bucket, so a replay that
-            %% previously had nowhere to route this bucket's cells now does.
-            %% Cheap when there is nothing to do: the cursor is already at the
-            %% current root and the replay returns `no_change`.
+            %% The directory just gained a bucket, so a replay can now route
+            %% this bucket's cells. Cheap when there is nothing to do: the
+            %% cursor is already at the current root and the replay returns
+            %% `no_change`.
             ok = gen_server:cast(self(), replay_cell_events),
             {reply, ok, State#state{
                 cell_apply_source = Source, ae_targets = AeTargets
@@ -1732,42 +1651,36 @@ handle_call(
     _From,
     #state{} = StateIn
 ) ->
-    %% I1 (prepare-after-deliver): this read is a tier_2 op's PREPARE —
-    %% it must not be served from a projection lagging events already
-    %% delivered to this replica, or the minted context under-
-    %% approximates its causal past (lost causality — the fatal
-    %% direction). Local events are covered by construction (the WAL
-    %% drain writes the projection before the MST install); remote
-    %% events need this fence. Steady-state cost: one atomic read. See
-    %% `ensure_remote_caught_up/1` for the invariant, the theorem it
-    %% underwrites, and the mechanism.
+    %% I1 (prepare-after-deliver): this read is a tier_2 op's PREPARE and
+    %% must not be served from a projection lagging events already delivered
+    %% to this replica, or the minted context under-approximates its causal
+    %% past (lost causality, the fatal direction). The WAL drain writes the
+    %% projection before the MST install, so local events are covered; remote
+    %% events need this fence (`ensure_remote_caught_up/1`). Steady-state
+    %% cost: one atomic read.
     #state{cell_apply_source = Source, cell_apply_ctx = Founding} =
         State = ensure_remote_caught_up(StateIn),
-    %% Resolve the ctx for THIS cell's bucket from the multiplex directory —
-    %% NOT the founding `cell_apply_ctx`. On a collapsed (one-log-per-shard)
-    %% instance many tables share one applier, each with its own CRDT, so the
-    %% kernel that decodes the cell's projection state MUST match the cell's
-    %% own table (e.g. an `ew_flag` membership cell on an instance founded by
-    %% an `lww_register` table). A `{single, Ctx}` source returns `Ctx` for any
-    %% bucket; a registered table bucket resolves to its own ctx. A bucket with
-    %% NO registered table — the instance-level latency probe's reserved
-    %% `$probe` bucket — falls back to the founding ctx (any kernel is correct
-    %% for a probe write).
+    %% Resolve the ctx for THIS cell's bucket from the multiplex directory,
+    %% NOT the founding `cell_apply_ctx`. On a collapsed instance many tables
+    %% share one applier, each with its own CRDT, so the kernel that decodes
+    %% the cell's projection state MUST match the cell's own table. A
+    %% `{single, Ctx}` source returns `Ctx` for any bucket; a registered table
+    %% bucket resolves to its own ctx; a bucket with no registered table (the
+    %% latency probe's reserved `$probe` bucket) falls back to the founding
+    %% ctx, since any kernel is correct for a probe write.
     #{
         adapter := Adapter,
         handle := Handle,
         kernel := Kernel,
         crdt_module := CrdtMod
     } = CellCtx = resolve_cell_ctx(Source, Bucket, Founding),
-    %% Single-applier-per-cell read of the cell's current context. The
-    %% caller (`bondy_db:apply_with_context/4`) then appends with this
-    %% context as `meta`. The read and the append are SEPARATE calls —
-    %% not one locked critical section — so two concurrent same-origin
-    %% writes to the same cell can read the same pre-write context and
-    %% stamp it twice (a pre-existing property of the tier_2
-    %% context-stamp design; the sequential `await/1` barrier gives
-    %% read-your-writes for the common serial case). Single-applier
-    %% scope still guarantees a consistent snapshot for THIS read.
+    %% Single-applier-per-cell read of the cell's current context. The caller
+    %% (`bondy_db:apply_with_context/4`) then appends with this context as
+    %% `meta`. The read and the append are SEPARATE calls, not one locked
+    %% critical section, so two concurrent same-origin writes to the same cell
+    %% can read the same pre-write context and stamp it twice; the sequential
+    %% `await/1` barrier gives read-your-writes for the serial case.
+    %% Single-applier scope still gives a consistent snapshot for THIS read.
     State0 =
         case Adapter:get(Handle, Bucket, Key) of
             not_found ->
@@ -1855,19 +1768,14 @@ handle_info(drain, State0) ->
         {ok, State2} ->
             %% Reaching end-of-log is the boot WAL-replay completion signal.
             State2b = boot_replay_end(State2),
-            %% Caught up. Park an async waiter on the WAL's durable
-            %% position instead of re-sending `drain` immediately (a
-            %% busy spin: the next-to-read byte is already durable in
-            %% `per_write` mode, so an inline `await_durable/3` returns
-            %% at once) or blocking the gen_server here (which would
-            %% stall the `replay_cell_events` cast and other messages
-            %% that cross-node sync depends on). The waiter fires the
-            %% instant a new frame becomes durable — immediate apply
-            %% latency, near-zero idle CPU, responsive mailbox.
-            %%
-            %% Reaching end-of-log is also the signal any `await_drain/1`
-            %% callers (the cold-start rebuild barrier) wait on, so reply to
-            %% them here before parking.
+            %% Caught up. Park an async waiter on the WAL's durable position
+            %% instead of re-sending `drain` at once (a busy spin: the
+            %% next-to-read byte is already durable in `per_write` mode) or
+            %% blocking the gen_server here (which would stall the
+            %% `replay_cell_events` cast that cross-node sync depends on). The
+            %% waiter fires the instant a new frame becomes durable.
+            %% End-of-log is also what `await_drain/1` callers (the cold-start
+            %% rebuild barrier) wait on, so reply to them before parking.
             {noreply, arm_idle_waiter(reply_drain_waiters(State2b))};
         {paused, State2} ->
             %% Hit the demand cap. Stay parked — the instance will
@@ -1957,15 +1865,13 @@ missing_sibling(_, _, undefined) -> mst;
 missing_sibling(_, _, _) -> none.
 
 %% @private
-%% Resume from `max(last_MST_key.hlc, watermark.hlc)`. The reader's
-%% `{hlc, T}` start finds the first frame whose first event HLC is
-%% `>= T`, so the frame that contained our resume HLC is re-read and
-%% its events are re-applied — that is safe because `bondy_mst:put`
-%% is content-addressable and verify+install are idempotent.
-%%
-%% Falls back to `beginning` when both inputs are absent (fresh
-%% instance with empty MST and no compaction history) or when the
-%% MST handle is missing.
+%% Resume from `max(last_MST_key.hlc, watermark.hlc)`. The reader's `{hlc, T}`
+%% start finds the first frame whose first event HLC is `>= T`, so the frame
+%% that contained the resume HLC is re-read and its events re-applied; that is
+%% safe because `bondy_mst:put` is content-addressable and verify+install are
+%% idempotent. Falls back to `beginning` when both inputs are absent (fresh
+%% instance with empty MST and no compaction history) or when the MST handle
+%% is missing.
 resume_position(MstLast, Watermark) ->
     case resume_hlc(MstLast, Watermark) of
         undefined -> beginning;
@@ -2043,15 +1949,12 @@ read_consumer_offset(WalDir) ->
 
 %% @private
 %% The WAL-drain resume position, derived from the durable consumer offset
-%% (the WAL-owned cursor) — deliberately NOT from MST state. A consumer offset
-%% that has never committed (`commit_count = 0`, the fresh-instance sentinel)
-%% resumes from `beginning` — the earliest LIVE segment, which also tolerates a
-%% compacted/truncated prefix. A committed offset resumes exactly where the
-%% last durable commit left off; any uncommitted tail (bounded by
-%% `commit_every`) is re-read and re-applied idempotently via the MST's HLC
-%% dedup — the standard at-least-once log-consumer contract. Keeping resume off
-%% the MST is what makes the drain's correctness independent of the MST root's
-%% durability schedule (e.g. async seal).
+%% (the WAL-owned cursor), deliberately NOT from MST state. A consumer offset
+%% that has never committed (`commit_count = 0`) resumes from `beginning`, the
+%% earliest LIVE segment, which also tolerates a truncated prefix. A committed
+%% offset resumes where the last durable commit left off; the uncommitted tail
+%% (bounded by `commit_every`) re-applies idempotently via the MST's HLC dedup.
+%% This keeps the drain independent of the MST root's durability schedule.
 start_pos_from_consumer_offset(CO) ->
     case bondy_log_state:commit_count(CO) of
         0 ->
@@ -2194,16 +2097,13 @@ open_drain_reader(WalP, StartPos) ->
     end.
 
 %% @private
-%% Drains the reader until it returns `end_of_log` or `{error, _}`.
-%% On every batch it applies the events and bumps the in-memory
-%% consumer offset; consumer.offset and `set_committed_segment` are
-%% persisted at `commit_every` events or on `end_of_log`.
-%%
-%% Before each next-batch read the loop checks the demand-based
-%% in-flight counter against `max_install_in_flight`. When the cap is
-%% reached the loop returns `{paused, State}` and `handle_info(drain,
-%% _)` marks `drain_deferred = true`; the loop is rearmed by the
-%% instance's `drain_resume` cast.
+%% Drains the reader until it returns `end_of_log` or `{error, _}`. On every
+%% batch it applies the events and bumps the in-memory consumer offset;
+%% consumer.offset and `set_committed_segment` are persisted at `commit_every`
+%% events or on `end_of_log`. Before each next-batch read the loop checks the
+%% demand-based in-flight counter against `max_install_in_flight`; at the cap
+%% it returns `{paused, State}`, `handle_info(drain, _)` marks
+%% `drain_deferred = true`, and the instance's `drain_resume` cast rearms it.
 drain_loop(#state{} = State0) ->
     case lifecycle_live(State0) of
         false ->
@@ -2218,14 +2118,11 @@ drain_loop(#state{} = State0) ->
     end.
 
 %% @private
-%% Bootstrap lifecycle gate. Returns `true` when the instance is `live`
-%% (the applier may drain), `false` when the instance is still
-%% `pre_bootstrap` (the applier must NOT touch the per-cell projection).
-%% Treats a missing handle as `live` — the registry publish can race
-%% with the applier's `init/1` after a one_for_all subtree restart, and
-%% the WAL is the durable buffer either way; backwards-compatibility
-%% for callers that haven't migrated to the lifecycle yet is the same
-%% fail-open path.
+%% Bootstrap lifecycle gate. Returns `true` when the instance is `live` (the
+%% applier may drain), `false` when the instance is still `pre_bootstrap` (the
+%% applier must NOT touch the per-cell projection). Treats a missing handle as
+%% `live`: the registry publish can race with the applier's `init/1` after a
+%% one_for_all subtree restart, and the WAL is the durable buffer either way.
 lifecycle_live(#state{lifecycle = undefined}) ->
     true;
 lifecycle_live(#state{lifecycle = H}) ->
@@ -2281,23 +2178,11 @@ drain_loop_step(
 %% @private
 %% Coalesce consecutive WAL frames into a single applier batch: read via the
 %% reader's `next/1` until the accumulated event count reaches `Max` or the
-%% reader signals `end_of_log`. `Max` is a soft cap — a frame is never split,
-%% so a batch may exceed it by the last frame's size. Batching amortises the
-%% two co-dominant per-batch storage costs (the pack-store spine rebuild and
-%% the leveled projection `put_batch`) over many more events.
-%%
-%% Coalescing engages only under a backlog: when the WAL is caught up one
-%% frame is available before `end_of_log`, so a batch is one frame.
-%%
+%% reader signals `end_of_log`. `Max` is a soft cap: a frame is never split.
 %% A reader error mid-collect discards the accumulated frames and surfaces the
-%% error. Their offset was never bumped, so they are re-read from the last
-%% committed position after the supervisor restart — at-least-once.
-%%
-%% Returns:
-%%   `{frames, Batch, {Seg, Off}, NewIter, more | eol}` — ≥1 frame read;
-%%       `more` = `Max` reached and the reader has more; `eol` = drained.
-%%   `{empty, Iter}` — `end_of_log` with nothing read.
-%%   `{error, Reason}` — reader error.
+%% error; their offset was never bumped, so they are re-read after the restart.
+%% Returns `{frames, Batch, {Seg, Off}, NewIter, more | eol}`, `{empty, Iter}`
+%% on `end_of_log` with nothing read, or `{error, Reason}`.
 collect_frames(Iter, Max) ->
     collect_frames(Iter, Max, [], 0, undefined).
 
@@ -2322,18 +2207,13 @@ collect_frames(Iter0, Max, AccRev, N, LastPos) ->
     end.
 
 %% @private
-%% Re-verify each event's stored signature (defence-in-depth against
-%% WAL tampering) and dispatch the survivors to the instance via a
-%% one-way `gen_server:cast`. The instance installs the events in
-%% the MST and evicts the matching overlay rows in FIFO order; the
-%% applier does not wait. Events that fail verification are dropped
-%% from the batch: their telemetry is emitted here and their overlay
-%% rows are evicted by the instance (`evict_rejected` cast) — the one
-%% path that also releases the rows' share of the admission counters
-%% and answers the rows' appenders — so a reader does not perpetually
-%% observe a row whose event the system has rejected. Subsequent
-%% applier passes do not retry rejected events (replay-from-beginning
-%% would just re-fire the same failure).
+%% Re-verify each event's stored signature (defence-in-depth against WAL
+%% tampering) and dispatch the survivors to the instance via a one-way
+%% `gen_server:cast`; the instance installs them in the MST and evicts the
+%% matching overlay rows in FIFO order. Events that fail verification are
+%% dropped from the batch: their telemetry is emitted here and the instance
+%% evicts their overlay rows (`evict_rejected` cast), releasing the rows' share
+%% of the admission counters and answering their appenders. No retry.
 apply_batch(
     #state{instance_id = Id, instance_pid = InstancePid} = State, Batch
 ) ->
@@ -2373,24 +2253,14 @@ apply_batch(
             [] ->
                 State;
             _ ->
-                %% Order matters for `await_apply/1,2`'s contract:
-                %% applier-side projection writes (cell_apply, publish)
-                %% run BEFORE the `install_local_batch` cast
-                %% is dispatched to the instance. The instance's
-                %% handler is the place that signals
-                %% `drain_waiters` — by enqueuing the cast last we
-                %% guarantee that, by the time a caller's
-                %% `await_apply` sees the overlay empty, the
-                %% projection adapter and `publish_fun`
-                %% have all observed the events. The earlier ordering
-                %% (cast first, then process in the applier) was a
-                %% concurrency micro-optimisation: it overlapped the
-                %% applier's projection write with the instance's MST
-                %% install. The pipeline still overlaps across
-                %% batches (the applier's NEXT batch starts while the
-                %% instance is processing this batch's cast), so the
-                %% reorder only costs the within-batch overlap, which
-                %% is dominated by the projection write anyway.
+                %% Order matters for `await_apply/1,2`'s contract: applier-side
+                %% projection writes (cell_apply, publish) run BEFORE the
+                %% `install_local_batch` cast is dispatched to the instance,
+                %% whose handler is what signals `drain_waiters`. Enqueuing the
+                %% cast last guarantees that, by the time a caller's
+                %% `await_apply` sees the overlay empty, the projection adapter
+                %% and `publish_fun` have observed the events. The pipeline
+                %% still overlaps across batches.
                 CellT0 = erlang:monotonic_time(microsecond),
                 %% The WHOLE verified batch, not just its cell ops: the mux
                 %% groups on `event_bucket/1` (which skips non-cell ops) but
@@ -2483,48 +2353,26 @@ stamp_ctx_guard(
     ),
     {Reply, State#state{ctx_guard = Guard1}}.
 
-%% NOTE (cell-event replay): re-applies the cell events that landed in
-%% the MST since the last replay. Called from the instance after a sync
-%% session merges peer events. Without this, remote events sit in the
-%% MST but never reach the projection — reads would only see events
-%% authored locally.
-%%
-%% The walk is incremental: the MST diff prunes subtrees whose root
-%% hash is shared between the current MST and the last replayed root,
-%% so the cost is O(events since last sync) rather than O(events in
-%% MST). A cold start (no last replayed root) does one full fold so any
-%% peer-authored events present in the MST at boot time are observed;
-%% subsequent replays use the diff.
+%% @private
+%% Re-applies the cell events that landed in the MST since the last replay.
+%% Called from the instance after a sync session merges peer events; without
+%% it remote events sit in the MST but never reach the projection. The walk is
+%% incremental: the MST diff prunes subtrees whose root hash is shared between
+%% the current MST and the last replayed root, so the cost is O(events since
+%% last sync). A cold start (no last replayed root) does one full fold.
 
 do_replay_cell_events(State0) ->
     {_, State} = do_replay_cell_events_r(State0),
     State.
 
 %% @private
-%% THE PREPARE FENCE — the enforcement point of invariant I1, stated in this
-%% module's docs under "Causal-stability invariants".
-%%
-%% Without this fence I1 fails on applier-backed instances for REMOTE events:
-%% `integrate_peer_root` advances the MST and casts `replay_cell_events`, but
-%% that cast and a client's `cell_context` call come from different senders,
-%% so the context read can be served from a projection lagging the replica's
-%% own delivered set — minting an op whose context under-approximates its
-%% causal past. That is the fatal direction: lost causality. (The
-%% read-and-stamp non-atomicity noted at the `{cell_context, _, _}` handler
-%% errs the other way, toward FALSE concurrency — extra siblings the CRDT
-%% resolves — and is therefore acceptable.)
-%%
-%% Mechanism: one shared atomics generation, bumped by the instance at each
-%% `integrate_peer_root` completion (the delivery point; see the bump-site
-%% note there for why that site is exhaustive). A context read compares it
-%% against the generation this projection last replayed to: equal in the
-%% steady state (one atomic read, no instance round-trip), and on a gap it
-%% runs the same idempotent `replay_pairs`-anchored catch-up the cast handler
-%% runs, advancing the recorded generation ONLY on success — a failed
-%% catch-up must keep the fence armed. The generation is sampled BEFORE the
-%% replay: a bump landing mid-replay may or may not be covered by the root
-%% the replay read, so it must re-arm the fence (conservative, never
-%% unsound).
+%% THE PREPARE FENCE: the enforcement point of invariant I1 (moduledoc,
+%% "Causal-stability invariants"). `integrate_peer_root` advances the MST and
+%% casts `replay_cell_events` from a different sender than a client's
+%% `cell_context` call, so without the fence a context read could lag the
+%% replica's delivered set. One shared atomics generation, bumped by the
+%% instance per `integrate_peer_root`, is compared against the generation last
+%% replayed to; on a gap the catch-up runs and advances it only on success.
 ensure_remote_caught_up(State0) ->
     State = resolve_remote_gen_ref(State0),
     case State#state.remote_gen_ref of
@@ -2741,32 +2589,25 @@ install_catalogue_group(Id, Ctx, Bucket, Cells, Acc0) ->
 settle_group(Ctx, Bucket, Acc0, #{idx := IdxAcc} = Acc, Status) ->
     Settled = bondy_oplog_cell_apply:settle_install(Ctx, IdxAcc, Status),
     Acc1 = Acc#{idx := #{}},
-    %% The install path (`install_cell/6`) writes the
-    %% projection WITHOUT write-through (it installs a frame directly,
-    %% with no fold result to cache). A catalogue bootstrap can run on a
-    %% LIVE instance (a live re-bootstrap), so any installed key may
-    %% already be warm in the OldValue cache with its pre-install frame —
-    %% a stale hit would then fold the next live event against the wrong
-    %% OldState (a convergence break). Clearing this table's cache here
-    %% closes it. The single-threaded applier guarantees this clear
-    %% completes before any later drain reads. Cheap: a rare bulk recovery
-    %% op, and the cache is rebuildable from the projection.
+    %% The install path (`install_cell/6`) writes the projection WITHOUT
+    %% write-through: it installs a frame directly, with no fold result to
+    %% cache. A catalogue bootstrap can run on a LIVE instance, so an
+    %% installed key may already be warm in the OldValue cache with its
+    %% pre-install frame, and a stale hit would fold the next live event
+    %% against the wrong OldState. Clearing this table's cache here closes
+    %% that; the single-threaded applier completes the clear before any
+    %% later drain reads, and the cache is rebuildable from the projection.
     bondy_oplog_cell_apply:oldstate_cache_clear(
         maps:get(oldstate_cache, Ctx, undefined)
     ),
     %% Honour the table's `publish => true` declaration on THIS write path
-    %% too. `install_cell/6` writes frames directly and emits no
-    %% per-cell merge event, so without this a table whose reactor DERIVES
-    %% state from the projection (rather than merely invalidating on change)
-    %% is never told its projection exists. One event per bucket per batch,
-    %% not one per cell: a snapshot install is a wholesale replace, not N
-    %% merges, and modelling it as N merges would both cost O(cells) sends
-    %% and hand reactors an `Old` of `undefined` for every key — which a
-    %% differ like `bondy_aae_reactor:react_user/3` would read as "every
-    %% user's credentials just changed".
-    %%
-    %% Only when this batch actually installed something: a batch whose cells
-    %% all failed to decode changed nothing to rebuild from.
+    %% too: `install_cell/6` writes frames directly and emits no per-cell
+    %% merge event, so without this a table whose reactor DERIVES state from
+    %% the projection is never told its projection exists. One event per
+    %% bucket per batch, not one per cell: a snapshot install is a wholesale
+    %% replace, and N merges would hand reactors an `Old` of `undefined` for
+    %% every key, which a differ would read as "everything changed". Only when
+    %% this batch actually installed something.
     ok = maybe_publish_bootstrap(Ctx, Bucket, Acc0, Acc1),
     case Settled of
         ok -> {ok, Acc1};
@@ -3229,30 +3070,13 @@ notify_committed_segment(InstanceId, WalPid, Seg) ->
     end.
 
 %% @private
-%% Park an async waiter on the WAL's durable position. Spawns a
-%% monitored helper that blocks in `bondy_oplog_wal:await_durable/3`
-%% until the durable position advances *strictly past* the reader's
-%% current offset (i.e. a new frame becomes durable) or
-%% `?AWAIT_DURABLE_TIMEOUT_MS` elapses, then exits. The helper's
-%% monitor `DOWN` is the applier's wakeup signal (see
-%% `handle_info({'DOWN', ...})`).
-%%
-%% Why a helper rather than calling `await_durable/3` inline:
-%% `await_durable/3` is a blocking `gen_server:call`. Calling it from
-%% the applier's own `handle_info(drain)` would make the applier
-%% unresponsive to every other message — notably the
-%% `replay_cell_events` cast that cross-node sync uses to fold synced
-%% events into the projection — for the duration of the wait. The
-%% helper isolates the block; the applier returns immediately and its
-%% mailbox keeps flowing.
-%%
-%% Why `{Seg, Off + 1}` and not `{Seg, Off}`: the reader's current
-%% position is the next-to-read byte, which is already durable whenever
-%% we are caught up (always so in `per_write` mode, where head ≡
-%% durable). Awaiting `{Seg, Off}` is satisfied instantly and the
-%% helper would exit immediately, spinning. `{Seg, Off + 1}` waits for
-%% genuinely new data. A segment rollover satisfies it too, since
-%% `{Seg, Off + 1} =< {Seg + 1, _}`.
+%% Park an async waiter on the WAL's durable position: a monitored helper
+%% blocks in `bondy_oplog_wal:await_durable/3` until the durable position
+%% passes the reader's offset or `?AWAIT_DURABLE_TIMEOUT_MS` elapses; its
+%% `DOWN` wakes the applier. A helper rather than an inline call because
+%% `await_durable/3` is a blocking `gen_server:call` that would make the
+%% applier deaf to `replay_cell_events`. `{Seg, Off + 1}`, not `{Seg, Off}`:
+%% the next-to-read byte is already durable when caught up, so it would spin.
 arm_idle_waiter(#state{idle_waiter = Ref} = State) when is_reference(Ref) ->
     %% Already parked — don't spawn a second helper.
     State;
@@ -3373,18 +3197,11 @@ validate_publish_opts(Opts) ->
 %% @private
 %% Walks `Verified` in HLC-monotonic order and publishes each event via
 %% `bondy_oplog_core:publish/4`. A `publish_fun` returning `skip` suppresses
-%% delivery for that event; a raise is logged and treated as `skip` so
-%% a misbehaving derivation cannot wedge the applier. Best-effort
-%% delivery; the dispatcher walks subscribers in this process.
-%%
-%% A MULTIPLEXING (`per_shard`) instance resolves the namespace PER EVENT
-%% from the bucket's own cell-apply ctx (`publish_batch_dir/2`): the
-%% instance-level `publish_ns` is the FOUNDING table's, and publishing every
-%% sibling's local writes under the founder's namespace both misroutes them
-%% and leaves a `publish => true` sibling's subscribers deaf to local
-%% writes — which is exactly how the merge path already resolves it
-%% (`bondy_oplog_cell_apply` reads the ctx). Pinned by
-%% `bondy_db_publish_list_test`'s shared-instance cases.
+%% delivery; a raise is logged and treated as `skip` so a misbehaving
+%% derivation cannot wedge the applier. A MULTIPLEXING (`per_shard`) instance
+%% resolves the namespace PER EVENT from the bucket's own cell-apply ctx
+%% (`publish_batch_dir/2`), since the instance-level `publish_ns` is the
+%% founding table's (`bondy_db_publish_list_test`'s shared-instance cases).
 publish_batch(#state{cell_apply_source = {dir, _}} = State, Verified) ->
     publish_batch_dir(State, Verified);
 publish_batch(#state{publish_ns = undefined}, _Verified) ->

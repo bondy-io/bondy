@@ -10,35 +10,14 @@
 
 -compile([nowarn_export_all, export_all]).
 
-%% BONDY_DB_RECLAMATION_PLAN.md Step 9 — the capstone validation, over a
-%% 3-node Partisan cluster with live AAE (production paths only: writes and
-%% deletes through `bondy_db`, stability through the frontier swap the
-%% background sync performs, reclamation through
-%% `bondy_oplog_instance:reclaim_stable_cells/1`):
-%%
-%%   - `reclaim_after_convergence_no_resurrection`: write on BOTH nodes,
-%%     converge, delete on both sides, converge the deletions, reclaim on
-%%     both nodes, then keep syncing and assert the deleted cells never
-%%     come back while surviving cells are untouched — on either node.
-%%   - `down_member_blocks_reclamation_until_retired`: with one member
-%%     permanently down, a fresh tombstone is NOT reclaimable (the strict
-%%     all-member oracle refuses); after the member is retired by a
-%%     deliberate membership act (`partisan_peer_service:leave/1` — the
-%%     replicated authority), the same tombstone IS reclaimed. This is the
-%%     plan's "frontier advances past a retired member" assertion, and its
-%%     converse: an un-retired silent member holds the frontier down. The
-%%     cluster has three nodes so the survivors stay a cluster: a sole
-%%     member with clustering enabled confirms nothing.
-%%   - `compacted_tombstone_is_reclaimed`: compaction empties a replica's
-%%     tree while the tombstone's cell remains in its projection; the cell
-%%     is still reclaimed on every node. Compaction reaching a tombstone
-%%     before reclamation is the default order (`bondy_oplog_config`:
-%%     `gc_interval_ms/0` against `reclaim_interval_ms/0`).
-%%
-%% Scheduler-driven GC (compaction) is frozen suite-wide, as in
-%% `bondy_frontier_cluster_SUITE`: reclamation must not race MST truncation
-%% in the test window, and recorded peer roots must stay readable for the
-%% frontier computation.
+%% Tombstone reclamation end to end over a 3-node Partisan cluster with live
+%% AAE, through production paths only: writes and deletes through `bondy_db`,
+%% stability through the frontier swap the background sync performs,
+%% reclamation through `bondy_oplog_instance:reclaim_stable_cells/1`. A fresh
+%% tombstone is NOT reclaimable while a member is down; it IS reclaimed once
+%% `partisan_peer_service:leave/1` retires that member. Compaction emptying a
+%% replica's tree does not stop reclamation of the cell. Scheduler-driven GC
+%% is frozen suite-wide so reclamation never races MST truncation.
 
 -define(NODE_NAMES, [creap1, creap2, creap3]).
 -define(USERS_TABLE, security_users).
@@ -136,15 +115,15 @@ down_member_blocks_reclamation_until_retired(Config) ->
     %% after) sit above every stability point and are RETAINED — however
     %% many attempts run. (Older, pre-death-confirmed garbage may
     %% legitimately reclaim; retention of the new tombstones is what the
-    %% strict oracle guarantees, and it is proven below by the
-    %% post-retirement discard count.)
+    %% strict oracle guarantees, and the post-retirement discard count
+    %% below checks it.)
     _ = [reclaim_once(N1) || _ <- lists:seq(1, 3)],
 
     %% RETIREMENT — a deliberate, replicated membership act.
     ok = erpc:call(N1, ?MODULE, do_retire, [N2]),
 
     %% The frontier advances past the retired member: all `length(Pairs)`
-    %% new tombstones are reclaimed NOW — proof they were all retained
+    %% new tombstones are reclaimed NOW, which shows they were all retained
     %% through the down phase.
     {ok, D} = reclaim_until_discarded(N1, length(Pairs)),
     ct:pal("post-retirement reclaimed ~p cells", [D]),
@@ -320,13 +299,9 @@ reclaim_once(Node) ->
 %% Stability advances only as live-sync frontier-reporting rounds complete, so
 %% poll, accumulating the (one-shot) discards until `Min` cells are gone.
 %%
-%% Each attempt also lands a round of CHURN — fresh writes with unique keys.
-%% `security_users` shards by (realm, aggregate) hash, and a tombstone that
-%% remains the NEWEST event on its shard is deliberately retained by the
-%% strict `<` bound (BONDY_DB_RECLAMATION_PROOF.md §5: the frontier cannot
-%% cover a same-HLC/higher-origin dot). Ongoing traffic — the production
-%% condition — is what advances each shard past its tombstones; the churn
-%% models it deterministically-in-the-limit across attempts.
+%% Each attempt also lands a round of CHURN — fresh writes with unique keys. A
+%% tombstone that remains the NEWEST event on its shard is retained by the
+%% strict `<` bound; ongoing traffic is what advances each shard past it.
 reclaim_until_discarded(Node, Min) ->
     reclaim_until_discarded(Node, Min, now_ms() + ?CONVERGE_MS, 0, 0).
 
@@ -499,7 +474,7 @@ do_reclaim_all() ->
 
 %% @private
 %% Retirement: the deliberate, REPLICATED membership act — remove the (dead)
-%% node from the Partisan membership. This is the plan's §4.8 authority.
+%% node from the Partisan membership.
 do_retire(Node) ->
     Specs =
         case partisan_peer_service:members_for_orchestration() of

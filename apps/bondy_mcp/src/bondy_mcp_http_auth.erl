@@ -6,7 +6,7 @@
 -module(bondy_mcp_http_auth).
 
 -moduledoc """
-Authentication for the modern per-request edge (design §6): the realm's
+Authentication for the modern per-request edge: the realm's
 configured methods decide what the `Authorization` header may carry — a
 Bearer JWT (OAuth2), a Bearer Bondy ticket, or Basic — and an absent
 header falls through to the anonymous principal when the realm admits
@@ -83,16 +83,13 @@ authenticate(Req, RealmUri) ->
     end.
 
 %% @private
-%% A Bearer credential is a JWT (OAuth2) or a Bondy ticket, decided by
-%% the claims: `bondy_oauth_jwt:decode/1` is an unverified `peek` and
-%% decodes ANY compact JWS — a Bondy ticket included — so "does it
-%% decode" cannot be the dispatch. An OAuth2 JWT carries `sub`; anything
-%% else (a ticket's claims carry `authid`, not `sub`; garbage peeks to
-%% nothing) goes to ticket verification, which is what actually
-%% validates it. The previous shape threw `invalid_token` for every
-%% Bondy ticket — measured by
-%% `bondy_mcp_modern_SUITE:delegated_ticket_caps_the_projection`, the
-%% first thing to exercise this path.
+%% A Bearer credential is a JWT (OAuth2) or a Bondy ticket, decided by the
+%% claims: `bondy_oauth_jwt:decode/1` is an unverified `peek` that decodes
+%% ANY compact JWS — a Bondy ticket included — so "does it decode" cannot
+%% be the dispatch. An OAuth2 JWT carries `sub`; anything else (a ticket's
+%% claims carry `authid`, not `sub`; garbage peeks to nothing) goes to
+%% ticket verification, which is what actually validates it
+%% (`bondy_mcp_modern_SUITE:delegated_ticket_caps_the_projection`).
 bearer(Token, RealmUri, SourceIP, Req) ->
     Peeked =
         try bondy_oauth_jwt:decode(Token) of

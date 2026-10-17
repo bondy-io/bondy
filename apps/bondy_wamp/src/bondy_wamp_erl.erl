@@ -55,8 +55,8 @@ decode(Bin, Opts) ->
 encode_term(Term, #wamp_erl{level = Level}) when
     is_atom(Term), Term =/= undefined, not is_boolean(Term), Level > 1
 ->
-    %% Level 1 atoms are the keys of the WAMP messages so we key them
-    %% Level 2+ are keys of the payload and details. It is dangerous for
+    %% Atoms at levels 0 and 1 are WAMP message keys and stay atoms.
+    %% Deeper atoms belong to payloads and details and become binaries.
     atom_to_binary(Term);
 encode_term(Term, Opts0) when is_map(Term) ->
     Opts = incr(Opts0),
@@ -84,7 +84,7 @@ encode_term([{_, _} | _] = Term, Opts0) ->
     );
 encode_term(Term, Opts0) when is_list(Term) ->
     Opts = incr(Opts0),
-    % TODO: Handle improper lists
+    %% TODO: Handle improper lists
     lists:map(fun(T) -> encode_term(T, Opts) end, Term);
 encode_term(Term, #wamp_erl{level = 0} = Opts) when is_tuple(Term) ->
     Encoded = encode_term(tuple_to_list(Term), Opts),

@@ -951,22 +951,14 @@ gc(#?MODULE{store = Store0} = T, KeepRoots) when is_list(KeepRoots) ->
                         }),
                         {T1, Meta};
                     {true, Missing} ->
-                        %% ABORT, do not sweep. The list-mode collector marks
-                        %% by walking the keep-roots THROUGH PRESENT PAGES
-                        %% (`fold_pages/4` skips a missing page silently), so
-                        %% a hole under the current root would under-mark its
-                        %% whole subtree below the hole and the sweep would
-                        %% then delete live, reachable pages — amplifying a
-                        %% small anomaly into large, permanent data loss. A
-                        %% hole in the CURRENT root is always a defect
-                        %% upstream (pinned peer roots, by contrast, are
-                        %% legitimately partial mid-pull); surface it loudly
-                        %% and keep the garbage for a cycle instead of making
-                        %% the damage worse.
-                        %%
-                        %% The store name is the instance id for the trees
-                        %% `bondy_oplog` opens, which is what makes the event
-                        %% attributable to a shard on a dashboard.
+                        %% ABORT, do not sweep. The list-mode collector
+                        %% marks through PRESENT pages only (`fold_pages/4`
+                        %% skips a missing page), so a hole under the current
+                        %% root under-marks its subtree and the sweep would
+                        %% delete live pages. A hole in the CURRENT root is
+                        %% a defect upstream; pinned peer roots may be
+                        %% partial mid-pull. The store name is the oplog
+                        %% instance id, so the report names its shard.
                         Name = bondy_mst_store:name(Store0),
                         Report = abort_report(Store0, Name, T, Missing),
                         ok = record_gc_abort(Report),
@@ -1128,8 +1120,8 @@ swept_tab() ->
 %% subtree whose hash both sides share, which is sound only if the receiver
 %% really holds it — and `put_batch/2` merges from a volatile map-backed store
 %% that is discarded immediately afterwards, so anything wrongly pruned is
-%% gone for good. That failure looks exactly like the s16 signature: a
-%% brand-new root referencing pages that were never stored here.
+%% gone for good. The signature of that failure is a brand-new root
+%% referencing pages that were never stored here.
 verify_published_root(#?MODULE{store = Store} = T, Op) ->
     case application:get_env(bondy_mst, verify_gc, ?VERIFY_DEFAULT) of
         false ->
@@ -1463,19 +1455,11 @@ do_last_n(T, TopBound, N, Low, [{K, V, Low2} | Rest]) ->
 %% -----------------------------------------------------------------------------
 %% Bulk canonical construction (put_batch's temporary tree)
 %% -----------------------------------------------------------------------------
-%% Builds the canonical MST of `Items` bottom-up into `B0`'s (map-backed)
-%% store. Because the MST is deterministic/history-independent, this
-%% produces pages byte-identical to those a sequence of `put/3` calls
-%% would converge on, but serialises + hashes each page exactly once
-%% instead of rehashing the insertion spine once per item.
-%%
-%% Construction: within any contiguous key range, the items carrying the
-%% range's maximum level `M` are exactly the entries of the range's top
-%% page (no higher-level separator splits them), and the runs of
-%% lower-level items between consecutive level-`M` items form the page's
-%% child subtrees (`low` for the run before the first entry, the entry's
-%% right-child for the run after it). Recursing on each run yields the
-%% canonical tree of the whole set.
+%% Within any contiguous key range, the items carrying the range's maximum
+%% level `M` are exactly the entries of the range's top page, and the runs of
+%% lower-level items between consecutive level-`M` items form its child
+%% subtrees. Recursing on each run yields the canonical tree
+%% (`bondy_mst_put_batch_bulk_test`).
 
 %% @private
 bulk_build(#?MODULE{store = Store0} = B0, Items) ->
@@ -1566,16 +1550,12 @@ put_at(T, Key, Value, Level, Store0, Hash) when is_binary(Hash) ->
     case bondy_mst_store:get(Store0, Hash) of
         undefined ->
             %% Dangling page: this (sub)tree root references a hash that
-            %% resolves in no store — the same condition `split/4` and
-            %% `merge_aux/5` already recover from (see the dangling-page
-            %% recovery note above `log_dangling_page/5`). Recover the same
-            %% way: log once with context and treat the missing subtree as
-            %% empty, delegating to the `undefined`-root clause to insert a
-            %% fresh single-entry page. The dropped content re-heals via
-            %% anti-entropy. Without this guard the missing page crashed the
-            %% owning `bondy_oplog_instance` gen_server with a
-            %% `function_clause` in `bondy_mst_page:list/1` — taking the
-            %% supervisor subtree down with it.
+            %% resolves in no store — the condition `split/4` and
+            %% `merge_aux/5` also recover from (see the dangling-page
+            %% recovery note above `log_dangling_page/5`). Log once with
+            %% context and treat the missing subtree as empty, delegating to
+            %% the `undefined`-root clause to insert a fresh single-entry
+            %% page. The dropped content re-heals via anti-entropy.
             log_dangling_page(
                 "put_at: dangling page, treating subtree as empty",
                 T,
@@ -1943,13 +1923,11 @@ get_page(T, Store, Hash) ->
 %% DONOR alone. But `merge_aux_rec/7` calls `split/4` on donor subtrees, and
 %% `split_page/5` writes the rewritten spine pages it produces into the
 %% RECEIVER's store while their children still live only in the donor. For
-%% exactly those hashes `copy/3` looked in the donor, found nothing, and
-%% returned the store untouched — so merge published a root referencing
-%% children that were never copied. With `merge/3` that is survivable (the
-%% donor IS the receiver, so the reference still resolves), which is why the
-%% peer-integrate path never showed it; with `put_batch/2` the donor is a
-%% volatile map store that is discarded on return, making the loss permanent.
-%% That is the own-root page loss observed on Fly s16/s25.
+%% those hashes `copy/3` finds nothing in the donor and leaves the store
+%% untouched, so merge would publish a root referencing children that were
+%% never copied. With `merge/3` the donor IS the receiver, so the reference
+%% still resolves; with `put_batch/2` the donor is a volatile map store that
+%% is discarded on return, so the loss would be permanent.
 %%
 %% Hence the two rules here: resolve each page receiver-first then donor (the
 %% same fallback `get_page/3` uses), and ALWAYS walk a page's refs — presence

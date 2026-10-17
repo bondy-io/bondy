@@ -14,8 +14,9 @@
 %% REVOKING (`bondy_rbac:revoke_role_grants/3`,
 %% `bondy_rbac_source:remove_all/2`) the truncation left rows behind through
 %% the very operation that exists to remove them; where they were READING
-%% (`find_grants/4`, `scan_user/2`, `bondy_rbac_user:member_groups/2`) it
-%% dropped grants, sources and group memberships — permissions — off the end.
+%% (grant lookups in `bondy_rbac`, source scans in `bondy_rbac_source`,
+%% `bondy_rbac_user:member_groups/2`) it dropped grants, sources and group
+%% memberships — permissions — off the end.
 %%
 %% Every band here is therefore deliberately LONGER than the default limit.
 %% A test that stayed under it would pass against the defect, which is exactly

@@ -303,15 +303,11 @@ holds the name.
 remove_all(RealmUri, Username) ->
     Table = table(),
     {Lo, Hi} = bondy_oplog_index_key:col_bounds(Username),
-    %% Folded to exhaustion, not one `range_all/5` page: a user with more
-    %% sources than the default limit kept the remainder, and this function
-    %% exists precisely so that nothing is left behind for whoever next holds
-    %% the name.
-    %%
-    %% Pinned to the user's shard: a user's sources co-locate there (catalogue
-    %% `aggregate_root => leading_col`, the username leading the composite
-    %% key), so the band never spans shards. Unpinned, `fold/6` would walk
-    %% every shard in sequence for a band that lives on one.
+    %% Folded to exhaustion, not one `bondy_db:range_all/5` page, so nothing
+    %% is left behind for whoever next holds the name. Pinned to the user's
+    %% shard, where a user's sources co-locate (catalogue
+    %% `aggregate_root => leading_col`); unpinned, `fold/6` would walk every
+    %% shard for a band that lives on one.
     Shard = bondy_db:shard_for(Table, RealmUri, Lo),
     {ok, ok} = bondy_db:fold(
         Table,
@@ -613,14 +609,11 @@ scan_user(RealmUri, Username) ->
 
 %% The source store key is the 3-tuple `{Username, AMask, Authmethod}`, encoded
 %% as an order-preserving composite: the username as a type-tagged leading
-%% column (`encode_col/1`, covering binary usernames and the reserved atoms
-%% `all`/`anonymous`), a `0x00` separator, then the canonical `term_to_binary`
-%% of `{AMask, Authmethod}`. The username column is `0x00`-free, so all of a
-%% user's sources form a contiguous band (`col_bounds(Username)`) and the
-%% auth-path match is a bounded range scan rather than a full-realm filter.
-%%
-%% Exported so the legacy-backup import translator encodes keys byte-identically
-%% to the live write path; not part of the module's public surface.
+%% column (`bondy_oplog_index_key:encode_col/1`), a `0x00` separator, then the
+%% canonical `term_to_binary` of `{AMask, Authmethod}`. The username column is
+%% `0x00`-free, so a user's sources form a contiguous band and the auth-path
+%% match is a bounded range scan. Exported so the legacy-backup import
+%% translator encodes keys exactly as the live write path does.
 -doc false.
 encode_key({Username, AMask, Authmethod}) ->
     <<
@@ -632,8 +625,8 @@ encode_key({Username, AMask, Authmethod}) ->
 %% @private
 %% Inverse of `encode_key/1`: split at the single `0x00` separator (the username
 %% column is `0x00`-free), decode the username column, then plain-decode
-%% `{AMask, Authmethod}` — own-persisted bytes per the C-2 own-bytes rule
-%% (rationale: `bondy_oplog_cell_kernel:decode_value_bytes/2`). The suffix
+%% `{AMask, Authmethod}` — own-persisted bytes (rationale in
+%% `bondy_oplog_cell_kernel`). The suffix
 %% carries no atoms anyway: `AMask` is `{IntTuple, Int}` and `Authmethod` a
 %% binary; the reserved atoms ride the username column.
 decode_key(Bin) when is_binary(Bin) ->

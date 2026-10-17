@@ -3,29 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
 %% `bondy_connect_consult:encode/1` — the round trip through the real
-%% `file:consult/1`.
-%%
-%% Every case here writes the bytes to disk and reads them back with
-%% `file:consult/1`. Parsing the bytes in memory with `erl_scan` is NOT the
-%% same oracle: `file:consult/1` decodes the file as UTF-8, and the defect
-%% class this pins is precisely bytes that are not valid UTF-8.
-%%
-%% The deterministic cases are the three measured falsifiers, one per
-%% mechanism that a plausible "simplification" of the encoder would break:
-%%
-%%   - a binary of printable latin-1 bytes: `~p` string-renders it and, with
-%%     `iolist_to_binary/1`, emits bytes 160..255 raw → `invalid_unicode`
-%%     (the production crash-loop of 2026-09-02);
-%%   - an atom with a latin-1 character: `~tw` emits it verbatim and, with
-%%     `iolist_to_binary/1`, the same bytes → `invalid_unicode` (the case
-%%     the `~p` → `~tw` change did NOT close);
-%%   - an atom with a character above 255: with `iolist_to_binary/1`,
-%%     `badarg` at encode time.
-%%
-%% The property then covers the whole consultable term space.
-%% =============================================================================
+%% `file:consult/1`, which decodes the file as UTF-8; parsing in memory with
+%% `erl_scan` is NOT the same oracle. Three deterministic falsifiers, one per
+%% mechanism a plausible "simplification" of the encoder breaks: a binary of
+%% printable latin-1 bytes (`~p` + `iolist_to_binary/1` → `invalid_unicode`),
+%% an atom with a latin-1 character (`~tw` + `iolist_to_binary/1` → the same),
+%% and an atom above 255 (`badarg` at encode time). The property then covers
+%% the whole consultable term space.
 
 -module(bondy_connect_consult_test).
 

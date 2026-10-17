@@ -1,5 +1,5 @@
 %% Test-only validator that rejects every remote event. Exercises the
-%% Stage 2 verify_event/2 hook in the instance worker.
+%% `verify_event/2` validator hook.
 
 -module(bondy_oplog_test_reject_validator).
 

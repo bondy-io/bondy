@@ -16,15 +16,12 @@ None of them takes a realm argument — a listener reference is not a realm — 
 none of them is a per-realm decision: the CA trust store and a listener's
 certificate are NODE state, shared by every realm the node serves.
 
-That asymmetry is why the check is written rather than inherited. FOUND
-2026-08-31: `reload_cacerts` and `rotate_all` validated nothing at all — they
-ignored the context and ran for any caller the dealer let through. The dealer's
+That asymmetry is why the check is written rather than inherited. The dealer's
 `bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt)` is the primary gate and holds
 in an ordinary realm, but it returns `ok` unconditionally for a realm with
-security DISABLED (`bondy_rbac.erl:268-275`), and that is precisely the
-configuration in which a tenant session could have reloaded the CA store and
-swapped every listener's certificate on the node. Local authority, node-wide
-effect, across the tenant boundary.
+security DISABLED, and in that configuration a tenant session could otherwise
+reload the CA store and swap every listener's certificate on the node. Local
+authority, node-wide effect, across the tenant boundary.
 """.
 -behaviour(bondy_wamp_api).
 

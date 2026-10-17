@@ -64,10 +64,9 @@ peer_loopback_local_origin_bumps_seq_atomic() ->
     %% Simulate a peer shipping back an event we issued ourselves
     %% (Origin == self). Fresh instance: SeqRef seeded to 0. Drive the
     %% `install_remote` call directly with a synthetic event at
-    %% seq=7. Pre-PR-J2, install_event left SeqRef at 0; the next
-    %% append_fast would allocate seq=1, colliding with no event but
-    %% out of order with the peer-shipped seq=7. Post-fix, the next
-    %% local append must skip past the loopback seq.
+    %% seq=7. The install must advance SeqRef past the loopback seq, or
+    %% the next append_fast allocates seq=1, out of order with the
+    %% peer-shipped seq=7.
     Id = mk_id(),
     Origin = bondy_oplog_origin:default(),
     {ok, _} = bondy_oplog_test_projection:start_instance(Id, #{origin => Origin}),

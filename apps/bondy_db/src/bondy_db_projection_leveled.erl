@@ -313,9 +313,7 @@ put_batch(H, Entries) when is_map(H), is_list(Entries) ->
 Range read over `(Bucket, [Low, High))`. Returns up to `Limit`
 `{Key, Frame}` pairs in ascending key order. One streaming
 `book_headfold` over BOTH subkeys reconstructs every V2 frame in a
-single ledger pass — no per-result reads (see the implementation
-comment for why the old keylist-then-`book_headonly` N+1 was
-replaced).
+single ledger pass — no per-result reads.
 
 The high bound is **exclusive** (substrate contract); leveled's
 `KeyRange` end is inclusive, so the fold drops a state subkey whose
@@ -343,10 +341,9 @@ range(H, Bucket, Low, High, Opts) when
     Pid = bookie(H),
     Limit = maps:get(limit, Opts, ?DEFAULT_RANGE_LIMIT),
     %% ONE streaming head-fold over BOTH subkeys reconstructs every frame in a
-    %% single ledger pass. The value lives in the head (no journal hop), so
-    %% there is no need for the old keylist + per-key `get/3` — that was an N+1
-    %% (one keylist fold, then two `book_headonly` reads per result row), which
-    %% turned a page into hundreds of random ledger reads per shard.
+    %% single ledger pass. The value lives in the head (no journal hop). A
+    %% keylist fold followed by per-key `book_headonly` reads is an N+1 that
+    %% turns a page into hundreds of random ledger reads per shard.
     %%
     %% Each Key stores its subkeys consecutively — `?SK_STATE` ("s") then, when
     %% present, `?SK_VALUE` ("v") (omitted for `value_equals_state` cells). The
@@ -547,7 +544,7 @@ matching_buckets(Pid, Suffix) ->
 %% `<<ET, "/$idx/", IndexName>>` (shared_shards) or
 %% `<<Realm, "/", ET, "/$idx/", IndexName>>` (single_bookie). A sibling table's
 %% same-named index (`<<ET2, "/$idx/", IndexName>>`) has a different `ET`
-%% prefix and so is excluded — the entity-scoped fix. Mirrors
+%% prefix and so is excluded. Mirrors
 %% `is_primary_bucket/3`: exact-match the no-realm form, suffix-match the
 %% realm-prefixed form. Ledger-only fold over buckets (cheap).
 entity_index_buckets(Pid, ET, IndexName) ->

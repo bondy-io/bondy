@@ -342,7 +342,6 @@ probe_init(RealmUri, Subscriptions, Procedures, Parent) ->
 
     _ = [
         case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
-            {ok, _, _} -> ok;
             {ok, _} -> ok;
             Other -> error({subscription_add_failed, Other})
         end

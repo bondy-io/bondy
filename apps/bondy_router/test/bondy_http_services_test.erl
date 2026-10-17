@@ -2,10 +2,9 @@
 %% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
-%% Tests that the route sets extracted out of `bondy_http_gateway` produce
-%% exactly the paths the hardcoded `base_routes/0` and `admin_base_routes/0`
-%% produced, and that a listener declaring fewer services mounts strictly
-%% fewer paths — the property the old fixed route sets could not express.
+%% Tests that the route sets `bondy_http_services:dispatch/1` derives from a
+%% listener's services mount exactly the expected public and admin paths, and
+%% that a listener declaring fewer services mounts strictly fewer paths.
 %% =============================================================================
 -module(bondy_http_services_test).
 
@@ -32,8 +31,7 @@ paths(Listener) ->
     lists:sort([Path || {Path, _Mod, _St} <- Routes]).
 
 full_public_service_set_matches_the_old_base_routes_test() ->
-    %% These are the nine paths `bondy_http_gateway:base_routes/0` mounted
-    %% unconditionally on every public listener.
+    %% The paths a public listener with the full service set mounts.
     Expected = lists:sort([
         "/ws",
         "/wamp/sse/open",
@@ -164,7 +162,7 @@ api_gateway_and_admin_api_do_not_share_a_carrier_test() ->
     ?assertNotEqual(Gateway, Admin).
 
 a_listener_naming_no_rest_service_has_no_rest_carrier_test() ->
-    %% The falsification of "no service, no route", now expressed one level up:
+    %% The falsification of "no service, no route", expressed one level up:
     %% the carrier is simply absent, so `dispatch/1` never calls the clause that
     %% would reach into stored-specification loading. That call needs a booted
     %% node, so a regression to an unconditional gateway lookup fails this case
@@ -176,10 +174,9 @@ a_listener_naming_no_rest_service_has_no_rest_carrier_test() ->
     ?assertEqual(["/ws"], paths(L)).
 
 service_spec_no_longer_carries_a_module_test() ->
-    %% The normalisation itself. While `module` rode on the service there was a
-    %% place to write a per-service value for a fact that depends on the carrier,
-    %% and two services naming one carrier could disagree. This asserts the field
-    %% is gone, so that state cannot be expressed at all.
+    %% A per-service `module` would let two services naming one carrier
+    %% disagree about a fact that depends on the carrier. The field is absent,
+    %% so that state cannot be expressed at all.
     ?assertEqual(
         [carrier, protocol],
         lists:sort(maps:keys(bondy_listener_config:service_spec(wamp_ws)))
@@ -192,9 +189,7 @@ host_qualified_collision_policy_test() ->
     %% Specifications arrive by anti-entropy after boot, so raising over one
     %% would abort this node's dispatch rebuild on account of a document another
     %% node accepted. That applies to a specification colliding with a STATIC
-    %% path just as much as with another specification: the `andalso` this
-    %% replaced tolerated only the second case, so a stored specification
-    %% declaring `/ws` or `/ping` took the rebuild down.
+    %% path just as much as with another specification.
     Static = [{'_', [{"/ws", ws_handler, #{}}]}],
     Claims = bondy_http_services:merge_routes(Static, websocket, []),
 
@@ -219,7 +214,7 @@ host_qualified_collision_policy_test() ->
 one_path_on_two_hosts_is_not_a_collision_test() ->
     %% The reason the key is {Host, Path} and not Path. Two specifications for
     %% different virtual hosts declaring the same path are not in conflict, and
-    %% under a Path-only key the second was reported as colliding with the first.
+    %% a Path-only key would report the second as colliding with the first.
     A = [{<<"a.example.com">>, [{"/orders", h, #{}}]}],
     B = [{<<"b.example.com">>, [{"/orders", h, #{}}]}],
     Claims = bondy_http_services:merge_routes(A, api_gateway, []),

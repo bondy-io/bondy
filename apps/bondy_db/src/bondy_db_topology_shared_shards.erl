@@ -28,7 +28,7 @@ Each table calls `open_table/4` with the same `ShardCount`. The
 topology starts N Bookies once (lazily, on first `open_table`) and
 reuses them for every subsequent table. The bucket distinguishes
 entity types within a Bookie; the facade folds the realm into the
-storage key with a NUL separator (`<<Realm, 0, Key>>` — G-1), so each
+storage key with a NUL separator (`<<Realm, 0, Key>>`), so each
 realm's cells form a contiguous, scannable band within the bucket.
 
 ## Why this topology

@@ -7,11 +7,11 @@
 
 -moduledoc """
 Integration tests for the raw-socket TCP transport against a live Bondy router
-(the `wamp_tcp` listener). Exercises the full PR-1 + PR-2 stack end-to-end:
-`bondy_connect_protocol` builds the HELLO record, `bondy_connect_transport_tcp`
-encodes/frames/sends it and reads/deframes/decodes the reply, and the protocol
-layer turns the WELCOME record into an established session — no gen_statem yet
-(that is Phase 3).
+(the `wamp_tcp` listener). Exercises the transport and protocol stack
+end-to-end: `bondy_connect_protocol` builds the HELLO record,
+`bondy_connect_transport_tcp` encodes/frames/sends it and
+reads/deframes/decodes the reply, and the protocol layer turns the WELCOME
+record into an established session — no gen_statem.
 """.
 
 -include_lib("common_test/include/ct.hrl").

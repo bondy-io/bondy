@@ -168,8 +168,7 @@ free(#?MODULE{pages = Pages0} = T, Hash, _Page) ->
 gc(#?MODULE{pages = Pages0} = T, KeepRoots) when is_list(KeepRoots) ->
     Fun = fun(X, Acc) -> gc_aux(Acc, Pages0, X) end,
     Pages = lists:foldl(Fun, #{}, KeepRoots),
-    %% `erts_debug:flat_size/1` reports words; convert to bytes (was
-    %% `memory:words/1`, no longer exported by the dep).
+    %% `erts_debug:flat_size/1` reports words; convert to bytes.
     Bytes =
         (erts_debug:flat_size(Pages0) - erts_debug:flat_size(Pages)) *
             erlang:system_info(wordsize),

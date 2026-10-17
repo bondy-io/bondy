@@ -292,14 +292,9 @@
         {platform_etc_dir, "./etc"},
         {platform_tmp_dir, "./tmp/" ++ os:getpid()},
         %% Per-OS-pid: `admin_local` puts its socket here, and two concurrent CT
-        %% runs sharing one path would collide —
-        %% `bondy_listener_ranch:maybe_unlink_socket/1` deletes the node before
-        %% binding, so the second run would silently take the first run's socket
-        %% away. `bondy_listener_SUITE:init_per_suite/1` does the same for the
-        %% same reason. The directory is the only thing that separates them: the
-        %% socket filename is a constant, and cannot carry the node — see the
-        %% comment on the path in
-        %% `bondy_listener_manager:admin_local_spec/0`.
+        %% runs sharing one path would collide, because the listener driver
+        %% unlinks a stale socket file before binding. The socket filename is a
+        %% constant, so the directory is the only thing separating runs.
         {platform_runtime_dir, "./run/" ++ os:getpid()},
         {platform_data_dir, "./data"},
         {platform_lib_dir, "./lib"},
@@ -386,12 +381,11 @@
                 {enabled, true}
             ]},
             %% Nested under `transport_opts` like every other listener's,
-            %% because ranch options now come from
-            %% `bondy_config:listener_transport_opts/2` for every listener
-            %% rather than from a per-transport module. `socket_opts` needs no
-            %% address: `bondy_listener_ranch:with_bind/2` sets `{local, Path}`
-            %% from the inventory's bind target and drops the address family,
-            %% which a Unix domain socket has none of.
+            %% because `bondy_config:listener_transport_opts/2` reads ranch
+            %% options for every listener. `socket_opts` needs no address: the
+            %% listener driver sets `{local, Path}` from the inventory's bind
+            %% target and drops the address family, which a Unix domain socket
+            %% has none of.
             {transport_opts, [
                 {num_acceptors, 10},
                 {max_connections, 100000},
@@ -773,14 +767,10 @@ start_bondy() ->
 
             %% Every key `?ENV` declares must have been applied. Checked as a
             %% SUBSET, not by comparing lengths: `bondy_config:set/2` reaches
-            %% `application:set_env/3` (`app_config:do_set/3`), so a test that
-            %% configures a listener adds a top-level `bondy_router` key and an
-            %% equal-length check then fails on a legitimate addition. It did:
-            %% `bondy_admin_listener_SUITE` run after `bondy_listener_SUITE` in
-            %% one `rebar3 ct` invocation exited `configuration_error` here,
-            %% while each suite passed alone. The subset check catches what this
-            %% guard is for — `?ENV` not reaching the application — and names
-            %% the keys instead of reporting a bare atom.
+            %% `application:set_env/3`, so a suite that configures a listener
+            %% adds a top-level `bondy_router` key and an equal-length check
+            %% fails on a legitimate addition. The subset check names the
+            %% missing keys instead of reporting a bare atom.
             {bondy_router, BondyEnv} = lists:keyfind(bondy_router, 1, ?ENV),
             Applied = application:get_all_env(bondy_router),
             Missing = [
@@ -1244,20 +1234,13 @@ stall_main_open(Gate) ->
     end).
 
 %% @private
-%% Peer nodes are otherwise SILENT. Two reasons compound:
-%%
-%%   - `peer_boot/1' runs under `erpc', which gives the calling process the
-%%     CONTROLLER's group leader, and OTP's `default' handler carries a
-%%     `logger_filters:remote_gl/2' STOP filter — so every event logged while
-%%     the node boots (including the supervisor and crash reports that explain
-%%     a failed boot) is dropped on the floor;
-%%   - the peer's kernel is already running when `peer_boot/1' sets the kernel
-%%     env, so `?KERNEL_ENV''s handler config never takes effect there either.
-%%
-%% Attach a per-node file handler with `filter_default => log' and NO filters,
-%% so the node's own boot story lands next to its data directory
-%% (`<priv_dir>/<node>/node.log') and survives the run. Best-effort: a peer we
-%% cannot give a log file to should still boot.
+%% Peer nodes are otherwise SILENT: `peer_boot/1' runs under `erpc', which
+%% gives the caller the CONTROLLER's group leader, and OTP's `default' handler
+%% carries a `logger_filters:remote_gl/2' STOP filter, so every event logged
+%% during boot is dropped; and the peer's kernel is already running when
+%% `peer_boot/1' sets the kernel env, so `?KERNEL_ENV''s handler never applies.
+%% A per-node file handler with no filters lands the boot story at
+%% `<priv_dir>/<node>/node.log'. Best-effort: a peer without a log file boots.
 install_peer_log_handler(Env) ->
     case key_value:get([bondy_router, platform_data_dir], Env, undefined) of
         undefined ->
@@ -1365,15 +1348,11 @@ start_disterl([Nodename | Rest]) ->
 
 %% Common Test sets the current working directory to the per-run `ct_run.*'
 %% log dir, but relative certificate/config paths (e.g.
-%% "./etc/ssl/server/keycert.pem") assume a release's cwd. Reproduce that
-%% layout by symlinking `./etc' to the repository's `etc' directory so those
-%% relative paths resolve. Idempotent and best-effort: a no-op when `./etc'
-%% already exists or the repo root / its `etc' dir cannot be located.
-%%
-%% Exported (not just called from `start_bondy/0' and `start_cluster/3') so a
-%% suite that never boots Bondy through this module — one driving
-%% `bondy_listener_manager' directly against real sockets — can still resolve
-%% the same relative certificate paths.
+%% "./etc/ssl/server/keycert.pem") assume a release's cwd. Symlinking `./etc'
+%% to the repository's `etc' directory makes those paths resolve. Idempotent
+%% and best-effort: a no-op when `./etc' already exists or the repo root cannot
+%% be located. Exported so a suite driving `bondy_listener_manager' directly
+%% can resolve the same relative certificate paths.
 ensure_etc() ->
     case filelib:is_dir("etc") of
         true ->
@@ -1498,29 +1477,14 @@ node_env(DataDir, PeerPort) ->
         [eleveldb, data_root], filename:join(DataDir, "leveldb"), ?ENV
     ),
     E1 = key_value:set([bondy_router, platform_data_dir], DataDir, E0),
-    %% `platform_runtime_dir` per peer, not just `platform_data_dir`: it is where
-    %% `bondy_listener_manager:admin_local_spec/0` puts the internal control
-    %% socket, and that listener is injected UNCONDITIONALLY on every node. `?ENV`
-    %% derives the directory from `os:getpid()`, which is evaluated in THIS VM, so
-    %% every peer would otherwise bind `bondy_admin.sock` at the same path as the
-    %% runner and as each other — the filename is a constant and cannot carry the
-    %% node (see the comment on the path in
-    %% `bondy_listener_manager:admin_local_spec/0`), so the directory is the only
-    %% thing separating them — and the driver unlinks a stale socket file before
-    %% binding, so the last node to boot silently takes the path away from the
-    %% others. Verified directly: without this line
-    %% `bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves` fails
-    %% with `econnrefused` in a full `rebar3 ct` run, when a cluster suite has
-    %% booted peers before it, while passing in isolation.
-    %%
-    %% SHORT and absolute, keyed on `PeerPort` (unique per peer) rather than
-    %% nested under `DataDir`: a Unix domain socket path has a hard length limit
-    %% of about 104 bytes on this platform, and a peer's `DataDir` sits deep
-    %% inside the Common Test log tree, so `<DataDir>/tmp/bondy_admin.sock`
-    %% overflows it and the bind fails with `{listen_error, admin_local, einval}`
-    %% — verified directly, that is what this line looked like before it was
-    %% shortened. `/tmp` with an `os:getpid()` namespace is the same shape
-    %% `bondy_listener_SUITE`'s `init_per_suite/1` already uses.
+    %% `platform_runtime_dir` per peer, not just `platform_data_dir`: the
+    %% internal control socket lives there, and that listener is injected
+    %% UNCONDITIONALLY on every node. `?ENV` derives the directory from
+    %% `os:getpid()` of THIS VM, so every peer would otherwise bind
+    %% `bondy_admin.sock` at the runner's path; the driver unlinks a stale
+    %% socket before binding, so the last node to boot takes the path away.
+    %% SHORT and absolute, keyed on `PeerPort`: a Unix domain socket path is
+    %% limited to about 104 bytes, and `DataDir` sits deep in the CT log tree.
     RuntimeDir = filename:join(
         "/tmp",
         "bondy_ct_" ++ os:getpid() ++ "_" ++ integer_to_list(PeerPort)
@@ -1530,29 +1494,14 @@ node_env(DataDir, PeerPort) ->
         [bondy_router, platform_runtime_dir], RuntimeDir, E1
     ),
     E2 = key_value:set([partisan, peer_port], PeerPort, E1b),
-    %% No CLIENT listeners on a peer node: they are irrelevant to AAE and
-    %% would clash on every port with the primary node's, which share this
-    %% host. Setting the inventory to a non-empty list is what puts a peer on
-    %% the CONFIGURED path rather than the legacy one, and on that path
-    %% `bondy_listener_manager' always adds the reserved `admin' listener —
-    %% every peer gets one whether this list mentions it or not. `admin' is
-    %% declared explicitly here, at `port => 0', for exactly that reason:
-    %% left out, the manager's own default binds it at the fixed port 18081,
-    %% and every peer on this host then races for that one port. Verified
-    %% directly — `bondy_aae_cluster_SUITE' aborts `init_per_suite' with
-    %% `eaddrinuse' without this entry, on the second peer to reach it.
-    %%
+    %% No CLIENT listeners on a peer node: they would clash on every port with
+    %% the primary node's on this host. A non-empty inventory puts a peer on
+    %% the CONFIGURED path, where `bondy_listener_manager' always adds the
+    %% reserved `admin' listener; declaring `admin' at `port => 0' stops the
+    %% manager's default from binding the fixed port 18081 on every peer.
     %% `ordering_probe_tls' exercises the ordering `bondy_config:init/1'
-    %% depends on between `splat_listener_blocks/0' and
-    %% `bondy_listener_manager:init/0': its certificate lives nested inside this
-    %% inventory entry, so it reaches both
-    %% `bondy_listener_config:assert_tls_keys/3' and
-    %% `bondy_config:listener_transport_opts/2' — what ranch actually uses to
-    %% bind — only after the splat has copied it out. Reordering those two calls
-    %% makes every peer boot abort with `{missing, [tls, certfile]}'. Both
-    %% listeners bind `port => 0`, so peers sharing this host never collide on
-    %% either, and the certificate files are the ones every other TLS listener in
-    %% this module's `?ENV' already reads.
+    %% depends on: its nested certificate reaches ranch only after the listener
+    %% splat has copied it out. Both listeners bind `port => 0`.
     E3 = key_value:set(
         [bondy_router, listeners],
         [

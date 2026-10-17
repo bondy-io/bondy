@@ -277,15 +277,11 @@ gauge_value(Name, Labels) ->
     end.
 
 egress_metrics_via_telemetry(_) ->
-    %% Egress is the LAST hop before the wire — the subscriber's own connection
-    %% process. It was the only unmeasured segment of the delivery path, and
-    %% Fly runs S28-S30 are why it is measured: the delivery tail appeared in
-    %% none of the router stages and relay ingress showed no backlog.
-    %%
-    %% This drives the REAL path (emitter -> telemetry -> sink -> scrape) on a
-    %% booted node. The eunit sink tests call handle_net_event/4 directly, so
-    %% they would stay green if the event were missing from setup/0's
-    %% attach_many list; only this test would catch that.
+    %% Egress is the last hop before the wire: the subscriber's own connection
+    %% process. This case drives the real path (emitter -> telemetry -> sink
+    %% -> scrape) on a booted node. The eunit sink tests call
+    %% handle_net_event/4 directly, so they stay green when the event is
+    %% missing from setup/0's attach_many list; only this case catches that.
     ok = bondy_telemetry:wamp_egress(websocket, 250, 4),
 
     [#{type := histogram, value := #{count := SCount}} | _] =

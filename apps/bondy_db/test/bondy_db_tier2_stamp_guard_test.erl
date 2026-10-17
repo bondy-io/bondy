@@ -131,8 +131,8 @@ open_db(Name) ->
     }),
     {Db, Origin}.
 
-%% Memory now buckets a cell by entity type (`bucket_for/3`) and folds the realm
-%% into the cell key (G-1), shard 0 (shard_count 1). Reach the shard's projection
+%% Memory buckets a cell by entity type (`bucket_for/3`) and folds the realm
+%% into the cell key, shard 0 (shard_count 1). Reach the shard's projection
 %% adapter via the registry and delete the single cell at its real
 %% `(EntityType bucket, <<Realm,0,Key>>)` address, simulating an in-process
 %% durable-state loss.

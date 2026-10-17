@@ -172,16 +172,13 @@ event_family(_) ->
 -spec async_handle_event(event(), term()) ->
     ok | {ok, {function(), partition_key()}}.
 
-%% Alarm transitions, emitted by `bondy_alarm_handler`. Demand-gated: an
-%% alarm is rare, but the gate is what lets the topics exist at all without
-%% adding an unconditional publish to a path that runs while the node is
-%% already in trouble.
-%%
-%% Master realm only (D4). A `class = realm` alarm carries its `realm_uri` as
-%% a LABEL naming the affected tenant; whether it should additionally publish
-%% into that tenant's own realm is open (D8), and is a disclosure decision
-%% rather than an omission — the `details` map is operator-oriented and is
-%% exactly where an internal error string would leak.
+%% Alarm transitions, emitted by `bondy_alarm_handler`. Demand-gated so that
+%% the topics exist without adding an unconditional publish to a path that
+%% runs while the node is already in trouble. Master realm only: a
+%% `class = realm` alarm carries its `realm_uri` as a LABEL naming the
+%% affected tenant and is not published into that tenant's realm, because
+%% the operator-oriented `details` map is where an internal error string
+%% would leak.
 async_handle_event({[bondy, alarm, Action], Alarm}, Ref) when
     Action == raised; Action == updated; Action == cleared
 ->

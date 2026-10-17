@@ -9,7 +9,7 @@
 %% the node stage of RPC selection would happily keep choosing a corpse — the
 %% CALL then times out instead of failing over to a live sibling.
 %%
-%% The fix filters at selection time, and the property that makes it safe is
+%% The policy filters at selection time, and the property that makes it safe is
 %% that it is a PREFERENCE, not an exclusion: it may only replace a candidate
 %% that cannot answer with one that might. It must never empty the candidate
 %% set, because that would convert a routable call into `no_such_procedure`.

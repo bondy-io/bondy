@@ -118,6 +118,10 @@ frame boundary.
 
 -export([recover/3]).
 
+-ifdef(TEST).
+-export([seek_byte_offset/2]).
+-endif.
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -1250,7 +1254,7 @@ align_to_frame_boundary(Dir, Seg, Target, HeadInfo, Ctx) ->
 seek_byte_offset(Entries, Target) ->
     lists:foldl(
         fun
-            ({_H, Off}, Best) when Off =< Target, Off > Best -> Off;
+            ({_First, _Last, Off}, Best) when Off =< Target, Off > Best -> Off;
             (_, Best) -> Best
         end,
         ?SEG_HEADER_BYTES,

@@ -21,7 +21,7 @@
 %% hand-called `bondy_oplog:sync/3'.
 
 -define(NODE_NAMES, [bondy1, bondy2, bondy3]).
-%% A per-realm durable main table (band = realm URI, exercises G-1 realm
+%% A per-realm durable main table (band = realm URI, exercises realm
 %% folding) and a global-band durable main table (band = <<>>).
 -define(USERS_TABLE, security_users).
 -define(BRIDGE_TABLE, bondy_bridge_relay).
@@ -176,9 +176,9 @@ realm_merge_event_fires_on_remote_write(Config) ->
     ok = wait_for_merge_event(N2, Uri, 15000),
     ok.
 
-%% A grant table (`security_user_grants') now carries `publish => true', so a
+%% A grant table (`security_user_grants') carries `publish => true', so a
 %% peer's grant write must deliver a merge event on node 2 — the path
-%% `bondy_aae_reactor' consumes to drive the §9.5 realm-wide RBAC-context
+%% `bondy_aae_reactor' consumes to drive the realm-wide RBAC-context
 %% invalidation. Like security_users it is realm-banded, so the folded cell key
 %% is `<<Realm, 0, EncGrantKey>>'; we match the delivered event on the grant key.
 grant_merge_event_fires_on_remote_write(Config) ->
@@ -200,7 +200,7 @@ grant_merge_event_fires_on_remote_write(Config) ->
 %% AAE — the lost update a whole-record `user.groups` lww would suffer (one
 %% node's `[g_a]` clobbering the other's `[g_b]`) is structurally impossible,
 %% because each `(user, group)` fact is its own cell. The remote merge also
-%% delivers the merge event that drives the §9.5 `react_member` RBAC-context
+%% delivers the merge event that drives the `react_member` RBAC-context
 %% invalidation.
 concurrent_membership_adds_both_survive(Config) ->
     [N1, N2, N3] = nodes_of(Config),
@@ -361,9 +361,8 @@ rib_write_mode_cluster(Config) ->
         ok = wait_rib_sub_node(W2, Uri, TopicA, W1),
         ok = wait_rib_sub_node(W2, Uri, TopicB, W1),
 
-        %% Write mode: entries live in the owner's local ETS only — there is no
-        %% full-entry bondy_db table left to hold anything anywhere, so the
-        %% property is now structurally true rather than empirically observed.
+        %% Write mode: entries live in the owner's local ETS only; no
+        %% full-entry bondy_db table exists to hold them.
 
         ?assertMatch(
             #result{args = [<<"pong">>]},
@@ -454,7 +453,7 @@ meta_event_demand_visible_cross_node(Config) ->
     ok = wait_has_matches(N2, Uri, Meta, false),
     ok.
 
-%% react_user fires cross-node on a real user DELETE (STORAGE_ARCHITECTURE §9.5):
+%% react_user fires cross-node on a real user DELETE:
 %% a user removed on node 1 must drive node 2's merge reactor to close that user's
 %% local sessions (`bondy.user.deleted`). The delete arrives as bondy_db's
 %% short-form `clear` op, so this guards the reactor against the wire op-shape the
@@ -503,7 +502,7 @@ remote_realm_delete_purges_peer_registry(Config) ->
     _ = erpc:call(N2, erlang, exit, [Owner, kill]),
     ok.
 
-%% The revocation zookie across nodes (STORAGE_ARCHITECTURE §9.2/§9.3): a JWT
+%% The revocation zookie across nodes: a JWT
 %% minted on node 1 authenticates on node 2 once the realm/user converge AND the
 %% AE fence is fresh; after a credential change on node 1 bumps the user cell's
 %% token_version and that bump converges, node 2 REJECTS the now-stale token.
@@ -552,7 +551,7 @@ token_version_rejected_cross_node(Config) ->
 
     ok = wait_token_version(N2, Uri, User, TV1),
 
-    %% Node 2 now REJECTS the old JWT: its embedded tv (TV0) no longer matches
+    %% Node 2 REJECTS the old JWT: its embedded tv (TV0) differs from
     %% the user's current token_version (TV1) — the Zanzibar new-enemy guard.
     ?assertEqual(
         {error, oauth2_invalid_grant},
@@ -634,23 +633,13 @@ concurrent_token_issues_cross_node_both_survive(Config) ->
     ),
     ok.
 
-%% Stale-peer rejoin on the DURABLE path.
-%%
-%% A peer that is down is still a member, so the survivor's compaction keeps
-%% everything the peer has not confirmed. What this case checks is that
-%% rejoining is lossless in BOTH directions:
-%%
-%%   - the survivor's writes made while the peer was down reach it;
-%%   - the returning node's OWN writes, made while isolated, live only in its
-%%     own MST and must flow back to the survivor.
-%%
-%% The second half is the one that would fail silently: a rejoin that only
-%% pulled would look perfectly healthy on the returning node while its unique
-%% rows had vanished from the cluster.
-%%
-%% The node restarts onto ITS OWN DATA DIRECTORY (`bondy_ct:restart_node/3`
-%% keys the dir on the node name), so this is a rejoin and not a fresh-peer
-%% bootstrap wearing the same name.
+%% Stale-peer rejoin on the DURABLE path. A down peer is still a member, so
+%% the survivor's compaction keeps everything the peer has not confirmed.
+%% Rejoin must be lossless in BOTH directions: the survivor's writes reach
+%% the peer, and the peer's OWN isolated writes flow back. A pull-only rejoin
+%% fails the second half silently. The node restarts onto ITS OWN data
+%% directory (`bondy_ct:restart_node/4` keys the dir on the node name), so
+%% this is a rejoin, not a fresh-peer bootstrap wearing the same name.
 stale_peer_rejoin_durable_converges(Config) ->
     Names = [
         {bondy_r1, [{[partisan, peer_port], 18194}]},
@@ -724,22 +713,14 @@ stale_peer_rejoin_durable_converges(Config) ->
         end
     end.
 
-%% V1 of _plans/2026-08-28-safe-decode-atom-interning-review.md — MEASURED
-%% 2026-08-28. A peer cell whose VALUE carries an atom absent from the
-%% reader's atom table syncs CLEANLY: the sync protocol ships events as
-%% Erlang TERMS (`bondy_oplog_event` op is `term()`, pages ride
-%% `partisan_gen_server:call`), so Partisan's plain message decode interns
-%% the atom on the reader BEFORE any bondy_oplog code runs. The CRDT
-%% decode seats sit downstream of that interning and never see wire
-%% bytes — their input is local projection frames (the restart case
-%% below pins that half).
-%%
-%% The probe atom is minted at runtime ON the writer only
-%% (`list_to_atom/1` over a string), so no module literal pool — including
-%% this pushed suite module's — can have interned it on the reader; the
-%% controller ships only the string, and Bondy replication is
-%% Partisan-only (`connect_disterl => false`), so the only route to the
-%% reader's atom table is the AAE sync itself.
+%% A peer cell whose VALUE carries an atom absent from the reader's atom
+%% table syncs CLEANLY: the sync protocol ships events as Erlang TERMS
+%% (`bondy_oplog_event:op()` is `term()`), so Partisan's message decode
+%% interns the atom on the reader BEFORE any bondy_oplog code runs. The probe
+%% atom is minted at runtime ON the writer only (`list_to_atom/1`), so no
+%% module literal pool can have interned it on the reader; replication is
+%% Partisan-only (`connect_disterl => false`), so the AAE sync is the only
+%% route to the reader's atom table.
 runtime_atom_value_sync_measured(Config) ->
     [N1, N2, _N3] = nodes_of(Config),
     ProbeStr =
@@ -807,7 +788,7 @@ runtime_atom_value_sync_measured(Config) ->
             [ControlOutcome, ProbeRead, AtomOnReader, length(Logs), Logs]
         ),
 
-        %% The measured behaviour, pinned: the probe cell converged and is
+        %% The pinned contract: the probe cell converged and is
         %% readable on the reader, the transport interned the peer's
         %% runtime atom, and no cell was skipped by the applier (the
         %% cell_apply catch never fired — its log says "skipped").
@@ -826,18 +807,14 @@ runtime_atom_value_sync_measured(Config) ->
         ok = erpc:call(N2, ?MODULE, do_detach_error_relay, [])
     end.
 
-%% V1b — the persisted half of the V1 measurement, on a dedicated 2-node
-%% cluster. After the probe cell (runtime atom in its value) converges to
-%% the reader and the reader COMPACTS — removing the probe EVENT from the
-%% durable log, so boot replay cannot re-intern its atom — the reader
-%% restarts on its own data directory with a fresh atom table. The only
-%% remaining copy of the value is the projection frame; the pinned
-%% contract is that its plain own-bytes decode
-%% (`bondy_oplog_cell_kernel:decode_value_bytes/2`) returns the value and
-%% re-interns the atom. The restarted reader deliberately does NOT rejoin
-%% — a live sync round would re-ship the event as a term and the
-%% transport would re-intern the atom, masking what the frame decode does
-%% on its own.
+%% The persisted half of the runtime-atom case, on a dedicated 2-node
+%% cluster. After the probe cell converges and the reader COMPACTS (so boot
+%% replay cannot re-intern its atom), the reader restarts on its own data
+%% directory with a fresh atom table. The projection frame is the only copy
+%% left; its plain own-bytes decode
+%% (`bondy_oplog_cell_kernel:decode_value_bytes/2`) must return the value and
+%% re-intern the atom. The restarted reader does NOT rejoin: a live sync
+%% round would re-intern the atom and mask the decode.
 runtime_atom_cell_read_after_restart_measured(Config) ->
     Names = [
         {bondy_v1, [{[partisan, peer_port], 18197}]},
@@ -858,7 +835,7 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
             do_apply_runtime_atom_value,
             [?USERS_TABLE, ?REALM, Key, ProbeStr]
         ),
-        %% Live sync interns + applies on the reader (the V1 measurement).
+        %% Live sync interns + applies on the reader.
         ok = wait_until(
             fun() ->
                 _ =
@@ -877,11 +854,9 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
 
         %% Compact the reader so the probe event leaves the durable log.
         %% Compaction needs the writer to have confirmed the reader's
-        %% root, which a fixed sleep does not guarantee — and an event still
-        %% in the live tree is decoded by the boot itself (measured: the
-        %% failing runs were exactly those whose main-DB instances held live
-        %% events after boot). So the PREMISE is waited for: the reader's
-        %% main-DB instances hold no live event.
+        %% root, which a fixed sleep does not guarantee, and the boot itself
+        %% decodes an event still in the live tree. So the PREMISE is waited
+        %% for: the reader's main-DB instances hold no live event.
         ok = wait_until(
             fun() ->
                 _ =
@@ -898,18 +873,9 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
 
         %% The writer never compacted, so its live tree still holds the
         %% probe event, and the restarted reader keeps its persisted
-        %% membership: a sync round right after its boot ships the event
-        %% back as a term (measured: the reader's tree held it again, size 1,
-        %% before the probe ran) and the transport interns the atom. The
-        %% writer goes down first, so there is no round to race.
-        %%
-        %% Each mechanism alone failed this case ~1 run in 3 (2026-09-04);
-        %% with both closed, 8/8 THAT DAY. It has since regressed and this
-        %% case is FLAKY: measured 2026-09-09, 2 failures in 3 runs on an
-        %% unmodified tree, always `AtomAfterBoot = true` — the boot did
-        %% intern the probe atom, so a premise above is no longer holding.
-        %% Measure the baseline before attributing a failure here to a
-        %% change under test.
+        %% membership: a sync round right after its boot would ship the
+        %% event back as a term and intern the atom. The writer goes down
+        %% first, so there is no round to race.
         ok = bondy_ct:stop_node(S1, halt),
         ok = bondy_ct:stop_node(S2, halt),
         S2b = bondy_ct:restart_node(
@@ -933,14 +899,10 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
                 "  atom interned after read: ~p",
                 [AtomAfterBoot, ColdRead, AtomAfterRead]
             ),
-            %% The F-4 contract, pinned: boot replay did not re-intern
-            %% (the event was compacted away), yet the cold read of the
-            %% node's own projection frame DECODES — plainly, per the C-2
-            %% own-bytes rule — returning the value and re-interning its
-            %% atom. Before F-4 this read raised `badarg` out of
-            %% `binary_to_term(_, [safe])` at
-            %% `bondy_oplog_cell_kernel:decode_value_bytes/2` (measured
-            %% 2026-08-28; this case is the fix's falsifier).
+            %% Boot replay does not re-intern (the event was compacted
+            %% away), yet the cold read of the node's own projection frame
+            %% DECODES plainly, per the own-bytes rule, returning the value
+            %% and re-interning its atom.
             ?assertEqual(false, AtomAfterBoot),
             ?assertMatch({ok, {#{marker := M}, _}} when is_atom(M), ColdRead),
             ?assertEqual(true, AtomAfterRead),
@@ -1098,7 +1060,7 @@ wait_user_exists(Node, Uri, User) ->
 
 %% @private
 %% Polls `Node` until its merge reactor has called `close_sessions` for the user
-%% (i.e. a peer's user delete drove the §9.5 reaction here), forcing a sync tick
+%% (a peer's user delete drove the reaction here), forcing a sync tick
 %% each round.
 wait_close_recorded(Node, Uri, User) ->
     Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
@@ -1279,7 +1241,7 @@ wait_converge_loop(Node, Table, Band, Key, Expected, Deadline) ->
 
 %% @private
 %% Polls `Node`'s collector until it has recorded a merge event whose key
-%% carries `Username` (the cell key is the G-1 realm-folded `<<Realm,0,User>>`,
+%% carries `Username` (the cell key is the realm-folded `<<Realm,0,User>>`,
 %% so we match on substring rather than equality).
 wait_for_merge_event(Node, Username, Timeout) ->
     Deadline = erlang:monotonic_time(millisecond) + Timeout,
@@ -1516,7 +1478,6 @@ probe_init(RealmUri, Subscriptions, Parent) ->
     Ref = bondy_ref:new(internal, self(), bondy_session:id(Session)),
     _ = [
         case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
-            {ok, _, _} -> ok;
             {ok, _} -> ok;
             Other -> error({subscription_add_failed, Other})
         end
@@ -1561,7 +1522,6 @@ do_add_registration(Uri, Proc) ->
     Ref = bondy_ref:new(internal, {bondy_wamp_api, resolve}),
     Opts = #{match => <<"exact">>, invoke => <<"single">>},
     case bondy_registry:add(registration, Uri, Proc, Opts, Ref) of
-        {ok, _, _} -> ok;
         {ok, _} -> ok;
         Other -> error({registration_add_failed, Other})
     end.
@@ -1621,7 +1581,6 @@ do_add_meta_subscription(Uri, Topic) ->
     Keeper = spawn(?MODULE, keeper_loop, []),
     Ref = bondy_ref:new(internal, Keeper, bondy_session_id:new()),
     case bondy_registry:add(subscription, Uri, Topic, #{}, Ref) of
-        {ok, _, _} -> ok;
         {ok, _} -> ok;
         Other -> error({subscription_add_failed, Other})
     end.
@@ -1936,8 +1895,6 @@ log(LogEvent, #{config := #{to := To, budget := Counter}}) ->
     ok.
 
 %% @private
-%% Runs a compaction cycle on every oplog instance of this node, so durable
-%% truncation actually happens instead of waiting on the scheduler's cadence.
 %% Live (uncompacted) events across the node's main-DB instances.
 do_main_live_events() ->
     Main = bondy_namespace_catalog:main_db_name(),
@@ -1946,6 +1903,9 @@ do_main_live_events() ->
      || I <- bondy_oplog:list_instances(), bondy_oplog:db_of(I) =:= Main
     ]).
 
+%% @private
+%% Runs a compaction cycle on every oplog instance of this node, so durable
+%% truncation happens instead of waiting on the scheduler's cadence.
 do_compact_all() ->
     _ = [
         try

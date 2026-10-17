@@ -5,13 +5,13 @@
 %%
 %% The token store under concurrent writers for ONE user.
 %%
-%% Written first as the falsification probe for the one-set-per-user layout,
-%% where every write was a read-modify-write of the user's whole set: two
-%% writers issuing DIFFERENT scopes could both read the same set and the
-%% later-applied write dropped the earlier token (20 concurrent issues left 1
-%% token), and a `revoke_all/2` interleaved with an issue was overwritten by
-%% the issue's stale set, revoked tokens included. The store is now one cell
-%% per token; these cases are the gate that keeps it so.
+%% The store holds one cell per token. A one-set-per-user layout, where every
+%% write is a read-modify-write of the user's whole set, loses tokens: two
+%% writers issuing DIFFERENT scopes can both read the same set and the
+%% later-applied write drops the earlier token, and a `revoke_all/2`
+%% interleaved with an issue is overwritten by the issue's stale set, revoked
+%% tokens included. These cases are the gate that keeps the store
+%% cell-per-token.
 %%
 %% `two_scopes_sequential` is the control. `two_scopes_concurrent` forces two
 %% issuers' writes into flight together (both rendezvous at their store write).

@@ -91,21 +91,12 @@ under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
     | noop
     | {error, cas_exhausted}.
 
-%% Adaptive child-container shapes. Path copying allocates a
-%% fresh node on every mutation, so "adaptive sizing" collapses to:
-%% pick the smallest container type that fits the current child count.
-%%
-%%   n_small — up to ?N_SMALL_CAPACITY (16) children, stored as an
-%%             integer-keyed map. BEAM's FlatMap representation keeps
-%%             keys sorted internally at small sizes; `maps:get/2` is an
-%%             O(log n) binary search; `maps:size/1` is O(1); and
-%%             `maps:iterator(M, ordered)` produces a key-sorted
-%%             iterator — crucial for the fold-in-byte-order path.
-%%   n256    — full 256-slot tuple, direct byte-indexed access.
-%%
-%% A future optimization (PART's n48) inserts a 256-byte index table +
-%% 48-slot child array between these two to save memory on medium-wide
-%% nodes. Skipped here for simplicity.
+%% Adaptive child-container shapes. Path copying allocates a fresh node on
+%% every mutation, so adaptive sizing means: pick the smallest container
+%% that fits the child count. `n_small` holds up to ?N_SMALL_CAPACITY (48)
+%% children as an integer-keyed map, whose `maps:iterator(M, ordered)`
+%% yields keys in byte order for the fold path; `n256` is a full 256-slot
+%% tuple with direct byte-indexed access.
 -type child_ptr() :: {node, node_id()}.
 -type children() ::
     {n_small, #{byte() => child_ptr()}}

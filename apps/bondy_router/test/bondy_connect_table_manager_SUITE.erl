@@ -123,8 +123,7 @@ get_or_create_named_is_idempotent(_Config) ->
 
 anonymous_table_has_no_registered_name(_Config) ->
     %% A named table appears in `ets:info(Tab, named_table)' as true. An
-    %% anonymous table must report false — this is the property that
-    %% guarantees no atom was allocated for this table.
+    %% anonymous table must report false: no atom names this table.
     Key = {?MODULE, unnamed, erlang:unique_integer([positive])},
     {ok, Tab} = bondy_connect_table_manager:add_anonymous(Key, [set, public]),
     ?assertEqual(false, ets:info(Tab, named_table)),

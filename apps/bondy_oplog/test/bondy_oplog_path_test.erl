@@ -48,7 +48,7 @@ instance_dir_resolves_layout_from_opts_test() ->
 %%
 %% `storage_path/3` joins the id straight into a filesystem path, so an id that
 %% is not a well-formed relative path is either unrepresentable or escapes the
-%% base directory. Measured before this was validated:
+%% base directory. Measured with the id unvalidated:
 %%
 %%   <<"inst-",233>>     ensure_path -> {error, eilseq}
 %%                       (`file:native_name_encoding()` is utf8)
@@ -239,20 +239,12 @@ ids_with_hyphens_are_ordinary_test() ->
 
 %% =============================================================================
 %% Consumers that do path arithmetic on an instance directory
-%%
-%% `bondy_oplog_instance:resolve_checkpoint_backend/3` derives a parent
-%% directory with `filename:dirname(InstanceDir)` and hands it to
-%% `bondy_oplog_compaction_checkpoint_file`, which re-appends the id. While the
-%% id nested, `dirname/1` stripped a segment of the ID rather than the instance
-%% component, and the re-append then DOUBLED it:
-%%
-%%   id main/realm/7 -> instance   /data/d4/d4bd/main/realm/7
-%%                      checkpoint /data/d4/d4bd/main/realm/main/realm/7/...
-%%
-%% Now that an id names ONE component, `dirname/1` strips exactly the instance
-%% and the checkpoint lands inside the instance's own directory, which is what
-%% the caller meant.
 %% =============================================================================
+%%
+%% `bondy_oplog_instance:resolve_checkpoint_backend/3` derives the parent with
+%% `filename:dirname(InstanceDir)`; `bondy_oplog_compaction_checkpoint_file`
+%% re-appends the id, so an id that names ONE component keeps the checkpoint
+%% inside the instance's own directory.
 
 checkpoint_dir_lands_inside_the_instance_dir_test_() ->
     {foreach, fun mk_tmp/0, fun rm_tmp/1, [

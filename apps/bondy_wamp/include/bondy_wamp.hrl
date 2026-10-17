@@ -746,13 +746,15 @@ end).
 
 -define(HELLO_DETAILS_SPEC, #{
     authmethods => #{
-        % description => Used by the client to announce the authentication methods it is prepared to perform.">>,
+        %% description => Used by the client to announce the authentication
+        %% methods it is prepared to perform.">>,
         alias => <<"authmethods">>,
         required => false,
         datatype => {list, binary}
     },
     authid => #{
-        % description => <<"The authentication ID (e.g. username) the client wishes to authenticate as.">>,
+        %% description => <<"The authentication ID (e.g. username) the client
+        %% wishes to authenticate as.">>,
         alias => <<"authid">>,
         required => false,
         datatype => [binary, atom]
@@ -763,7 +765,7 @@ end).
         datatype => [binary, atom]
     },
     authextra => #{
-        % description => <<"Not in RFC">>,
+        %% description => <<"Not in RFC">>,
         alias => <<"authextra">>,
         required => false,
         allow_undefined => true,
@@ -777,14 +779,27 @@ end).
         validator => ?CLIENT_ROLES_SPEC
     },
     agent => #{
-        % description => <<"When a software agent operates in a network protocol, it often identifies itself, its application type, operating system, software vendor, or software revision, by submitting a characteristic identification string to its operating peer. Similar to what browsers do with the User-Agent HTTP header, both the HELLO and the WELCOME message MAY disclose the WAMP implementation in use to its peer">>,
+        %% description => <<"When a software agent operates in a network
+        %% protocol, it often identifies itself, its application type, operating
+        %% system, software vendor, or software revision, by submitting a
+        %% characteristic identification string to its operating peer. Similar
+        %% to what browsers do with the User-Agent HTTP header, both the HELLO
+        %% and the WELCOME message MAY disclose the WAMP implementation in use
+        %% to its peer">>,
         alias => <<"agent">>,
         required => false,
         datatype => binary
     },
     transport => #{
-        % description => <<"When running WAMP over a TLS (either secure WebSocket
-        % or raw TCP) transport, a peer may authenticate to the other via the TLS certificate mechanism. A server might authenticate to the client, and a client may authenticate to the server (TLS client-certificate based authentication). This transport-level authentication information may be forward to the WAMP level within HELLO.Details.transport.auth|any in both directions (if available).">>,
+        %% description => <<"When running WAMP over a TLS (either secure
+        %% WebSocket
+        %% or raw TCP) transport, a peer may authenticate to the other via the
+        %% TLS certificate mechanism. A server might authenticate to the client,
+        %% and a client may authenticate to the server (TLS client-certificate
+        %% based authentication). This transport-level authentication
+        %% information may be forward to the WAMP level within
+        %% HELLO.Details.transport.auth|any in both directions (if
+        %% available).">>,
         alias => <<"transport">>,
         required => false,
         datatype => map,
@@ -798,13 +813,14 @@ end).
         datatype => boolean
     },
     resume_session => #{
-        % description => <<"The session ID the client would like to resume.">>,
+        %% description => <<"The session ID the client would like to resume.">>,
         alias => <<"resume_session">>,
         required => false,
         datatype => binary
     },
     resume_token => #{
-        % description => <<"The secure token required to resume the session defined in 'resume_session'.">>,
+        %% description => <<"The secure token required to resume the session
+        %% defined in 'resume_session'.">>,
         alias => <<"resume_token">>,
         required => false,
         datatype => binary
@@ -877,7 +893,8 @@ end).
         datatype => boolean
     },
     resume_token => #{
-        % description => <<"The secure token required to resume the session defined in 'resume_session'.">>,
+        %% description => <<"The secure token required to resume the session
+        %% defined in 'resume_session'.">>,
         alias => <<"resume_token">>,
         required => false,
         datatype => binary

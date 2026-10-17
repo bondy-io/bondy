@@ -29,7 +29,7 @@ declarations_test_() ->
             ?assertEqual(2, length(Registry))
         end},
         {"mcp_upstream is a durable main lww table, no publish", fun() ->
-            %% Pinned upstream MCP tool definitions (design §13.3):
+            %% Pinned upstream MCP tool definitions:
             %% whole-entry replacement on approval, and pins gate the
             %% projection only — they never feed the manifest cache.
             Spec = maps:get(mcp_upstream, ByName),
@@ -49,7 +49,7 @@ declarations_test_() ->
             ?assertEqual(aw, maps:get(fold, Spec))
         end},
         {"retained_messages is a durable main lww table", fun() ->
-            %% Cut over to bondy_db (§11.4): always durable regardless of the
+            %% Always durable regardless of the
             %% inert `wamp.message_retention.storage_type` knob; storage-only
             %% lww, no secondary index (matched by key).
             Spec = maps:get(retained_messages, ByName),
@@ -60,7 +60,7 @@ declarations_test_() ->
         end},
         {"group membership is a durable main ew fold (cell-per-fact)", fun() ->
             %% Authoritative cell-per-fact add-wins membership (ew_flag); the
-            %% forward + reverse presence cells live here (design §3 / §11).
+            %% forward + reverse presence cells live here.
             Spec = maps:get(security_group_members, ByName),
             ?assertEqual(main, maps:get(db, Spec)),
             ?assertEqual(durable, maps:get(durability, Spec)),
@@ -72,9 +72,8 @@ declarations_test_() ->
             ?assertEqual(true, maps:get(publish, Spec, false))
         end},
         {"no table declares the retired shard_by key", fun() ->
-            %% shard_by was declared/frozen but never consumed by routing
-            %% (partition_strategy + aggregate_root is the placement model);
-            %% it was deleted — pin that it never reappears in a spec.
+            %% `partition_strategy` + `aggregate_root` is the placement model;
+            %% routing consumes no `shard_by` key, so no spec may declare one.
             ?assert(
                 lists:all(
                     fun(S) -> not maps:is_key(shard_by, S) end, Tables
@@ -240,8 +239,8 @@ provisions_all() ->
         %% Subscriptions: a bare reading, NO schema, so the cell stays
         %% tier_0; a struct is tier_2, whose state grows with every
         %% unstabilized write. `bondy_oplog_crdt_owned_reading_proper_test`'s
-        %% `prop_state_size_is_independent_of_writes/0` is the law; this is
-        %% the ratchet on the DECLARATION.
+        %% property `prop_state_size_is_independent_of_writes` is the law;
+        %% this is the ratchet on the DECLARATION.
         SubInfo = bondy_db:info(?CAT:table(bondy_rib_subscriptions)),
         ?assertMatch(#{crdt_module := bondy_oplog_crdt_owned_reading}, SubInfo),
         ?assertEqual(
@@ -278,15 +277,14 @@ provisions_all() ->
             [bondy_rib_registrations, bondy_rib_subscriptions]
         ),
         %% EVERY field of the registration schema must declare `force_reap`,
-        %% or a departed node's cell is never reclaimed: `reap_origins/2`
-        %% reaps an origin only once it has no live dot in ANY field, so one
-        %% undeclared field defeats the policy on all the others and
-        %% `bondy_oplog_cell_utils:reap_one_cell/5` then skips the write
-        %% entirely. The field set is DECLARED here, not scanned off the
-        %% schema: a ratchet that iterates whatever it finds cannot notice a
-        %% field going missing. `bondy_rib_reclamation_cluster_SUITE` is the
-        %% end-to-end proof and `bondy_oplog_crdt_struct_proper_test`'s
-        %% `prop_reap_iff_every_touched_field_force_reaps/0` is the law.
+        %% or a departed node's cell is never reclaimed: an origin is reaped
+        %% only once it has no live dot in ANY field, so one undeclared field
+        %% defeats the policy on all the others. The field set is DECLARED
+        %% here, not scanned off the schema: a ratchet that iterates whatever
+        %% it finds cannot notice a field going missing.
+        %% `bondy_rib_reclamation_cluster_SUITE` is the end-to-end proof and
+        %% `bondy_oplog_crdt_struct_proper_test`'s property
+        %% `prop_reap_iff_every_touched_field_force_reaps` is the law.
         #{crdt_opts := RegSchema} =
             bondy_db:info(?CAT:table(bondy_rib_registrations)),
         ExpectedFields = [count, invoke, earliest, latest],

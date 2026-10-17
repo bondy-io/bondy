@@ -396,12 +396,10 @@ exposition_formats() ->
 %% =============================================================================
 %% SCRAPE-TIME GAUGES: THE APPLIED FRONTIER'S PENDING COMPONENT
 %% =============================================================================
-%%
 %% Its own fixture: unlike the event-driven metrics above, these gauges are
 %% read from `bondy_oplog_registry` at scrape time, so the oplog must be
-%% RUNNING and carrying a real instance for the collector to emit anything
-%% (`collect_mf/2` short-circuits when `bondy_oplog` is not a running
-%% application).
+%% running and carrying a real instance for the collector to emit anything
+%% (`collect_mf/2` short-circuits when `bondy_oplog` is not running).
 
 frontier_hole_gauge_test_() ->
     {setup, fun hole_setup/0, fun hole_cleanup/1, fun(Id) ->
@@ -423,16 +421,14 @@ hole_cleanup(Id) ->
     _ = bondy_oplog:stop_instance(Id),
     ok.
 
-%% A healthy instance reads 0 — the gauge is emitted for EVERY instance, not
-%% only the sick ones, so an alert can be written against `== 0` and a
-%% dashboard shows a flat floor rather than a gap.
-%%
-%% Then inject a hole and read it back through the real exposition. Seqs 2, 5
-%% and 6 fold with 1, 3 and 4 absent: the prefix cannot leave 0, and pending
-%% holds TWO maximal runs (`[2, {5, 6}]`) covering THREE seqs. That difference
-%% is the point of having both gauges — the run count is bounded by the number
-%% of holes while the seq count grows with traffic behind them
-%% (`proofs/isabelle/Frontier_Pending.thy`, `pending_intervals_bounded_by_holes`).
+%% A healthy instance reads 0: the gauge is emitted for EVERY instance, so
+%% an alert can target `== 0` and a dashboard shows a floor, not a gap.
+%% Then inject a hole and read it back through the real exposition. Seqs
+%% 2, 5 and 6 fold with 1, 3 and 4 absent: the prefix stays 0 and pending
+%% holds TWO maximal runs (`[2, {5, 6}]`) over THREE seqs. The run count
+%% is bounded by the number of holes while the seq count grows with the
+%% traffic behind them: `pending_intervals_bounded_by_holes` in
+%% `proofs/isabelle/Frontier_Pending.thy`.
 holes_appear_under_an_injected_hole(Id) ->
     Origin = bondy_oplog_origin:new(),
     ?assertEqual(0, gauge(bondy_oplog_instance_frontier_holes, Id)),

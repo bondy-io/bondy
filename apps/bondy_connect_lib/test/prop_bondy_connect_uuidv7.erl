@@ -3,12 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% @doc Property-based tests for bondy_connect_uuidv7 (UUIDv7 generation and parsing).
-%%
-%% UUIDv7 is a time-ordered UUID that embeds a Unix timestamp in milliseconds.
-%% These tests verify the RFC 9562 compliance and implementation correctness.
-%% @end
 -module(prop_bondy_connect_uuidv7).
+-moduledoc """
+Property-based tests for `bondy_connect_uuidv7`: UUIDv7 generation and parsing.
+
+UUIDv7 is a time-ordered UUID that embeds a Unix timestamp in milliseconds.
+These properties check the implementation against RFC 9562.
+""".
 
 -include_lib("proper/include/proper.hrl").
 
@@ -193,8 +194,8 @@ prop_is_valid_rejects_invalid() ->
 %% Properties: Ordering and Uniqueness
 %% =============================================================================
 
-%% Property: UUIDs created from increasing timestamps are ordered
-%% (when compared as binaries)
+%% Property: UUIDs built from increasing timestamps embed non-decreasing
+%% timestamps.
 prop_monotonic_ordering() ->
     ?FORALL(
         Timestamps,
@@ -204,8 +205,6 @@ prop_monotonic_ordering() ->
                 bondy_connect_uuidv7:from_timestamp(Ts)
              || Ts <- lists:reverse(Timestamps)
             ],
-            %% Note: Due to random bits, this is only guaranteed for timestamps
-            %% that differ by more than the random component can affect ordering
             check_monotonic_timestamps(UUIDs)
         end
     ).

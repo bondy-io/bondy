@@ -60,26 +60,14 @@ register_stub(InstanceId) ->
         live_size => 0
     }).
 
-%% The stub rows MUST NOT outlive this module.
-%%
-%% `bondy_oplog_registry` is node-global and eunit shares one VM, so a row left
-%% behind is seen by every later test in the run. It was left behind, and it
-%% made `bondy_oplog_frontier_reap_test:retire_dead_retires_the_complement`
-%% fail with `{instances_down, [<<"scrubber-test-...">>]}` and
-%% `retire_dead_refuses_while_an_instance_is_down` time out waiting for
-%% `down/0` to empty — whole-suite-only, with the victim moving between runs.
-%%
-%% Deleting the row is the only fix; no sentinel pid hides it. MEASURED: with
-%% `instance_pid = self()` the row is dead by cleanup and `down/0` reports it
-%% (registry.erl:454); with `undefined` it is excluded from `down/0` but
-%% `list/0` counts it as PRESENT (registry.erl:431), and the schedulers then
-%% dispatch to a phantom instance — that attempt turned 2 failures into 7,
-%% across `bondy_oplog_gc_scheduler_test` and
-%% `bondy_oplog_sync_scheduler_test`.
-%%
-%% Swept by id prefix rather than by threading ids out of the test bodies: a
-%% body that fails never reaches its own cleanup line, which is how this family
-%% of leak recurs.
+%% The stub rows MUST NOT outlive this module: `bondy_oplog_registry` is
+%% node-global and eunit shares one VM, so a leaked row is seen by every later
+%% test (`bondy_oplog_frontier_reap_test:retire_dead_retires_the_complement`
+%% fails on it). No sentinel pid hides a row: with `instance_pid = self()` the
+%% row is dead by cleanup and `down/0` reports it; with `undefined`, `list/0`
+%% counts it as PRESENT and the schedulers dispatch to a phantom instance.
+%% Rows are swept by id prefix rather than by threading ids out of the test
+%% bodies: a body that fails never reaches its own cleanup line.
 cleanup(_) ->
     drop_stub_rows().
 
@@ -522,9 +510,9 @@ info_surfaces_alerts() ->
         rmrf(Dir)
     end.
 
-%% A manual `scrub_now/1` call must emit exactly one `[..., scrub, run]`
-%% event, carrying `trigger = manual` and the per-run roll-up
-%% measurements. On a clean WAL we expect `alerts_raised = 0` and
+%% A manual `bondy_log_scrubber:scrub_now/1` call must emit exactly one
+%% `[..., scrub, run]` event, carrying `trigger = manual` and the per-run
+%% roll-up measurements. On a clean WAL we expect `alerts_raised = 0` and
 %% non-zero `frames_checked`/`bytes_checked` summed from the sealed
 %% segments.
 manual_trigger_emits_run_event() ->

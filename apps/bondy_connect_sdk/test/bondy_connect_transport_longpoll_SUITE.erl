@@ -124,9 +124,9 @@ longpoll_survives_server_poll_timeout(_) ->
 %% `max_message_length' is refused before it reaches the wire.
 longpoll_outbound_too_large_rejected(_) ->
     %% 2048, not 512: the HELLO this SDK sends is ~727 bytes with the four
-    %% client roles, so a 512-byte bound fails the HANDSHAKE and the case would
-    %% be asserting on the wrong message entirely (MEASURED — the connect
-    %% itself returned `{message_too_large, 727, 512}').
+    %% client roles, so a 512-byte bound fails the HANDSHAKE itself with
+    %% `{message_too_large, 727, 512}' and the case would assert on the wrong
+    %% message entirely.
     {ok, Conn} = bondy_connect_client:connect(
         spec(#{
             max_message_length => 2048
@@ -173,15 +173,13 @@ longpoll_bad_path_fails(_) ->
             ok
     end.
 
-%% The held `/receive` monitors the transport session
-%% (`bondy_http_longpoll_handler:do_handle_receive/2`): killing the session
-%% mid-hold must answer the poll at once, so the client's INBOUND path — the
-%% only one exercised here, since no send happens between the kill and the
-%% final call — detects the death, reconnects and replays. Without the
-%% monitor the poll hangs to the idle timeout and this case's single call,
-%% issued 3s after the kill (far above reconnect+replay on localhost, far
-%% below the 30-60s poll horizons a hang would take), would be the FIRST
-%% detection and would fail.
+%% The held `/receive` monitors the transport session: killing the session
+%% mid-hold answers the poll at once, so the client's INBOUND path — the only
+%% one exercised here, since no send happens between the kill and the final
+%% call — detects the death, reconnects and replays. Without the monitor the
+%% poll hangs to the idle timeout and this case's single call, issued 3s after
+%% the kill (far above reconnect+replay on localhost, far below the 30-60s poll
+%% horizons a hang would take), would be the FIRST detection and would fail.
 longpoll_session_death_ends_the_held_poll(_) ->
     Before = http_session_pids(),
     Conn = connect(),
@@ -287,17 +285,11 @@ drain_events() ->
 %% @private
 %% The poller is the transport's only inbound path, and suspending it is how a
 %% case creates a "client is not polling" window that does not depend on timing.
-%%
 %% Identified by `initial_call', not `current_function': a poller spends nearly
 %% all of its life blocked inside gun waiting for `/receive', so its CURRENT
-%% frame is gun's and matching on it found zero processes (MEASURED —
-%% `{expected_pollers, 2, found, 0}'). `initial_call' is the spawn entry point
-%% and does not move.
-%%
-%% Read from the scheduler rather than out of the transport's record: `conn()'
-%% is opaque and its internals are not this suite's business. The helper fails
-%% loudly when the count is not what the caller expected, so a case can never
-%% silently suspend the wrong connection's poller — or none at all.
+%% frame is gun's; `initial_call' is the spawn entry point and does not move.
+%% Read from the scheduler rather than out of the opaque `conn()'. The helper
+%% fails loudly when the count is not what the caller expected.
 pollers(Expected) ->
     Pids = [
         P

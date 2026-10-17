@@ -6,37 +6,37 @@
 -module(bondy_mcp_wamp).
 
 -moduledoc """
-The MCP ⇄ WAMP semantic mapping (design §5.1, §10.2, §16), over
+The MCP ⇄ WAMP semantic mapping, over
 `bondy_json_rpc`'s codec: pure functions with no transport and no process.
 
-- **Arguments** (§16.1, symmetric): the reserved `@args` key carries WAMP
+- **Arguments** (symmetric): the reserved `@args` key carries WAMP
   positional arguments; everything else is a kwarg. The same flattening
-  shapes a WAMP `RESULT` into MCP `structuredContent` (§16.2).
-- **Errors** (§10.2): a WAMP error becomes a SUCCESSFUL `tools/call`
+  shapes a WAMP `RESULT` into MCP `structuredContent`.
+- **Errors**: a WAMP error becomes a SUCCESSFUL `tools/call`
   response with `isError: true`, a structured `retryable` marker — agents
   parse structure reliably and infer badly from prose — and the original
   error URI in `_meta."bondy:error_uri"`. `no_such_procedure` classifies
   as retryable because the gateway only dispatches manifest-DECLARED
   entries: the manifest declares surface and the registry decides liveness
-  (§7.7), so an unregistered declared procedure is a transient gap, not a
+  so an unregistered declared procedure is a transient gap, not a
   permanent absence.
-- **Resource templates** (§16.3): RFC 6570 level-1 URI matching, variable
+- **Resource templates**: RFC 6570 level-1 URI matching, variable
   validation against the entry's `uri_vars_schema` (type coercion for the
   scalar types), and `{{var}}` interpolation into the entry's WAMP
   binding.
 - **Header value codec**: the Streamable HTTP transport's Value Encoding
   — scalar-to-string conversion and the `=?base64?...?=` sentinel for
   values outside RFC 9110's field-value character set — used by the
-  handler's header/body cross-checks (§10.1).
-- **MRTR** (§11.1): validation of the callee's
+  handler's header/body cross-checks.
+- **MRTR**: validation of the callee's
   `bondy.error.mcp.input_required` signal payload — `input_requests`
   values MUST be one of the three request types the spec admits — and the
   `InputRequiredResult` wire shape, of which at least one of
   `inputRequests` / `requestState` MUST be present.
-- **Trace context** (SEP-414, §15.4): a request's `_meta.traceparent` /
+- **Trace context** (SEP-414): a request's `_meta.traceparent` /
   `tracestate` / `baggage` ⇄ the `'_traceparent'` / `'_tracestate'` /
   `'_baggage'` WAMP extension options, verbatim in both directions
-  (`trace_options/1` inbound, `trace_meta/1` for the §13 client
+  (`trace_options/1` inbound, `trace_meta/1` for the client
   direction).
 """.
 
@@ -46,14 +46,14 @@ The MCP ⇄ WAMP semantic mapping (design §5.1, §10.2, §16), over
 
 %% The three request types an `inputRequests` value MUST be (spec, MRTR
 %% server requirements). `roots/list` and `sampling/createMessage` are
-%% deprecated-but-functional upstream and valid here (MCP-D24).
+%% deprecated-but-functional upstream and valid here.
 -define(MRTR_METHODS, [
     <<"elicitation/create">>,
     <<"roots/list">>,
     <<"sampling/createMessage">>
 ]).
 
-%% Overlay annotation spellings (snake_case, the operator-facing §18.4
+%% Overlay annotation spellings (snake_case, the operator-facing document
 %% form) to the MCP wire's ToolAnnotations camelCase. Unknown keys pass
 %% through untouched.
 -define(ANNOTATION_KEYS, #{
@@ -87,7 +87,8 @@ The MCP ⇄ WAMP semantic mapping (design §5.1, §10.2, §16), over
 
 -doc """
 The WAMP call options carrying a request's trace context (SEP-414,
-§15.4): `params._meta`'s `traceparent` / `tracestate` / `baggage` map
+the span contract): `params._meta`'s `traceparent` / `tracestate` / `baggage`
+map
 onto the router's declared `'_traceparent'` / `'_tracestate'` /
 `'_baggage'` extension options, values verbatim — never parsed. Per W3C
 Trace Context, `tracestate` (and Baggage alongside it) is meaningful
@@ -118,7 +119,7 @@ trace_options(Params) when is_map(Params) ->
 
 -doc """
 The `_meta` entries carrying a WAMP message's trace context — the
-inverse of `trace_options/1`, for the client direction (§13): the
+inverse of `trace_options/1`, for the client direction: the
 `'_traceparent'` / `'_tracestate'` / `'_baggage'` extension options of
 a CALL's options (what the dealer hands an internal callback) map onto
 SEP-414's `traceparent` / `tracestate` / `baggage`, values verbatim.
@@ -144,7 +145,8 @@ trace_meta(Options) when is_map(Options) ->
     #{}.
 
 -doc """
-The WAMP `{Args, KwArgs}` of an MCP `arguments` object (§16.1 reversed):
+The WAMP `{Args, KwArgs}` of an MCP `arguments` object (the flattening
+reversed):
 `@args` carries the positional list, every other key is a kwarg.
 """.
 -spec call_args(Arguments :: map()) ->
@@ -160,7 +162,7 @@ call_args(_) ->
     {error, badarg}.
 
 -doc """
-§16.2's flattening of a WAMP payload: kwargs pass through, positional
+The flattening of a WAMP payload: kwargs pass through, positional
 arguments ride under `@args`.
 """.
 -spec flatten_payload(Args :: list() | undefined, KwArgs :: map() | undefined) ->
@@ -193,14 +195,14 @@ call_result(#{args := Args, kwargs := KwArgs}) ->
     }.
 
 -doc """
-The WAMP shape of an upstream `CallToolResult` (§16 reversed — the client
-direction, §13): `structuredContent` splits into `{Args, KwArgs}` exactly
+The WAMP shape of an upstream `CallToolResult` (the mapping reversed — the
+client direction): `structuredContent` splits into `{Args, KwArgs}` exactly
 as `call_args/1` splits `arguments`, so positional arguments round-trip
 through a chained Bondy upstream; a result with no structured content
 carries its `content` list as the single `content` kwarg. `isError: true`
 maps to the fixed URI `bondy.error.mcp.upstream_tool_error` — an
 upstream's `_meta."bondy:error_uri"` is deliberately NOT resurfaced as
-the WAMP error URI, because upstream output is untrusted (§13.3) and must
+the WAMP error URI, because upstream output is untrusted and must
 not mint URIs in our namespaces.
 """.
 -spec tool_result(map()) ->
@@ -233,7 +235,7 @@ tool_result(Result) when is_map(Result) ->
 
 -doc """
 A `CallToolResult` with `isError: true` from a `bondy_router_peer:call/5` error
-(`#{error_uri, args, kwargs, ...}`), classified per §10.2. `retryable` is
+(`#{error_uri, args, kwargs, ...}`), classified. `retryable` is
 structured data inside `structuredContent`; the original WAMP error URI
 rides in `_meta."bondy:error_uri"`.
 """.
@@ -255,7 +257,7 @@ call_error(#{error_uri := Uri} = Error) ->
 
 -doc """
 Validates the payload of a callee's `bondy.error.mcp.input_required`
-signal (§11.1): kwargs may carry `input_requests` — a map whose values
+signal (MRTR): kwargs may carry `input_requests` — a map whose values
 must each be `#{"method", "params"}` with a method the spec admits — and
 `state`, the callee's opaque continuation. At least one of the two must be
 present (the wire result MUST carry one). `{error, badarg}` is a CALLEE
@@ -325,7 +327,7 @@ read_result(Uri, #{args := Args, kwargs := KwArgs}) ->
 
 -doc """
 The MCP `Resource` descriptor of a compiled manifest entry of kind
-`resource`. Like `tool_descriptor/1`, the §7.5 content hash rides in
+`resource`. Like `tool_descriptor/1`, the content hash rides in
 `_meta."bondy:hash"`.
 """.
 -spec resource_descriptor(bondy_mcp_spec:t()) -> map().
@@ -358,7 +360,7 @@ resource_template_descriptor(
 The MCP `Tool` descriptor of a compiled manifest entry
 (`bondy_mcp_spec:t()` of kind `tool`). A tool with no declared input
 schema advertises the permissive empty object schema — `inputSchema` is
-required on the wire. The §7.5 content hash rides in
+required on the wire. The content hash rides in
 `_meta."bondy:hash"` so a client or reviewer can pin what it saw.
 """.
 -spec tool_descriptor(bondy_mcp_spec:t()) -> map().
@@ -415,7 +417,7 @@ bind_template(#{kind := resource_template} = Entry, Uri) ->
     end.
 
 -doc """
-The WAMP topic behind one concrete resource URI's update stream (§9.2): a
+The WAMP topic behind one concrete resource URI's update stream: a
 base resource whose `uri` equals `Uri` names its `topic` directly; a
 resource template that matches `Uri` and declares an `update_topic` yields
 that topic with the bound (and schema-coerced) variables interpolated.
@@ -532,7 +534,7 @@ text_content(Structured) ->
     }.
 
 %% @private
-%% §10.2: transient conditions the agent should retry — the declared
+%% Transient conditions the agent should retry — the declared
 %% procedure has no registered callee right now, no callee could take the
 %% call, or the call timed out. Denial and everything else is permanent
 %% for this principal.

@@ -46,23 +46,14 @@ bootstrap_catalogue_test_() ->
         fun live_replica_recovers_lossless_via_anti_entropy/0
     ]}.
 
-%% THE CONTRACT (post stale-peer-rejoin audit): a LIVE round adopts the
-%% peer's applied-frontier ONLY for maxima the local replica can WITNESS —
-%% i.e. when, after the round and the local settle, its own frontier
-%% already covers everything the peer's claims (no deficit). A maximum no
-%% transferred event carries — a compacted-prefix maximum, modelled here
-%% by a phantom origin injected into the peer's frontier — is precisely
-%% what a live round cannot witness, and unconditionally adopting it was
-%% the stale-peer rejoin data-loss mechanism: a replica the
-%% recency-filtered frontier had excluded would return, "successfully"
-%% sync against the truncated trees, adopt a frontier covering data it
-%% never received, and the convergence oracle would report CONVERGED over
-%% a silent permanent loss. The live round now refuses with
-%% `{error, {frontier_gap, Origins}}`; the sync scheduler routes that to
-%% a catalogue BOOTSTRAP, whose install + finalize supply BOTH the data
-%% and the frontier (phantom maxima included) — the witnessed adoption
-%% path. Asserted here by driving the bootstrap directly and observing a
-%% clean live round afterwards.
+%% THE CONTRACT: a LIVE round adopts the peer's applied-frontier ONLY for
+%% maxima the local replica can WITNESS, i.e. maxima its own frontier covers
+%% after the round and the local settle. A compacted-prefix maximum, modelled
+%% here by a phantom origin injected into the peer's frontier, is one no live
+%% round can witness. The live round refuses it with
+%% `{error, {frontier_gap, Origins}}`. The sync scheduler routes that verdict
+%% to a catalogue BOOTSTRAP, whose install + finalize supply BOTH the data
+%% and the frontier. The case drives the bootstrap, then runs a clean round.
 live_sync_refuses_phantom_frontier_bootstrap_adopts() ->
     {Peer, _, _, _} = setup_instance(),
     {Local, _, _, _} = setup_instance(),

@@ -231,20 +231,13 @@ wildcard_subdomain_mixed_with_exact(_Config) ->
 %% =============================================================================
 
 a_partial_listener_block_is_totalised_on_read(_Config) ->
-    %% The property the schema translation now depends on: it stopped completing
-    %% a listener's `cors' block, so a listener may set ONE member and
-    %% `config_from_req/1' has to answer a total map anyway.
-    %%
-    %% This is the only case that drives a PARTIAL block through that function.
-    %% `config/1' below merges `default_config/0' itself, so every other case
-    %% hands `headers/2' a map that was already total — verified by removing the
-    %% merge from `config_from_req/1', which left all nineteen of them green.
-    %%
-    %% `build_headers/2' reads `allowed_methods', `allowed_headers' and `max_age'
-    %% with `maps:get/2', so a partial map raises `badkey' here, on the request
-    %% path, after the response has begun.
-    %%
-    %% Set as a PROPLIST because that is what arrives:
+    %% The schema translation does not complete a listener's `cors' block, so
+    %% a listener may set ONE member and `config_from_req/1' has to answer a
+    %% total map anyway. This is the only case that drives a PARTIAL block
+    %% through that function: `config/1' below merges `default_config/0'
+    %% itself. The header builder reads `allowed_methods', `allowed_headers'
+    %% and `max_age' with `maps:get/2', so a partial map raises `badkey' on the
+    %% request path, after the response has begun. Set as a PROPLIST because
     %% `bondy_config:splat_listener_blocks/1' writes the block one leaf at a
     %% time.
     ok = bondy_config:set([cors_partial, cors], [{max_age, <<"60">>}]),

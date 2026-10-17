@@ -6,8 +6,7 @@
 -module(bondy_mcp_gateway).
 
 -moduledoc """
-The MCP manifest cache manager (design §7.10) and the MCP overlay document
-store (§18.3).
+The MCP manifest cache manager and the MCP overlay document store.
 
 ## Overlay documents
 
@@ -18,7 +17,7 @@ posture `bondy_http_gateway` takes with API specifications. A document is
 validated as a whole by `bondy_mcp_spec_parser:parse/1` — one invalid entry
 rejects the load — plus the two checks the parser cannot run pure: every
 named realm must exist, and no `(realm, name)` the document claims may
-belong to a DIFFERENT loaded document (§17's overlay-collision rule; the
+belong to a DIFFERENT loaded document (the overlay-collision rule; the
 compile-time skip-and-alarm below remains the backstop for collisions that
 arrive already-converged via anti-entropy). These functions are plain
 `bondy_db` writes: no process is involved, and they work on a node that
@@ -35,7 +34,7 @@ kind — a node-level manager with debounced invalidation — but contributes
 no routes and takes no part in dispatch: a manifest change alters what
 `tools/list` answers, nothing more.
 
-The server is started ON DEMAND by the first `manifest/1` call (§18.2: a
+The server is started ON DEMAND by the first `manifest/1` call (a
 node with no MCP listener runs nothing of this application), and then:
 
 - subscribes to the `bondy_interface` and `mcp_gateway` table namespaces
@@ -52,12 +51,12 @@ node with no MCP listener runs nothing of this application), and then:
 
 Registration and deregistration are deliberately NOT invalidation
 triggers: the manifest declares surface and the registry decides liveness
-(§7.7), so a callee connecting or dropping changes nothing a rebuild would
+so a callee connecting or dropping changes nothing a rebuild would
 see.
 
 ## Collisions
 
-A compile reporting §17 name collisions (one name, different underlying
+A compile reporting name collisions (one name, different underlying
 WAMP bindings, e.g. from two overlay documents converged via AE) raises
 one `major` alarm per `(realm, name)` through OTP's `alarm_handler` and
 exposes NEITHER entry; the alarm clears on the first rebuild where the
@@ -86,7 +85,7 @@ collision is gone.
     oplog_subs = [] :: [reference()],
     %% Pending debounce timer for a coalesced rebuild of the cached realms.
     rebuild_timer :: reference() | undefined,
-    %% The §17 collision alarms currently raised, per realm, so a rebuild
+    %% The collision alarms currently raised, per realm, so a rebuild
     %% can clear the ones its collisions no longer justify.
     alarms = #{} :: #{binary() => [term()]}
 }).
@@ -310,7 +309,7 @@ assert_realms_exist(Entries) ->
     ).
 
 %% @private
-%% §17: a `(realm, name)` this document claims that another LOADED document
+%% A `(realm, name)` this document claims that another LOADED document
 %% already claims rejects the whole load. Reloading one's own document is a
 %% replace, never a conflict.
 assert_names_unclaimed(Id, Entries) ->
@@ -445,7 +444,7 @@ note_change(State) ->
 
 %% @private
 %% Compile `RealmUri`'s manifest, publish it as ONE cell (the atomic
-%% snapshot), and reconcile the §17 collision alarms.
+%% snapshot), and reconcile the collision alarms.
 rebuild(RealmUri, Trigger, State) ->
     T0 = erlang:monotonic_time(microsecond),
     Previous =
@@ -464,14 +463,14 @@ rebuild(RealmUri, Trigger, State) ->
     true = ets:insert(
         ?TAB, {RealmUri, erlang:monotonic_time(millisecond), Manifest}
     ),
-    %% §7.10: after a rebuild that CHANGED the manifest, tell the realm's
+    %% After a rebuild that CHANGED the manifest, tell the realm's
     %% `subscriptions/listen` streams which kinds changed — each stream
-    %% forwards only what its own filter requested (§9.1). A first build
+    %% forwards only what its own filter requested. A first build
     %% and a no-op rebuild (the TTL backstop, a burst that compiled to
     %% the same result) notify nobody: nothing a client saw has changed.
     Changed = changed_kinds(Previous, Entries),
     ok = bondy_mcp_stream:notify_manifest_changed(RealmUri, Changed),
-    %% The handshake era's sessions (§12) get the same signal as
+    %% The handshake era's sessions get the same signal as
     %% pre-encoded `notifications/*/list_changed` in their transport
     %% queues — buffered while no GET stream is connected.
     ok = bondy_mcp_handshake:notify_manifest_changed(RealmUri, Changed),
@@ -500,8 +499,8 @@ entry_census(Entries) ->
     ).
 
 %% @private
-%% Which §9.1 list-changed kinds a rebuild changed, compared as
-%% `Name => hash` projections — the §7.5 hash covers exactly the content
+%% Which list-changed kinds a rebuild changed, compared as
+%% `Name => hash` projections — the content hash covers exactly the content
 %% a client can observe through a descriptor.
 changed_kinds(undefined, _) ->
     [];

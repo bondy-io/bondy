@@ -222,7 +222,7 @@ translate_skips_test_() ->
     ].
 
 %% =============================================================================
-%% decode_key/1 — own-persisted key bytes decode plain (C-2 own-bytes rule)
+%% decode_key/1 — own-persisted key bytes decode plain
 %% =============================================================================
 
 %% The grant key's resource suffix is this node's own persisted bytes

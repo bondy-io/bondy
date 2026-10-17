@@ -3,14 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Focused coverage for `bondy_ticket`'s bulk revocation after its cut-over from
-%% plum_db to bondy_db (design §11.4). The point read/write paths are exercised
-%% end-to-end by `bondy_auth_ticket_SUITE`; what that suite does NOT cover is
-%% `revoke_all/1,2`, which is real production code (realm / user deletion) and —
-%% for `revoke_all/2` — the one place the cut changed the ALGORITHM: plum_db's
-%% ordered key-prefix range became a realm `bondy_db:list/2` scan that decodes
-%% each `term_to_binary/1` store key and filters by its `Authid` (the first
-%% element of the composed `{Authid, A, B}` key). This pins that filter.
+%% Focused coverage for `bondy_ticket`'s bulk revocation. The point read/write
+%% paths are exercised end-to-end by `bondy_auth_ticket_SUITE`; what that suite
+%% does NOT cover is `revoke_all/1,2`, which is real production code (realm /
+%% user deletion). `revoke_all/2` is a realm `bondy_db:list/2` scan that
+%% decodes each `term_to_binary/1` store key and filters by its `Authid` (the
+%% first element of the composed `{Authid, A, B}` key). This pins that filter.
 %%
 %% These functions take `RealmUri` directly (no realm resolution), so the test
 %% needs only a provisioned catalogue — not a full bondy boot.
@@ -36,9 +34,9 @@ revoke_all_test_() ->
         ]
     end}.
 
-%% Regression guard for the bounded list-in-one-cell storage shape preserved
-%% from plum_db: client-scoped tickets for one (user, client) across many
-%% devices live in ONE cell as a per-device list — NOT one cell per ticket.
+%% The bounded list-in-one-cell storage shape: client-scoped tickets for one
+%% (user, client) across many devices live in ONE cell as a per-device list —
+%% NOT one cell per ticket.
 storage_shape_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         [
@@ -132,7 +130,7 @@ expired_marker_is_pruned() ->
     ?assertEqual({error, not_found}, lookup(<<"karl">>, <<"app6">>, device(1))).
 
 %% Drive the real `bondy_ticket:store_ticket/3` (which builds the per-device
-%% list via `update_tickets/3`) for one (user, client) across N devices. All N
+%% list) for one (user, client) across N devices. All N
 %% share one composed store key `{Authid, ClientId, <<>>}` (device handled by
 %% the in-cell list), so they MUST collapse to a single cell holding a list of
 %% N — a cell-per-ticket regression would instead yield N cells.
@@ -156,9 +154,8 @@ client_tickets_list_in_one_cell() ->
     ?assert(is_list(Value)),
     ?assertEqual(N, length(Value)),
 
-    %% Every device — INCLUDING the first — is findable via lookup/3 (regression
-    %% guard for the `update_tickets/3` first-device fix: the first ticket used
-    %% to be stored as a bare unkeyed map and so was unfindable).
+    %% Every device — INCLUDING the first — is findable via lookup/3: the first
+    %% ticket must not be stored as a bare unkeyed map.
     lists:foreach(
         fun(I) ->
             ?assertMatch(

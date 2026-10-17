@@ -104,7 +104,7 @@ aggregate_root_second_col_band_prefix_test() ->
 user_grant_source_colocate_test() ->
     %% The point of shard co-location: alice's user record + her grants + her sources
     %% all land on one shard, so a token_version bump + grant write is one
-    %% atomic per-shard batch (#73).
+    %% atomic per-shard batch.
     UserT = agg_table(identity),
     GrantT = agg_table(leading_col),
     SourceT = agg_table(leading_col),

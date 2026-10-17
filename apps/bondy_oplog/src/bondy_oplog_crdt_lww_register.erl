@@ -272,9 +272,7 @@ encode_state({cleared, H}) when is_integer(H) ->
 decode_state(<<0>>) ->
     undefined;
 decode_state(<<1, H:64/big-unsigned, VBin/binary>>) ->
-    %% Own-persisted projection bytes — plain decode per the C-2
-    %% own-bytes rule (rationale:
-    %% `bondy_oplog_cell_kernel:decode_value_bytes/2`).
+    %% Own projection bytes, so no `[safe]`: see `bondy_oplog_cell_kernel`.
     {set, binary_to_term(VBin), H};
 decode_state(<<2, H:64/big-unsigned>>) ->
     {cleared, H}.

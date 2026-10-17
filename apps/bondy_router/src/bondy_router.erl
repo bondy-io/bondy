@@ -144,16 +144,9 @@ forward(
 ) ->
     async_forward(M, Ctxt);
 forward(#call{} = M, #{session := _} = Ctxt0) ->
-    %% This is a sync call as it is an easy way to guarantee ordering of
-    %% invocations between any given pair of Caller and Callee as
-    %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
-    %% between two processes.
-    %% RFC:
-    %% If Callee A has registered endpoints for both Procedure 1 and Procedure
-    %% 2, and Caller B first issues a Call 1 to Procedure 1 and then a Call 2
-    %% to Procedure 2, and both calls are routed to Callee A, then Callee A
-    %% will first receive an invocation corresponding to Call 1 and then Call
-    %% 2. This also holds if Procedure 1 and Procedure 2 are identical.
+    %% Sync, to guarantee the invocation ordering between a Caller and a
+    %% Callee that WAMP RFC 11.2 requires: Erlang guarantees causal delivery
+    %% of messages between two processes.
     ok = sync_forward({M, Ctxt0}),
     %% The invocation is always async and the result or error will be delivered
     %% asynchronously by the dealer.
@@ -161,15 +154,11 @@ forward(#call{} = M, #{session := _} = Ctxt0) ->
 forward(M, #{session := _} = Ctxt) when
     is_record(M, subscribe) orelse is_record(M, unsubscribe)
 ->
-    %% This is a sync request as clients can subscribe multiple times
-    %% concurrently. This is beczuse matching and adding to the registry is not
-    %% done atomically: bondy_registry:add uses art_server:match/2 to
-    %% determine if a subscription already exists and then adds to the registry
-    %% (and trie). If we allow this request to be concurrent 2 or more request
-    %% could get no matches from match and thus create 3 subscriptions when
-    %% according to the protocol the subscriber should always get the same
-    %% subscription as result.
-    %% Same for UNSUBSCRIBE
+    %% Sync, because matching and adding to the registry are not atomic:
+    %% `bondy_registry:add` first matches for an existing subscription and
+    %% then adds. Concurrent SUBSCRIBEs could each see no match and create
+    %% several subscriptions, where the protocol requires the subscriber to
+    %% get the same subscription back. Same for UNSUBSCRIBE.
     %% REVIEW An alternative approach would be for this to be handled async and
     %% a pool of register servers to block.
     ok = sync_forward({M, Ctxt}),
@@ -177,36 +166,23 @@ forward(M, #{session := _} = Ctxt) when
 forward(M, #{session := _} = Ctxt) when
     is_record(M, register) orelse is_record(M, unregister)
 ->
-    %% This is a sync call as it is an easy way to preserve RPC ordering as
-    %% defined by RFC 11.2:
-    %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
-    %% message will be sent by _Dealer_ to _Callee A_ before any
-    %% "INVOCATION" message for *Procedure 1*.
-    %% Because we block the callee until we get the response,
-    %% the callee will not receive any other messages.
-    %% However, notice that if the callee has another connection with the
-    %% router, then it might receive an invocation through that connection
-    %% before we reply here.
-    %% Same for UNREGISTER
-    %% At the moment this relies on Erlang's guaranteed causal delivery of
-    %% messages between two processes even when in different nodes.
+    %% Sync, to preserve the RPC ordering WAMP RFC 11.2 requires: REGISTERED
+    %% reaches the Callee before any INVOCATION for that procedure, because
+    %% the callee is blocked until the reply. A callee with a second
+    %% connection may still receive an invocation through it first. Same for
+    %% UNREGISTER. This relies on Erlang's causal delivery of messages between
+    %% two processes, also across nodes.
     ok = sync_forward({M, Ctxt}),
     {ok, Ctxt};
 forward(M, #{session := _} = Ctxt) ->
-    %% PUBLISH, YIELD, CANCEL and ERROR (invocation/interrupt).
-    %% These carry per-source ordering obligations — events from one
-    %% publisher must reach each subscriber in publication order, and the
-    %% results of one call (e.g. progressive) must reach the caller in
-    %% yield order. Handling them synchronously preserves that order for
-    %% free: this process serialises the session's inbound traffic, the
-    %% relay egress pins each flow to one channel connection and the
-    %% receiving node's ingress dispatches it to one flow pool worker.
-    %% It also spreads routing work across the (many) connection
-    %% processes instead of funnelling every session's messages through
-    %% a small shared pool — an ordered lane cannot convert queue depth
-    %% into throughput, so under load such a funnel can only grow
-    %% latency and shed; here a loaded router instead exerts natural
-    %% backpressure on the connection.
+    %% PUBLISH, YIELD, CANCEL and ERROR (invocation/interrupt) carry
+    %% per-source ordering obligations: events from one publisher reach each
+    %% subscriber in publication order, and the results of one call reach
+    %% the caller in yield order. Handling them synchronously preserves that
+    %% order: this process serialises the session's inbound traffic, the
+    %% relay egress pins each flow to one channel connection, and the
+    %% receiving node's ingress dispatches it to one flow pool worker. A
+    %% loaded router then exerts backpressure on the connection.
     ok = sync_forward({M, Ctxt}),
     {ok, Ctxt}.
 

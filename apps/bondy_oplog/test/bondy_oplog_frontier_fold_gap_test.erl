@@ -159,25 +159,13 @@ across_a_restart(Dir) ->
     end.
 
 %% As `live_path/1`, but the two appends reach the applier in SEPARATE batches
-%% and there is no restart, so nothing repairs the claim afterwards.
-%%
-%% The falsifier for a per-batch cap. A
-%% rule that caps below the lowest seq THIS batch failed to materialise lets
-%% batch one fail seq 1 and materialise nothing, batch two materialise seq 2
-%% and observe no failure at all, and the claim reach 2 over a projection
-%% holding only seq 2.
-%%
-%% The point is not that the cap is mis-computed. It is that a single integer
-%% per origin cannot carry "seq 2 folded" across the batch boundary while seq 1
-%% is missing: PROVED impossible in
-%% `proofs/isabelle/Frontier_Pending.thy` (`no_scalar_writer_sound_and_complete`),
-%% checked under concurrency and restarts in `proofs/tla/FrontierPending.tla`
-%% (`FrontierPending_MaxCap.cfg`, `NoOverClaim` violated). Note that BOTH
-%% batches here are individually blameless — batch two never saw a failure.
-%%
-%% `live_path/1` gates the drain so both appends share one batch, which is the
-%% regime where the shipped rule IS sound
-%% (`shipped_sound_when_visible`); this case is the complement.
+%% and there is no restart, so nothing repairs the claim afterwards. A rule
+%% that caps below the lowest seq THIS batch failed to materialise lets batch
+%% one fail seq 1 and materialise nothing, batch two materialise seq 2 and
+%% observe no failure, and the claim reach 2 over a projection holding only
+%% seq 2. A single integer per origin cannot carry "seq 2 folded" across the
+%% batch boundary while seq 1 is missing; proved in
+%% `proofs/isabelle/Frontier_Pending.thy` and `proofs/tla/FrontierPending.tla`.
 split_batch(Dir) ->
     {Id, NS, Origin, H} = open(Dir, mk_id()),
     try

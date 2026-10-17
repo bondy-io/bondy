@@ -10,31 +10,31 @@ Cowboy handler for both MCP paths, selected by the `action` key in its
 route state: the JSON-RPC endpoint (`rpc`) and the OAuth protected-resource
 metadata document (`oauth_metadata`, still a stub).
 
-## The modern per-request edge (design §5.2, §21 increment 4)
+## The modern per-request edge
 
 A `2026-07-28` request is served in the REST-gateway shape: no process, no
 stored session, nothing retained past the response. The pipeline is
 
 1. transport checks — method, body size, JSON-RPC decode;
-2. §10.1 validation — the `MCP-Protocol-Version` header must equal the
+2. header/body validation — the `MCP-Protocol-Version` header must equal the
    body's `_meta."io.modelcontextprotocol/protocolVersion"` (else `400` +
    `-32020 HeaderMismatch`); a version this endpoint does not carry is
    `400` + `-32022 UnsupportedProtocolVersionError` naming the supported
    set; `Mcp-Method` (all requests) and `Mcp-Name` (`tools/call`,
    `resources/read`, `prompts/get`) must agree with the body,
    Base64-sentinel values decoded before comparison;
-3. authentication (§6, modern) — the realm's configured auth methods
+3. authentication (modern) — the realm's configured auth methods
    decide what the `Authorization` header may carry: a Bearer JWT
    (OAuth2), a Bearer Bondy ticket, or Basic (password); an absent header
    falls through to the anonymous principal when the realm admits it.
    Failure is `401` with `WWW-Authenticate`; NOTHING has been started;
-4. dispatch — `tools/list` (RBAC-projected per §6, paginated),
-   `tools/call` and `resources/read` build the §5.2 unstored session and
+4. dispatch — `tools/list` (RBAC-projected, paginated),
+   `tools/call` and `resources/read` build the unstored session and
    context and speak WAMP inward. An unknown method — and a manifest
    entry hidden from this principal, deliberately indistinguishable — is
    `404` + `-32601`.
 
-`tools/call` also carries the §11.1 multi round-trip mechanism: a callee
+`tools/call` also carries the MRTR multi round-trip mechanism: a callee
 answering `bondy.error.mcp.input_required` becomes an
 `InputRequiredResult` whose `requestState` is sealed by
 `bondy_mcp_request_state`, and a retry presenting `inputResponses` /
@@ -42,12 +42,12 @@ answering `bondy.error.mcp.input_required` becomes an
 `_mcp_state` kwargs (client arguments in the `_mcp` namespace are
 refused, so the channel cannot be impersonated through the gateway).
 
-Every tool call, resource read, and RBAC denial emits one §14 audit
+Every tool call, resource read, and RBAC denial emits one audit
 record via `bondy_mcp_audit:record/2` — the denial record is invisible on
 the wire, which answers identically for hidden and absent. Emission is
 fail-open (see that module's doc).
 
-## The handshake era (design §12, §21 increment 8)
+## The handshake era
 
 The same endpoint serves protocol revisions `2025-06-18` and
 `2025-11-25` when the listener's `protocol_versions` carries them. Era
@@ -68,11 +68,11 @@ the status dialect: inside a session, JSON-RPC-level failures ride HTTP
 or unknown session (the client MUST re-initialize on it) — `hs_status/1`
 remaps the shared dispatch's modern-era statuses accordingly. The shared
 `tools_call`/`resources_read` are era-gated: `Mcp-Param-*` header checks
-and the §11.1 retry params are modern mechanisms, a callee's
+and the MRTR retry params are modern mechanisms, a callee's
 `input_required` signal surfaces here as a plain tool error, and audit
 records carry the SESSION's id rather than a per-request one.
 
-The per-request RBAC context build (the modern path's floor, §2.5.4) is
+The per-request RBAC context build (the modern path's floor) is
 measured around `bondy_session:rbac_context/1` and published as the
 telemetry event `[bondy_mcp, modern, rbac_context_build]` with a
 native-unit `duration` measurement.
@@ -97,12 +97,12 @@ init(Req0, #{action := rpc} = St) ->
     case handle_rpc(Req0, St) of
         {loop, Req, Stream} ->
             %% A `subscriptions/listen` request became a held SSE stream
-            %% (§9): this process stays as a cowboy_loop, `info/3` below
+            %% this process stays as a cowboy_loop, `info/3` below
             %% delegates to `bondy_mcp_stream`.
             {cowboy_loop, Req, St#{mcp_stream => Stream}};
         {loop_state, Req, St1} ->
             %% A handshake-era GET became the session's held notification
-            %% stream (§12.2); `info/3`'s `hs_stream` clauses serve it.
+            %% stream; `info/3`'s `hs_stream` clauses serve it.
             {cowboy_loop, Req, St1};
         Req ->
             {ok, Req, St}
@@ -121,9 +121,9 @@ info(Msg, Req0, #{mcp_stream := Stream0} = St) ->
         {ok, Req, Stream} -> {ok, Req, St#{mcp_stream => Stream}};
         {stop, Req, Stream} -> {stop, Req, St#{mcp_stream => Stream}}
     end;
-%% The handshake era's held GET stream (§12.2): `drain_queue` arrives
+%% The handshake era's held GET stream: `drain_queue` arrives
 %% from the transport session whenever its queue has content; the drain
-%% translates above the queue (§12.3) and re-arms itself while a backlog
+%% translates above the queue and re-arms itself while a backlog
 %% remains. `{stop_stream, _}` is the session's graceful close, `DOWN`
 %% its death — either way the SSE stream just ends; the client learns
 %% the session is gone from its next request's 404.
@@ -160,10 +160,9 @@ info(_Msg, Req, #{hs_stream := _} = St) ->
 %% the DOWN cleanup (session close + subscription removal) however this
 %% process ends — a terminate callback a brutal kill would skip cannot be
 %% the cleanup path. The one exception is a REMOTE handshake stream: its
-%% owner-side proxy has no monitor on this process, so a best-effort
-%% detach frees the one-stream slot promptly — and when this callback is
-%% skipped, the next attach's liveness probe detaches the stale proxy
-%% instead.
+%% owner-side proxy has no monitor on this process, so a best-effort detach
+%% frees the one-stream slot promptly; when this callback is skipped, the
+%% next attach's liveness probe detaches the stale proxy instead.
 terminate(_Reason, _Req, #{hs_stream := #{mode := remote} = Stream}) ->
     ok = bondy_mcp_handshake:detach_stream(Stream);
 terminate(_Reason, _Req, _St) ->
@@ -204,7 +203,7 @@ do_handle_rpc(Req0, #{config := Config} = St) ->
     %% default) — the same inbound throttle the WS and raw-socket handlers
     %% apply, before any realm or parse work. 429 is transport-level here:
     %% it carries no session meaning, so it is safe in both eras (unlike
-    %% 404, which is reserved for the session — §12).
+    %% 404, which is reserved for the session).
     ok =
         case
             bondy_http_utils:throttle(http, Req0, #{
@@ -240,7 +239,7 @@ do_handle_rpc(Req0, #{config := Config} = St) ->
                 Req0}
         ),
 
-    %% GET and DELETE exist only in the handshake era (§12): the held
+    %% GET and DELETE exist only in the handshake era: the held
     %% notification stream and explicit session termination. On a
     %% modern-only endpoint they are 405 — for GET exactly the answer the
     %% transport specification prescribes for "no SSE stream offered".
@@ -386,7 +385,7 @@ dispatch(<<"subscriptions/listen">>, Id, Params, RealmUri, AuthSt, Req, St) ->
 dispatch(<<"server/discover">>, Id, _, _, _, _, St) ->
     server_discover(Id, St);
 dispatch(Method, Id, _, _, _, _, _) ->
-    %% §10.1: 404 and -32601 together — the JSON-RPC body is what
+    %% 404 and -32601 together — the JSON-RPC body is what
     %% distinguishes this from a 404 by something that is not MCP at all.
     {404,
         bondy_json_rpc:error_response(
@@ -398,14 +397,11 @@ dispatch(Method, Id, _, _, _, _, _) ->
 %% @private
 %% The modern era's connect-time negotiation probe. The official client
 %% (@modelcontextprotocol/client 2.0.0) decides the connection's era from
-%% this answer: `supportedVersions` must offer a 2026-07-28+ revision and
-%% `capabilities` is required — both measured against that client (a probe
-%% server logging its wire traffic; the SDK's own DiscoverResult
-%% validator). The result is deliberately NOT resultType-stamped: the
-%% probe runs before the era verdict, and the measured client accepts the
-%% bare shape. A handshake-only endpoint never reaches this clause —
-%% `check_version/4` already refused the modern header — so discover
-%% cannot claim an era the endpoint does not serve.
+%% this answer: `supportedVersions` offers a 2026-07-28+ revision and
+%% `capabilities` is present, the two fields its DiscoverResult validator
+%% requires (`bondy_mcp_modern_SUITE:server_discover_answers_the_probe`).
+%% Not resultType-stamped: the probe runs before the era verdict. A
+%% handshake-only endpoint never reaches this clause (`check_version/4`).
 server_discover(Id, #{config := Config}) ->
     Result = #{
         <<"supportedVersions">> => bondy_mcp_http_headers:supported_versions(
@@ -446,7 +442,7 @@ tools_list(Id, Params, RealmUri, AuthSt, _Req, #{config := Config}) ->
             bondy_mcp_wamp:tool_descriptor(maps:get(Name, Entries))
          || Name <- Page
         ],
-        %% §7.8: the manifest changes at release cadence, so the cache TTL
+        %% The manifest changes at release cadence, so the cache TTL
         %% is the advertised bound; the scope is ALWAYS private — the list
         %% is RBAC-projected per principal and a shared cache would leak it.
         <<"ttlMs">> => application:get_env(
@@ -481,15 +477,15 @@ tools_call(Id, Params, RealmUri, AuthSt, Req, St) ->
             ok;
         false ->
             %% Hidden by RBAC: deliberately the same answer as absent
-            %% (§6) — "exists but you can't see it" leaks the realm's
-            %% tool surface. The denial IS audited (§14.1): one
+            %% — "exists but you can't see it" leaks the realm's
+            %% tool surface. The denial IS audited: one
             %% policy-decision record, invisible on the wire.
             _ = audit_denied(Arguments, RealmUri, AuthSt, Entry, St),
             ok = bondy_mcp_metrics:rbac_denied(RealmUri, call_authz, 1),
             throw_method_not_found(Id, Name)
     end,
     Era = maps:get(era, St, modern),
-    %% `Mcp-Param-{Name}` headers and the §11.1 retry params are modern
+    %% `Mcp-Param-{Name}` headers and the MRTR retry params are modern
     %% (`2026-07-28`) mechanisms; the handshake era has neither.
     ok =
         case Era of
@@ -558,7 +554,7 @@ tools_call(Id, Params, RealmUri, AuthSt, Req, St) ->
         {error, #{error_uri := ?BONDY_ERROR_MCP_INPUT_REQUIRED} = ErrorMap} when
             Era == modern
         ->
-            %% §11.1: the callee needs more input before it can complete —
+            %% MRTR: the callee needs more input before it can complete —
             %% an `InputRequiredResult`, not an error. Handshake-era
             %% requests fall through to the tool-error clause below: the
             %% MRTR result type does not exist in those revisions, so the
@@ -568,7 +564,7 @@ tools_call(Id, Params, RealmUri, AuthSt, Req, St) ->
                 Id, ErrorMap, RealmUri, Name, Arguments, AuthSt, Audit, Resume
             );
         {error, #{error_uri := _} = ErrorMap} ->
-            %% §10.2: tool-level failures are SUCCESSFUL responses with
+            %% Tool-level failures are SUCCESSFUL responses with
             %% isError and a structured retryable marker.
             _ = bondy_mcp_audit:record(tool_call, Audit#{
                 status => tool_error,
@@ -654,15 +650,11 @@ resources_read(Id, Params, RealmUri, AuthSt, Req, St) ->
                         )
                     }),
                     %% The 2026-07-28 wire schema requires the SEP-2549
-                    %% cache fields on `resources/read` results (the
-                    %% official v2 client refuses the result without
-                    %% them). A read is a live WAMP call, so no
-                    %% freshness is promised — `ttlMs: 0` — and like
-                    %% `tools/list` the scope is private (the read went
-                    %% through this principal's RBAC projection). The
-                    %% handshake-era result schemas tolerate the extra
-                    %% fields (the v1 SDK and the conformance read
-                    %% scenarios pass with them present).
+                    %% cache fields on `resources/read` results. A read is
+                    %% a live WAMP call, so `ttlMs: 0` promises no
+                    %% freshness; the scope is private because the read
+                    %% went through this principal's RBAC projection. The
+                    %% handshake-era result schemas tolerate the extra fields.
                     Read = (bondy_mcp_wamp:read_result(Uri, ResultMap))#{
                         <<"ttlMs">> => 0,
                         <<"cacheScope">> => <<"private">>
@@ -717,7 +709,7 @@ match_resource([_ | Rest], Uri, Id) ->
     match_resource(Rest, Uri, Id).
 
 %% =============================================================================
-%% PRIVATE — the handshake era (§12)
+%% PRIVATE — the handshake era
 %% =============================================================================
 
 %% Streamable HTTP reserves 404 for a terminated or unknown session (the
@@ -730,7 +722,7 @@ match_resource([_ | Rest], Uri, Id) ->
 -define(MCP_RESOURCE_NOT_FOUND, -32002).
 
 %% @private
-%% `initialize` (§12.1): version negotiation per the lifecycle
+%% `initialize`: version negotiation per the lifecycle
 %% specification — echo a supported requested version, else answer the
 %% latest this endpoint carries; only an endpoint with NO handshake
 %% revision refuses, with the specification's own error shape. The
@@ -845,7 +837,7 @@ server_version() ->
 %% @private
 %% A POST carrying `Mcp-Session-Id`: authenticate (per request — the
 %% session is never a credential), then resolve and bind-check the
-%% session, then dispatch. Only POSTs reset the idle timer (§12.8).
+%% session, then dispatch. Only POSTs reset the idle timer.
 handshake_established(Req, Message, RealmUri, WireId, St) ->
     AuthSt = bondy_mcp_http_auth:authenticate(Req, RealmUri),
     ok = check_hs_version_header(Req, rpc_id(Message), St),
@@ -926,7 +918,7 @@ handshake_dispatch(
     ok =
         case Method of
             <<"notifications/cancelled">> ->
-                %% §12.5: a real client-to-server cancellation. Arriving
+                %% A real client-to-server cancellation. Arriving
                 %% after the response was sent is a no-op (the in-flight
                 %% entry is gone).
                 case maps:get(<<"requestId">>, Params, undefined) of
@@ -936,7 +928,7 @@ handshake_dispatch(
             _ ->
                 %% `notifications/initialized` and anything else is
                 %% accepted; no initializing→ready state machine exists
-                %% (§12.1).
+                %% (the lifecycle rule).
                 ok
         end,
     cowboy_req:reply(202, #{}, <<>>, Req);
@@ -1021,7 +1013,7 @@ hs_method(Method, Id, _, _, _, _, _, _) ->
         )}.
 
 %% @private
-%% The three listings share the §12.7 cursor: RBAC filtering AFTER
+%% The three listings share the cursor: RBAC filtering AFTER
 %% slicing — a page can be short once hidden entries are removed, and the
 %% cursor advances by the raw slice, so a manifest dense with hidden
 %% entries cannot amplify scans. The cursor embeds a content tag over the
@@ -1124,10 +1116,10 @@ entry_permission(#{topic := T}) -> {<<"wamp.subscribe">>, T};
 entry_permission(_) -> none.
 
 %% @private
-%% `resources/subscribe` (§12.4): the URI resolves through the manifest
+%% `resources/subscribe`: the URI resolves through the manifest
 %% to an update topic; absent, unresolvable (a procedure-backed resource
 %% with no update topic answers `unsupported` as absence) and RBAC-hidden
-%% answer identically (§6) — only the denial leaves an audit record.
+%% answer identically — only the denial leaves an audit record.
 hs_subscribe(Id, Params, Handle, RealmUri, AuthSt, St) ->
     Uri = require_binary_param(<<"uri">>, Params, Id),
     {ok, #{entries := Entries}} = bondy_mcp_gateway:manifest(RealmUri),
@@ -1204,11 +1196,10 @@ hs_unknown_resource(Id) ->
         )}.
 
 %% @private
-%% The held GET stream (§12.2): one per session — a live predecessor
+%% The held GET stream: one per session — a live predecessor
 %% answers 409 (the reference implementation's status) — delivering the
 %% queue's backlog first, then whatever the session enqueues while
-%% connected. Deliberately NOT `touch`ed: a held stream is not activity
-%% (§12.8).
+%% connected. Deliberately NOT `touch`ed: a held stream is not activity.
 handshake_get(Req0, RealmUri, St) ->
     AuthSt = bondy_mcp_http_auth:authenticate(Req0, RealmUri),
     WireId = require_session_header(Req0),
@@ -1231,7 +1222,7 @@ handshake_get(Req0, RealmUri, St) ->
                     ),
                     %% Local streams drain the queue themselves; the
                     %% initial kick delivers the backlog buffered while
-                    %% no stream was connected (§12.2). A remote
+                    %% no stream was connected. A remote
                     %% stream's backlog flows from the owner-side proxy,
                     %% whose registration triggers the same kick there.
                     case Stream of
@@ -1257,7 +1248,7 @@ handshake_get(Req0, RealmUri, St) ->
     end.
 
 %% @private
-%% `DELETE` (§12.8): graceful close — in-flight calls are cancelled (each
+%% `DELETE`: graceful close — in-flight calls are cancelled (each
 %% pending POST answers with its cancellation error), the stream and
 %% queue go with the transport session, and the stored WAMP session and
 %% its subscriptions with the session manager's monitor. Close metrics
@@ -1292,7 +1283,7 @@ require_session_header(Req) ->
     end.
 
 %% =============================================================================
-%% PRIVATE — multi round-trip requests (§11.1)
+%% PRIVATE — multi round-trip requests
 %% =============================================================================
 
 %% @private
@@ -1433,13 +1424,13 @@ continuation(#{continuation := C}) -> C;
 continuation(undefined) -> undefined.
 
 %% =============================================================================
-%% PRIVATE — RBAC projection (§6)
+%% PRIVATE — RBAC projection
 %% =============================================================================
 
 %% @private
 %% The list filter: the context is fetched (and MEASURED) once, then
 %% `bondy_rbac:check_permission/2` folds over the entries THREADING the
-%% context it returns — `authorize/3` discards it, which is the §6 trap.
+%% context it returns — `bondy_rbac:authorize/3` discards it, which is the trap.
 visible_tools([], _, _, _) ->
     [];
 visible_tools(Names, Entries, RealmUri, AuthSt) ->
@@ -1473,7 +1464,7 @@ visible_tools(Names, Entries, RealmUri, AuthSt) ->
     end.
 
 %% @private
-%% §15.1 `rbac_denied{surface=list_filter}`: the entries a list
+%% `rbac_denied{surface=list_filter}`: the entries a list
 %% projection hid from this principal.
 list_filter_denied(_, 0) ->
     ok;
@@ -1497,10 +1488,10 @@ is_visible(Entry, RealmUri, AuthSt) ->
     end.
 
 %% @private
-%% The per-request RBAC context (§5.2): built from an UNSTORED session —
+%% The per-request RBAC context: built from an UNSTORED session —
 %% the explicitly supported input `bondy_session:rbac_context/1` has a
 %% clause for — and measured, because this build is the floor of every
-%% modern request on a security-enabled realm (§2.5.4).
+%% modern request on a security-enabled realm.
 rbac_context(RealmUri, AuthSt) ->
     case bondy_realm:is_security_enabled(RealmUri) of
         false ->
@@ -1518,14 +1509,14 @@ rbac_context(RealmUri, AuthSt) ->
     end.
 
 %% =============================================================================
-%% PRIVATE — audit capture (§14)
+%% PRIVATE — audit capture
 %% =============================================================================
 
 %% @private
 %% What every audit record on this request shares: the principal, the
-%% listener the request arrived on and its transport (descriptive only —
-%% §6), and the manifest entry's identity including its §7.5 hash, so the
-%% record ties to the exact tool version invoked. The entry's §14.3
+%% listener the request arrived on and its transport (descriptive only),
+%% and the manifest entry's identity including its content hash, so the
+%% record ties to the exact tool version invoked. The entry's
 %% redaction policy rides along and governs the digests.
 audit_base(RealmUri, AuthSt, Entry, St) ->
     #{
@@ -1542,7 +1533,7 @@ audit_base(RealmUri, AuthSt, Entry, St) ->
     }.
 
 %% @private
-%% §14.1's policy-decision record: an RBAC denial the wire deliberately
+%% The policy-decision record: an RBAC denial the wire deliberately
 %% does not distinguish from absence. Denial only arises on a
 %% security-enabled realm, so the decision source is `rbac`.
 audit_denied(Arguments, RealmUri, AuthSt, Entry, St) ->
@@ -1557,7 +1548,7 @@ audit_denied(Arguments, RealmUri, AuthSt, Entry, St) ->
 
 %% @private
 %% `rule` stays `undefined` until `bondy_rbac` surfaces which grant
-%% matched — the §14.2 schema carries the field from the first release.
+%% matched — the record schema carries the field from the first release.
 allow_decision(RealmUri) ->
     Source =
         case bondy_realm:is_security_enabled(RealmUri) of
@@ -1567,18 +1558,17 @@ allow_decision(RealmUri) ->
     #{verdict => allow, rule => undefined, source => Source}.
 
 %% =============================================================================
-%% PRIVATE — the §5.2 per-request session and context
+%% PRIVATE — the per-request session and context
 %% =============================================================================
 
 %% @private
 %% The WAMP call, era-routed. Modern requests use the blocking
-%% `bondy_router_peer:call/5`. Handshake requests split it into its own two exported
-%% halves — `bondy_router_peer:cast/5`, which yields the WAMP request id, and
-%% `bondy_router_peer:check_response/4` — registering the in-flight call in between
-%% so `notifications/cancelled` (and session close) can cancel it with
-%% the original caller context (§12.5); the dealer then answers THIS
-%% blocked process with the cancellation error. The WAMP cancel mode is
-%% the manifest entry's `cancel_mode` option, `killnowait` by default.
+%% `bondy_router_peer:call/5`. Handshake requests split it into
+%% `bondy_router_peer:cast/5`, which yields the WAMP request id, and
+%% `bondy_router_peer:check_response/4`, registering the in-flight call in
+%% between so `notifications/cancelled` (and session close) can cancel it;
+%% the dealer then answers THIS blocked process with the cancellation error.
+%% The cancel mode is the entry's `cancel_mode` option (`killnowait` default).
 mcp_call(Procedure, EntryOpts, TraceOpts, Args, KwArgs, Ctxt, St) ->
     Realm = bondy_context:realm_uri(Ctxt),
     Listener = maps:get(listener, St, undefined),
@@ -1593,7 +1583,7 @@ mcp_call(Procedure, EntryOpts, TraceOpts, Args, KwArgs, Ctxt, St) ->
 %% @private
 do_mcp_call(Procedure, EntryOpts, TraceOpts, Args, KwArgs, Ctxt, St) ->
     %% Disjoint merge: the manifest options are binary-keyed, the trace
-    %% options are the declared extension atoms (§15.4).
+    %% options are the declared extension atoms.
     Opts = maps:merge(
         maps:with([<<"timeout">>, <<"disclose_me">>], EntryOpts),
         TraceOpts
@@ -1622,10 +1612,10 @@ do_mcp_call(Procedure, EntryOpts, TraceOpts, Args, KwArgs, Ctxt, St) ->
     end.
 
 %% @private
-%% The §15.1 status label from an `mcp_call` outcome. As-built enum:
+%% The status label from an `mcp_call` outcome. As-built enum:
 %% `success | input_required | tool_error | internal_error` — a WAMP
 %% timeout or cancellation surfaces as an error URI and lands in
-%% `tool_error` (§21.10 records the deviation from §15.1's enum).
+%% `tool_error`.
 call_status({ok, _}, _) ->
     success;
 call_status({error, #{error_uri := ?BONDY_ERROR_MCP_INPUT_REQUIRED}}, modern) ->
@@ -1652,7 +1642,7 @@ wamp_context(RealmUri, AuthSt, Req, _St) ->
 %% @private
 %% `bondy_session:new/2` constructs; `store/1` is never called on this
 %% path. `progressive_call_results => true` is the load-bearing line: both
-%% progressive features are strict-opt-in per session, and §9.4's progress
+%% progressive features are strict-opt-in per session, and progress
 %% delivery silently degrades without it.
 unstored_session(RealmUri, AuthSt, Peer) ->
     bondy_session:new(RealmUri, #{
@@ -1733,7 +1723,7 @@ throw_method_not_found(Id, Name) ->
     ).
 
 %% @private
-%% Absent and RBAC-hidden resources answer identically (§6's leak rule,
+%% Absent and RBAC-hidden resources answer identically (the leak rule,
 %% applied to the resource space). Each era speaks its own dialect: the
 %% handshake era uses the resources specification's `-32002` (ridden on
 %% 200 by `hs_status/1`), the modern era its `-32602` on 400.

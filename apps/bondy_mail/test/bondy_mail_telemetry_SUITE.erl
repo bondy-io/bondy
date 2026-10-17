@@ -589,8 +589,8 @@ alarm_set(Relay) ->
 
 %% @private
 clear_alarms() ->
-    %% `clear_alarm/1` is a plain notify, so it reaches whichever handler is
-    %% installed.
+    %% `alarm_handler:clear_alarm/1` is a plain notify, so it reaches whichever
+    %% handler is installed.
     _ = [alarm_handler:clear_alarm(Id) || {Id, _} <- get_alarms()],
     ok.
 

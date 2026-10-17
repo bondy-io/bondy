@@ -274,7 +274,7 @@ write_then_read_round_trip_test() ->
 read_unreadable_file_names_the_path_test() ->
     with_tmp_dir(fun(Dir) ->
         Path = bondy_mst_pack_manifest:path(Dir),
-        %% invalid UTF-8: exactly what the `~p` encoder used to write
+        %% invalid UTF-8, which `file:consult/1` rejects
         ok = file:write_file(
             Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
         ),
@@ -457,13 +457,12 @@ override_terms(Terms, Key, Value) ->
 %% @private  Parse an encoded manifest back into terms through the real
 %%           production path: bytes on disk, read by `file:consult/1`.
 %%
-%%           This MUST go through disk. A previous version of this helper
-%%           used `binary_to_list/1` + `erl_scan:string/1`, which applies
-%%           latin-1 semantics and therefore accepted byte sequences that
-%%           `file:consult/1` -- which decodes UTF-8 -- rejects with
-%%           `{Line, file_io_server, invalid_unicode}`. That divergence hid
-%%           a `~p` encoder defect that bricked every replica of a shard in
-%%           production (see `format_term/1` in the module under test).
+%%           This MUST go through disk. `binary_to_list/1` +
+%%           `erl_scan:string/1` applies latin-1 semantics and accepts byte
+%%           sequences that `file:consult/1` -- which decodes UTF-8 --
+%%           rejects with `{Line, file_io_server, invalid_unicode}`. A
+%%           `~p`-rendered binary is such a sequence, which is why
+%%           `encode/1` in the module under test avoids `~p`.
 bin_to_terms(Bin) ->
     Dir = mktemp_dir(),
     try

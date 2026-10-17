@@ -141,15 +141,12 @@ start_http(#{name := Name, transport := Transport} = L) ->
         %% plaintext socket (`cowboy_http.erl:531', `:985'); harmless on TLS,
         %% where ALPN decides first.
         protocols => Versions,
-        %% `cowboy_tls' routes EVERY non-`h2' ALPN outcome through this —
-        %% a negotiated `http/1.1' included, not just an absent ALPN
-        %% extension (`cowboy_tls.erl:38-46'). So this must be the HTTP/1.1
-        %% codec whenever the listener offers 1.1 at all; `hd(Versions)'
-        %% here put h2-first listeners' 1.1 clients into `cowboy_http2'
-        %% (caught live by `bondy_connect_conformance_SUITE''s wss group).
-        %% An h2-only listener keeps `http2': RFC 7540 §3.3 requires ALPN
-        %% for h2 over TLS, so a client landing here is not an h2 client
-        %% and refusing it is that configuration's meaning.
+        %% `cowboy_tls' routes EVERY non-`h2' ALPN outcome through this, a
+        %% negotiated `http/1.1' included, so this must be the HTTP/1.1 codec
+        %% whenever the listener offers 1.1 at all
+        %% (`bondy_connect_conformance_SUITE''s wss group). An h2-only
+        %% listener keeps `http2': RFC 7540 §3.3 requires ALPN for h2 over
+        %% TLS, so a client landing here is not an h2 client.
         alpn_default_protocol =>
             case lists:member(http, Versions) of
                 true -> http;
@@ -208,9 +205,7 @@ connection_handler(wamp_rawsocket) -> bondy_wamp_tcp_connection_handler;
 connection_handler(bridge_relay) -> bondy_bridge_relay_server.
 
 %% @private
-%% Carries over the two behaviours of the now-deleted
-%% `bondy_http_gateway:listener_transport_opts/1`: the connection alarms and the
-%% reuseport listen-socket fan-out.
+%% Owns the connection alarms and the reuseport listen-socket fan-out.
 %% `num_acceptors`, `max_connections` and `socket_opts` are read here and below
 %% WITHOUT a default. `bondy_config:listener_transport_opts/2` merges
 %% `?DEFAULT_TRANSPORT_OPTS` and writes `socket_opts` back unconditionally, so
@@ -235,18 +230,12 @@ transport_opts(#{name := Name, bind := Bind} = L) ->
 %% @private
 with_bind({path, Path}, Opts) ->
     %% Merge rather than replace: `backlog`, `keepalive`, `nodelay`, `sndbuf`,
-    %% `recbuf`, `buffer` and `reuseport` are generic stream-socket options and
-    %% are just as meaningful on a Unix domain socket, so an operator who set
-    %% them must not have them silently dropped. A UDS listener has no port,
-    %% but ranch still requires the key.
-    %%
-    %% This is the one bind target that DOES replace `ip`: the listen address of
-    %% a Unix domain socket is its path, so whatever address the listener
-    %% resolved to is not a bind target here. The bare `inet`/`inet6` family
-    %% atom that `bondy_config:normalise_socket_opts/1` always prepends is
-    %% dropped with it: a Unix domain socket is family-less (`AF_UNIX`), and
-    %% combining that atom with `{ip, {local, Path}}` makes `gen_tcp:listen/2`
-    %% raise `badarg` (verified directly).
+    %% `recbuf`, `buffer` and `reuseport` are as meaningful on a Unix domain
+    %% socket. A UDS listener has no port, but ranch still requires the key.
+    %% This bind target DOES replace `ip`: the listen address of a Unix
+    %% domain socket is its path. The bare `inet`/`inet6` family atom
+    %% `bondy_config` prepends is dropped too: combining it with
+    %% `{ip, {local, Path}}` makes `gen_tcp:listen/2` raise `badarg`.
     SocketOpts0 = key_value:get(socket_opts, Opts),
     SocketOpts1 = lists:delete(inet, lists:delete(inet6, SocketOpts0)),
     SocketOpts2 = lists:keystore(ip, 1, SocketOpts1, {ip, {local, Path}}),

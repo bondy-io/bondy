@@ -5,8 +5,7 @@
 
 -module(bondy_rate_limit_SUITE).
 -moduledoc """
-The REALM scope of the rate-limit chain (design:
-`_plans/2026-08-29-rate-limit-scopes-design.md`), end to end through a
+The REALM scope of the rate-limit chain, end to end through a
 real realm: the `rate_limit` realm property (validator, update,
 migration, external projection) and its enforcement — per-caller
 budgets, the shared `total` quota, consumption order, and the
@@ -119,7 +118,7 @@ parked_realm_class_is_inert(_) ->
 
 %% Updating `rate_limit` to `undefined` clears the property: a caller
 %% the old budget already refused is admitted again, because the chain
-%% no longer consults the (still-existing) buckets.
+%% does not consult the (still-existing) buckets once the property is cleared.
 update_clears_realm_budgets(_) ->
     Uri = gen_uri(),
     _ = bondy_realm:create(#{
@@ -169,11 +168,8 @@ session_chain_shares_the_realm_total(_) ->
     ?assertEqual(throttled, bondy_rate_limit:allow_session(L2)).
 
 %% A session's PRIVATE buckets must own no row in the regulator's shared table.
-%% That table was the only place a per-session bucket could outlive its session:
-%% the old key was `{bondy_msg_limiter, Pid, unique_integer()}`, unreconstructible
-%% by anything but the owner, so a connection killed before
-%% `bondy_wamp_protocol:terminate/1` ran orphaned the row for the life of the
-%% node. Owning no row is what makes that impossible.
+%% A row keyed by the owning connection outlives a connection killed before
+%% `bondy_wamp_protocol:terminate/1` runs. Owning no row makes that impossible.
 %%
 %% The realm's `total` bucket is deliberately excluded — it IS registered and
 %% IS shared, which is why the chain carries it as a key rather than a bucket.
@@ -263,9 +259,8 @@ property_is_projected_externally(_) ->
 %% the longpoll (resp. SSE) handler on `api_gateway_http' must draw from
 %% that listener's `message' budget. Node scope is off (per-testcase),
 %% and no realm budget is set, so the ONLY link that can refuse the third
-%% throttled verb is the listener's. Before the listener name was
-%% threaded through `init_protocol', the chain resolved empty and the
-%% third SUBSCRIBE was admitted — the exact assertion below.
+%% throttled verb is the listener's. A chain that resolves empty admits the
+%% third SUBSCRIBE — the exact assertion below.
 %% =============================================================================
 
 longpoll_session_draws_from_the_listener_message_budget(_) ->

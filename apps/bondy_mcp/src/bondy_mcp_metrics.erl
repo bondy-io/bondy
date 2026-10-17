@@ -5,7 +5,7 @@
 -module(bondy_mcp_metrics).
 
 -moduledoc """
-MCP gateway telemetry (design §15): the emission helpers, the
+MCP gateway telemetry: the emission helpers, the
 `:telemetry` event contract, and the Prometheus sink.
 
 The capture discipline is the node-wide one (`bondy_telemetry`,
@@ -21,7 +21,7 @@ raises is detached permanently by `telemetry`, so every sink clause
 try/catches, and every emitter swallows its own failure — metrics are
 never allowed to take a request down.
 
-Cardinality (§15.2): `realm`, `listener`, `status`, `reason`, `type`,
+Cardinality: `realm`, `listener`, `status`, `reason`, `type`,
 `kind`, `trigger`, `surface` and `upstream` are bounded (operator
 inventory or closed enums). `name` is bounded by the manifest and rides
 the call/read counters; on the duration histograms it is opt-in via
@@ -30,12 +30,12 @@ Two labels are client-controlled and therefore sanitized BY THE CALLER
 before emission: `version` (a known protocol revision or `other` —
 `bondy_mcp_http_handler` owns the known set) and `method` (a method the
 dispatcher knows or `other`, sanitized here against `?KNOWN_METHODS`).
-`principal`, `session_id` and `user` are never labels (§15.2) — they
+`principal`, `session_id` and `user` are never labels — they
 belong to event metadata and the audit record only.
 
 Durations are recorded in microseconds (`_microseconds` families):
 `bondy_metrics` histograms are integer log-linear, matching the node's
-existing duration families, so §15.1's `_seconds` names are realized at
+existing duration families, so the designed `_seconds` names are realized at
 microsecond grain.
 """.
 
@@ -163,7 +163,7 @@ metadata key so an attached handler can emit an OpenTelemetry span for
 the call retroactively, parented to the client's trace: telemetry
 handlers run synchronously in the emitting process, so the handler's
 own clock at handle time is the span's end time and `duration` gives
-the start. That is the §15.4 span contract — one post-hoc event, no
+the start. That is the span contract — one post-hoc event, no
 start/stop pair to orphan on a crash.
 """.
 -spec tool_call(binary(), atom(), binary(), atom(), non_neg_integer(), map()) ->
@@ -227,7 +227,7 @@ notification_emitted(Realm, Type, Count) ->
 RBAC hid or refused something: `list_filter` (entries projected out of a
 list), `call_authz` (a direct call/read on a hidden entry) or
 `subscribe_authz` (a subscription on a topic the principal cannot
-subscribe to — an as-built extension to §15.1's two-surface enum).
+subscribe to).
 """.
 -spec rbac_denied(binary(), atom(), pos_integer()) -> ok.
 
@@ -239,7 +239,7 @@ rbac_denied(Realm, Surface, Count) ->
     ).
 
 -doc """
-A protocol version this endpoint does not carry was refused (§8).
+A protocol version this endpoint does not carry was refused.
 `Version` MUST already be sanitized by the caller: a revision Bondy
 knows, or `other` — never the raw client value.
 """.
@@ -254,9 +254,9 @@ version_refused(Listener, Version) ->
 
 -doc """
 A dispatched request completed; `DurationUs` is the whole gateway-side
-handling INCLUDING any WAMP call — §15.1's dispatch-overhead histogram
+handling INCLUDING any WAMP call — the dispatch-overhead histogram
 is realized as total request time, with overhead derivable at the
-aggregate level as `request_sum - tool_call_sum` (§21.10).
+aggregate level as `request_sum - tool_call_sum`.
 """.
 -spec request_stop(binary(), binary(), non_neg_integer()) -> ok.
 
@@ -298,7 +298,7 @@ manifest_rebuild(Realm, Trigger, DurationUs, Counts) ->
         #{realm => Realm, trigger => Trigger}
     ).
 
--doc "A rebuild reported `Count` §17 collisions of `Kind`.".
+-doc "A rebuild reported `Count` name collisions of `Kind`.".
 -spec manifest_conflict(binary(), atom(), pos_integer()) -> ok.
 
 manifest_conflict(Realm, Kind, Count) ->
@@ -309,7 +309,7 @@ manifest_conflict(Realm, Kind, Count) ->
     ).
 
 -doc """
-A projected upstream tool call completed (§13, §21.9). `Trace` as in
+A projected upstream tool call completed. `Trace` as in
 `tool_call/6` — here it is what rode the upstream request's
 `params._meta`, so the operator's span parents to the WAMP caller's
 trace.
@@ -323,7 +323,7 @@ upstream_call(Upstream, Status, DurationUs, Trace) ->
         #{upstream => Upstream, status => Status, trace => Trace}
     ).
 
--doc "`Count` upstream tools were blocked by the §13.3 pin gate.".
+-doc "`Count` upstream tools were blocked by the pin gate.".
 -spec upstream_drift_blocked(binary(), pos_integer()) -> ok.
 
 upstream_drift_blocked(Upstream, Count) ->
@@ -382,7 +382,7 @@ handle_event([bondy, http_transport, session, closed], _Meas, Meta, _Config) ->
     %% this gateway registered lifecycle metadata for (bootstrap, AFTER
     %% a successful open) is an MCP session — everything else (WAMP
     %% longpoll/SSE transports, part-initialized bootstraps) is ignored.
-    %% Re-emitted as the §15.3 `[bondy, mcp, session, close]` event, so
+    %% Re-emitted as the `[bondy, mcp, session, close]` event, so
     %% that contract stays THE MCP close event for external handlers.
     case Meta of
         #{
@@ -595,7 +595,7 @@ handle_event(_, _, _, _) ->
 
 %% @private
 %% Counter (name always a label — bounded by the manifest) + duration
-%% histogram (name opt-in via `mcp.metrics.label_by_name`, §15.2).
+%% histogram (name opt-in via `mcp.metrics.label_by_name`).
 sink_dispatched(CounterName, HistName, Meas, Meta) ->
     Node = node_name(),
     Realm = maps:get(realm, Meta, undefined),
@@ -627,12 +627,10 @@ sink_dispatched(CounterName, HistName, Meas, Meta) ->
 %% The closed-reason label enum. The inputs are server-side stop tags
 %% (never client-controlled), but the label must stay a closed set: a
 %% tag added upstream without extending this mapping shows up as
-%% `other`, which is visible and harmless. As-built deviations from
-%% §15.1's enum: `stored_session_closed` covers both the admin-kill and
-%% realm-deletion rows (the liveness-check seat cannot tell them
-%% apart), and `server_shutdown` is any supervisor-driven stop
-%% (listener stop and node shutdown are indistinguishable at
-%% `terminate/2`).
+%% `other`, which is visible and harmless. `stored_session_closed` covers
+%% both the admin-kill and realm-deletion rows (the liveness-check seat
+%% cannot tell them apart), and `server_shutdown` is any supervisor-driven
+%% stop (listener stop and node shutdown look the same at `terminate/2`).
 mcp_close_reason(client_close) -> client_close;
 mcp_close_reason(idle_timeout) -> idle_timeout;
 mcp_close_reason(stored_session_closed) -> stored_session_closed;

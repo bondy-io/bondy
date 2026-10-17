@@ -129,27 +129,14 @@ routes(admin, _Spec, _Listener) ->
     ];
 routes(metrics, _Spec, _Listener) ->
     [{'_', [{"/metrics/[:registry]", prometheus_cowboy2_handler, []}]}];
-%% The two specification-derived carriers. Both route sets come from the gateway
-%% — `api_gateway`'s from the specifications stored in bondy_db, `admin_api`'s
-%% from the built-in specification in `priv/` — and a listener that declares
-%% neither service has neither carrier, so neither clause runs and nothing asks
-%% the gateway for routes.
-%%
-%% They are two carriers rather than one because they differ by route SOURCE and
-%% not by protocol: both declare `undefined` for protocol, so a shared carrier's
-%% protocol union could not tell them apart and this function had to read
-%% `services` to decide which of the two route sets to fetch.
-%%
-%% Both are backed by the durable store — `api_gateway` reads its
-%% specifications from it, and compiling either table consults the realm
-%% table to drop routes whose realm is absent — so on a degraded boot
-%% (`main` failed to open; `bondy_namespace_catalog:main_status/0`) neither
-%% can be built, and neither could serve a request if it were. The dispatch
-%% is made HERE, once per carrier, rather than by catching
-%% `*_table_unavailable` per route inside the compiler: the listener still
-%% mounts every static carrier, so `/ping`, `/ready` and `/metrics` answer on
-%% a degraded node. This is the same mode dispatch `bondy_router_app:start_services/1`
-%% boots by. Exercised by `bondy_degraded_boot_SUITE`.
+%% The two specification-derived carriers. Both route sets come from the
+%% gateway: `api_gateway`'s from the specifications stored in bondy_db,
+%% `admin_api`'s from the built-in specification in `priv/`. They are two
+%% carriers because they differ by route SOURCE, not by protocol. Both read
+%% the durable store, so on a degraded boot
+%% (`bondy_namespace_catalog:main_status/0`) neither is built, while every
+%% static carrier (`/ping`, `/ready`, `/metrics`) still mounts: the same mode
+%% dispatch as `bondy_router_app:start_services/1`. `bondy_degraded_boot_SUITE`.
 routes(api_gateway, _Spec, Listener) ->
     specification_routes(
         api_gateway, fun bondy_http_gateway:routes/1, Listener

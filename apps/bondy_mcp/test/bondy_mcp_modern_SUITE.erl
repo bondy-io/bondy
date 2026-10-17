@@ -5,10 +5,10 @@
 -module(bondy_mcp_modern_SUITE).
 
 -moduledoc """
-The modern (2026-07-28) per-request MCP edge (design §5.2, §21 increment 4)
+The modern (2026-07-28) per-request MCP edge
 over a real socket on a booted node: `tools/list` is the RBAC-projected,
 paginated manifest; `tools/call` and `resources/read` speak WAMP inward
-through an UNSTORED per-request session; §10.1's transport validation
+through an UNSTORED per-request session; the transport validation
 (protocol-version negotiation, header/body agreement incl. the Base64
 sentinel and `x-mcp-header` params) answers with the specification's
 status/code pairs; and the era's defining property — N requests leave zero
@@ -100,7 +100,7 @@ init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(gun),
 
     %% Audit records reach their seam as `[bondy, mcp, audit, record]`
-    %% telemetry (MCP-D27: no local sink). Capture them for the audit
+    %% telemetry (no local sink). Capture them for the audit
     %% cases. The handler runs synchronously in the emitting process, so
     %% a record is in the table before any response or SSE frame that
     %% follows its emission — the cases may query right after a reply.
@@ -254,7 +254,7 @@ init_per_suite(Config) ->
                 }
             ] ++
             [
-                %% The §11.1 callees: one elicits (requests + state), one
+                %% The MRTR callees: one elicits (requests + state), one
                 %% load-sheds (state only).
                 #{
                     <<"realm">> => ?OPEN_REALM,
@@ -308,7 +308,7 @@ init_per_suite(Config) ->
                     <<"com.example.mcp.mod.user.{{id}}.changed">>,
                 <<"result_kwargs_schema">> => #{<<"type">> => <<"object">>}
             },
-            %% An overlay-only tool with a §14.3 redaction policy: what
+            %% An overlay-only tool with an audit redaction policy: what
             %% the redaction CT case captures through.
             #{
                 <<"realm">> => ?OPEN_REALM,
@@ -364,7 +364,7 @@ end_per_suite(Config) ->
     ok = bondy_mcp_gateway:delete(<<"mcp_modern_overlay">>),
     {save_config, Config}.
 
-%% The §3.4 shape, hand-built: resolution totality is
+%% The resolved listener shape, hand-built: resolution totality is
 %% `bondy_listener_config`'s property, pinned by its own tests; this
 %% suite's subject is the handler. `default_page_size => 2` keeps the
 %% pagination case honest; `2025-11-25` makes the endpoint dual-era —
@@ -447,7 +447,8 @@ tools_call_round_trip(Config) ->
     ),
     ?assertEqual(200, Status),
     #{<<"result">> := Result} = Resp,
-    %% §16.1 both directions: @args became WAMP positional arguments, the
+    %% Flattening in both directions: @args became WAMP positional arguments,
+    %% the
     %% echoed payload flattens back under @args.
     ?assertMatch(
         #{
@@ -463,7 +464,7 @@ tools_call_round_trip(Config) ->
     ).
 
 tools_call_unregistered_is_retryable(Config) ->
-    %% §7.7 + §10.2: declared in the manifest, no callee registered — a
+    %% Declared in the manifest, no callee registered — a
     %% SUCCESSFUL response carrying isError and a STRUCTURED retryable
     %% marker, so an agent waits or retries instead of abandoning the tool.
     {200, #{<<"result">> := Result}} = post(
@@ -487,7 +488,7 @@ tools_call_unregistered_is_retryable(Config) ->
 %% router's trace extension options, verbatim — through the handler's
 %% mapping, `bondy_router_peer:call`, the dealer's carry and the SDK's decode. The
 %% completion event carries the same context as its `trace` metadata —
-%% the §15.4 span contract, asserted at the telemetry seam.
+%% the span contract, asserted at the telemetry seam.
 tools_call_maps_meta_trace_context(Config) ->
     TP = <<"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01">>,
     TS = <<"congo=t61rcWkgMzE">>,
@@ -635,7 +636,7 @@ resources_read_binds_the_template(Config) ->
     ).
 
 unknown_method_is_404_with_method_not_found(Config) ->
-    %% §10.1: status and code together — the body distinguishes this 404
+    %% Status and code together — the body distinguishes this 404
     %% from one served by something that is not an MCP endpoint at all.
     ?assertMatch(
         {404, #{<<"error">> := #{<<"code">> := -32601}}},
@@ -684,8 +685,8 @@ version_negotiation(Config) ->
         },
         Err
     ),
-    %% A handshake-era version header on a session-less request: since
-    %% §21 increment 8 the endpoint carries `2025-11-25`, and the
+    %% A handshake-era version header on a session-less request: the
+    %% endpoint carries `2025-11-25`, and the
     %% transport specification's session rule answers before anything
     %% else — a session id is required for everything but `initialize`.
     {400, #{<<"error">> := Err2}} = raw_post(
@@ -794,7 +795,7 @@ basic_auth_and_the_rbac_projection(Config) ->
     Tools = all_tools(Config, ?RBAC_REALM, #{auth => Auth}),
     ?assertEqual([?ALLOWED], [maps:get(<<"name">>, T) || T <- Tools]),
     %% A hidden entry called directly answers EXACTLY like an absent one
-    %% (§6: the distinction is an information leak).
+    %% (the distinction is an information leak).
     {S1, R1} = post(
         Config,
         ?RBAC_REALM,
@@ -829,7 +830,7 @@ basic_auth_and_the_rbac_projection(Config) ->
         )
     ).
 
-%% The MCP-D31 delegation flow end to end on the wire: a user's own
+%% The ticket delegation flow end to end on the wire: a user's own
 %% session (full roles) issues a ticket restricted to one of its groups
 %% via `authroles`; an agent presenting that ticket as a Bearer
 %% credential gets a projection bounded by the RESTRICTED roles — the
@@ -937,7 +938,7 @@ requests_leave_zero_footprint(Config) ->
     ?assertEqual(Transport0, transport_session_count()).
 
 rbac_context_build_is_measured(Config) ->
-    %% §2.5.4 / §21.4: the per-request RBAC context build is the modern
+    %% The per-request RBAC context build is the modern
     %% path's floor; it must be MEASURED and published, not estimated.
     Self = self(),
     Id = {?MODULE, rbac_measure},
@@ -978,9 +979,9 @@ notification_is_accepted(Config) ->
     ?assertEqual(202, Status).
 
 audit_tool_call_records(Config) ->
-    %% §14.1: one record per tool call, tied to the exact entry version
-    %% by the §7.5 hash, emitted at the telemetry seam a sink attaches
-    %% to (MCP-D27).
+    %% One record per tool call, tied to the exact entry version
+    %% by the content hash, emitted at the telemetry seam a sink attaches
+    %% to.
     Args = #{<<"n">> => 991},
     {200, _} = post(
         Config,
@@ -1008,7 +1009,7 @@ audit_tool_call_records(Config) ->
             procedure := ?ECHO,
             redaction := none,
             decision := #{verdict := allow, source := none},
-            %% §14.2: present from the first release, unpopulated.
+            %% Present from the first release, unpopulated.
             agent := undefined,
             delegation := [],
             derivation := undefined,
@@ -1025,8 +1026,8 @@ audit_tool_call_records(Config) ->
     ?assertNotEqual(undefined, maps:get(session_id, R)).
 
 audit_denied_call_is_recorded_invisibly(Config) ->
-    %% §14.1's policy decision: the wire answers exactly like absence
-    %% (§6), the audit record does not — and true absence leaves NO
+    %% The policy decision: the wire answers exactly like absence
+    %% (the leak rule), the audit record does not — and true absence leaves NO
     %% record, so the two are distinguishable only where they should be.
     Auth = basic_auth(?USER, ?PASSWORD),
     Before = length(audit_records()),
@@ -1065,7 +1066,7 @@ audit_denied_call_is_recorded_invisibly(Config) ->
     ?assertEqual(Before + 1, length(audit_records())).
 
 audit_redaction_applies_at_capture(Config) ->
-    %% §14.3 end to end: the overlay's redaction policy travels
+    %% Redaction end to end: the overlay's redaction policy travels
     %% parser → store → compiled manifest → capture, and the redacted
     %% field influences nothing the record captures.
     Args = #{<<"customer">> => <<"acme">>, <<"ssn">> => <<"123-45-6789">>},
@@ -1091,7 +1092,7 @@ audit_redaction_applies_at_capture(Config) ->
     ).
 
 %% =============================================================================
-%% CASES — multi round-trip requests (§11.1, §21.7)
+%% CASES — multi round-trip requests
 %% =============================================================================
 
 tools_call_input_required_round_trip(Config) ->
@@ -1162,7 +1163,7 @@ tools_call_input_required_round_trip(Config) ->
         ),
         ?assertEqual(Responses, maps:get(<<"responses">>, SC)),
 
-        %% §14: both legs audited as ONE logical call — two records
+        %% Both legs audited as ONE logical call — two records
         %% sharing a continuation id nothing else carries.
         [A1, A2] = collect_mrtr_audit(2, []),
         ?assertEqual(
@@ -1177,7 +1178,7 @@ tools_call_input_required_round_trip(Config) ->
     end.
 
 state_only_continuation_round_trip(Config) ->
-    %% §11.2's primitive: no input requests at all — "check back later"
+    %% The state-only primitive: no input requests at all — "check back later"
     %% as a requestState-only InputRequiredResult (the specification's
     %% load-shedding example), completed by an out-of-band condition the
     %% callee models.
@@ -1264,7 +1265,7 @@ request_state_bindings_are_enforced(Config) ->
     ).
 
 request_state_replay_by_another_principal_is_rejected(Config) ->
-    %% THE §21.7 falsification target. Leg 1 is minted in-VM as ?USER —
+    %% THE request-state falsification target. Leg 1 is minted in-VM as ?USER —
     %% the handler's `open` is the enforcement point and runs BEFORE any
     %% callee, so none is needed.
     {ok, Sealed} = bondy_mcp_request_state:seal(?RBAC_REALM, #{
@@ -1296,7 +1297,7 @@ request_state_replay_by_another_principal_is_rejected(Config) ->
     ),
     %% ...while the minted-for principal passes the state gate and
     %% proceeds to the call, hitting the declared-but-unregistered
-    %% procedure (§7.7's retryable tool error) — proof the rejection
+    %% procedure (the retryable tool error) — proof the rejection
     %% above was the principal binding and nothing else.
     {200, #{<<"result">> := R}} = Retry(70, ?USER),
     ?assertMatch(
@@ -1333,7 +1334,7 @@ collect_mrtr_audit(N, Acc) ->
     end.
 
 %% =============================================================================
-%% CASES — subscriptions/listen (§9, §21.6)
+%% CASES — subscriptions/listen
 %% =============================================================================
 
 -define(SUBID_KEY, <<"io.modelcontextprotocol/subscriptionId">>).
@@ -1412,7 +1413,7 @@ listen_ack_first_and_filter_enforced(Config) ->
     end.
 
 listen_resource_updates_round_trip(Config) ->
-    %% §9.2 both resolution paths: a base resource (`wamp:<realm>:<topic>`)
+    %% Both resolution paths: a base resource (`wamp:<realm>:<topic>`)
     %% and a template instance whose `update_topic` interpolates the bound
     %% variable. An unknown URI is silently omitted from the ack, and an
     %% update for a DIFFERENT template instance never arrives.
@@ -1447,7 +1448,7 @@ listen_resource_updates_round_trip(Config) ->
         },
         E1
     ),
-    %% §9.2: only the URI travels; the payload does not.
+    %% Only the URI travels; the payload does not.
     #{<<"params">> := E1Params} = E1,
     ?assertEqual(
         [<<"_meta">>, <<"uri">>], lists:sort(maps:keys(E1Params))
@@ -1462,9 +1463,10 @@ listen_resource_updates_round_trip(Config) ->
     ok = gun:close(Conn).
 
 listen_rbac_denied_subscription_is_omitted_and_audited(Config) ->
-    %% §6 applied to the subscription filter: a topic the principal lacks
+    %% The leak rule applied to the subscription filter: a topic the principal
+    %% lacks
     %% `wamp.subscribe` on is omitted from the ack exactly like an unknown
-    %% one — and the denial is a §14.1 policy-decision audit record.
+    %% one — and the denial is a policy-decision audit record.
     OkUri = <<"wamp:", ?RBAC_REALM/binary, ":", ?SUB_OK_TOPIC/binary>>,
     NoUri = <<"wamp:", ?RBAC_REALM/binary, ":", ?SUB_NO_TOPIC/binary>>,
     Before = length(audit_records()),
@@ -1503,7 +1505,7 @@ listen_rbac_denied_subscription_is_omitted_and_audited(Config) ->
     ok = gun:close(Conn).
 
 closing_stream_unsubscribes_everything(Config) ->
-    %% The transport-drop ending (§9.3): the client closes; NOTHING was
+    %% The transport-drop ending: the client closes; NOTHING was
     %% sent to it; the session-manager DOWN cleanup removes the stored
     %% session and every WAMP subscription the stream held.
     ok = drain_streams(?OPEN_REALM),
@@ -1536,7 +1538,7 @@ closing_stream_unsubscribes_everything(Config) ->
     ).
 
 server_teardown_sends_completion(Config) ->
-    %% The graceful ending (§9.3): `notifications/cancelled` naming the
+    %% The graceful ending: `notifications/cancelled` naming the
     %% listen request id — the spec's ONLY sanctioned server-side use —
     %% then the completion response correlated by that id. A transport
     %% drop (previous case) sends neither.
@@ -1572,10 +1574,11 @@ server_teardown_sends_completion(Config) ->
     ok = gun:close(Conn).
 
 stream_survives_quiet_hold_at_connection_floor(Config) ->
-    %% §3.8 / §21.6: stream lifetime is the CONNECTION idle timer, seated
+    %% Stream lifetime is the CONNECTION idle timer, seated
     %% for a listener whose services include `mcp` from the carrier's own
     %% `idle_timeout` with reset-on-send — checked here against the REAL
-    %% resolution (`with_option_defaults/1`), then proved on the wire: a
+    %% resolution (`bondy_listener_config:with_option_defaults/1`), then on the
+    %% wire: a
     %% quiet 18s hold survives on a listener carrying the resolved floor
     %% and dies on one carrying the bare 15s HTTP default.
     Resolved = bondy_listener_config:with_option_defaults(#{
@@ -1684,7 +1687,7 @@ spawn_callee_owner() ->
                 {ok, #{kwargs => KWArgs}}
             end
         ),
-        %% §11.1: first leg elicits and hands the gateway a continuation;
+        %% MRTR: first leg elicits and hands the gateway a continuation;
         %% the resume leg receives it back with the responses and echoes
         %% both, proving the whole loop.
         {ok, _} = bondy_connect_client:register(
@@ -1731,7 +1734,7 @@ spawn_callee_owner() ->
                 end
             end
         ),
-        %% §11.2's primitive: a state-only continuation ("check back
+        %% The state-only primitive: a state-only continuation ("check back
         %% later") with no input requests at all.
         {ok, _} = bondy_connect_client:register(
             Conn, ?PENDING, fun(_, KwArgs, _) ->
@@ -1807,13 +1810,11 @@ req_v(Id, Method, Params, Version) ->
         <<"params">> => Params#{<<"_meta">> => Meta}
     }.
 
-%% POST with the standard headers derived from the body, the way a
-%% conforming client sends them.
 %% The MCP endpoint applies the same per-source-IP `http`-class admission
 %% the WS and raw-socket handlers apply per connection, BEFORE any realm
 %% or parse work. Enabling ONLY that class both trips it and PINS it —
 %% a site drawing from any other class would never 429 here. 429 carries
-%% no session meaning, so it is safe alongside the reserved 404 (§12).
+%% no session meaning, so it is safe alongside the handshake era's reserved 404.
 %% The `{http, 127.0.0.1}` bucket is shared across a run, so only "rapid
 %% requests trip 429" and "off means served" are asserted.
 requests_are_rate_limited(Config) ->
@@ -1840,8 +1841,8 @@ requests_are_rate_limited(Config) ->
     ?assertNotEqual(429, S1).
 
 server_discover_answers_the_probe(Config) ->
-    %% The official 2026-era client's negotiation probe, byte-shaped as
-    %% measured on the wire (string JSON-RPC id, `_meta` envelope,
+    %% The official 2026-era client's negotiation probe in its wire
+    %% shape (string JSON-RPC id, `_meta` envelope,
     %% `Mcp-Method: server/discover`): the answer must offer the modern
     %% revision in `supportedVersions` and carry `capabilities` — the two
     %% fields the client's DiscoverResult validator requires for a modern
@@ -1950,6 +1951,8 @@ origin_probe(Port, Origin) ->
     ),
     Status.
 
+%% POST with the standard headers derived from the body, the way a
+%% conforming client sends them.
 post(Config, Realm, Body) ->
     post(Config, Realm, Body, #{}).
 

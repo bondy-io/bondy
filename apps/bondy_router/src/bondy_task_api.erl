@@ -9,7 +9,7 @@
 The WAMP read API over `bondy_task_catalogue`: `bondy.task.catalogue` and
 `bondy.task.describe`.
 
-Master realm only, like the alarm API and for the same reason (design D4): the
+Master realm only, like the alarm API and for the same reason: the
 catalogue names procedures that act on the node and the cluster, and the
 vocabularies it publishes are what an agent's policy is written against.
 

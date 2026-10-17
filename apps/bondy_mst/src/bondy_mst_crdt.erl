@@ -771,7 +771,7 @@ broadcast(CRDT0, Gossip) ->
             CRDT0
     end.
 
-%% private
+%% @private
 broadcast_pending(#?MODULE{} = CRDT, Pred) when is_function(Pred, 1) ->
     B0 = CRDT#?MODULE.bcast_backlog,
 

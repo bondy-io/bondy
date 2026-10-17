@@ -12,7 +12,7 @@
 %% Four properties:
 %%
 %%   * DISPATCH — both procedures resolve and answer.
-%%   * AUTHORITY — a session in an ordinary realm is refused (D4), for both.
+%%   * AUTHORITY — a session in an ordinary realm is refused, for both.
 %%   * ENCODABILITY — the reply survives a real `json:encode`, which is the
 %%     only thing that proves an agent can actually read it.
 %%   * VOCABULARY — `catalogue` publishes the ORDERED `impact` and
@@ -85,9 +85,7 @@ catalogue_publishes_the_ordered_vocabularies(_) ->
     ),
     %% The property: a vocabulary is published in FULL, not derived from the
     %% values today's rows happen to use. `session` is the blast radius no
-    %% task carries — every impact grade now has at least one row, so
-    %% `destructive` no longer demonstrates it (it did until
-    %% `bondy.cluster.leave` was catalogued).
+    %% task carries.
     #{<<"tasks">> := Tasks} = call(?MASTER_REALM_URI, catalogue),
     ?assertEqual(
         [],
@@ -100,9 +98,8 @@ catalogue_publishes_the_ordered_vocabularies(_) ->
 %% to tell "not sanctioned" from "nobody has written it down yet".
 catalogue_publishes_the_out_of_scope_reasons(_) ->
     #{<<"out_of_scope">> := Out} = call(?MASTER_REALM_URI, catalogue),
-    %% `realm` rather than `cluster`: the cluster family left this map when
-    %% `bondy.cluster.leave` was catalogued, which is the transition the map
-    %% exists to make visible.
+    %% `realm` is an excluded family; `cluster` is not, because it carries a
+    %% task.
     ?assert(maps:is_key(<<"realm">>, Out)),
     ?assert(is_binary(maps:get(<<"realm">>, Out))),
     ?assertNot(
@@ -140,16 +137,10 @@ describe_of_an_uncatalogued_procedure_is_empty_not_an_error(_) ->
         call(?MASTER_REALM_URI, describe, [<<"not.a.procedure.at.all">>]),
     ?assertEqual([], None).
 
-%% D4: both procedures refuse a session in an ordinary realm.
-%%
-%% The asymmetry this comment used to record is gone. Under
-%% `do_validate_call_args/6` the first positional argument was read as a realm
-%% URI, so `describe` — whose first argument is a TASK URI — was refused by the
-%% realm COMPARISON rather than by the admin check, and swapping its validator
-%% for the non-admin one failed nothing. Both procedures now use
-%% `bondy_wamp_api_utils:admin_call_args/3`, where the master-realm check is
-%% written as itself and does not depend on what the first argument happens to
-%% be. Swapping either for `call_args/3` fails this case.
+%% Both procedures refuse a session in an ordinary realm. Both use
+%% `bondy_wamp_api_utils:admin_call_args/3`, whose master-realm check does not
+%% depend on the first positional argument. Swapping either for
+%% `bondy_wamp_api_utils:call_args/3` fails this case.
 both_procedures_require_the_master_realm(_) ->
     _ = [
         ?assertMatch(

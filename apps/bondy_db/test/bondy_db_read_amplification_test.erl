@@ -23,7 +23,7 @@
 %% the rows returned, that IS the amplification factor, exactly and
 %% deterministically.
 %%
-%% Measured on this fixture (4000 rows, 4 shards) before the walk landed:
+%% A per-page scan of every shard on this fixture (4000 rows, 4 shards) costs
 %% 9,939 rows scanned for 4,000 returned, 2.48x. The factor climbs toward
 %% `shard_count` as the band grows past `shard_count x limit`, which is why
 %% the bound is stated as a small multiple rather than an absolute count.

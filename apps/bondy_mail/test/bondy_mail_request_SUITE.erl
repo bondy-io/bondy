@@ -344,10 +344,11 @@ reply_to_may_carry_a_display_name(_) ->
 -doc """
 A display name that is not valid UTF-8 is refused, not crashed on.
 
-Found by `prop_bondy_mail_header:prop_the_control_rule_is_one_rule/0`, which is
-the whole argument for the property: `string:trim/1` raises `badarg` on a
-binary that is not valid UTF-8, so a single stray byte in a caller-supplied
-`from` took down the process validating it rather than producing an error.
+`string:trim/1` raises `badarg` on a binary that is not valid UTF-8, so a
+single stray byte in a caller-supplied `from` must produce an error rather than
+take down the process validating it.
+`prop_bondy_mail_header:prop_the_control_rule_is_one_rule/0` generates such
+input.
 
 Refused rather than repaired for the reason this module refuses everything
 else: a name that is not UTF-8 cannot be written as the UTF-8 encoded word

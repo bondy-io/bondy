@@ -783,21 +783,9 @@ merge_stub_nodes({{L, R}, Cont}, Nodes) when is_list(L), is_list(R) ->
 
 %% @private
 make_match_opts(SessionId, Opts) ->
-    %% An (authorized) Subscriber to topic T will receive an event published to
-    %% T if and only if all of the following statements hold true:
-    %%
-    %% 1. if there is an eligible attribute present, the Subscriber's sessionid
-    %% is in this list [DONE]
-    %% 2. if there is an exclude attribute present, the Subscriber's sessionid
-    %% is NOT in this list [DONE]
-    %% 3. if there is an eligible_authid attribute present, the
-    %% Subscriber's authid is in this list  [TODO]
-    %% 4. if there is an exclude_authid attribute present, the Subscriber's
-    %% authid is NOT in this list [TODO]
-    %% 5. if there is an eligible_authrole attribute present, the Subscriber's
-    %% authrole is in this list [TODO]
-    %% 6. if there is an exclude_authrole attribute present, the Subscriber's authrole is NOT in this list [TODO]
-
+    %% WAMP Subscriber Black- and Whitelisting: an event reaches a subscriber
+    %% only if its session id is in `eligible` (when present) and not in
+    %% `exclude` (when present).
     %% Subscriber Exclusion: we only support sessionIds for now
     %% TODO Add support for eligible_authid, eligible_authrole, exclude_authid
     %% and exclude_authrole.

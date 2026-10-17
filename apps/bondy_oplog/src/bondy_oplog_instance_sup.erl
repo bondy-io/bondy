@@ -414,21 +414,13 @@ scrubber_opts(InstanceId, Opts) ->
     }.
 
 %% @private
-%% Resolve the `origin` opt and inject it into the opts map so every
-%% downstream child (instance gen_server, WAL writer, applier) reads
-%% the same value. Precedence:
-%%   1. Caller-provided `origin` wins.
-%%   2. Otherwise, if `storage_path` is set, load (or create + persist)
-%%      the origin under that path so it survives BEAM restarts.
-%%   3. Otherwise, with an in-memory WAL, none: the instance gen_server is
-%%      then the only minter and its state begins at its `init/1`, so it
-%%      takes a fresh origin there, on every start and every restart
-%%      (`bondy_oplog_instance_sup_origin_test`).
-%%   4. Otherwise, the per-VM default, which the disk WAL's segments carry.
-%%
-%% The on-disk path is `<storage_path-for-instance>/origin` (i.e.,
-%% alongside the `wal/` subdir, not inside it), so the WAL recovery's
-%% directory scans don't see it.
+%% Resolve the `origin` opt and inject it into the opts map so every downstream
+%% child (instance gen_server, WAL writer, applier) reads the same value. A
+%% caller-provided `origin` wins; otherwise, with `storage_path` set, the origin
+%% is loaded or created under `<storage_path-for-instance>/origin` (beside the
+%% `wal/` subdir, so WAL recovery never scans it); otherwise, with an in-memory
+%% WAL, the instance gen_server mints a fresh origin at its `init/1` on every
+%% start (`bondy_oplog_instance_sup_origin_test`); otherwise the per-VM default.
 resolve_origin_opt(InstanceId, Opts) ->
     case maps:is_key(origin, Opts) of
         true ->
@@ -463,22 +455,13 @@ origin_persist_path(InstanceId, Opts) ->
     end.
 
 %% @private
-%% Loud warning when an instance is starting with no durable storage
-%% configured for the WAL. The default tmp path is namespaced by
-%% `os:getpid()` so a fresh BEAM run never sees prior segments — that
-%% is intentional test-isolation behaviour but a footgun under any
-%% kill-restart scenario (Jepsen, systemd-restart, OOM-killer).
-%%
-%% No dedup needed: `start_children/3` runs once per
-%% `bondy_oplog:start_instance/2` call. The supervisor's own `intensity`
-%% governs child restarts within an instance, which reuse the child specs
-%% and do not re-run it. Tests run with
-%% `logger_level = error`, so this is silent in the eunit suite.
-%%
-%% Avoiding `persistent_term` for dedup is deliberate: every
-%% `persistent_term:put/2` triggers a global GC scan of every process
-%% on the node — fine for write-once-per-VM constants, the wrong
-%% substrate for per-instance lifecycle events.
+%% Loud warning when an instance is starting with no durable storage configured
+%% for the WAL. The default tmp path is namespaced by `os:getpid()`, so a fresh
+%% BEAM run never sees prior segments: intended for test isolation, a footgun
+%% under any kill-restart scenario. No dedup needed: `start_children/3` runs
+%% once per `bondy_oplog:start_instance/2` call, and child restarts reuse the
+%% child specs. `persistent_term` is not used for dedup because every
+%% `persistent_term:put/2` triggers a global GC scan of every process.
 maybe_warn_default_wal_path(InstanceId, Opts) ->
     case warn_default_wal_path(Opts) of
         false ->

@@ -5,9 +5,8 @@
 %% Tests `bondy_config:normalize_dynamic_buffer/1` — the boot-time
 %% normalisation of the schema's `{min, max}` property list at
 %% [Listener, protocol_opts, dynamic_buffer] into the `{Min, Max} | false`
-%% shape Cowboy requires. Before this normaliser existed, a configured
-%% buffer reached Cowboy as a raw property list, which silently DISABLED
-%% dynamic buffering (Cowboy's tuple pattern-match falls through to
+%% shape Cowboy requires. A raw property list reaching Cowboy silently
+%% DISABLES dynamic buffering (Cowboy's tuple pattern-match falls through to
 %% `false`) while also suppressing Cowboy's own default — the opposite of
 %% the operator's intent.
 %% =============================================================================
@@ -54,8 +53,7 @@ zero_disables_test() ->
         false,
         bondy_config:normalize_dynamic_buffer([{min, 2 * ?KB}, {max, 0}])
     ),
-    %% Order-independent for the zero case too (the pre-rewrite validator
-    %% only matched zeroes in one fixed order).
+    %% Order-independent for the zero case too.
     ?assertEqual(
         false,
         bondy_config:normalize_dynamic_buffer([{max, 64 * ?KB}, {min, 0}])

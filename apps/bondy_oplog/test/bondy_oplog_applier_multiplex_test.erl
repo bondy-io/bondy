@@ -361,17 +361,11 @@ install_catalogue_batch_routes_by_bucket() ->
 %% Where the projection stream is cut is not this replica's decision: the
 %% peer's `catalogue_snapshot_batch_size`, the inter-node frame cap and the
 %% chunking of an oversized cell all move the boundaries. The adoption verdict
-%% must be a property of WHAT was shipped and not of how it was cut, so this
-%% drives the real path end to end — snapshot, batching, staging, the install
-%% that counts every staged batch (`bondy_oplog_applier:commit_stage/4`),
-%% `bondy_oplog_applier:commit_stage/4` — at batch sizes from one cell up, with the unroutable
-%% cells at generated positions in the mint order.
-%%
-%% `partial_install_does_not_adopt_the_peer_frontier/0` above is one point of
-%% this space and cannot see the fold across batches: it ships two cells in a
-%% single batch. Mutants run against this: the install dropping each staged
-%% batch's counts, caught; the session raising the unroutable-bucket alarm
-%% under a different id, caught in 1 trial.
+%% must be a property of WHAT was shipped, not of how it was cut, so this
+%% drives the real path end to end, through the install that counts every
+%% staged batch (`bondy_oplog_applier:commit_stage/4`), at batch sizes from
+%% one cell up, with the unroutable cells at generated positions in the mint
+%% order.
 prop_adoption_survives_any_batching() ->
     ?FORALL(
         {BatchSize, Plan, Skew},
@@ -573,14 +567,12 @@ partial_install_does_not_adopt_the_peer_frontier() ->
     ?assertEqual(#{}, bondy_oplog_instance:frontier(TgtId)),
     %% The session's RETURN is deliberately not asserted here. Withholding the
     %% claim leaves this replica behind the peer's frontier, so the
-    %% post-bootstrap round's `maybe_frontier_gap/5` reports
-    %% `{error, {frontier_gap, _}}`. That is correct rather than a defect to
-    %% fix: the verdict schedules a re-bootstrap, and the catalogue install is
-    %% the only writer of applied state that does not pass through the fold —
-    %% so it is how the events the contiguity hold parks are eventually
-    %% delivered. Suppressing the verdict to stop the cycle violates `Live`
-    %% (`MuxBucketSkip_Minus_GapVerdict`). What ends the cycle is an operator,
-    %% which is what the `bondy_oplog_bucket_unroutable` alarm is for.
+    %% post-bootstrap round reports `{error, {frontier_gap, _}}`. That verdict
+    %% schedules a re-bootstrap; the catalogue install is the only writer of
+    %% applied state that bypasses the fold, so it delivers the parked events.
+    %% Suppressing the verdict violates `Live` (`MuxBucketSkip_Minus_GapVerdict`
+    %% under `proofs/tla`); an operator ends the cycle, which is what the
+    %% `bondy_oplog_bucket_unroutable` alarm is for.
     _ = bondy_oplog_sync_session:bootstrap_catalogue(
         TgtId, PeerId, #{transport_opts => #{}}
     ),

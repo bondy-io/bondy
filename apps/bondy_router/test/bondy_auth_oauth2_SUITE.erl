@@ -120,7 +120,7 @@ all() ->
 
         context_method_set_after_auth,
 
-        %% CP-for-security (§9.2) — AAE-phase fence gating
+        %% AAE-phase fence gating
         aae_fence_certifies_only_with_clustering_disabled,
         aae_fence_isolation_policy
     ].
@@ -326,7 +326,7 @@ password_grant_jwt_has_required_claims(Config) ->
 
     %% Revocation zookie: `tv` carries the user's token_version at issue time
     %% (the user cell's HLC). ?U1 is local to RealmUri, so it equals the current
-    %% version with no intervening user write (STORAGE_ARCHITECTURE §9.3).
+    %% version with no intervening user write.
     ?assert(maps:is_key(<<"tv">>, Claims)),
     TV = maps:get(<<"tv">>, Claims),
     ?assert(is_integer(TV) andalso TV >= 0),
@@ -380,9 +380,10 @@ aae_fence_isolation_policy(Config) ->
     %% The `db.aae.fence.on_isolation` policy governs a node that is part of a
     %% multi-node cluster but cannot reach a peer this round.
     %% We simulate that on a single test node by mocking the Partisan membership
-    %% to include an unreachable peer; `maybe_bump_ae_isolated/1` (the exact
-    %% function the scheduler invokes at its no-peer seam) is then driven directly
-    %% so the assertion is deterministic.
+    %% to include an unreachable peer;
+    %% `bondy_oplog_sync_session:maybe_bump_ae_isolated/1` (the exact function
+    %% the scheduler invokes at its no-peer seam) is then driven directly so the
+    %% assertion is deterministic.
     RealmUri = ?config(realm_uri, Config),
     JWT = issue_jwt(RealmUri, ?U1, [<<"group_1">>]),
     ok = application:set_env(bondy_oplog, aae_enabled, true),

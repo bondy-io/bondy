@@ -87,18 +87,12 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 
 %% The registration RIB cell's `bondy_oplog_crdt_struct` schema, passed as
 %% `crdt_opts`. `earliest`/`latest` are ratchets over the group's
-%% entry-creation times, so removals never shrink them.
-%%
-%% Every field declares `force_reap`, so a departed node's cell is
-%% reclaimable: the reap drops the retired origins' dots from every field,
-%% `count` reads 0, and the `stabilize_zero` discard removes the cell.
-%% `bondy_oplog_crdt_struct:reap_origins/2` keeps an origin live while any
-%% field holds one of its dots, so a field without `force_reap` would keep the
-%% cell forever (`bondy_rib_reclamation_cluster_SUITE`).
-%%
-%% The subscription cell has one field, so it is a bare `?OWNED_READING_CRDT`
-%% and stays tier_0: a struct is tier_2, whose state grows with every
-%% unstabilized write.
+%% entry-creation times, so removals never shrink them. Every field declares
+%% `force_reap` so a departed node's cell is reclaimable: `count` reads 0 and
+%% the `stabilize_zero` discard removes the cell; a field without it would
+%% keep the cell forever (`bondy_rib_reclamation_cluster_SUITE`). The
+%% subscription cell has one field, so it is a bare `?OWNED_READING_CRDT`
+%% and stays tier_0.
 -define(RIB_REGISTRATION_SCHEMA, #{
     count => {?OWNED_READING_CRDT, #{stabilize_zero => 0, force_reap => true}},
     invoke => {bondy_oplog_crdt_lww_register, #{force_reap => true}},
@@ -129,14 +123,11 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
     publish => boolean(),
     %% The contract a `publish => true` assumes of its consumer.
     %% `must_not_miss` (the default): events are the only mechanism that
-    %% corrects the consumer's derived state — or the event's side effect
-    %% is itself the deliverable (an alarm) — so a live subscriber for the
-    %% table's whole life is a correctness invariant, asserted by
-    %% `bondy_rbac_SUITE:every_publishing_table_has_a_live_subscriber`.
-    %% `recovered_on_attach`: the consumer rebuilds its derived state from
-    %% current table contents whenever it subscribes (reconcile-on-attach),
-    %% so it may start on demand and a missed-event window is harmless;
-    %% the assertion exempts these.
+    %% corrects the consumer's derived state, so a live subscriber for the
+    %% table's whole life is a correctness invariant
+    %% (`bondy_rbac_SUITE:every_publishing_table_has_a_live_subscriber`).
+    %% `recovered_on_attach`: the consumer rebuilds from table contents
+    %% whenever it subscribes, so a missed-event window is harmless.
     missed_events => must_not_miss | recovered_on_attach,
     %% Declared secondary indexes (substrate-maintained reverse access
     %% paths), passed verbatim to `bondy_db:open_table/3`.
@@ -188,14 +179,11 @@ Returns the declarative specs for all sixteen tables (both DBs), mirroring the
 tables() ->
     [
         %% main — durable (leveled, shared_shards)
-        %% bondy_realm — unlike the per-realm tables this is a GLOBAL registry:
-        %% every realm shares one band (the empty binary) keyed by its Uri.
-        %% Under the aggregate partition strategy the shard hash includes the
-        %% Uri, so realms spread across shards while a single
-        %% `bondy_db:list/2` over the band scatter-scans them all. Local
-        %% lifecycle is inline in bondy_realm; `publish => true` wires the remote
-        %% on_merge seam so a peer's realm delete closes this node's sessions for
-        %% that realm (the reactor is `bondy_aae_reactor`).
+        %% bondy_realm — a GLOBAL registry: every realm shares one band (the
+        %% empty binary) keyed by its Uri; the aggregate shard hash includes
+        %% the Uri, so realms spread across shards. `publish => true` wires
+        %% the remote on_merge seam so a peer's realm delete closes this
+        %% node's sessions for that realm (`bondy_aae_reactor`).
         #{
             name => ?BONDY_DB_REALM_TAB,
             db => main,
@@ -203,15 +191,12 @@ tables() ->
             fold => lww,
             publish => true
         },
-        %% bondy_realm_keys — the realm's signing/encryption key material, split
-        %% OUT of the realm identity cell so the realm's bondy_db identity (and
-        %% its cross-node convergence) is the Uri + config, never the random key
-        %% bytes.
-        %% A GLOBAL registry like bondy_realm (constant band, keyed by Uri).
-        %% `aw` (add-wins map of `kid => key bundle`): key rotation mints a fresh
-        %% kid, so concurrent rotations on different nodes add distinct entries
-        %% that merge without loss. Storage-only (no reactor): peers read the
-        %% merged keyset on demand.
+        %% bondy_realm_keys — the realm's key material, split OUT of the realm
+        %% identity cell so the realm's identity (and its cross-node
+        %% convergence) is the Uri + config, never the random key bytes. A
+        %% GLOBAL registry like bondy_realm. `aw` (add-wins map of
+        %% `kid => key bundle`): rotation mints a fresh kid, so concurrent
+        %% rotations merge without loss. Storage-only (no reactor).
         #{
             name => ?BONDY_DB_REALM_KEYS_TAB,
             db => main,
@@ -246,20 +231,14 @@ tables() ->
             fold => lww,
             publish => true
         },
-        %% security_group_members — the AUTHORITATIVE group-membership relation.
-        %% Membership is cell-per-fact, add-wins: each `(user, group)` fact is an
-        %% `ew_flag` (enable-wins) presence cell, so a concurrent add survives a
-        %% remove that did not observe it. Every fact is stored in BOTH key
-        %% orderings (a forward `f` band keyed `enc(user) ⊕ enc(group)` and a
-        %% reverse `r` band keyed `enc(group) ⊕ enc(user)`) so "groups of a user"
-        %% and "members of a group" are each a bounded, realm-local key-range
-        %% scan with no secondary index — the permutation-index pattern. The
-        %% read/write primitives live in `bondy_rbac_user`. `publish => true`
-        %% wires the remote `on_merge` seam so a peer's membership change merged
-        %% via anti-entropy invalidates this node's cached RBAC contexts for the
-        %% realm in place (reactor `bondy_aae_reactor:react_member/2`), exactly as
-        %% grants do. token_version still advances on a membership change because
-        %% the write path also touches the user cell.
+        %% security_group_members — the AUTHORITATIVE group-membership
+        %% relation, cell-per-fact, add-wins: each `(user, group)` fact is an
+        %% `ew_flag` presence cell stored in BOTH key orderings (forward `f`
+        %% band `enc(user) ⊕ enc(group)`, reverse `r` band), so each direction
+        %% is a bounded realm-local key-range scan. Primitives live in
+        %% `bondy_rbac_user`. `publish => true` lets a peer's merged
+        %% membership change invalidate this node's cached RBAC contexts
+        %% (`bondy_aae_reactor`), as grants do.
         #{
             name => ?BONDY_DB_GROUP_MEMBERS_TAB,
             db => main,
@@ -276,21 +255,14 @@ tables() ->
             fold => ew,
             publish => true
         },
-        %% security_{group,user}_grants — `publish => true` wires the remote
-        %% on_merge seam so a peer's grant / revoke (a `set` / `clear` arriving
-        %% via anti-entropy) invalidates this node's cached RBAC contexts for the
-        %% realm in place (reactor `bondy_aae_reactor`) — an authorization change
-        %% re-evaluates on the next authorize, it does NOT tear the session down
-        %% (that is reserved for authn-level changes). Local grant / revoke
-        %% already invalidates inline in bondy_rbac, so the reactor ignores the
-        %% local event tag and acts only on the remote merge tag.
-        %% Declared `mv` (sibling-preserving) but cut as `lww`: mv only differs
-        %% from lww under concurrent multi-node grant edits, which anti-entropy
-        %% reconciles, so honouring mv is deferred. The compound
-        %% `{Rolename, Resource}` key is an order-preserving composite
-        %% (`bondy_rbac:encode_key/1`) so the forward "grants for role" query is a
-        %% bounded role-band range scan; the `by_resource` index provides the
-        %% equality reverse lookup "grants on resource R" (see `grant_indexes/0`).
+        %% security_{group,user}_grants — `publish => true` lets a peer's grant
+        %% or revoke merged via anti-entropy invalidate this node's cached
+        %% RBAC contexts for the realm (`bondy_aae_reactor`); the session is
+        %% not torn down. Local grant / revoke invalidates inline in
+        %% bondy_rbac, so the reactor acts only on the remote merge tag.
+        %% Declared `mv` but cut as `lww`: they differ only under concurrent
+        %% multi-node grant edits. The compound `{Rolename, Resource}` key is
+        %% order-preserving (`bondy_rbac:encode_key/1`); see `grant_indexes/0`.
         #{
             name => ?BONDY_DB_GROUP_GRANT_TAB,
             db => main,
@@ -358,16 +330,12 @@ tables() ->
             fold => lww
         },
         %% oauth_token — ONE CELL PER TOKEN, keyed `[UserHash, Realm, Client,
-        %% Device]` (`bondy_oauth_token:cell_key/2`). The user hash leads the
-        %% composite key, so `leading_col` co-locates a user's tokens on the
-        %% user's shard and the per-user band (bound enforcement,
-        %% `revoke_all/2`) is one pinned scan. Legacy refresh pointers are
-        %% plain `legacy:`-prefixed keys in the same table and route on their
-        %% whole key. Key shape changed with the cell-per-token cut: a data
-        %% dir written under the previous one-set-per-user layout must be
-        %% wiped, not migrated — on EVERY node: a wiped node freezes this
-        %% root, an un-wiped one keeps the old one under `warn`, and the two
-        %% publish different topology fingerprints, which anti-entropy
+        %% Device]` (`bondy_oauth_token`). The user hash leads, so
+        %% `leading_col` co-locates a user's tokens on the user's shard and
+        %% the per-user band is one pinned scan. Legacy refresh pointers are
+        %% `legacy:`-prefixed keys in the same table. A data dir written under
+        %% a one-set-per-user layout must be wiped on EVERY node: a mixed
+        %% cluster publishes two topology fingerprints, which anti-entropy
         %% refuses to sync across.
         #{
             name => ?BONDY_DB_OAUTH_TOKEN_TAB,
@@ -387,38 +355,25 @@ tables() ->
             fold => lww
         },
         %% retained_messages — the WAMP retained-event store. A DURABLE main
-        %% table regardless of the legacy `wamp.message_retention.storage_type`
-        %% knob (now inert): the operator decision is that retained messages
-        %% always survive a restart. The feature is gated per-publish by the
-        %% `retain` option, not at provisioning. Storage-only `lww`: the per-realm
-        %% count / memory counters are maintained inline at the local write
-        %% sites; the remote-replication counter sync is deferred until
-        %% anti-entropy reconciles the counters. Keyed by Topic and matched via
-        %% key-ordered `range_all/5` prefix / wildcard scans (no secondary index).
+        %% table whatever `wamp.message_retention.storage_type` says: retained
+        %% messages always survive a restart. The feature is gated per-publish
+        %% by the `retain` option. Storage-only `lww`: the per-realm counters
+        %% are maintained inline at the local write sites. Keyed by Topic and
+        %% matched via key-ordered prefix / wildcard scans (no secondary index).
         #{
             name => retained_messages,
             db => main,
             durability => durable,
             fold => lww
         },
-        %% bondy_interface — interface metadata (procedure/topic/error
-        %% descriptions and schemas), the store WAMP Interface Reflection
+        %% bondy_interface — interface metadata the WAMP Interface Reflection
         %% reads and the MCP manifest projects from. Keyed per realm by
-        %% {Kind, MatchPolicy, Uri} — release-cadence data, whole-entry
-        %% replacement, so `lww` with the identity routing default.
-        %% `publish => true` feeds the MCP manifest cache
-        %% (`bondy_mcp_gateway`), which invalidates its compiled per-realm
-        %% manifests on local + AE-replicated interface writes. That
-        %% consumer is started ON DEMAND (first `manifest/1` call —
-        %% `bondy_mcp_sup` runs nothing by default) and reconciles on
-        %% attach, so `missed_events => recovered_on_attach`. (`publish`
-        %% is a runtime knob, not part of the frozen topology, so wiring it
-        %% here is not a manifest divergence.) NOTE for readers of
-        %% `bondy_db_manifest`: this was the first table added AFTER the
-        %% topology freeze existed — an upgraded data dir adopts it through
-        %% the manifest's additive-extension path
-        %% (`{extended, [bondy_interface]}`), which is what keeps its AAE
-        %% fingerprint equal to a freshly provisioned node's.
+        %% {Kind, MatchPolicy, Uri}; whole-entry replacement, so `lww`.
+        %% `publish => true` feeds the `bondy_mcp_gateway` manifest cache,
+        %% which starts ON DEMAND and reconciles on attach, so
+        %% `missed_events => recovered_on_attach`. An upgraded data dir adopts
+        %% the table through `bondy_db_manifest`'s additive-extension path
+        %% (`{extended, [bondy_interface]}`).
         #{
             name => ?BONDY_DB_INTERFACE_TAB,
             db => main,
@@ -427,7 +382,7 @@ tables() ->
             publish => true,
             missed_events => recovered_on_attach
         },
-        %% mcp_gateway — the MCP overlay documents (design §18.3): one key
+        %% mcp_gateway — the MCP overlay documents: one key
         %% per loaded document in a single flat bucket, the stored value the
         %% SOURCE map (never a parsed form), same posture as `api_gateway`.
         %% `publish => true` feeds the same on-demand manifest-cache
@@ -751,7 +706,7 @@ open_main_into(State) ->
             %% topology is `per_shard`. See `bondy_db:start_draining/1`.
             ok = bondy_db:start_draining(Db),
             %% Now that the gates are open, run the secondary-index cold-start
-            %% that `open_table/3` deferred for the gated tables: each
+            %% that `bondy_db:open_table/3` deferred for the gated tables: each
             %% barriers its (now ungated) primary drain and trust-or-rebuilds
             %% from a fully-replayed primary.
             ok = cold_start_main_indexes(Specs),
@@ -1134,38 +1089,14 @@ maybe_ephemeral_opts(#{db := registry}, Opts) ->
         Opts
     );
 maybe_ephemeral_opts(#{db := main, durability := durable}, Opts) ->
-    %% Make each durable main table's per-shard WAL + MST pack durable, rooted
-    %% under the data dir (collocated with the leveled projection) instead of
-    %% the ephemeral `/tmp` fallback (which abandons fsynced frames on restart
-    %% and keeps no MST pack on disk). Without this the DB-level
-    %% `durability => durable` never reaches the oplog instances.
-    %%
-    %% The MST pack store (`storage_path`) and the WAL (`wal_dir`) live in their
-    %% own sibling subtrees alongside the leveled `main' dir — see
-    %% `bondy_db_dir/0`. An explicit `wal_dir` (rather than letting the WAL
-    %% default to a `wal/' dir *under* the pack instance dir) keeps the WAL leaf
-    %% at `wal/<InstanceId>' (`wal/main/<ET>/<Shard>') instead of the doubly
-    %% nested `mst/.../<InstanceId>/wal/<InstanceId>'. The pack store keeps the
-    %% default `sharded' path layout (`mst/<hash>/<hash>/<InstanceId>'); `flat'
-    %% is unsafe here because the slash-bearing `InstanceId' makes the
-    %% pack-store's shard-dir derivation double-nest the pack away from its
-    %% manifest.
-    %%
-    %% `seed => true` starts each instance live as a genesis peer and writes a
-    %% durable `lifecycle.live` flag that survives restart. A fresh persistent
-    %% instance with the default `seed => false` would instead block in
-    %% `pre_bootstrap` waiting for a live peer to bootstrap from — which a single
-    %% node never has. Under multi-node AAE every node genesis-seeds and the lww
-    %% merge reconciles their cells (proven by `bondy_aae_cluster_SUITE`).
-    %% `drain_gated => true` founds each shared per-shard instance with its WAL
-    %% drain deferred. The `main` DB collapses every table onto N shard
-    %% instances (one WAL each); the first table opened on a shard founds the
-    %% instance and the rest register their cell-apply buckets as they open. A
-    %% founding instance that drained at init — before its siblings registered —
-    %% would skip (and, since the MST install is unconditional, LOSE) every
-    %% not-yet-registered table's WAL-tail cells on restart.
-    %% `open_main_into/1` releases the gate via `bondy_db:start_draining/1`
-    %% AFTER all main tables are open. See the applier `drain_gate`.
+    %% Roots each durable main table's per-shard WAL and MST pack under the
+    %% data dir (see `bondy_db_dir/0`); the ephemeral fallback abandons
+    %% fsynced frames on restart. An explicit `wal_dir` keeps the WAL leaf at
+    %% `wal/<InstanceId>`; the pack store keeps the `sharded` layout, since
+    %% `flat` double-nests a slash-bearing `InstanceId`. `seed => true`
+    %% starts each instance as a genesis peer (`bondy_aae_cluster_SUITE`).
+    %% `drain_gated => true` defers the WAL drain until every table has
+    %% registered its bucket; `open_main_into/1` releases the gate.
     Opts#{
         oplog_instance_opts => #{
             backend => bondy_mst_pack_store,

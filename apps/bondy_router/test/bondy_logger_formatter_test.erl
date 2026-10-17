@@ -10,16 +10,14 @@ The formatter renders text as text whatever the VM's `+pc` range is.
 A structured report's `description` is prose, and the prose in this codebase
 uses characters outside Latin-1 (the em dash, U+2014, above all). Under the
 VM's default `+pc latin1` such a string is not `io_lib:printable_list/1`, and
-a formatter that relied on that predicate printed it through the depth-limited
-term printer: the operator read `[82,101,99,108,97,...|...]` where the text
-told them which cluster member to revive. Six production log sites carry such
-a character today; the customer logs of 2026-09-17 show every stall warning
-of `bondy_oplog_gc_scheduler` rendered that way.
+a formatter that relies on that predicate prints it through the depth-limited
+term printer: the operator reads `[82,101,99,108,97,...|...]` where the text
+names the cluster member to revive.
 
 These cases run under whatever range `rebar3 eunit` starts the VM with — the
 default, `latin1` — and that is the only range under which they can fail: a
-VM started with `+pc unicode` passes them with the old predicate too. Each
-case names the range it ran under on failure.
+VM started with `+pc unicode` passes them with the printable-list predicate
+too. Each case names the range it ran under on failure.
 """.
 
 -include_lib("eunit/include/eunit.hrl").

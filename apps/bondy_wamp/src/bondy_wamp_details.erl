@@ -112,13 +112,10 @@ validate(hello, Details0, Extensions) ->
             ok
     end,
 
-    %% Progressive Calls pairs with call_canceling too (a streamed call must be
-    %% cancellable mid-stream). Read the canonical `[Role, features, Feature]`
-    %% path from `Roles` — the same path `bondy_dealer:session_feature/3` uses.
-    %% (NOTE: the `progressive_call_results` checks above read `[Role, Feature]`
-    %% from `Details`, which does not descend into the nested `features` map, so
-    %% that pre-existing pairing check does not currently fire — tracked
-    %% separately.)
+    %% A progressive call is cancellable mid-stream, so progressive_calls
+    %% requires call_canceling. The check reads `[Role, features, Feature]`
+    %% from `Roles`; the `progressive_call_results` checks above read
+    %% `[Role, Feature]` from `Details` and do not descend into `features`.
     ok = require_call_canceling(caller, progressive_calls, Roles),
     ok = require_call_canceling(callee, progressive_calls, Roles),
 

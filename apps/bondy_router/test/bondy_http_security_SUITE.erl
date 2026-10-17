@@ -78,7 +78,7 @@ longpoll_options_cors(_Config) ->
 
 %% HTTP/2 is served on clear listeners via prior knowledge (and h2c
 %% upgrade) because the `http.versions` default lists `2` — Cowboy's
-%% `protocols` option is now derived from that key per listener
+%% `protocols` option is derived from that key per listener
 %% (`bondy_listener_ranch:start_http/1`). This drives a real h2c connection
 %% with gun and proves the listener speaks HTTP/2 end-to-end; resource use
 %% is bounded by `max_concurrent_streams`.

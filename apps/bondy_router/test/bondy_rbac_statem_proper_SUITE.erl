@@ -1134,8 +1134,6 @@ prop_prototype_inheritance(_Config) ->
 
 %% @doc Explicit groups normalization: get_context/3 with mixed-case explicit
 %% group names must produce the same authorization as with normalized names.
-%%
-%% This tests the fix where get_context/3 now normalizes ExplicitGroups.
 prop_explicit_groups_normalization(_Config) ->
     Prop = ?FORALL(
         {Perms, CaseStyle},

@@ -82,25 +82,16 @@ snapshot is a moving target across peer restarts.
     %% shard (each its own entity-type bucket and, on a memory topology, its
     %% own projection handle); `next_target/1` pops the head into the current
     %% `ns`/`bucket` when the current target's keyspace is exhausted. Empty
-    %% for a single-target (`mint/6`) session — the legacy single-bucket walk.
+    %% for a single-target (`mint/6`) session.
     remaining = [] :: [{atom(), binary()}],
-    %% Mid-cell resume point for a cell too large to frame whole
-    %% (`bondy_oplog_catalogue_snapshot:cap_cells/5`). `{Key, Frame, PartBytes, NextIdx}`
-    %% means "this key's frame is being shipped in parts of PartBytes; the
-    %% next part to emit is NextIdx".
-    %%
-    %% PartBytes is PINNED here, not recomputed per round, because it derives
-    %% from `cluster.max_message_size` — which the oversized alarm explicitly
-    %% tells the operator to RAISE. Recomputing would change the part count
-    %% mid-cell and the receiver, holding the first `Total` it saw, could
-    %% never complete the reassembly. Pinning makes that undrifting by
-    %% construction.
-    %%
-    %% The FRAME IS HELD HERE rather than re-read per round
-    %% on purpose: the range scan is live (see the snapshot module's
-    %% moduledoc), so re-reading could slice two different frames into one
-    %% reassembly. Holding it makes that unrepresentable instead of guarding
-    %% it. Bounded: at most one part-shipped cell per session at a time.
+    %% Mid-cell resume point for a cell too large to frame whole (the
+    %% `bondy_oplog_catalogue_snapshot` cell cap): `{Key, Frame, PartBytes,
+    %% NextIdx}` means this key's frame ships in parts of PartBytes and the next
+    %% part to emit is NextIdx. PartBytes is pinned here, not recomputed per
+    %% round: it derives from `cluster.max_message_size`, which the oversized
+    %% alarm tells the operator to raise, and a changed part count mid-cell
+    %% would leave the receiver unable to complete the reassembly. The frame
+    %% is held because the range scan is live: a re-read could mix two frames.
     pending =
         undefined ::
         undefined

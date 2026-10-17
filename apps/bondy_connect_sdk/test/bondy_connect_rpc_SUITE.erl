@@ -146,13 +146,12 @@ trace_context_round_trip(_) ->
 
 %% The SDK's own span seats: every router-settled CALL emits
 %% `[bondy_connect, rpc, latency]` twice — kind `call` from the caller's
-%% connection (send to terminal RESULT/ERROR) and kind `invocation` from
-%% the callee's worker (handler run) — each carrying the call's W3C
-%% trace context as binary-keyed metadata (`#{}` untraced), the same
-%% shape as the router's `[bondy, rpc, latency]` event. The call leg
-%% names the configured `peer_service` (default `<<"bondy-connect">>`), the
-%% invocation leg names none. An ERROR settlement (the handler returns
-%% a business error) emits both events too.
+%% connection (send to terminal RESULT/ERROR) and kind `invocation` from the
+%% callee's worker (handler run) — each carrying the call's W3C trace context
+%% as binary-keyed metadata (`#{}` untraced), the same shape as the router's
+%% `[bondy, rpc, latency]` event. The call leg names the configured
+%% `peer_service` (default `<<"bondy-connect">>`), the invocation leg names
+%% none. An ERROR settlement (a business error) emits both events too.
 call_latency_trace(_) ->
     Proc = <<"com.example.trace.latency">>,
     ErrProc = <<"com.example.trace.latency.err">>,
@@ -341,7 +340,7 @@ per_call_timeout(_) ->
 
 %% A callee capped at a single in-flight invocation rejects concurrent
 %% invocations at admission with ERROR(wamp.error.unavailable) — the
-%% `bondy_connect_load' backpressure arm (Decision 5), relayed by the router to
+%% `bondy_connect_load' backpressure arm, relayed by the router to
 %% each caller. This drives the `{error, overloaded}' path end-to-end (the unit
 %% suite only exercises the pure counter) and proves the `handler' load config is
 %% reachable through the public connect spec.

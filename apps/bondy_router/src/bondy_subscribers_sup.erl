@@ -51,9 +51,9 @@ start_link() ->
 init([]) ->
     SupFlags = #{
         strategy => simple_one_for_one,
-        % max restarts
+        %% max restarts
         intensity => 5,
-        % seconds
+        %% seconds
         period => 10,
         auto_shutdown => never
     },

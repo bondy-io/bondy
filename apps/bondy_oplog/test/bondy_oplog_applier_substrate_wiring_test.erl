@@ -1,6 +1,5 @@
 %% =============================================================================
-%% End-to-end tests for the applier's substrate read-side wiring
-%% (MST_DB_DESIGN §11/§12 + open items 6 & 7).
+%% End-to-end tests for the applier's substrate read-side wiring.
 %%
 %% Verifies:
 %%   - `publish_ns` + `publish_fun` opts forward verified events to

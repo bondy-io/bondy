@@ -8,15 +8,14 @@
 -moduledoc """
 Regression suite for `bondy_broker_bridge_manager`.
 
-Every case here corresponds to a defect that made the subsystem unusable: the
-manager could not start once a bridge was enabled, `subscribe/5` reported an
-error for a subscription it had just created, `terminate/2` was never reached,
-and evaluating an action made a `gen_server` call into the manager on every
-single event.
+Each case pins one property the subsystem depends on: the manager starts with
+an enabled bridge, `subscribe/5` reports success for a subscription it created,
+`terminate/2` is reached on shutdown, and evaluating an action makes no
+`gen_server` call into the manager.
 
 The suite drives the real boot path -- `application:start/1` reading the
 `bridges` app env and the JSON specification named by `config_file` -- because
-that is where the first defect lived. `bondy_test_bridge` stands in for a real
+that is the path a node boots through. `bondy_test_bridge` stands in for a real
 sink, so nothing here needs a broker or a network.
 """.
 
@@ -76,10 +75,11 @@ end_per_testcase(_Case, _Config) ->
 The manager starts with an enabled bridge whose specification declares a
 subscription.
 
-`bondy_broker:subscribe/4` answers `{ok, {Id, Pid}}` for a fun subscriber, but
-`load_config/2` asserted `{ok, _, _}`. The resulting badmatch escaped
-`handle_continue/2` and stopped the manager, so enabling any bridge at all took
-the subsystem down at boot. Every other case in this suite depends on this one.
+`bondy_broker:subscribe/4` answers `{ok, {Id, Pid}}` for a fun subscriber, and
+the manager's configuration loader has to match that shape: a badmatch there
+escapes `handle_continue/2` and stops the manager, so enabling any bridge at
+all takes the subsystem down at boot. Every other case in this suite depends on
+this one.
 """.
 enabled_bridge_with_subscription_starts(Config) ->
     Topic = ?config(topic, Config),
@@ -241,8 +241,8 @@ Restarting the bridge on the same topic keeps delivering, exactly once.
 This is what reloading a specification does. Subscribers live under
 `bondy_subscribers_sup` in the router app rather than under this app's tree, so
 if shutdown does not unsubscribe them the old generation stays live and every
-event is delivered once per generation. Before `trap_exit`, `terminate/2` never
-ran and this case saw two actions for one publish.
+event is delivered once per generation. Without `trap_exit`, `terminate/2` does
+not run and this case sees two actions for one publish.
 """.
 resubscribe_after_restart_delivers(Config) ->
     Topic = ?config(topic, Config),
@@ -296,8 +296,8 @@ retry_result_is_retried_then_abandoned(Config) ->
 -doc """
 Shutting the manager down calls `terminate/2` on every initialised bridge.
 
-The behaviour declares `terminate/2` but the manager called `terminate/1`, so
-shutdown failed with `undef` and no bridge ever got to release anything.
+The behaviour declares `terminate/2`; a manager calling `terminate/1` fails
+with `undef` at shutdown, and no bridge gets to release anything.
 """.
 terminate_is_called_with_reason_and_context(Config) ->
     Topic = ?config(topic, Config),

@@ -96,8 +96,8 @@ the_declared_conjuncts_are_the_ones_is_ready_consults_test() ->
 %% `readiness_via` says "this condition affects readiness through a mechanism
 %% OTHER than this alarm", and names it. Nothing in the running system reads
 %% that string, so left alone it is a comment that can rot into a lie — an
-%% operator following it would go and look at a function readiness no longer
-%% consults. This is what makes it a claim with evidence.
+%% operator following it would go and look at a function readiness does not
+%% consult. This is what makes it a claim with evidence.
 every_readiness_via_names_a_live_conjunct_test() ->
     Live = [mfa_string(MFA) || MFA <- readiness_conjuncts()],
     Declared = [
@@ -112,7 +112,7 @@ every_readiness_via_names_a_live_conjunct_test() ->
 %% The two fields are alternatives, not companions: `readiness_via` exists
 %% precisely for a condition whose readiness signal does NOT run through the
 %% alarm. An entry claiming both would say readiness arrives twice, and the
-%% catalogue would no longer answer "how does this reach `/ready`".
+%% catalogue would not answer "how does this reach `/ready`".
 readiness_via_and_affects_ready_are_exclusive_test() ->
     ?assertEqual(
         [],
@@ -292,16 +292,12 @@ an_uninstalled_alarm_handler_reads_as_not_blocking() ->
 
 %% @private
 %% Raising an alarm is a CAST (`gen_event:notify/2`, as OTP's own
-%% `alarm_handler:set_alarm/1` is), and `affects_ready/0` no longer calls the
-%% handler — it reads a boolean the handler publishes. So a raise and a
-%% readiness read are not ordered, and a test that asserts immediately after
+%% `alarm_handler:set_alarm/1` is), and `affects_ready/0` reads a boolean the
+%% handler publishes rather than calling the handler. A raise and a readiness
+%% read are therefore not ordered, and a test that asserts immediately after
 %% raising is racing. Any `gen_event:call` to the handler is the barrier;
-%% `list/0` is the cheapest.
-%%
-%% This is a real property, not a test artifact: `/ready` can answer READY for
-%% as long as the raise sits in the handler's mailbox. It is bounded by the
-%% mailbox, polled once a second or so, and only observable by a caller that
-%% just raised — see the `bondy_alarm_handler` moduledoc.
+%% `list/0` is the cheapest. `/ready` can answer READY for as long as the raise
+%% sits in the handler's mailbox — see the `bondy_alarm_handler` moduledoc.
 sync() ->
     _ = bondy_alarm_handler:list(),
     ok.

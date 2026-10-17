@@ -1,6 +1,6 @@
 %% =============================================================================
 %% End-to-end tests for `bondy_oplog_core_events` and the restart-recovery
-%% protocol (`MST_DB_DESIGN.md` §11.1, §12.3, §18 item 11).
+%% protocol.
 %%
 %% Verifies:
 %%   - `subscribe/1` receives the topic's notifications and nothing else

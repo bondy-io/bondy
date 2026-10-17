@@ -6,7 +6,7 @@
 -module(bondy_mcp_upstream).
 
 -moduledoc """
-Owner of one declared upstream MCP server (design §13): holds the
+Owner of one declared upstream MCP server: holds the
 upstream MCP session (`bondy_mcp_client`), projects the upstream's tools
 into the WAMP registry as callee procedures, and gates every projection
 through the pin store.
@@ -29,11 +29,11 @@ must not be fatal):
    makes the gproc lookup below sound.
 
 The projection writes nothing to `bondy_interface`: upstream descriptions
-are a prompt-injection channel (§13.3), so surfacing a projected
+are a prompt-injection channel, so surfacing a projected
 procedure on Bondy's own served MCP manifest stays a deliberate operator
 overlay act, never a side effect.
 
-## Pin gate (§13.3)
+## Pin gate
 
 The first sighting of a tool pins its definition — trust on first use —
 in the durable `mcp_upstream` table: the normative definition fields and
@@ -57,7 +57,7 @@ re-initialization, so callers never wait on the owner), performs
 was terminated — asks the owner to re-initialize (single-flight: the
 owner compares session ids and reconnects at most once per expiry) and
 retries the call once. Every call is audited as an `upstream_call` with
-`derivation` naming the shared service account it rode (§13.1).
+`derivation` naming the shared service account it rode.
 
 Positional WAMP arguments are not accepted (the dealer's callback
 application splices them into the callback arity): callers pass kwargs,
@@ -125,7 +125,7 @@ start_link(#{name := _} = Conf) ->
 
 -doc """
 Re-pins a drift-BLOCKED tool at its current upstream definition and
-registers it. The explicit re-approval §13.3 requires; there is no bulk
+registers it. The explicit re-approval the pin gate requires; there is no bulk
 form on purpose.
 """.
 -spec approve(binary(), binary()) -> ok | {error, any()}.
@@ -188,7 +188,7 @@ handle_wamp_call(#{upstream := Upstream} = CBConf, KWArgs, Options) when
     is_map(KWArgs)
 ->
     T0 = erlang:monotonic_time(microsecond),
-    %% The CALL's trace context (§15.4) continues into the upstream
+    %% The CALL's trace context continues into the upstream
     %% request as `params._meta`, and rides the completion event so an
     %% attached handler can span this leg.
     Trace = bondy_mcp_wamp:trace_meta(Options),
@@ -204,7 +204,7 @@ handle_wamp_call(#{upstream := Upstream} = CBConf, KWArgs, Options) when
 
 %% @private
 %% The ONE status classification of a projected call's WAMP shape, shared
-%% by the audit record and the §15 metric: the fixed tool-error URI is
+%% by the audit record and the metric: the fixed tool-error URI is
 %% the upstream saying "the tool ran and failed"; every other error URI
 %% is a gateway/transport failure.
 result_status({ok, _, _, _}) ->
@@ -225,7 +225,7 @@ init([Conf]) ->
     #{name := Name, realm := RealmUri, identity := Identity} = Conf,
 
     %% The sup validated the declaration set; this is the per-instance
-    %% assertion of the §13.1 contract, for direct (test/console) starts.
+    %% assertion of the identity contract, for direct (test/console) starts.
     Identity == service orelse error({invalid_identity, Identity}),
 
     %% Registered up front so `approve/2`, `refresh/1` and the call

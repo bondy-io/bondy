@@ -88,22 +88,11 @@ handle_info(_Info, #local_session{}) ->
 
 %% Two cleanups, not one, and in this order — the same pair
 %% `bondy_wamp_protocol:terminate/1' performs for every socket transport.
-%%
-%% `bondy_session_manager:close/1' retires the session: it demonitors the owner
-%% with `[flush]', flushes the session's registry entries and RPC promises, and
-%% deletes the session rows and counters. `bondy_context:close/1' then flushes
-%% the same registry entries again, which is a no-op range scan by then.
-%%
-%% The second call is kept because the first is a CAST: it is what guarantees
-%% the flush has happened by the time `close/1' returns, which an in-VM caller
-%% that reconnects immediately depends on. Historically it was also the ONLY
-%% flush — demonitoring with `[flush]' removes the `DOWN' whose handler would
-%% otherwise have run one — and omitting it left every registration an in-VM
-%% callee had made routable after it disconnected, so a later CALL was
-%% dispatched to a dead process and the caller waited out its timeout with no
-%% error to explain it.
-%%
-%% They run independently so that one raising cannot skip the other.
+%% `bondy_session_manager:close/1' is a CAST that retires the session;
+%% `bondy_context:close/1' flushes the session's registry entries again, and
+%% is what guarantees the flush has happened by the time `close/1' returns,
+%% which an in-VM caller that reconnects immediately depends on. They run
+%% independently so that one raising cannot skip the other.
 close(#local_session{session = Session, context = Ctxt}) ->
     _ =
         try

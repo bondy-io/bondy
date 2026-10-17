@@ -225,15 +225,12 @@ detect_equivocation(E1, E2) ->
             end
     end.
 
-%% Refreshes the verification-side fields of the state from the
-%% operator-pushed application env key
-%% `{validator_crypto, InstanceId}` under the `bondy_mst`
-%% application. Fields present in the pushed map replace their
-%% counterparts in the current state; fields absent are kept.
-%%
-%% Only `peer_pubkeys` and `accept_unknown_origin` are refreshable
-%% — see the "Snapshot refresh" section of the moduledoc for why
-%% `keypair` and `last_hash` cannot be rotated through this path.
+%% Refreshes the verification-side fields of the state from the operator-pushed
+%% application env key `{validator_crypto, InstanceId}` under the `bondy_oplog`
+%% application. Fields present in the pushed map replace their counterparts in
+%% the current state; fields absent are kept. Only `peer_pubkeys` and
+%% `accept_unknown_origin` are refreshable; see the "Snapshot refresh" section
+%% of the moduledoc for why `keypair` and `last_hash` cannot be rotated here.
 refresh(#state{instance_id = InstanceId} = State) ->
     case application:get_env(bondy_oplog, {validator_crypto, InstanceId}) of
         undefined ->

@@ -1,5 +1,4 @@
-%% Smoke tests for the foundation primitives that survive the
-%% course-correction reshape: origin, HLC, event keys.
+%% Smoke tests for the foundation primitives: origin, HLC, event keys.
 
 -module(bondy_oplog_basic_test).
 

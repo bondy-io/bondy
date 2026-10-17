@@ -6,10 +6,10 @@
 %% `bondy_db:delete/3` and the cell sweeper.
 %%
 %% `delete/3` issues the removal operation the table's CRDT declares; the cell
-%% becomes invisible to readers at once but is retained while a concurrent
-%% lower-HLC write could still arrive. `sweep_stable_cells/2` reclaims it once
-%% that is impossible. The sweep runs inside the applier — the only writer to
-%% the projection — so it cannot interleave a delete with a concurrent write.
+%% is invisible to readers at once but retained while a concurrent lower-HLC
+%% write could still arrive; `bondy_oplog_applier:sweep_stable_cells/2` reclaims
+%% it once that is impossible. The sweep runs inside the applier — the only
+%% writer to the projection — so it cannot interleave a delete with a write.
 %% =============================================================================
 
 -module(bondy_db_cell_sweep_test).
@@ -146,15 +146,10 @@ live_value_survives(T) ->
 %% Causal-stabilization folding ({keep, Reduced} → value-preserving rewrite)
 %% -----------------------------------------------------------------------------
 %%
-%% A struct cell's fields are nested PO-Logs — one dot-store entry per
-%% sub-op, forever — until the sweep folds each origin's causally-stable
-%% run into a synthetic op (`bondy_oplog_crdt_struct:stabilize/2` →
+%% The sweep folds each origin's causally-stable run of a struct cell's
+%% sub-ops into one synthetic op (`bondy_oplog_crdt_struct:stabilize/2` →
 %% `{keep, Reduced}`) and persists it as a value-preserving frame rewrite,
-%% counted as `rewritten`. This drives the whole path end-to-end through
-%% `bondy_db`: real stamped tier_2 events, the applier's sweep handler
-%% (behind the I1 remote-generation fence), the overlay fence, and the
-%% adapter write-back — on the registration-RIB schema, the production
-%% shape this bounds.
+%% counted as `rewritten`.
 
 struct_fold_setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
@@ -279,25 +274,9 @@ struct_fold_reduces_stable_runs(T) ->
 %% Overlay fence on the {keep, Reduced} rewrite
 %% -----------------------------------------------------------------------------
 %%
-%% The reduction rides the same overlay fence as `discard`: while ANY
-%% event is pending in the shard's overlay for a cell, the sweep must
-%% leave that cell alone (`skipped`), because a pending event's stamped
-%% context may be one the reduction's license did not account for.
-%%
-%% No production owner currently arms the fence — `bondy_db` registers
-%% every shard with `overlay => disabled` (read-your-writes comes from
-%% `apply/4`'s await, not overlay-merge), so the branch is defensive
-%% scaffolding for prospective `bondy_oplog_core` owners that DO pass an
-%% overlay tid. To exercise the real resolution path
-%% (`shard_key` -> registry lookup -> `entry_overlay` -> `events_for`)
-%% the test needs the shared_shards topology (whose ctx carries a
-%% `shard_key`; the memory topology's does not) and a passthrough meck
-%% of `bondy_oplog_core_registry:entry_overlay/1` returning a prepared
-%% overlay table — the registered entry itself is `disabled`, which the
-%% test asserts first to document that production reality. The "blocked"
-%% assertion doubles as a check that the pending row's Bucket/CellKey
-%% convention matches the fence's real read — a mismatch would let the
-%% rewrite through and fail it.
+%% The sweep skips a cell (`skipped`) while any event for it is pending in
+%% the shard's overlay: a pending event's stamped context may be one the
+%% reduction's license did not account for.
 
 fence_setup() ->
     process_flag(trap_exit, true),

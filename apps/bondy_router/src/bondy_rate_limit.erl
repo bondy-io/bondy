@@ -8,8 +8,7 @@
 Inbound rate-limiting policy: turns per-scope configuration into
 token-bucket admission decisions over `bondy_rate_limiter`.
 
-Budgets exist at up to three SCOPES, composed as a chain (design:
-`_plans/2026-08-29-rate-limit-scopes-design.md`):
+Budgets exist at up to three SCOPES, composed as a chain:
 
 - **node** — `[security, rate_limit]` (`security.rate_limit.*` in
   `bondy.conf`): per-source-IP / per-session buckets shared by every
@@ -43,10 +42,7 @@ tokens/millisecond.
 
 The node scope's reader requires the `[security, rate_limit]` config
 value to be a MAP — the shape `schema/bondy.schema`'s
-`bondy_router.security.rate_limit` translation builds (verified by
-generation probe, 2026-08-26; the earlier per-key schema targets
-generated nested proplists, which this reader rejected, so conf-file
-enablement was a no-op).
+`bondy_router.security.rate_limit` translation builds.
 
 It never raises — the underlying limiter fails open — so a limiter
 problem degrades to "no limit", never to a wedged inbound path.

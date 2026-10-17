@@ -43,7 +43,7 @@ validate_id(Id) ->
 validate_map(Map, Spec, Extensions) ->
     Opts = #{
         atomic => true,
-        % This will only turn the defined keys to atoms
+        %% This will only turn the defined keys to atoms
         labels => atom,
         keep_unknown => false
     },
@@ -52,7 +52,7 @@ validate_map(Map, Spec, Extensions) ->
 validate_map(Map, Spec, Extensions, Opts0) ->
     Defaults = #{
         atomic => true,
-        % This will only turn the defined keys to atoms
+        %% This will only turn the defined keys to atoms
         labels => atom,
         keep_unknown => false
     },

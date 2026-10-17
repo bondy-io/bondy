@@ -4,7 +4,7 @@
 %%
 %% @author    Ricardo Tomé Gonçalves <tome.wave@gmail.com>
 %% @author    Paulo Sérgio Almeida <pssalmeida@gmail.com>
-%
+%%
 %% @copyright The MIT License (MIT)
 %% Copyright (C) 2013
 %%
@@ -93,7 +93,7 @@ The version vector SHOULD BE a direct result of join/1.
 """.
 -spec new(vector(), value() | [value()]) -> clock().
 new(VV, Vs) when is_list(Vs) ->
-    % defense against non-order preserving serialization
+    %% defense against non-order preserving serialization
     VVS = lists:sort(VV),
     {[{I, N, []} || {I, N} <- VVS], Vs};
 new(VV, V) ->
@@ -116,14 +116,14 @@ sync(C, {}) ->
 sync(C1 = {E1, V1}, C2 = {E2, V2}) ->
     V =
         case less(C1, C2) of
-            % C1 < C2 => return V2
+            %% C1 < C2 => return V2
             true ->
                 V2;
             false ->
                 case less(C2, C1) of
-                    % C2 < C1 => return V1
+                    %% C2 < C1 => return V1
                     true -> V1;
-                    % keep all unique anonymous values and sync entries()
+                    %% keep all unique anonymous values and sync entries()
                     false -> sets:to_list(sets:from_list(V1 ++ V2))
                 end
         end,
@@ -226,7 +226,7 @@ Compares the equality of both clocks, regarding
 only the causal histories, thus ignoring the values.
 """.
 -spec equal(clock() | vector(), clock() | vector()) -> boolean().
-% DVVSet
+%% DVVSet
 equal({C1, _}, {C2, _}) -> equal2(C1, C2);
 equal(C1, C2) when is_list(C1) and is_list(C2) -> equal2(C1, C2).
 
@@ -318,9 +318,9 @@ find_entry(F, {[{I, _, [V | _]} | T], Vs}) -> find_entry(F, I, V, {T, Vs}, id).
 find_entry(F, I, V, C, Flag) ->
     Fun = fun(A, B) ->
         case F(A, B) of
-            % A is newer than B
+            %% A is newer than B
             false -> {left, A};
-            % A is older than B
+            %% A is older than B
             true -> {right, B}
         end
     end,
@@ -409,13 +409,13 @@ sync_test() ->
     ok.
 
 syn_update_test() ->
-    % Mary writes v1 w/o VV
+    %% Mary writes v1 w/o VV
     A0 = update(new([v1]), a),
-    % Peter reads v1 with version vector (VV)
+    %% Peter reads v1 with version vector (VV)
     VV1 = join(A0),
-    % Mary writes v2 w/o VV
+    %% Mary writes v2 w/o VV
     A1 = update(new([v2]), A0, a),
-    % Peter writes v3 with VV from v1
+    %% Peter writes v3 with VV from v1
     A2 = update(new(VV1, [v3]), A1, a),
     ?assertEqual(VV1, [{a, 1}]),
     ?assertEqual(A0, {[{a, 1, [v1]}], []}),
@@ -505,7 +505,7 @@ equal_test() ->
     A = {[{a, 4, [v5, v0]}, {b, 0, []}, {c, 1, [v3]}], [v0]},
     B = {[{a, 4, [v555, v0]}, {b, 0, []}, {c, 1, [v3]}], []},
     C = {[{a, 4, [v5, v0]}, {b, 0, []}], [v6, v1]},
-    % compare only the causal history
+    %% compare only the causal history
     ?assert(equal(A, B)),
     ?assert(equal(B, A)),
     ?assertNot(equal(A, C)),

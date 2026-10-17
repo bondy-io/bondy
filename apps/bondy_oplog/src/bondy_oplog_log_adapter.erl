@@ -34,18 +34,15 @@ Directory: the writer's pid is the `wal_pid` field of the instance's
 `bondy_oplog_registry` row, where `bondy_oplog_instance` and the
 per-instance supervisor expect it.
 
-The record and identity bytes are the bytes the WAL wrote before the
-seams existed; the byte-identity probe pins them, and
-`bondy_log_frame_test` pins the frame envelope.
+The byte-identity probe in `bondy_oplog_log_adapter_test` pins the record
+and identity bytes, and `bondy_log_frame_test` pins the frame envelope.
 
 `decode_body/1` is deliberately NOT `[safe]`: it decodes frames THIS node
 wrote. Under `[safe]` an event carrying an atom absent from the VM's atom
 table at replay time raises `badarg` and would be misattributed to frame
 corruption — dropped by the reader, and read as TRUNCATION by strict
 recovery, discarding every frame after it. `binary_to_term/1` still
-raises `badarg` on malformed bytes, so real framing errors are caught
-exactly as before. Peer-shipped bytes are decoded under `[safe]` at the
-wire boundary (`C-2`), where that control belongs.
+raises `badarg` on malformed bytes, so framing errors are still caught.
 """.
 
 -export([frame_magic/0]).

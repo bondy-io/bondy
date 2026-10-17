@@ -166,7 +166,7 @@ end#{
 -type permission() :: binary().
 -type resource() ::
     any
-    % <<"any">>
+    %% <<"any">>
     | binary()
     | #{uri := binary(), strategy := binary()}
     | normalised_resource().
@@ -1006,7 +1006,7 @@ do_get_metadata([], _, Acc) ->
                 IsList = lists:any(fun is_list/1, L0),
                 case sets:to_list(sets:from_list(lists:flatten(L0))) of
                     [V] when IsList == false ->
-                        % Unwrap if singleton
+                        %% Unwrap if singleton
                         V;
                     L when is_list(L) ->
                         L
@@ -1522,15 +1522,11 @@ find_grants(Realm, {Rolename, '_'}, Type, _Opts) ->
     %% cell) simply fails the generator pattern and is skipped.
     Table = grant_table(Type),
     {Lo, Hi} = bondy_oplog_index_key:col_bounds(Rolename),
-    %% Folded to exhaustion, not `range_all/5`: that returns ONE page, so a
-    %% role with more grants than the default limit silently lost the rest —
-    %% and a missing grant here is a missing PERMISSION.
-    %%
-    %% Pinned to the role's shard: a role's grants co-locate there (catalogue
-    %% `aggregate_root => leading_col`, the Rolename leading the composite
-    %% key), so the band never spans shards. The pin is what keeps this ONE
-    %% durable read — an unpinned `fold/6` walks every shard in sequence, and
-    %% this is the authz path, several calls per `get_context/2`.
+    %% Folded to exhaustion, not one `bondy_db:range_all/5` page: a missing
+    %% grant here is a missing PERMISSION. Pinned to the role's shard, where a
+    %% role's grants co-locate (catalogue `aggregate_root => leading_col`),
+    %% so this is ONE durable read on the authz path; an unpinned `fold/6`
+    %% walks every shard.
     Shard = bondy_db:shard_for(Table, Realm, Lo),
     {ok, Rev} = bondy_db:fold(
         Table, Realm, Lo, Hi, fun(Row, Acc) -> [Row | Acc] end, [], #{
@@ -1613,20 +1609,16 @@ do_get(Table, RealmUri, Key) ->
 
 %% @private
 %% Clears every grant for `Rolename` within the realm. The role band
-%% (`col_bounds/1`) selects exactly that role's grants, so the scan is bounded
+%% (`bondy_oplog_index_key:col_bounds/1`) selects exactly that role's grants, so
+%% the scan is bounded
 %% to `O(grants-for-role)` — no full-realm decode-and-filter.
 revoke_role_grants(Table, RealmUri, Rolename) ->
     {Lo, Hi} = bondy_oplog_index_key:col_bounds(Rolename),
-    %% Folded to exhaustion, and clearing as it goes. `range_all/5` returned
-    %% one page, so a role with more grants than the default limit kept the
-    %% remainder THROUGH a revocation — a grant surviving the removal of the
-    %% role it belongs to. Clearing from inside the fold is safe: the walk
-    %% runs a forward cursor and a cleared cell holds its place in the band
-    %% until stabilization.
-    %%
-    %% Pinned to the role's shard, for the reason given in `find_grants/4`:
-    %% the band is single-shard by the catalogue's `aggregate_root`, and an
-    %% unpinned `fold/6` would walk every shard in sequence.
+    %% Folded to exhaustion, not one `bondy_db:range_all/5` page, so no grant
+    %% survives the removal of its role. Clearing from inside the fold is
+    %% safe: the walk runs a forward cursor and a cleared cell holds its
+    %% place in the band until stabilization. Pinned to the role's shard for
+    %% the reason given in `find_grants/4`.
     Shard = bondy_db:shard_for(Table, RealmUri, Lo),
     {ok, ok} = bondy_db:fold(
         Table,
@@ -1654,14 +1646,11 @@ clear_all_grants(Table, RealmUri) ->
 
 %% The grant store key is the compound `{Rolename, Resource}`, encoded as an
 %% order-preserving composite: the role as a type-tagged leading column
-%% (`encode_col/1`, so the reserved atoms `all`/`anonymous` and binary rolenames
-%% coexist), a `0x00` separator, then the canonical `term_to_binary` of the
-%% resource (`any | {Uri, Strategy}`). The role column is `0x00`-free, so every
-%% grant for a role is a contiguous band (`col_bounds(Rolename)`) and the forward
-%% "grants for role" query is a bounded range scan, not a full-realm filter.
-%%
-%% Exported so the legacy-backup import translator encodes keys byte-identically
-%% to the live write path; not part of the module's public surface.
+%% (`bondy_oplog_index_key:encode_col/1`), a `0x00` separator, then the
+%% canonical `term_to_binary` of the resource. The role column is `0x00`-free,
+%% so every grant for a role is a contiguous band and the "grants for role"
+%% query is a bounded range scan. Exported so the legacy-backup import
+%% translator encodes keys exactly as the live write path does.
 -doc false.
 encode_key({Rolename, Resource}) ->
     <<
@@ -1673,8 +1662,7 @@ encode_key({Rolename, Resource}) ->
 %% @private
 %% Inverse of `encode_key/1`: split at the single `0x00` separator (the role
 %% column is `0x00`-free), decode the role column, then plain-decode the
-%% resource — own-persisted bytes per the C-2 own-bytes rule (rationale:
-%% `bondy_oplog_cell_kernel:decode_value_bytes/2`).
+%% resource — own-persisted bytes (rationale in `bondy_oplog_cell_kernel`).
 decode_key(Bin) when is_binary(Bin) ->
     {ColBin, ResBin} = split_key(Bin),
     {bondy_oplog_index_key:decode_col(ColBin), binary_to_term(ResBin)}.

@@ -1,12 +1,12 @@
 %% =============================================================================
 %% Tests for `bondy_oplog_core_metrics` — the periodic per-namespace gauge
-%% emitter for §16 of `MST_DB_DESIGN.md`.
+%% emitter.
 %%
 %% Verifies:
 %%   - read / range telemetry events increment the underlying counters
 %%     through `bondy_metrics`
 %%   - `snapshot_now/0` emits a `[bondy_oplog_core, metrics, refresh]` event
-%%     per known namespace with the §16 measurements + metadata
+%%     per known namespace with the gauge measurements + metadata
 %%   - cache_hit_rate computes from delta of hits / (hits + misses)
 %%   - read_rps / range_rps reflect the elapsed window since the last tick
 %%   - `interval_ms => disabled` suppresses the periodic tick while

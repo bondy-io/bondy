@@ -43,7 +43,9 @@ all realms share a single bondy_db band (the empty binary, like the API Gateway
 specs) and are keyed by their Uri, whose hash spreads them across
 shards. `list/0` therefore scatter-scans the band across every shard. Realms'
 associated RBAC objects (users, credentials, groups, sources, grants) live in
-their own bondy_db tables.
+their own bondy_db tables. The realm's key material lives apart, in the
+realm-keys table (`bondy_realm_keys`): an add-wins map of `kid => key bundle`,
+so concurrent rotations merge to the union.
 
 ## Bondy Master Realm
 When you start Bondy for the first time it creates and stores the Bondy
@@ -143,7 +145,7 @@ connected to any realm.
 %% while `bondy_db:list/2` over the band scatter-scans every realm.
 -define(REALM_BAND, <<>>).
 
-%% S-2: at-rest encryption marker for a `bondy_realm_keys` bundle field. A
+%% At-rest encryption marker for a `bondy_realm_keys` bundle field. A
 %% sensitive field (`private`, `encryption`) is stored either as a plaintext JWK
 %% (encryption off / legacy) or as `{?ENC_TAG, Envelope}` (a `bondy_keyring`
 %% AES-256-GCM envelope over `term_to_binary(JWK)`). `public` is never encrypted.
@@ -1783,16 +1785,13 @@ apply_config() ->
         undefined ->
             ok;
         Filename ->
-            %% Apply the security config declaratively. Each object is written
-            %% with `bondy_db:reconcile` (an idempotent set), so re-applying the
-            %% unchanged file on every boot emits NO operations and never
-            %% perturbs cross-node convergence — the op-based CRDT + anti-entropy
-            %% reconcile multi-node writes, so no deterministic-version rebase
-            %% is needed. The `declarative` flag carries that intent:
-            %% overwrite-if-present and skip the runtime lifecycle side-effects.
-            %% Idempotency relies on each object being byte-identical across
-            %% nodes and boots; see `validate_rbac_config` for the deterministic
-            %% password salt that makes a config-declared password so.
+            %% Apply the security config declaratively: each object is
+            %% written with `bondy_db:reconcile` (an idempotent set), so
+            %% re-applying the unchanged file on every boot emits NO
+            %% operations. The `declarative` flag means overwrite-if-present
+            %% and skip the runtime lifecycle side-effects. Idempotency relies
+            %% on each object being identical across nodes and boots; see
+            %% `validate_rbac_config` for the deterministic password salt.
             from_file(Filename, #{declarative => true})
     end.
 
@@ -2029,13 +2028,6 @@ grants(Uri, Opts) when is_binary(Uri) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-%%
-%% The realm table has no prefix callbacks. The LOCAL lifecycle is the inline
-%% `on_create/1`/`on_update/1`/`on_delete/1` notifications fired from the
-%% create/update/delete paths. The REMOTE side-effect — close all sessions when
-%% a peer deletes the realm via anti-entropy — is the `publish => true` /
-%% `bondy_aae_reactor:react_realm/2` seam (see `bondy_namespace_catalog`),
-%% exactly as the user on_merge works.
 
 %% @private
 add_master_realm() ->
@@ -2089,7 +2081,7 @@ resolve_master_admin_password() ->
     end.
 
 -doc """
-Idempotent one-shot hardening of an ALREADY-STORED master realm (D-1/D-2), for
+Idempotent one-shot hardening of an ALREADY-STORED master realm, for
 installations provisioned before the master-realm hardening. Fresh installs
 create the master realm already hardened, so this is a no-op for them. Called at
 boot (see `bondy_router_app`) after the master realm is guaranteed to exist. Guarded so
@@ -2387,11 +2379,11 @@ do_create(#{uri := Uri} = Map0, Opts) ->
     Realm.
 
 %% @private
-%% Decide whether to mint key material eagerly at create time. See the REALM KEY
-%% MATERIAL section for the rationale. Eager for an authoritative create (not
-%% declarative) or with clustering disabled; deferred to lazy generation for a
-%% clustered node applying declarative config. A keyset explicitly supplied in
-%% the create map is always kept verbatim.
+%% Decide whether to mint key material eagerly at create time. Eager for an
+%% authoritative create (not declarative) or with clustering disabled;
+%% deferred to lazy generation for a clustered node applying declarative
+%% config, which inherits the cluster's keys via anti-entropy. A keyset
+%% explicitly supplied in the create map is always kept verbatim.
 maybe_gen_keys(Map, Opts) ->
     Declarative =
         is_map(Opts) andalso maps:get(declarative, Opts, false) =:= true,
@@ -2520,37 +2512,6 @@ store(Uri, Realm) ->
 %% =============================================================================
 %% PRIVATE: REALM KEY MATERIAL (separate `bondy_realm_keys` cell)
 %% =============================================================================
-%% The realm's signing/encryption keys are random per generation, so they must
-%% NOT be part of the realm's bondy_db identity (the identity cell + its cross-node
-%% convergence must be Uri + config, deterministic across nodes). They live in their
-%% own `bondy_realm_keys` cell, an add-wins map of `kid => key bundle` keyed by
-%% the realm Uri. Add-wins means concurrent rotations — each minting a fresh
-%% kid — merge to the UNION on every node, so the keys converge (and an imported
-%% realm's keys are preserved) without a deterministic-version write.
-%%
-%% Key generation is gated so that the add-wins union does not accumulate a
-%% redundant set per node (`maybe_gen_keys/2`):
-%%
-%%   * An AUTHORITATIVE create — a non-declarative `create/1` (API) — generates
-%%     eagerly. It has a single creator node, so the keys are written once and
-%%     propagate to peers via anti-entropy before any token is issued; this is
-%%     what makes cross-node JWT verification of the first token reliable.
-%%   * A node with clustering disabled (`bondy_cluster:enabled/0`) also
-%%     generates eagerly, even for declarative config-declared realms: it is the
-%%     only replica, so its keys are the realm's keys, and a node that later
-%%     starts a cluster carries them to the nodes that join it.
-%%   * A node applying DECLARATIVE config while part of a cluster (a joiner, or a
-%%     node re-reading the config file at boot) DEFERS: it creates the realm
-%%     key-free and inherits the cluster's keys via anti-entropy, so joiners do
-%%     not each mint a redundant set.
-%%
-%% Whatever is deferred is still covered by LAZY generation on first use (the
-%% empty-keyset clauses in `private_keys/1`, `encryption_keys/1`,
-%% `get_random_kid/1`, `get_random_private_key/1`, `get_random_encryption_kid/1`),
-%% so a realm is never stuck without keys: a node that genuinely needs a key
-%% before anti-entropy delivers one mints its own (union-merged). Membership is
-%% not consulted: it cannot tell a first node from a member that has just
-%% restarted (`bondy_oplog_instance:reclamation_members/0`).
 
 %% @private
 %% The open `bondy_realm_keys` table handle. Raises if the catalogue has not
@@ -2627,7 +2588,7 @@ fold_key_entry(Uri, Kid, Bundles, {P, Pu, E}) ->
     end.
 
 %% =============================================================================
-%% PRIVATE: REALM KEY AT-REST ENCRYPTION (S-2)
+%% PRIVATE: REALM KEY AT-REST ENCRYPTION
 %% =============================================================================
 
 %% @private
@@ -2713,10 +2674,10 @@ bundle_of(B) when is_map(B) -> B.
 %% realm identity cell (see the REALM KEY MATERIAL section), so clearing that
 %% cell leaves them behind.
 %%
-%% The cell is an add-wins MAP, and a collection type has no whole-cell removal:
-%% `bondy_oplog_crdt_aw_map` exports no `removal_op/0`, so `bondy_db:delete/3`
-%% answers `{error, {no_removal_op, _}}` and a `clear` op is not the map's
-%% language. Each kid is therefore retracted individually — the same `{rmv, Kid}`
+%% The cell is an add-wins MAP, and `bondy_oplog_crdt_aw_map` has no whole-cell
+%% removal op, so `bondy_db:delete/3` answers `{error, {no_removal_op, _}}`
+%% and a `clear` op is not the map's language. Each kid is therefore retracted
+%% individually — the same `{rmv, Kid}`
 %% `store_keys/2` issues for a revoked key. An observed-remove, so a rotation
 %% racing the delete on another node survives; the realm is going away, so what
 %% matters is that everything this node observed is retracted.

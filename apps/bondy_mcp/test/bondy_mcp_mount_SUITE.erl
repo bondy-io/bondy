@@ -14,10 +14,8 @@ route state through the manager's own configuration path.
 Runs on a booted node (`bondy_ct:start_bondy/0`): although the subject is
 the listener machinery, not MCP semantics, the mounting proof rides the
 real handler's realm check and the manager mounts the metrics stream
-handler — both need what a booted node seats (measured: the previously
-declared lean ranch+cowboy environment fails when the suite runs first
-in a fresh VM and was green in batteries only via an earlier suite's
-booted node).
+handler — both need what a booted node seats. A lean ranch+cowboy
+environment is not enough when the suite runs first in a fresh VM.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -53,11 +51,9 @@ init_per_suite(Config) ->
     %% listener, whose socket path is `platform_tmp_dir`-relative and read
     %% without a default. This suite does not boot `bondy_config:init/1`, so
     %% it supplies the key itself; the OS pid keeps parallel CT runs from
-    %% sharing the directory.
-    %% Node-global like `listeners` below: an already-running bondy resolved
-    %% its `admin_local` socket path from the value at ITS boot, and a later
-    %% suite recomputes the same path from this key — leaving ours in place
-    %% points them at a socket that does not exist. Restored in
+    %% sharing the directory. Node-global like `listeners` below: a later
+    %% suite recomputes the same path from this key, so leaving ours in
+    %% place points it at a socket that does not exist. Restored in
     %% `end_per_suite/1`.
     OriginalTmpDir = bondy_config:get(platform_tmp_dir, undefined),
     ok = bondy_config:set(
@@ -98,8 +94,8 @@ mcp_listener_answers_the_stub_on_both_paths(_Config) ->
     ok = bondy_listener_manager:start(normal),
     Port = ranch:get_port(ct_mcp),
 
-    %% A GET on the JSON-RPC path reaches the real handler — since §21.8
-    %% GET is a real method (the handshake era's held stream), so the
+    %% A GET on the JSON-RPC path reaches the real handler — GET is a
+    %% real method (the handshake era's held stream), so the
     %% mounting proof is the handler's own realm check: only OUR handler
     %% answers `no_such_realm` for the URL's realm binding.
     Rpc = http_get(Port, "localhost", "/mcp/realm/com.example.test"),

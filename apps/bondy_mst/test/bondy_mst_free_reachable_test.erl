@@ -60,42 +60,23 @@ free_reachable_test_() ->
             {timeout, 60, fun foreign_split_frees_nothing/0}
         ]}.
 
-%% The FOREIGN owner rule in `bondy_mst:split/5`: decomposing the DONOR
-%% tree's pages while merging must never `free/3` them — the receiver's
-%% store holds them (the AAE adopt-then-integrate path `put_page`s the
-%% peer's pages into the local store and then merges the peer root), and
-%% until the merge commits they are reachable only from the pinned peer
-%% root. Freeing them there tombstones pulled pages mid-integrate; on
-%% the pack store a later collection (`reachable ∩ non-tombstoned`)
-%% would then drop them outright.
-%%
-%% This drives the exact production shape — adopt a fully-interleaved
-%% peer tree, merge its root — and asserts NO page of either the merged
-%% root's tree or the peer's tree carries a tombstone afterwards. The
-%% merge only ever frees pages it path-copied AWAY (owned rewrites of
-%% the receiver's old spine, unreachable from the new root), so a
-%% tombstone on anything still reachable is an over-free. Reverting
-%% `foreign` to free (one word in `split_page/6`) trips this on the
-%% peer-root walk.
+%% The FOREIGN owner rule in `bondy_mst:split/5`: decomposing the DONOR tree's
+%% pages while merging must never `free/3` them. The receiver's store holds
+%% them (the AAE adopt-then-integrate path `put_page`s the peer's pages into
+%% the local store, then merges the peer root), and until the merge commits
+%% they are reachable only from the pinned peer root; a tombstone there drops
+%% them at the next collection. Asserts NO page of the merged root's tree or
+%% the peer's tree carries a tombstone afterwards: the merge only frees pages
+%% it path-copied AWAY, so a tombstone on anything reachable is an over-free.
 foreign_split_frees_nothing() ->
     N = 200,
-    %% DISJOINT, fully interleaved key sets, deliberately — both halves
-    %% of the trap:
-    %%
-    %% - Every receiver key is absent from the donor, so the merge must
-    %%   `split/5` the donor's pages at every receiver entry — the
-    %%   foreign path runs down the donor's spine over and over.
-    %%   (Overlapping key sets short-circuit the aligned regions and
-    %%   barely exercise the foreign path.)
-    %% - Disjoint keys mean no page of A can alias a page of P, so
-    %%   "zero tombstones on either walk" is an exact invariant — an
-    %%   OWNED free of A's replaced spine cannot legitimately tombstone
-    %%   a row some kept twin still references.
-    %%
-    %% `put_batch/2` cannot catch this rule even though it merges a
-    %% foreign (map-store) batch tree: the batch pages are absent from
-    %% the receiver's store, so a wrong free there is a no-op. The
-    %% adopt step below is what arms it.
+    %% DISJOINT, fully interleaved key sets, deliberately: every receiver key
+    %% is absent from the donor, so the merge must `split/5` the donor's pages
+    %% at every receiver entry (overlapping key sets short-circuit the aligned
+    %% regions); and no page of A can alias a page of P, so "zero tombstones
+    %% on either walk" is an exact invariant. `put_batch/2` cannot catch this
+    %% rule: the batch pages are absent from the receiver's store, so a wrong
+    %% free there is a no-op. The adopt step below is what arms it.
     A0 = new_ets_tree(<<"foreign_recv">>),
     A = bondy_mst:put_batch(A0, [{2 * I, <<"a">>} || I <- lists:seq(1, N)]),
 

@@ -90,7 +90,7 @@ pub_apply_read(Db) ->
     ?assertEqual({ok, {<<"v2">>, H2}}, bondy_db:read(T, <<"r1">>, <<"alice">>)),
     ok = bondy_db:close_table(T).
 
-%% The read-overlay path (step 3b): a CRDT shard registered with the
+%% The read-overlay path: a CRDT shard registered with the
 %% overlay ENABLED. The read merges pending overlay events on top of the
 %% projection via `interpret_cog` (the operation-based primitive), NOT a
 %% per-event `apply_event` fold. Deterministic — seeds a projection frame
@@ -127,8 +127,9 @@ ov_clear_clears(#{ns := NS}) ->
     ?assertEqual(undefined, bondy_oplog_core:read(NS, primary, ?B, <<"k2">>)).
 
 ov_below_projection_ignored(#{ns := NS}) ->
-    %% An overlay event at or below the projection HLC is filtered by
-    %% `read_overlay/4` (key_hlc > ProjHlc), so the projection value stands.
+    %% An overlay event at or below the projection HLC is filtered by the
+    %% overlay read in `bondy_oplog_core` (key_hlc > ProjHlc), so the
+    %% projection value stands.
     materialise(NS, <<"k3">>, {set, <<"current">>, 50}, 50),
     overlay_insert(NS, <<"k3">>, 30, {set, 30, <<"stale">>}),
     ?assertEqual(

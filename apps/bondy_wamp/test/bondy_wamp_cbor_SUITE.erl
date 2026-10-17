@@ -20,6 +20,7 @@ all() ->
         test_key_value_list,
         test_check_duplicate_keys,
         test_decode_head,
+        test_decode_head_indefinite_string,
         test_decode_tail,
         test_encode_with_tail,
         test_validate_opts,
@@ -269,6 +270,21 @@ test_decode_head(_) ->
     ?assertEqual([#{<<"key">> => <<"value">>}, [1, 2]], Elements4),
     TailDecoded4 = bondy_wamp_cbor:decode_tail(Tail4),
     ?assertEqual([3, 4], TailDecoded4).
+
+%% RFC 8949 section 3.2.3: an indefinite-length string is a sequence of
+%% definite-length chunks closed by the break byte. The head decoder must
+%% hand the whole item to the decoder, not the break byte alone, and the
+%% tail must start at the element after it.
+test_decode_head_indefinite_string(_) ->
+    Text = <<16#7f, 16#63, "foo", 16#62, "ar", 16#ff>>,
+    Bytes = <<16#5f, 16#42, "ab", 16#41, "c", 16#ff>>,
+    CBOR = <<16#84, Text/binary, Bytes/binary, 16#02, 16#03>>,
+    {Elements, Tail} = bondy_wamp_cbor:decode_head(CBOR, 2),
+    ?assertEqual([<<"fooar">>, <<"abc">>], Elements),
+    ?assertEqual([2, 3], bondy_wamp_cbor:decode_tail(Tail)),
+    {Elements1, Tail1} = bondy_wamp_cbor:decode_head(CBOR, 1),
+    ?assertEqual([<<"fooar">>], Elements1),
+    ?assertEqual([<<"abc">>, 2, 3], bondy_wamp_cbor:decode_tail(Tail1)).
 
 test_decode_tail(_) ->
     CBOR = bondy_wamp_cbor:encode([1, 2, 3, 4, 5]),

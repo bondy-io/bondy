@@ -333,7 +333,7 @@ close_is_idempotent_test() ->
     end).
 
 %% =============================================================================
-%% Sealed-segment corruption surfacing (QA finding #2)
+%% Sealed-segment corruption surfacing
 %% =============================================================================
 
 %% Truncate the tail of a sealed segment so a frame straddles EOF.
@@ -649,10 +649,10 @@ qidx_not_written_on_close_if_no_appends_test() ->
         rmrf(Dir)
     end.
 
-%% After rotation, a head segment that has had zero appends since the
-%% rotation must NOT produce a `.qidx` on close — the `flush_head_idx`
-%% gate has to look at the accumulator's entry count, not the writer's
-%% lifetime `append_count`. QA finding C1.
+%% Exercises the head segment that received no append after an explicit
+%% rotation: its `.qidx` must be absent on close while the sealed
+%% segment's is present. A size-triggered rotation cannot reach this
+%% state, because the append that triggers it lands in the new head.
 qidx_not_written_for_empty_head_after_rotation_test() ->
     HLC = bondy_connect_hlc:new(),
     Dir = mktemp_dir(),
@@ -660,20 +660,12 @@ qidx_not_written_for_empty_head_after_rotation_test() ->
         Opts = #{
             dir => Dir,
             origin => origin(),
-            max_segment_bytes => 200
+            max_segment_bytes => 1_000_000
         },
         {ok, Pid} = bondy_oplog_wal:start_link(instance_id(), Opts),
         E1 = mk_event(bondy_connect_hlc:now(HLC), 1),
-        E2 = mk_event(bondy_connect_hlc:now(HLC), 2),
         {ok, _, {0, _}} = bondy_oplog_wal:append(Pid, E1),
-        {ok, _, {1, _}} = bondy_oplog_wal:append(Pid, E2),
-        %% Now close without doing anything else; head is segment 1
-        %% which has had exactly one event (E2 went into segment 1 per
-        %% the position assert above), so its .qidx should exist.
-        %% But to exercise the "empty head after rotation" path, force
-        %% another rotation by appending an oversize-ish event... easier:
-        %% just close. Segment 1 has 1 event → idx_acc has 1 entry → flush.
-        %% Segment 0 was sealed → flush at rotation.
+        {ok, 0} = bondy_log_wal:rotate(Pid),
         ok = bondy_oplog_wal:close(Pid),
         Seg0Idx = filename:join(
             [Dir, instance_id(), bondy_log_idx:filename(0)]
@@ -682,13 +674,12 @@ qidx_not_written_for_empty_head_after_rotation_test() ->
             [Dir, instance_id(), bondy_log_idx:filename(1)]
         ),
         ?assert(filelib:is_regular(Seg0Idx)),
-        ?assert(filelib:is_regular(Seg1Idx)),
-        {ok, _} = bondy_log_idx:read_file(Seg1Idx)
+        ?assertNot(filelib:is_regular(Seg1Idx))
     after
         rmrf(Dir)
     end.
 
-%% QA finding T1: when a sealed segment's `.qidx` is missing, the
+%% When a sealed segment's `.qidx` is missing, the
 %% reader's HLC seek must fall back to a linear scan from the segment
 %% header. Verify by writing across two segments, deleting segment 0's
 %% `.qidx`, then seeking a target HLC that lives in segment 0.

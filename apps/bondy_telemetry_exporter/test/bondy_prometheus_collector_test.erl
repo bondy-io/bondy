@@ -44,8 +44,7 @@ cleanup({new, Pid}) ->
     exit(Pid, shutdown),
     ok;
 cleanup({reused, _}) ->
-    %% Server owned elsewhere: clear only the declaration registry (same
-    %% effect the old persistent_term erase had — a full reset).
+    %% Server owned elsewhere: clear only the declaration registry.
     try
         ets:delete_all_objects(?DECLARED_TAB)
     catch

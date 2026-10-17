@@ -6,7 +6,7 @@
 -module(bondy_mcp_client).
 
 -moduledoc """
-A Streamable HTTP MCP client (design §13): the protocol half of projecting
+A Streamable HTTP MCP client: the protocol half of projecting
 an upstream MCP server's tools into the WAMP registry. Stateless — a
 connection is a value (`t()`), owned and refreshed by
 `bondy_mcp_upstream`; every function here is a plain call over an

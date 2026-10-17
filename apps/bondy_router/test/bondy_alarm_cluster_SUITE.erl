@@ -18,12 +18,11 @@ Three properties, in the order they matter:
     node 2's name. Without this the "cluster view" is a local list with extra
     fields.
   * PARTITION — `answered` and `silent` partition the membership: every member
-    is in exactly one, always. This is the property §6 of the design is about,
-    and it is what stops "node X has no alarms" being read as "node X is
-    silent".
+    is in exactly one, always. This property is what stops "node X has no
+    alarms" being read as "node X is silent".
   * DEGRADATION — with node 2 stopped, node 1 still answers for itself and
     reports node 2 SILENT rather than absent. A node dropping out of the reply
-    entirely is the failure this design was built to prevent: the missing node
+    entirely is the failure the fan-out exists to prevent: the missing node
     is usually the interesting one.
 
 `bondy.alarm.history` is here for the same reason, and more sharply: it walks
@@ -41,9 +40,9 @@ skipped.
     which is the only reason a walk over n unreachable peers costs one timeout
     rather than n.
 
-The last two are the ones `bondy_alarm_api_SUITE` cannot hold: mutants that
-name a deferred node, or spend a fresh budget per node, pass every case there
-(mutation-checked 2026-09-01).
+The last two are the ones `bondy_alarm_api_SUITE` cannot hold: on one node, a
+mutant that names a deferred node, or spends a fresh budget per node, has no
+second node to expose it.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -260,14 +259,10 @@ not_reached_accumulates_across_pages(Config) ->
 %% is DEFERRED, not named: it is left in the cursor and asked next page.
 %%
 %% Forced by SUSPENDING node 2's alarm manager, so the RPC to it blocks until
-%% the deadline instead of failing. That is the whole point: a peer that is
-%% DOWN fails immediately and consumes no budget, so only a peer that is up and
-%% not answering — the case the timeout exists for — can exhaust one. It is
-%% walked first, and the 200ms `_deadline` is provably gone by the time the
-%% walk reaches node 1.
-%%
-%% With a fresh budget per node — the shape this replaced — node 1 would be
-%% read and the page would carry its events.
+%% the deadline instead of failing: a peer that is DOWN fails immediately and
+%% consumes no budget. Node 2 is walked first, so the 200ms `_deadline` is
+%% spent before the walk reaches node 1. A fresh budget per node would read
+%% node 1 and the page would carry its events.
 an_exhausted_budget_defers_without_naming(Config) ->
     [N1, N2] = nodes_of(Config),
     ok = erpc:call(N1, ?MODULE, do_raise, [<<"local relay down">>]),

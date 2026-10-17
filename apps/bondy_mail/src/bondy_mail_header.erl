@@ -126,8 +126,10 @@ Answers `{ok, Headers}`, or the first problem found:
 - `{error, {header_injection, Name}}` -- a CR, LF or NUL in the name or value.
 - `{error, {invalid_header, Name}}` -- empty, over-long, or not a binary.
 
-The result is sorted by name so that a message built twice from one request is
-byte-identical, which makes both the tests and any downstream signature stable.
+The result is sorted by name
+(`bondy_mail_header_test:ordering_is_stable_test/0`), so a message built twice
+from one request carries its headers in one order, which keeps both the tests
+and any downstream signature stable.
 """.
 -spec validate(Term :: any()) ->
     {ok, [{binary(), binary()}]} | {error, any()}.

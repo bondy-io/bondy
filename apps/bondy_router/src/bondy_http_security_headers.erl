@@ -45,19 +45,13 @@ headers map, and stores it in `persistent_term` for fast access.
 -spec init(atom()) -> ok.
 
 init(ListenerName) ->
-    %% Converted on read: `bondy_config:splat_listener_blocks/1` writes the block
-    %% one leaf at a time, so this path answers a proplist rather than the map
-    %% merged below — `splatted_cors_and_security_headers_reach_the_consumers` in
-    %% `bondy_listener_SUITE` drives that shape through this function.
-    %%
-    %% MERGED over the defaults rather than defaulted only on the read, which is
-    %% what `bondy_http_cors:config_from_req/1` does with the sibling block: a
-    %% block that is present but PARTIAL takes the read's value as-is, so a
-    %% listener stating `hsts` alone used to lose `frame_options` and
-    %% `content_type_options` — silently emitting FEWER security headers than a
-    %% listener that stated nothing. The merge fills only ABSENT keys, so an
-    %% explicit `undefined` still means "do not emit this header"
-    %% (`hsts_only` in `bondy_http_security_headers_SUITE` covers that).
+    %% Converted on read: `bondy_config:splat_listener_blocks/1` writes the
+    %% block one leaf at a time, so this path answers a proplist
+    %% (`splatted_cors_and_security_headers_reach_the_consumers` in
+    %% `bondy_listener_SUITE`). MERGED over the defaults so that a PARTIAL
+    %% block does not lose the headers it does not state. The merge fills
+    %% only ABSENT keys, so an explicit `undefined` still means "do not emit
+    %% this header" (`hsts_only` in `bondy_http_security_headers_SUITE`).
     Config = maps:merge(
         default_config(),
         key_value:to_map(

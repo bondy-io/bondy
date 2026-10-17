@@ -71,9 +71,9 @@ delete_child(Name) ->
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
-        % max restarts
+        %% max restarts
         intensity => 20,
-        % seconds
+        %% seconds
         period => 60,
         auto_shutdown => never
     },

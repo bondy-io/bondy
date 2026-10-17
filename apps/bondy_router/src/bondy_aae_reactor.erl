@@ -29,7 +29,7 @@ is ignored here.
 | `bondy_rib_subscriptions`| set / clear  | record / remove the peer's subscription RIB summary (`bondy_registry_rib`) |
 
 The **conflict alarm** is the lww safety valve for the authorization tables
-(design §3): grants and sources deliberately stay last-writer-wins, so when a
+: grants and sources deliberately stay last-writer-wins, so when a
 remote merge replaces an existing *different* local value the losing write is
 silently discarded. The reactor cannot tell a genuinely newer remote edit from
 a concurrent one (lww carries no causal context), so it over-approximates:
@@ -282,20 +282,12 @@ ensure_subscribed(#sub{table = Table, label = Label, kind = Kind} = Sub) ->
                 description => "AAE merge reactor subscribed to remote changes",
                 table => Label
             }),
-            %% RECONCILE ON ATTACH, do not assume we heard the event.
-            %%
-            %% The bootstrap notification is one-shot and `fanout_all/2`
-            %% reaches only the subscribers that exist when it fires. This
-            %% reactor subscribes ASYNCHRONOUSLY — `init/1` defers to a
-            %% `{continue, subscribe}` that retries until the catalogue has
-            %% provisioned each table — so a bootstrap completing before that
-            %% wins the race and its event is lost with no replay.
-            %%
-            %% Rebuilding here removes the dependency on having heard it: the
-            %% state this reactor maintains is DERIVED from the projection, so
-            %% deriving it once at attach time is correct regardless of what
-            %% happened before. Idempotent, and a no-op when the projection is
-            %% still empty (the bootstrap then arrives normally and rebuilds).
+            %% The bootstrap event is one-shot and reaches only the subscribers
+            %% that exist when it fires. This reactor subscribes after a
+            %% `{continue, subscribe}` retry loop, so a bootstrap that
+            %% completes first is never replayed. The reaction derives its
+            %% state from the projection, so rebuilding at attach time is
+            %% idempotent and a no-op on an empty projection.
             ok = bootstrap_reaction(Kind, Table),
             Sub#sub{ns = NS, ref = Ref}
     end.
@@ -517,14 +509,14 @@ react_grant(Label, Key, Op, Old) ->
 %% React to a remote security_sources change: conflict alarm only. Sources gate
 %% authentication of NEW connections — established sessions are unaffected, so
 %% there is nothing to invalidate or close; the next connection attempt reads
-%% the merged value. The alarm is the reaction (design §3): sources stay lww,
+%% the merged value. The alarm is the reaction: sources stay lww,
 %% so a silently discarded concurrent edit must at least be observable.
 react_source(Label, Key, Op, Old) ->
     RealmUri = unfold_grant_key(Key),
     maybe_conflict_alarm(Label, RealmUri, Op, Old).
 
 %% @private
-%% The lww conflict alarm (design §3): a remote merge REPLACED an existing,
+%% The lww conflict alarm: a remote merge REPLACED an existing,
 %% differing value of an authorization cell. Under lww the losing write is
 %% silently discarded; the reactor cannot distinguish a genuinely newer remote
 %% edit from a concurrent one (lww carries no causal context), so this
@@ -615,7 +607,7 @@ react_rib(Table, Key, _Op) ->
     bondy_registry_rib:on_remote_merge(Type, Key).
 
 %% @private
-%% security_users is realm-sharded, so its cell key is the G-1 realm-folded
+%% security_users is realm-sharded, so its cell key is the realm-folded
 %% `<<Realm, 0, Username>>` (realm URIs are NUL-free). Split it back.
 unfold_user_key(Key) ->
     case binary:split(Key, <<0>>) of

@@ -91,12 +91,11 @@ maybe_progress_fun(Details, _, _) ->
 %% @private
 %% Mirror of `maybe_progress_fun/3` for the INPUT direction. For a
 %% progressive-INPUT invocation (`INVOCATION.Details.progress => true`, more
-%% argument chunks arriving), inject an `input` fun the handler calls to PULL the
-%% next chunk: `Input()` blocks on the chunk the connection forwards to this
-%% worker and returns `{more, Args, KWArgs}` while the stream continues or
-%% `{last, Args, KWArgs}` for the final chunk. The invocation's own args are the
-%% first chunk; the handler pulls the rest until `{last, _, _}`. Without the flag
-%% the details are untouched, so a handler must check for the key.
+%% argument chunks arriving), inject an `input` fun the handler calls to PULL
+%% the next chunk: `Input()` blocks on the chunk the connection forwards to
+%% this worker and returns `{more, Args, KWArgs}` while the stream continues
+%% or `{last, Args, KWArgs}` for the final chunk. The invocation's own args are
+%% the first chunk. Without the flag the details are untouched.
 maybe_input_fun(#{progress := true} = Details) ->
     Details#{input => fun pull_input/0};
 maybe_input_fun(Details) ->

@@ -7,9 +7,8 @@
 -moduledoc """
 The declared table of every alarm this build can raise.
 
-An alarm id used to be whatever its producer invented, known only once it fired
-in production. This module is the enumeration: `bondy_alarm_handler` describes
-the *shape* of an alarm, this describes the *set* of them.
+This module is the enumeration: `bondy_alarm_handler` describes the *shape* of
+an alarm, this describes the *set* of them.
 
 ## What an entry is for
 
@@ -37,7 +36,7 @@ unresolvable site also fails.
 An `id_pattern` is either an atom (matching that id exactly) or a tuple of the
 same arity as the id, where `'_'` matches any element. Producers key
 per-service, per-relay and per-instance alarms as
-`{Head, Discriminator}` — see `bondy_http_connector_http_pool:552` — so the
+`{Head, Discriminator}` — see `bondy_http_connector_http_pool` — so the
 pattern is what makes those one catalogue entry rather than one per service.
 
 ## `detail_keys` is a checked contract
@@ -156,7 +155,7 @@ only by tests.** `bondy_alarm_handler` publishes the blocking flag into an
 `atomics` cell that `bondy_router_app:is_ready/0` reads, and nothing in this build has
 ever put a `true` in it outside `bondy_alarm_handler_test` and
 `bondy_router_app_readiness_test`. The seam is kept because readiness is a per-alarm
-judgement rather than a severity threshold (design D1) and this table is where
+judgement rather than a severity threshold and this table is where
 that judgement belongs — but the first entry to declare `true` is the one that
 will find whatever is wrong with the path, and it should be landed expecting
 that rather than trusting the mechanism because it is written down.
@@ -165,7 +164,7 @@ that rather than trusting the mechanism because it is written down.
 
 list() ->
     [
-        %% `bondy_http_connector_http_pool:552`. Severe — calls to this
+        %% Raised by `bondy_http_connector_http_pool`. Severe — calls to this
         %% service fail — but NOT a reason to drain the node: the other
         %% services and the whole WAMP data plane are unaffected, and if the
         %% upstream is down for everyone, draining every node takes the
@@ -202,7 +201,8 @@ list() ->
                 >>
             ]
         },
-        %% `bondy_mail_relay:274`. Same reasoning as the connector: outbound
+        %% Raised by `bondy_mail_relay`. Same reasoning as the connector:
+        %% outbound
         %% mail is degraded, routing is not.
         #{
             id_pattern => {mail_relay_down, '_'},
@@ -223,15 +223,12 @@ list() ->
                 <<"mail.relay.$name.health.success_threshold">>
             ]
         },
-        %% `bondy_mcp_gateway:553`. `class = realm` because the collision and
-        %% its repair are both inside one realm's manifest; the realm and the
-        %% colliding name are carried in the ID, which is why `detail_keys` is
-        %% empty.
-        %%
-        %% `severity = major`, not `critical`: two MCP entries are hidden from
-        %% one realm's manifest, which is a page-in-hours fault. The producer's
-        %% moduledoc calls it "critical" in prose written before the D1
-        %% vocabulary existed — that is description, not a classification.
+        %% Raised by `bondy_mcp_gateway`. `class = realm` because the collision
+        %% and its repair are both inside one realm's manifest; the realm and
+        %% the colliding name are carried in the ID, so `detail_keys` is empty.
+        %% `severity = major`, not `critical`: two MCP entries hidden from one
+        %% realm's manifest is a page-in-hours fault, whatever the producer's
+        %% prose calls it.
         #{
             id_pattern => {bondy_mcp_name_collision, '_', '_'},
             severity => major,
@@ -254,7 +251,7 @@ list() ->
             ],
             config_keys => []
         },
-        %% `bondy_regulator_memory:handle_info/2'. The node's memory use is
+        %% Raised by `bondy_regulator_memory'. The node's memory use is
         %% above the high watermark of its limit: admission gates refuse new
         %% work until it drops below the low watermark. `class = node' because
         %% the limit is the node's. Not readiness-affecting, and it must not
@@ -285,21 +282,13 @@ list() ->
                 <<"load_regulation.memory_monitor.limit">>
             ]
         },
-        %% Raised by `bondy_oplog_sync_session`. A peer shipped
-        %% catalogue cells for a bucket this instance has no table for, so the
-        %% install was partial and the peer's applied frontier was withheld
-        %% rather than adopted. `class = node` because the deficient party is
-        %% this node's table set, not the data: every peer that declares the
-        %% table holds it and converges normally.
-        %%
-        %% Not readiness-affecting, and the reason is stronger here than for
-        %% the frontier hole above: the missing data belongs to a table this
-        %% node does not declare, so no local reader can ask for it and there
-        %% is no stale-read surface to protect. Draining the node would not
-        %% make the table appear.
-        %%
-        %% `tasks` is empty because declaring a table is a deployment change,
-        %% not a WAMP procedure. The remedy is in the alarm's own description.
+        %% Raised by `bondy_oplog_sync_session`. A peer shipped catalogue cells
+        %% for a bucket this instance has no table for, so the install was
+        %% partial and the peer's applied frontier was withheld. `class = node`
+        %% because the deficient party is this node's table set. Not
+        %% readiness-affecting: no local reader can ask for a table this node
+        %% does not declare. `tasks` is empty because declaring a table is a
+        %% deployment change, not a WAMP procedure.
         #{
             id_pattern => {bondy_oplog_bucket_unroutable, '_'},
             severity => major,
@@ -320,7 +309,7 @@ list() ->
             tasks => [],
             config_keys => []
         },
-        %% `bondy_oplog_applier:2094`. Applied state is falling behind this
+        %% Raised by `bondy_oplog_applier`. Applied state is falling behind this
         %% node's own WAL. Not readiness-affecting: the node still serves, it
         %% serves stale durable reads — and a stall whose cause is shared
         %% would otherwise drain every node at once.
@@ -341,14 +330,14 @@ list() ->
             tasks => [],
             config_keys => [<<"db.drain.stall_alarm">>]
         },
-        %% `bondy_oplog_sync_scheduler:raise_hole_alarm/4`. A gap in an
-        %% origin's sequence that this replica has carried for longer than the
+        %% Raised by `bondy_oplog_sync_scheduler`. A gap in an origin's
+        %% sequence that this replica has carried for longer than the
         %% threshold. `class = node` because the gap is one replica's missing
         %% history; the events themselves exist wherever they were not
         %% truncated. Not readiness-affecting, and must not become so: a
-        %% rejoining node carries holes by construction until it catches up,
-        %% and taking it out of rotation for that would stop the very traffic
-        %% that closes them.
+        %% rejoining node carries holes until it catches up, and taking it
+        %% out of rotation for that would stop the very traffic that closes
+        %% them.
         #{
             id_pattern => {bondy_oplog_frontier_hole, '_'},
             severity => major,
@@ -360,21 +349,17 @@ list() ->
                     "frontier past the alarm threshold"
                 >>,
             detail_keys => [instance_id, held_for_ms, holes, origins],
-            %% Empty for a reason worth writing down. The standing condition
-            %% IS exposed — `bondy_oplog_instance_frontier_holes` and
-            %% `bondy_oplog_instance_frontier_pending_seqs` in the Prometheus
-            %% exposition — but those are scrape-time collector families in
-            %% `bondy_prometheus_db:families/0`, and the coverage test
-            %% resolves a `metric` reference by scanning for
-            %% `bondy_metrics:declare/1` registrations, which these are not.
-            %% Naming them here would fail that join, so the handle stays in
-            %% `details`: `origins` carries the per-origin prefix, the seq the
-            %% gap starts at, and how much is stranded above it.
+            %% The condition is exposed by the frontier gauges that
+            %% `bondy_prometheus_db` collects at scrape time, but the coverage
+            %% test resolves a `metric` reference through
+            %% `bondy_metrics:declare/1` registrations, which those are not.
+            %% The handle stays in `details`: `origins` carries the per-origin
+            %% prefix, the start seq and the stranded count.
             observe_with => [],
             tasks => [],
             config_keys => [<<"db.frontier.hole_alarm">>]
         },
-        %% `bondy_oplog_instance:report_frontier_provenance/3`. Raised once at
+        %% Raised by `bondy_oplog_instance`, once at
         %% instance start. Not readiness-affecting: the node serves correctly
         %% and its data is no worse than it was before the upgrade — what it
         %% cannot do is notice that it is behind, because the suspect entries
@@ -397,16 +382,11 @@ list() ->
             config_keys => []
         },
         %% Raised by the namespace catalogue when `main` fails to open, cleared
-        %% when it opens. The one condition here that stops the node serving —
-        %% every durable table raises `*_not_provisioned`.
-        %%
-        %% `affects_ready => false` is deliberate and is NOT a claim that the
-        %% node stays in rotation. The readiness signal for this condition is
-        %% `persistent_term`-backed and must survive an `alarm_handler` crash,
-        %% which this alarm cannot: the watcher re-installs a crashed handler
-        %% with `[]`, so `bondy_alarm_handler:init/1` starts empty. The rule
-        %% that follows, for every future entry: a condition that must survive
-        %% a handler crash is not published as an alarm.
+        %% when it opens. `affects_ready => false` is NOT a claim that the node
+        %% stays in rotation: the readiness signal is `persistent_term`-backed
+        %% so that it survives an `alarm_handler` crash, which an alarm cannot
+        %% (the watcher re-installs a crashed handler with `[]`). A condition
+        %% that must survive a handler crash is not published as an alarm.
         #{
             id_pattern => bondy_db_main_unavailable,
             severity => critical,
@@ -439,7 +419,8 @@ list() ->
             tasks => [],
             config_keys => []
         },
-        %% `bondy_oplog_origin_bans:634`. `class = cluster` because reaping
+        %% Raised by `bondy_oplog_origin_bans`. `class = cluster` because
+        %% reaping
         %% needs EVERY member to hold the retirement, so one node's unwritable
         %% path stops reclamation cluster-wide.
         #{
@@ -457,7 +438,8 @@ list() ->
             tasks => [],
             config_keys => [<<"db.origin_retirement.path">>]
         },
-        %% `bondy_oplog_responder:535`. `class = cluster`: the affected data
+        %% Raised by `bondy_oplog_responder`. `class = cluster`: the affected
+        %% data
         %% cannot converge on ANY peer until the frame cap is raised.
         #{
             id_pattern => bondy_oplog_sync_oversized_items,
@@ -483,29 +465,19 @@ list() ->
             tasks => [],
             config_keys => [<<"cluster.max_message_size">>]
         },
-        %% `bondy_retained_message_manager:raise/3`. A configured ceiling
+        %% Raised by `bondy_retained_message_manager`. A configured ceiling
         %% doing its job: publication continues, retention stops. `warning`
-        %% is the whole point of D1's bottom level — this is an in-hours
-        %% capacity conversation, not a page.
+        %% is the bottom level: an in-hours capacity conversation, not a page.
         %%
         %% Cleared by `bondy_retained_message_manager:reconcile_limit_alarms/0`
         %% on the eviction cycle, so it states the ceiling is being hit NOW and
         %% not merely that it was hit once since boot.
         #{
-            %% Instance-scoped by realm. The ceilings are node-wide VALUES but
-            %% the counters they are compared against are per realm
-            %% (`bondy_retained_message_manager:get_counters_ref/1`), so the
-            %% condition is per realm: one realm over its ceiling says nothing
-            %% about another, and a node-wide id would let either realm's
-            %% recovery clear the other's alarm. `class` follows the id — the
-            %% tenant whose publications are being refused is named by
-            %% `realm_uri`.
-            %%
-            %% Worst-case cardinality is therefore one alarm per realm rather
-            %% than one per node. That is the true number of conditions, and it
-            %% reaches `bondy_alarm_active`'s labels; a deployment with
-            %% thousands of realms all over their ceiling has a capacity
-            %% problem before it has a cardinality problem.
+            %% Instance-scoped by realm: the ceilings are node-wide values but
+            %% the counters are per realm, so a node-wide id would let one
+            %% realm's recovery clear another's alarm. `realm_uri` names the
+            %% tenant. Cardinality is one alarm per realm, and that reaches
+            %% `bondy_alarm_active`'s labels.
             id_pattern => {retained_messages_count_limit, '_'},
             severity => warning,
             class => realm,

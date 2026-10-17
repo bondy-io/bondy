@@ -173,7 +173,7 @@ synchronous_reply_waits_in_the_queue(_Config) ->
     ok = bondy_http_transport_session:handle_client_message(Pid, HelloBin),
 
     %% It is IN THE QUEUE, not in a buffer beside it. That is the property this
-    %% case now pins: a synchronous reply and a router delivery share one
+    %% case pins: a synchronous reply and a router delivery share one
     %% structure, so they share one order.
     ?assertEqual(1, bondy_http_transport_queue:count(TransportId)),
 
@@ -289,16 +289,14 @@ send_unknown_transport(_Config) ->
     ).
 
 held_stream_outlives_http_default_on_both_versions(_Config) ->
-    %% The behavioural parity claim, probed on the wire: a quiet SSE stream
-    %% must survive past the 15s `http.idle_timeout' default on HTTP/1.1 AND
-    %% HTTP/2, because `held_stream_defaults/1' seats the connection timer
-    %% from `sse.idle_timeout' (600s) with reset-on-send for a listener that
-    %% serves `wamp_sse' — the handlers cast nothing per stream any more.
-    %% The proof of life is the first 20s keepalive: it arrives AFTER the
-    %% old kill point, so before the fix the HTTP/2 connection died ~15s in,
-    %% before ever sending it (`cowboy_http2' discards the per-stream cast
-    %% the HTTP/1.1 path used to rely on). Both streams are held
-    %% concurrently, so the case costs one ~20s wait, not two.
+    %% A quiet SSE stream must survive past the 15s `http.idle_timeout'
+    %% default on HTTP/1.1 AND HTTP/2, because a listener that serves
+    %% `wamp_sse' seats the connection timer from `sse.idle_timeout' (600s)
+    %% with reset-on-send. The proof of life is the first 20s keepalive, which
+    %% arrives AFTER the HTTP default would have closed the connection;
+    %% `cowboy_http2' discards per-stream casts, so only the connection timer
+    %% can hold it. Both streams are held concurrently, so the case costs one
+    %% ~20s wait, not two.
     {ok, _} = application:ensure_all_started(gun),
     H1 = open_wire_stream(#{transport => tcp, protocols => [http]}),
     H2 = open_wire_stream(#{transport => tcp, protocols => [http2]}),
@@ -334,7 +332,7 @@ open_wire_stream(GunOpts) ->
 %% @private
 %% The stream sends nothing until its first keepalive at ~20s. Anything else
 %% before then — `gun_down', `gun_error', a response fin — is the connection
-%% dying, which is exactly the pre-fix HTTP/2 behaviour at ~15s.
+%% dying, which is what the 15s HTTP default would do.
 assert_keepalive({Conn, StreamRef}, Label) ->
     receive
         {gun_data, Conn, StreamRef, nofin, Data} ->

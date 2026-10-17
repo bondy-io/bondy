@@ -208,9 +208,9 @@ a_wildcard_conflicts_with_every_address_on_its_port_test() ->
     ).
 
 an_explicit_wildcard_address_conflicts_like_an_absent_one_test() ->
-    %% `resolve_ip/3` leaves `ip` absent when none was configured, and
-    %% `bondy_config:normalise_socket_opts/1` binds that to the wildcard of the
-    %% configured family. An absent address and a written-out `0.0.0.0` are
+    %% The resolver leaves `ip` absent when none was configured, and
+    %% `bondy_config` binds that to the wildcard of the configured family.
+    %% An absent address and a written-out `0.0.0.0` are
     %% therefore the same socket, so they must get the same verdict.
     ?assertMatch(
         {error, {invalid_listener, b, {port_in_use_by, a}}},
@@ -377,12 +377,9 @@ default_inventory_resolves_with_no_configuration_test() ->
     %% The case every `prod`, `prod_named` and `docker` node is in: those
     %% releases overlay no `bondy.conf` at all, so this inventory resolves
     %% against nothing. It must succeed, or those nodes cannot boot.
-    %%
-    %% `get_with([])` supplies NO certificate material, which is the point of the
-    %% test rather than an omission: `assert_tls_keys/3` has no `enabled` guard,
-    %% so a single TLS entry in the default inventory would fail here — and would
-    %% fail on every node that never asked for TLS. The assertion below is what
-    %% keeps one from being added back.
+    %% `get_with([])` supplies NO certificate material on purpose: the TLS key
+    %% check has no `enabled` guard, so a single TLS entry in the default
+    %% inventory fails here — and on every node that never asked for TLS.
     {ok, Listeners} = bondy_listener_config:resolve(
         bondy_listener_config:default_inventory(), get_with([])
     ),
@@ -535,14 +532,12 @@ listener_value_overrides_only_the_key_it_names_test() ->
     ).
 
 stale_global_carrier_key_is_ignored_test() ->
-    %% `wamp.websocket.*' was the tier a listener fell back to before
-    %% `carrier_defaults/1' existed. The mapping is gone, but the application
-    %% environment it wrote is still reachable — a `sys.config' carried over
-    %% from an older release, or an embedded caller, can still set
+    %% No `wamp.websocket.*' mapping exists, but the application environment
+    %% it names is still reachable — a `sys.config' carried over from an
+    %% older release, or an embedded caller, can still set
     %% `[wamp_websocket, idle_timeout]'. It must have no effect: this listener
     %% states nothing, so it gets the code default and not the 90000 seeded
-    %% here. Written against the fallback rather than for it — reinstating
-    %% `resolve_carrier_key/5''s second read is what this fails on.
+    %% here. A resolver that falls back to that key fails this case.
     Inventory = [
         {iot, #{
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
@@ -613,8 +608,7 @@ partial_ping_is_completed_from_the_defaults_test() ->
     %% `ping.enabled' resolves independently of its siblings, so a partial
     %% block is what an operator naturally writes. The merge is at the LEAF,
     %% not the block: the two keys stated here survive and the two left
-    %% unresolved arrive from `carrier_defaults/1', which is what makes an
-    %% enabled `ping' complete by construction.
+    %% unresolved arrive from `carrier_defaults/1'.
     %%
     %% `idle_timeout' is 45000 rather than the default 20000 on purpose — with
     %% the default value the assertion would hold even if the operator's value
@@ -658,11 +652,11 @@ partial_ping_with_enabled_absent_is_accepted_test() ->
     ).
 
 ping_off_is_the_handler_fall_through_test() ->
-    %% The premise `assert_ping_keys/4' now rests on, tested against the three
-    %% handlers themselves rather than assumed: a `ping' map WITHOUT `enabled'
-    %% means ping off, and is a no-op on the state. Before the fall-through
-    %% clause each of these raised `function_clause' on the first connection —
-    %% after the socket was accepted, so the listener bound and then died.
+    %% Tested against the three handlers themselves rather than assumed: a
+    %% `ping' map WITHOUT `enabled' means ping off, and is a no-op on the
+    %% state. A handler without that fall-through clause raises
+    %% `function_clause' on the first connection — after the socket was
+    %% accepted, so the listener binds and then dies.
     %%
     %% `State' is opaque here on purpose: the clause under test returns it
     %% untouched, so it never has to be a real record.
@@ -840,13 +834,9 @@ partial_listener_ping_is_rejected_test() ->
     ?assertMatch({ok, [_]}, bondy_listener_config:resolve(Inventory, Off)).
 
 stream_listener_ping_siblings_are_the_same_for_both_protocols_test() ->
-    %% A raw-socket block naming `interval` instead of `idle_timeout` — the
-    %% shape the deleted `wamp.tls.ping.interval` mapping produced — is REJECTED.
-    %% It used to be accepted, on the premise that
-    %% `bondy_wamp_tcp_connection_handler:maybe_enable_ping/2` never read a ping
-    %% idle period and took its interval from the listener's own `idle_timeout`.
-    %% That is no longer true, and a listener carrying `interval` would enable
-    %% ping and then crash on `maps:get(idle_timeout, PingOpts)`.
+    %% A raw-socket block naming `interval` instead of `idle_timeout` is
+    %% REJECTED: a listener carrying `interval` would enable ping and then
+    %% crash on `maps:get(idle_timeout, PingOpts)`.
     Inventory = [
         {wamp_tls, #{
             transport => tcp, protocol => wamp_rawsocket, port => 18085
@@ -877,8 +867,8 @@ stream_listener_ping_siblings_are_the_same_for_both_protocols_test() ->
         ]}
     ]),
     ?assertMatch({ok, [_]}, bondy_listener_config:resolve(Inventory, Complete)),
-    %% `bondy_bridge_relay_server:maybe_enable_ping/2` has always read
-    %% `ping.idle_timeout`, so the same omission was always an error there.
+    %% The bridge-relay server reads `ping.idle_timeout` too, so the same
+    %% omission is an error there.
     Relay = [
         {relay, #{transport => tcp, protocol => bridge_relay, port => 18092}}
     ],
@@ -1129,22 +1119,14 @@ malformed_ip_tuple_is_rejected_test() ->
 %% =============================================================================
 %% OPTION DEFAULTS IMPLIED BY TRANSPORT AND PROTOCOL
 %% =============================================================================
-%% Removing the legacy `wamp.{tcp,tls}.*', `api_gateway.*' and
-%% `bridge.listener.*' mappings removed the `{default, ...}' each carried, and
-%% `rebar3_scuttler' had been writing those defaults into every release's
-%% generated `etc/bondy.conf' as active lines. A `listeners.$name.*' mapping
-%% cannot replace them: a fuzzy default materialises for every listener name
-%% under the prefix. So they live in `bondy_listener_config' and these cases pin
-%% each one.
-%%
-%% Written to break the restoration, not to confirm it: each asserts the
-%% specific value that was in force, and `..._is_independent_of_..._test' and
-%% `operator_..._wins_..._test' assert the two properties a wrong restoration
-%% would violate while still looking correct.
+%% A `listeners.$name.*' mapping cannot carry a default: a fuzzy default
+%% materialises for every listener name under the prefix, so the defaults
+%% live in `bondy_listener_config' and these cases pin each one. The
+%% `..._is_independent_of_..._test' and `operator_..._wins_..._test' cases
+%% assert the two properties a wrong default would violate while looking right.
 
 rawsocket_ping_defaults_are_restored_test() ->
-    %% `wamp.tcp.ping.enabled' defaulted to `on', so raw-socket keepalive was on
-    %% for every node. Its replacement is default-free, so with nothing here a
+    %% The `listeners.$name.*' mapping is default-free, so with nothing here a
     %% raw-socket listener has no `ping' key at all and every connection runs
     %% without a keepalive.
     Defaults = bondy_listener_config:option_defaults(tcp, wamp_rawsocket),
@@ -1161,12 +1143,11 @@ rawsocket_reap_deadline_is_restored_test() ->
     ?assertMatch(#{idle_timeout := 28800000}, Defaults).
 
 rawsocket_ping_interval_is_independent_of_the_reap_deadline_test() ->
-    %% The load-bearing case. `maybe_enable_ping/2' took the ping interval from
-    %% the listener's `idle_timeout', so both timers came due at the same
-    %% moment: at that deadline the connection was closed rather than probed,
-    %% and the ping could neither hold a NAT binding open nor detect a dead peer
-    %% any sooner than the reap already did. The two must be distinct, and the
-    %% probe must be the shorter of the two.
+    %% The load-bearing case. A ping interval equal to the listener's
+    %% `idle_timeout' brings both timers due at the same moment: the connection
+    %% is closed rather than probed, and the ping can neither hold a NAT
+    %% binding open nor detect a dead peer sooner than the reap. The two must
+    %% be distinct, and the probe must be the shorter of the two.
     #{
         idle_timeout := Reap,
         ping := #{idle_timeout := Probe}
@@ -1209,12 +1190,8 @@ http_versions_default_offers_both_test() ->
     %% HTTP/2 first — the preference Cowboy itself ships — with HTTP/1.1
     %% offered, and the order asserted as a value since it is the server's
     %% ALPN preference. h2-first is safe for held streams only because their
-    %% lifetime is connection-level on both versions now
-    %% (`held_stream_defaults/1'; the wire proof is
-    %% `bondy_http_sse_SUITE:held_stream_outlives_http_default_on_both_versions'):
-    %% before that, h2 discarded the per-stream `idle_timeout' override
-    %% (`cowboy_http2.erl:988') and this default would have killed SSE and
-    %% long-poll at the 15s connection timeout.
+    %% lifetime is connection-level on both versions; the wire proof is
+    %% `bondy_http_sse_SUITE:held_stream_outlives_http_default_on_both_versions'.
     ?assertMatch(
         #{http_versions := [http2, http]},
         bondy_listener_config:option_defaults(tcp, http)
@@ -1268,9 +1245,9 @@ held_stream_services_raise_the_connection_floor_test() ->
 
 held_stream_floor_follows_the_operator_carrier_value_test() ->
     %% The floor is MAX over the held-stream carriers' effective values, the
-    %% operator's own where stated: the same numbers the handlers used to
-    %% cast per stream, so at any config the connection behaves as the
-    %% HTTP/1.1 path always had. The larger carrier must win — a floor from
+    %% operator's own where stated, so at any config the connection holds a
+    %% stream as long as the HTTP/1.1 path does. The larger carrier must win — a
+    %% floor from
     %% the smaller one would kill the other carrier's holds.
     Spec = #{
         transport => tcp,
@@ -1327,16 +1304,12 @@ http_versions_operator_order_survives_defaults_test() ->
     ).
 
 rawsocket_linger_default_is_one_second_test() ->
-    %% `wamp.{tcp,tls}.linger.timeout' defaulted to `1s'. It was withheld until
-    %% the key's unit was corrected, because the datatype was `{duration, ms}'
-    %% and `bondy_config:normalise_socket_opts/1' passes the value straight into
-    %% `{linger, {true, N}}', whose second component `inet' documents as SECONDS
-    %% (`kernel/src/inet.erl:1124') — so `1s' had been requesting a 1000-second
-    %% blocking close. With the datatype now `{duration, s}` the default is the
-    %% one second it always read as.
-    %%
-    %% ONE, not 1000. That is the whole point of the correction, so it is
-    %% asserted as a value rather than as a key being present.
+    %% `wamp.{tcp,tls}.linger.timeout' defaults to `1s'. The datatype is
+    %% `{duration, s}' because `bondy_config' passes the value straight into
+    %% `{linger, {true, N}}', whose second component `inet' documents as
+    %% SECONDS; a `{duration, ms}' datatype would request a 1000-second
+    %% blocking close. ONE, not 1000, so it is asserted as a value rather than
+    %% as a key being present.
     Defaults = bondy_listener_config:option_defaults(tcp, wamp_rawsocket),
     ?assertMatch(
         #{transport_opts := #{socket_opts := #{linger_timeout := 1}}}, Defaults
@@ -1407,9 +1380,9 @@ operator_value_wins_over_a_protocol_default_test() ->
     ?assertMatch(#{enabled := false}, Ping).
 
 protocol_defaults_merge_into_a_partial_block_test() ->
-    %% The property that makes deleting the ping-completeness validation safe:
+    %% The property that makes a ping-completeness validation unnecessary:
     %% an operator who sets ONE ping key gets the rest from the defaults, so an
-    %% enabled block can no longer be missing a sibling the handler reads with
+    %% enabled block cannot be missing a sibling the handler reads with
     %% `maps:get/2'. A shallow merge would drop `enabled', `timeout' and
     %% `max_attempts' here.
     Spec = #{
@@ -1453,12 +1426,9 @@ tls_rawsocket_gets_no_hsts_test() ->
 %% =============================================================================
 %% CARRIER → MODULE IS A FUNCTIONAL DEPENDENCY
 %% =============================================================================
-%% `module` used to ride on each SERVICE, so two services naming one carrier
-%% each carried a value for a field that depends on the carrier alone — a state
-%% in which an operator's service list can be internally inconsistent, and which
-%% forced the dispatch assembler to re-derive the module by rescanning
-%% `services` and taking the first match. These cases pin the normalised shape:
-%% the resolver decides the module once, from the carrier.
+%% `module` depends on the carrier alone, so no SERVICE carries it: two
+%% services naming one carrier could otherwise disagree on it. These cases pin
+%% the normalised shape: the resolver decides the module once, from the carrier.
 
 resolved_carrier_carries_its_module_test() ->
     Inventory = [
@@ -1498,11 +1468,9 @@ api_gateway_and_admin_api_are_separate_carriers_test() ->
     ?assertNot(maps:is_key(rest, Carriers)).
 
 carrier_config_is_resolved_once_per_carrier_test() ->
-    %% `wamp_ws` and `bamp_ws` share the `websocket` carrier. The fold this
-    %% replaced built its accumulator entry with `maps:get/3`, whose default is
-    %% evaluated EAGERLY, so the carrier's whole configuration was resolved once
-    %% per service and thrown away for every service but the first.
-    %%
+    %% `wamp_ws` and `bamp_ws` share the `websocket` carrier. A fold that
+    %% builds its accumulator entry with `maps:get/3` evaluates the default
+    %% EAGERLY and resolves the carrier's whole configuration once per service.
     %% Counted through the `GetFun`, which is the only observable the resolver
     %% has: one read of a given carrier key per carrier, not per service.
     Key = [pub, websocket, compress],
@@ -1531,8 +1499,8 @@ count() ->
 unknown_carrier_is_a_boot_error_test() ->
     %% An external service naming a carrier no module implements. Caught at BOOT
     %% naming the listener, the carrier and the service that asked for it —
-    %% rather than inside a listener start or a dispatch rebuild, where the old
-    %% `no_module_for_carrier` error was raised and could name no listener.
+    %% rather than inside a listener start or a dispatch rebuild, where an
+    %% error could name no listener.
     ok = application:set_env(bondy_router, http_services, [
         {ghost, #{carrier => nowhere, protocol => undefined}}
     ]),
@@ -1621,17 +1589,14 @@ partial_security_headers_block_still_gets_the_hsts_default_test() ->
     ).
 
 an_explicit_undefined_hsts_still_disables_it_test() ->
-    %% The other side of that merge, and the reason the fix is to stop
-    %% completing the block rather than to stop the operator overriding it: an
-    %% operator who says "do not send this header" must keep winning over the
-    %% default a TLS listener gets.
+    %% The other side of that merge: an operator who says "do not send this
+    %% header" must keep winning over the default a TLS listener gets.
     %%
     %% The conf spelling is `security_headers.hsts = off`, which the schema's
     %% `Header/1` renders as the `undefined` used here. NOT
-    %% `security_headers.hsts =` with nothing after it — measured, that is a
-    %% cuttlefish CONF SYNTAX ERROR, not an empty value
-    %% (`an_empty_security_header_value_is_a_syntax_error` in
-    %% `bondy_listener_schema_SUITE`).
+    %% `security_headers.hsts =` with nothing after it, which is a cuttlefish
+    %% CONF SYNTAX ERROR (`an_empty_security_header_value_is_a_syntax_error`
+    %% in `bondy_listener_schema_SUITE`).
     Spec = #{
         transport => tls,
         protocol => http,
@@ -1649,12 +1614,9 @@ websocket_and_stream_ping_attempts_agree_test() ->
     %% "the peer is gone" means. The two numbers come from different tables —
     %% `carrier_defaults/1' for the carrier, `option_defaults/2' for the
     %% listener's own ping block — so nothing but this makes them agree.
-    %%
     %% Asserted both ways on purpose: against each other, so raising one and
-    %% forgetting the other fails here rather than shipping a split that nothing
-    %% explains; and against the literal, so they cannot agree on a value nobody
-    %% chose. This is the pair that was already out of step once — `wamp.tls'
-    %% shipped 3 where `wamp.tcp' shipped 2.
+    %% forgetting the other fails here; and against the literal, so they
+    %% cannot agree on a value nobody chose.
     Websocket = maps:get(
         max_attempts,
         maps:get(ping, bondy_listener_config:carrier_defaults(websocket))

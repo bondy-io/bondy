@@ -65,12 +65,12 @@ read_returns_shard_not_registered_for_unknown_shard() ->
     teardown_shard(Setup).
 
 read_honours_shard_override() ->
-    %% G-1: point reads honour an explicit `shard` override, mirroring the
+    %% Point reads honour an explicit `shard` override, mirroring the
     %% range path. Register ONLY shard 0 (of 4) and materialise a cell
     %% there. Pick a Key that hashes to shard 1 (not 0): without the
     %% override the read hashes to the unregistered shard 1 → error; with
     %% `shard => 0` it resolves to the registered shard and returns the
-    %% value. This proves the override forces a shard the hash would never
+    %% value. The case shows the override forces a shard the hash would never
     %% select — the invariant a realm-partitioned table relies on.
     NS = mk_ns(),
     {Setup, #{projection := PH}} = setup_shard(NS, primary, 0, 4, lww_register),
@@ -149,8 +149,7 @@ cache_returns_value_unchanged_when_set() ->
         setup_shard(NS, primary, 0, 1, lww_register),
     %% Pre-populate the cache directly with a synthetic value; the read
     %% must come back from cache (projection is empty so a slow path
-    %% would return `undefined`). After §3.6 the cache stores values
-    %% (not states).
+    %% would return `undefined`). The cache stores values (not states).
     ok = bondy_oplog_cache_ets:fill(
         CH, ?B, <<"k">>, {<<"v">>, 99}, bondy_oplog_cache_ets:ticket(CH)
     ),
@@ -165,7 +164,7 @@ write_through_invalidates_existing_cache_entry() ->
     {Setup, #{cache_handle := CH}} =
         setup_shard(NS, primary, 0, 1, lww_register),
     %% Pre-populate the cache. The write-through path invalidates rather
-    %% than folding (§3.6); the next read repopulates via HEAD.
+    %% than folding; the next read repopulates via HEAD.
     ok = bondy_oplog_cache_ets:fill(
         CH, ?B, <<"k">>, {<<"v1">>, 5}, bondy_oplog_cache_ets:ticket(CH)
     ),

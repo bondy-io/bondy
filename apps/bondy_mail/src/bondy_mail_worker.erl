@@ -131,15 +131,11 @@ front of it is what callers actually interact with.
     {ok, pid()} | {error, any()}.
 
 start_link(#bondy_mail_relay{name = Name} = Relay, Index) ->
-    %% Zeroed here rather than in `init/1`, because here is the one moment at
-    %% which nothing can hold a reservation against this worker: it runs in the
-    %% supervisor, the process does not exist yet, and its `gproc` name is
-    %% unregistered, so no caller can have resolved it. A worker that died
-    %% holding messages -- or one whose caller resolved its pid and sent to it
-    %% in the moment after it died -- leaves reservations behind that no release
-    %% path can reach, and a counter that only ever accumulates them shrinks the
-    %% relay's queue bound a little more with every restart. Starting from zero
-    %% makes that self-healing instead.
+    %% Zeroed here rather than in `init/1`: this runs in the supervisor, the
+    %% process does not exist yet and its `gproc` name is unregistered, so
+    %% nothing can hold a reservation against it. A worker that died holding
+    %% messages leaves reservations no release path can reach; a counter that
+    %% only accumulates them shrinks the relay's queue bound on every restart.
     ok = reset(Relay, Index),
     Via = {via, gproc, key(Name, Index)},
     gen_server:start_link(Via, ?MODULE, [Relay, Index], []).
@@ -173,15 +169,12 @@ enqueue(#bondy_mail_request{relay = Name} = Request, Reply) ->
 
 -doc false.
 init([#bondy_mail_relay{name = Name}, Index]) ->
-    %% Without this the supervisor's shutdown kills this process outright and
-    %% `terminate/2` never runs, so everything still queued would vanish with
-    %% no reply to a waiting caller, no status update, and -- on a restart --
-    %% no release of the queue reservations those messages hold. A
-    %% `terminate/2` that is never called looks exactly like one that works.
-    %%
-    %% Safe here: `gen_smtp_client:send_blocking/2` runs inline and links
+    %% Without trapping exits the supervisor's shutdown kills this process
+    %% outright and `terminate/2` never runs: queued messages vanish with no
+    %% reply, no status update and, on restart, no release of their queue
+    %% reservations. `gen_smtp_client:send_blocking/2` runs inline and links
     %% nothing, so trapping exits does not turn a delivery failure into a
-    %% message the worker would then have to interpret.
+    %% message the worker would have to interpret.
     _ = process_flag(trap_exit, true),
     {ok, #state{relay_name = Name, index = Index}}.
 
@@ -361,9 +354,9 @@ depth(Name) ->
 %% free -- which is also what makes per-worker slots a fair division of a
 %% relay-wide bound rather than a lottery.
 %%
-%% Wraps by construction: the cursor is unsigned 64-bit, so it is taken modulo
-%% the pool size rather than being reset, and no two callers can collide on the
-%% reset.
+%% The cursor is an unsigned 64-bit atomic, so it is taken modulo the pool
+%% size rather than being reset, and there is no reset for two callers to
+%% collide on.
 %%
 %% There is no ordering guarantee between messages, and none is claimed: SMTP
 %% has none either.
@@ -383,8 +376,8 @@ worker(#bondy_mail_relay{name = Name}, Index) ->
     end.
 
 %% @private
-%% One place that knows the shape of a worker's registered name, so that
-%% registering one and finding one cannot disagree.
+%% One place that knows the shape of a worker's registered name: both the
+%% `via` registration and `worker/2` look it up through this function.
 key(Name, Index) ->
     {n, l, {?MODULE, Name, Index}}.
 

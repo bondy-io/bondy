@@ -151,17 +151,12 @@ declaration cannot take the others down with it.
             (_) -> {error, ~"Expected a list of realm URIs, or 'any'."}
         end
     },
-    %% Not exposed in the schema: there is one implementation, and the field
-    %% exists so the worker dispatches on data rather than naming a module.
-    %% A test transport is set here directly; a provider transport would add a
-    %% schema mapping and nothing else.
-    %%
-    %% Checked, because the worker calls `Mod:send/3` on this value: a module
-    %% that is absent or does not implement the behaviour would raise `undef`
-    %% inside the worker, which is the one thing `bondy_mail_transport` says a
-    %% transport must never do -- it would crash the delivery path instead of
-    %% classifying a failure on it. Refusing the relay at startup turns that
-    %% into one log line naming the relay, before any mail is accepted for it.
+    %% Not in the schema: there is one implementation, and the field exists so
+    %% the worker dispatches on data rather than naming a module. Checked
+    %% because the worker calls `Mod:send/3` on it: an absent module raises
+    %% `undef` inside the worker, which `bondy_mail_transport` says a transport
+    %% must never do. Refusing the relay at startup turns that into one log
+    %% line naming the relay, before any mail is accepted for it.
     transport_mod => #{
         required => true,
         default => bondy_mail_transport_smtp,

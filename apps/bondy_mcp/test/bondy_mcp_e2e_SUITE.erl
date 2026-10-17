@@ -5,9 +5,9 @@
 -module(bondy_mcp_e2e_SUITE).
 
 -moduledoc """
-End-to-end cases (§21.12): the official MCP SDK client of each era and the
+End-to-end cases: the official MCP SDK client of each era and the
 official conformance suite (@modelcontextprotocol/conformance) driven
-against a real listener over real sockets, plus the §18.5 two-endpoint
+against a real listener over real sockets, plus the two-endpoint
 deployment claim.
 
 The node-based cases run the SDKs pinned by this suite's data dir
@@ -40,7 +40,7 @@ and a baselined scenario that starts passing fails it too (stale entry).
 
 %% The conformance scenarios each call a tool of this NAME; all ride one
 %% stub procedure, so their failures measure the gateway's deviation
-%% (text-only §16.2 output mapping; no server-initiated logging,
+%% (text-only output mapping; no server-initiated logging,
 %% progress, sampling, or elicitation) rather than a missing fixture.
 -define(SCENARIO_TOOLS, [
     <<"test_image_content">>,
@@ -218,7 +218,7 @@ end_per_testcase(_Case, _Config) ->
 %% =============================================================================
 
 two_endpoint_deployment(_Config) ->
-    %% §18.5: two listeners on one node with different per-listener
+    %% Two listeners on one node with different per-listener
     %% `mcp.*` options serve the SAME per-realm manifest; the era set and
     %% the body limit are per-listener; retiring one endpoint is deleting
     %% its block (here: stopping its listener) and does not touch the

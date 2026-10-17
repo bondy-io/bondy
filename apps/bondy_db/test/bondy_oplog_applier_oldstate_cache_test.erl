@@ -1,17 +1,18 @@
 %% =============================================================================
 %% Applier OldValue frame-cache tests for `bondy_oplog_applier`.
 %%
-%% On the durable stack the applier's per-event OldValue read
-%% (`compute_one_cell/11` → projection `get/3`) is the single largest
-%% per-event cost. A3 puts a private, write-through cache of the last
-%% durable cell frame per `{Bucket, Key}` in front of that read: a hit
+%% On the durable stack the applier's per-event OldValue read (the per-cell
+%% fold in `bondy_oplog_cell_apply` → projection `get/3`) is the single largest
+%% per-event cost. `oldstate_cache` puts a private, write-through cache of the
+%% last durable cell frame per `{Bucket, Key}` in front of that read: a hit
 %% returns byte-identical `{OldState, OldValue}` to a projection read, so
 %% the fold result is unchanged — only the read I/O is removed.
 %%
 %% The cache is coherent because the applier is the SOLE writer of its
 %% shard's primary cells and write-throughs the exact frame it durably
 %% wrote (after `put_batch` returns ok), at every live write path
-%% (`apply_cell_batch/2` local + `apply_cell_pairs/4` peer/replay).
+%% (`bondy_oplog_cell_apply:apply_cell_batch/3` local +
+%% `bondy_oplog_cell_apply:apply_cell_pairs/4` peer/replay).
 %%
 %% Coverage:
 %%   1. Semantic transparency — cache ON yields the SAME final values as
@@ -149,7 +150,7 @@ counter_coherent_across_batches() ->
     ?assert(Hits >= 1).
 
 %% =============================================================================
-%% 3b. Coherence vs the catalogue-install write path (Architecture QA fix)
+%% 3b. Coherence vs the catalogue-install write path
 %% =============================================================================
 
 %% A catalogue install writes the projection directly, WITHOUT going through
@@ -302,7 +303,7 @@ read_value(Other) -> Other.
 counter_value({ok, {V, _H}}) -> V;
 counter_value(Other) -> Other.
 
-%% Open a memory-topology DB whose per-shard appliers carry the A3 flag.
+%% Open a memory-topology DB whose per-shard appliers carry `oldstate_cache`.
 open_db(Name, Fold, CacheOn) ->
     Dir = make_tempdir(),
     {ok, Sup} = bondy_db_leveled_sup:start_link(),

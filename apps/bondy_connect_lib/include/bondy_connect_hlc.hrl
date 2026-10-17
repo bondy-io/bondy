@@ -2,7 +2,6 @@
 %% SPDX-FileCopyrightText: 2023 - 2026 Leapsight
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
-%%
 %% The pack layout of a `bondy_connect_hlc` value: 48 bits of physical millisecond
 %% timestamp followed by 16 bits of logical counter, comparing as a plain
 %% integer.

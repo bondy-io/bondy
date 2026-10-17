@@ -204,7 +204,7 @@ restart_after_mark_live_sees_live_test() ->
 restart_without_mark_live_sees_pre_bootstrap_test() ->
     %% Crash before mark_live: the flag file was never created, so
     %% restart goes back to pre_bootstrap and a re-run of bootstrap is
-    %% required. This is the §2.4 ordering invariant in action.
+    %% required.
     Tmp = mk_tmp_dir(),
     Id = <<"p7">>,
     try

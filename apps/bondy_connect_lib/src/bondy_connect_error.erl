@@ -352,15 +352,9 @@ Every key is a binary and every value is JSON-encodable. `metadata` is omitted;
 to_map(#{} = Error) ->
     Details = sanitise(maps:get(details, Error, #{})),
 
-    %% Every scalar goes through `to_binary/1`, not `maps:get/3` raw. This is
-    %% the JSON projection, so producing JSON-encodable output is its contract
-    %% — it must not depend on every construction path having normalised its
-    %% input. Sanitising `details` alone would leave `code`, `message`,
-    %% `description`, `uri`, `handle` and `doc_uri` able to carry a non-UTF-8
-    %% binary straight into `json:encode/1`.
-    %%
-    %% `to_binary/1` rather than `sanitise/1`: sanitise also truncates, and a
-    %% description is not something this projection should silently shorten.
+    %% This projection owns JSON-encodability, so every scalar goes through
+    %% `to_binary/1` whatever its construction path did. Not `sanitise/1`:
+    %% that also truncates, and this projection does not shorten a description.
     Canonical = #{
         ~"code" => to_binary(maps:get(code, Error, ~"")),
         ~"message" => to_binary(maps:get(message, Error, ~"")),
@@ -1777,10 +1771,8 @@ entry(cluster_disabled) ->
 %%
 %% A mail relay is operator-owned infrastructure, and none of these entries
 %% describes it. `details` carries the relay's configured NAME -- which the
-%% caller supplied in the first place, or could read from
-%% `bondy.mail.relay.list` -- and nothing else. No hostname, no username, no
-%% credential, and never the text of an SMTP reply: a relay's banner is written
-%% by someone other than us and can say anything at all.
+%% caller supplied, or could read from `bondy.mail.relay.list` -- and nothing
+%% else: no hostname, username or credential, and never an SMTP reply's text.
 %% -----------------------------------------------------------------------------
 
 entry(mail_not_configured) ->
@@ -1906,11 +1898,10 @@ entry(mail_queue_full) ->
 %% -----------------------------------------------------------------------------
 %% Streams (`bondy.stream.*`)
 %%
-%% What a caller can act on is the detail, never a cell: `already_exists`
-%% and `not_active` carry the generation that is the stream with its status
-%% and effective configuration, so a caller retrying a create after
-%% `no_quorum` can tell its own generation from another's, and a modify
-%% refused learns what the stream is now.
+%% What a caller can act on is the detail, never a cell: `already_exists` and
+%% `not_active` carry the generation (the stream with its status and effective
+%% configuration), so a retry after `no_quorum` can tell its own generation
+%% from another's, and a refused modify learns what the stream is now.
 %% -----------------------------------------------------------------------------
 
 entry(stream_already_exists) ->
@@ -1969,7 +1960,7 @@ entry(stream_unsettled_members) ->
             >>
         )
     );
-%% A publication to a captured topic (§19 A-3's producer rules, and the
+%% A publication to a captured topic (the stream producer rules, and the
 %% capture path itself). `producer_fenced` and `producer_gap` carry the
 %% numbers a producer needs to recover: the current epoch, the expected
 %% sequence.

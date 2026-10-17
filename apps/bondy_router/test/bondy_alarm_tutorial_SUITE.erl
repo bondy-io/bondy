@@ -122,17 +122,11 @@ step_2_and_3_the_failing_relay_raises_one_alarm(_) ->
 %% Step 3's second half: "Now call `bondy.mail.test` again, twice. Call
 %% `bondy.alarm.list` once more — still ONE alarm."
 %%
-%% MEASURED 2026-08-31, and the tutorial was wrong about the reason. It said
-%% `consecutive_failures` would have grown, teaching restatement. This producer
-%% does not restate: `bondy_mail_relay:fail/1` gates on
-%% `status =/= down andalso Failures >= Threshold`, so the alarm is raised ONCE
-%% on the transition to down and further failures only move the relay's own
-%% counter. The alarm's `details` therefore hold the count AT THE RAISE
-%% forever.
-%%
-%% Asserting the count is UNCHANGED is the sharper property anyway: it is the
-%% falsifier for a producer that restated on every failure, which is what would
-%% flood `bondy.alarm.updated` and evict the history ring.
+%% This producer does not restate: `bondy_mail_relay` raises the alarm ONCE,
+%% on the transition to down, and further failures only move the relay's own
+%% counter. The alarm's `details` therefore hold the count AT THE RAISE.
+%% Asserting the count is UNCHANGED is the falsifier for a producer that
+%% restated on every failure and so flooded `bondy.alarm.updated`.
 step_3_further_failures_neither_add_nor_restate_an_alarm(_) ->
     ?assertMatch(#error{}, mail_test()),
     ok = await_alarm(),
@@ -279,11 +273,8 @@ step_6_the_history_holds_the_transitions(Config) ->
     ?assertEqual(~"raised", maps:get(~"action", Previous)),
     ?assert(maps:get(~"at", Newest) >= maps:get(~"at", Previous)),
 
-    %% MEASURED 2026-08-31: no `updated` between them. The tutorial said the
-    %% two extra failures would each be weighed as a possible transition and
-    %% one would show as `updated`; they are not reported at all, because
-    %% `bondy_mail_relay:fail/1` stops at the down transition. The three sends
-    %% in this case produce exactly two transitions.
+    %% No `updated` between them: `bondy_mail_relay` reports nothing after the
+    %% down transition, so the three sends produce exactly two transitions.
     ?assertEqual(
         [~"cleared", ~"raised"],
         [maps:get(~"action", E) || E <- [Newest, Previous]]
@@ -364,18 +355,12 @@ call(Proc, Args) ->
 
 %% @private
 %% A reader types the next command a second later; a suite does not.
-%%
 %% `bondy_mail:send/3` replies when the SEND fails, and the relay process
-%% raises the alarm after that — `alarm_handler:set_alarm/1` is a
-%% `gen_event:notify/2`, a cast. So a read taken the instant the call returns
-%% can legitimately precede the raise. Measured: without this,
-%% `step_3_...` read an empty alarm list while `step_2_and_3_...` did not, in
-%% the same run.
-%%
-%% This is a REAL property of the alarm subsystem, not a test artefact — see
-%% `bondy_alarm_handler`'s moduledoc — so the barrier is here rather than the
-%% raise being made synchronous, which would put a producer reporting a
-%% problem in a queue behind the alarm subsystem.
+%% raises the alarm after that through `alarm_handler:set_alarm/1`, a
+%% `gen_event:notify/2` cast. So a read taken the instant the call returns can
+%% precede the raise. The barrier is here rather than the raise being made
+%% synchronous, which would queue a reporting producer behind the alarm
+%% subsystem (see `bondy_alarm_handler`'s moduledoc).
 await_alarm() ->
     await(fun() -> relay_alarms() =/= [] end, alarm_not_raised).
 

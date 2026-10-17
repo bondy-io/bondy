@@ -5,12 +5,12 @@
 -module(bondy_mcp_gateway_SUITE).
 
 -moduledoc """
-The MCP manifest cache (design §7.10) and overlay document store (§18.3) on
+The MCP manifest cache and overlay document store on
 a booted node: overlay documents load atomically with realm-existence and
 cross-document name-exclusivity checks; a realm's manifest is the compiled
 join of its interface entries (the base layer) and the overlay (the
 naming/annotation layer); an overlay rename REPLACES the URI-named base
-entry; a §17 name collision exposes neither side and raises a critical
+entry; a name collision exposes neither side and raises a critical
 alarm that clears when the collision does; and the cache is invalidated by
 store change events (debounced), with the TTL as backstop.
 
@@ -219,7 +219,7 @@ manifest_is_the_interface_overlay_join(_) ->
     Manifest = fresh_manifest(?REALM),
     #{entries := Entries} = Manifest,
 
-    %% The base tool: named by its URI, schemas flattened per §16.1.
+    %% The base tool: named by its URI, schemas flattened.
     #{P1 := Tool} = Entries,
     ?assertMatch(
         #{
@@ -248,7 +248,7 @@ manifest_is_the_interface_overlay_join(_) ->
         },
         ArgsTool
     ),
-    %% The base resource, at the §17 default URI.
+    %% The base resource, at the default URI.
     #{T1 := Resource} = Entries,
     ExpectedUri = <<"wamp:", ?REALM/binary, ":", T1/binary>>,
     ?assertMatch(
@@ -311,7 +311,7 @@ overlay_rename_replaces_the_base_entry(_) ->
 name_collision_exposes_neither_and_alarms(_) ->
     %% Two procedures in the interface; an overlay names its tool with the
     %% LITERAL URI of the other procedure. Load-time exclusivity only sees
-    %% other overlay documents, so this reaches the compiler — §17's
+    %% other overlay documents, so this reaches the compiler — the
     %% "one name, different bindings" case.
     P1 = <<"com.bondy.mcp.gw.col.p1">>,
     P2 = <<"com.bondy.mcp.gw.col.p2">>,
@@ -334,7 +334,7 @@ name_collision_exposes_neither_and_alarms(_) ->
     %% P1's base entry was replaced by the overlay claim on P1.
     ?assertNot(maps:is_key(P2, Entries)),
     ?assertNot(maps:is_key(P1, Entries)),
-    %% The rebuild counted its collision (§15.1); `>=` because a
+    %% The rebuild counted its collision; `>=` because a
     %% debounced rebuild racing this read counts it again.
     ?assert(
         mval(bondy_mcp_manifest_collisions_total, collision_label()) >=
@@ -409,10 +409,6 @@ unknown_realm_never_grows_the_cache(_) ->
         {error, no_such_realm}, bondy_mcp_gateway:manifest(Uri)
     ),
     ?assertEqual([], ets:lookup(bondy_mcp_gateway, Uri)).
-
-%% =============================================================================
-%% HELPERS
-%% =============================================================================
 
 %% =============================================================================
 %% CASES — the bondy.mcp.overlay.* WAMP API
@@ -532,7 +528,7 @@ curated_mode_exposes_only_overlay_entries(_) ->
         _ = bondy_mcp_gateway:delete(<<"gw_cur_overlay">>)
     end.
 
-%% The overlay `resource` kind (MCP-D31's curated companion): a plain
+%% The overlay `resource` kind (the curated companion): a plain
 %% topic-backed resource is exposable by NAMING its topic — without it, a
 %% described topic could never surface under curated mode. The entry
 %% joins the topic's interface entry (description; payload schemas
@@ -650,10 +646,8 @@ template(Name, Procedure) ->
         <<"result_kwargs_schema">> => #{<<"type">> => <<"object">>}
     }.
 
-%% A manifest guaranteed to reflect the CURRENT store content: suites and
-%% earlier cases share the cache, so force a rebuild by expiring the cell.
 %% =============================================================================
-%% CASES — §15 manifest metrics (delta-based: the node is shared)
+%% CASES — manifest metrics (delta-based: the node is shared)
 %% =============================================================================
 
 metrics_manifest_series(_) ->
@@ -711,11 +705,11 @@ sre_overlay_is_not_loaded_by_default(_) ->
         {error, not_found}, bondy_mcp_gateway:lookup(<<"bondy_sre_read">>)
     ).
 
-%% The MCP-D32 ratchet. Bondy ships a READ surface and no action surface: a
+%% The read-only ratchet. Bondy ships a READ surface and no action surface: a
 %% tool description is prompt, and an action tool reachable over MCP would
-%% put an administrative procedure on the agent surface by the route MCP-D14
-%% does not watch (the realm is a path segment, not a listener property), with
-%% RBAC as its only control.
+%% put an administrative procedure on the agent surface by the route the
+%% listener guard does not watch (the realm is a path segment, not a listener
+%% property), with RBAC as its only control.
 %%
 %% Checked against the task catalogue rather than against a list of URIs, so
 %% cataloguing a NEW task cannot quietly widen the shipped surface either.
@@ -763,7 +757,7 @@ sre_overlay_is_reachable_over_wamp(_) ->
 %% checks it cannot run pure (every named realm exists, no name belongs to
 %% another document) — and compiles under `curated`, the shipped mode, into
 %% exactly the entries it names and nothing else. Set equality is also the
-%% collision check: a §17 collision exposes NEITHER side, so a colliding name
+%% collision check: a name collision exposes NEITHER side, so a colliding name
 %% goes missing here.
 sre_overlay_documents_load_and_compile(_) ->
     Read = bondy_mcp_sre_overlay:read_document(),
@@ -801,19 +795,12 @@ sre_overlay_documents_load_and_compile(_) ->
 
 %% Each read entry declares one `@args` schema per positional argument its
 %% procedure takes, and NOTHING in Bondy validates that claim — no code reads
-%% `inputSchema`. So it is checked by CALLING, in both directions:
-%%
-%%   * the declared count must reach the handler and answer;
-%%   * one MORE than the declared count must be refused.
-%%
-%% The second assertion is what catches a count that is too LOW, and it is
-%% needed because too few arguments does not refuse:
-%% `bondy_wamp_api_utils:do_validate_call_args/6` pads a missing first
-%% positional argument with the session's realm URI, so `bondy.alarm.get`
-%% called with nothing at all answers an EMPTY ENVELOPE rather than an error
-%% (§7.5, found not fixed). Requiring the declared count to be the maximum
-%% accepted sidesteps that: an entry declaring one argument too few is caught
-%% by its "one more" call succeeding. Mutation-killed in both directions.
+%% `inputSchema`. So it is checked by CALLING, in both directions: the
+%% declared count must reach the handler and answer, and one MORE must be
+%% refused. The second assertion catches a count that is too LOW, because too
+%% few arguments does not refuse: the admin-call argument validator pads a
+%% missing first positional argument with the session's realm URI, so
+%% `bondy.alarm.get` called with nothing answers an EMPTY ENVELOPE.
 sre_read_entries_call_their_procedures(_) ->
     Ctxt = bondy_context:local_context(?MASTER_REALM),
     Tools = [
@@ -847,7 +834,6 @@ sre_read_entries_call_their_procedures(_) ->
 %% `inputSchema`, so a schema is only ever a claim; this one claims an agent
 %% can page, and an agent that believed a short page was the whole history
 %% would draw the wrong conclusion from it.
-%%
 %% The call is built the way `bondy_mcp_wamp:call_args/1` builds one, so this
 %% exercises the actual MCP route from `arguments` to CALL.KWArgs rather than
 %% a hand-written KWArgs map.
@@ -919,7 +905,8 @@ declared_arity(Entry) ->
     end.
 
 %% The refusal path THROWS rather than replying, which is how
-%% `validate_admin_call_args/3` reports a wrong argument count.
+%% `bondy_wamp_api_utils:validate_admin_call_args/3` reports a wrong argument
+%% count.
 dispatch(M, Ctxt) ->
     try
         bondy_wamp_api:handle_call(M, Ctxt)
@@ -955,6 +942,8 @@ hcount(Name, Label) ->
         not_found -> 0
     end.
 
+%% A manifest guaranteed to reflect the CURRENT store content: suites and
+%% earlier cases share the cache, so force a rebuild by expiring the cell.
 fresh_manifest(RealmUri) ->
     ok = expire(RealmUri),
     cached_manifest(RealmUri).

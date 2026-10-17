@@ -23,7 +23,7 @@ Two ways in:
 
 - `alarm_handler:set_alarm({Id, Desc})` and `alarm_handler:clear_alarm(Id)` —
   the raw OTP calls, and the ONLY spelling for the 2-tuple form. This module
-  deliberately exports no 1-arity wrapper: it would be byte-identical to OTP's
+  deliberately exports no 1-arity wrapper: it would duplicate OTP's
   (`gen_event:notify(alarm_handler, …)`), and a second spelling of one
   operation is how half the tree ends up calling each. It also matters for
   layering — `bondy_oplog` and `bondy_mail` raise alarms without depending on
@@ -31,7 +31,7 @@ Two ways in:
   allows.
 - `set_alarm/2` — the same plus an options map. This IS this module's, because
   OTP has no such call. The 3-tuple it sends passes through
-  `alarm_handler:set_alarm/1` unchanged (sasl-4.4 `alarm_handler.erl:103`), so
+  `alarm_handler:set_alarm/1` unchanged (sasl `alarm_handler.erl`), so
   a producer outside `bondy_router` can send one too.
 
 `severity`, `class` and `affects_ready` come from three sources in order: an
@@ -296,17 +296,12 @@ affects_ready() ->
 init([]) ->
     {ok, update_ready(#state{})};
 init({[], {alarm_handler, Alarms}}) ->
-    %% gen_event swap from the OTP default handler, invoked with
-    %% `{alarm_handler, swap}` so its `terminate(swap, Alarms)` hands its
-    %% alarm list over (sasl/alarm_handler.erl). Adopt it: alarms raised
-    %% BEFORE the swap — e.g. `bondy_db_main_unavailable`, set by the
-    %% namespace catalogue while bondy_router_sup is still starting — must survive
-    %% into `get_alarms/0` (asserted by `bondy_degraded_boot_SUITE`).
-    %%
-    %% The OTP handler records no timestamps, so an adopted alarm's
-    %% `raised_at` is the ADOPTION time, not the original raise. Adoption is
-    %% recorded in the ring as `raised` because that is when this handler
-    %% learned of it.
+    %% gen_event swap from the OTP default handler: `terminate(swap, Alarms)`
+    %% hands over its alarm list (sasl `alarm_handler.erl`). Alarms raised
+    %% BEFORE the swap, such as `bondy_db_main_unavailable` set by the
+    %% namespace catalogue during boot, survive into `get_alarms/0`
+    %% (`bondy_degraded_boot_SUITE`). The OTP handler records no timestamps,
+    %% so an adopted alarm's `raised_at` is the adoption time.
     {ok, update_ready(lists:foldl(fun adopt/2, #state{}, Alarms))};
 init({[], _}) ->
     %% A swap with nothing to adopt: the old handler was absent (gen_event

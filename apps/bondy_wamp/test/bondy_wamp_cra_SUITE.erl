@@ -108,8 +108,8 @@ salted_password_salt_sensitive(_) ->
 %% RESPONSE ROUND-TRIPS
 %% =============================================================================
 
-%% The kernel response/2 must equal the historical formula so that previously
-%% stored expectations keep verifying.
+%% `response/2` is `base64(hmac(sha256, SaltedPassword, Challenge))`; stored
+%% expectations depend on that formula.
 response_kernel_matches_legacy(_) ->
     Salt = bondy_wamp_cra:salt(),
     SPass = bondy_wamp_cra:salted_password(?P1, Salt, params(4096, 32)),

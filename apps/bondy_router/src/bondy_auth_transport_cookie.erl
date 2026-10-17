@@ -96,7 +96,7 @@ validate_claims(
     %% scope, so the wildcard is always the atom `all` (never the legacy
     %% `undefined`) by this point.
     TrustedScope = bondy_auth_scope:matches_realm(Scope, RealmUri),
-    %% A-1: the cookie/ticket issuer (`authrealm`) must be trusted by the
+    %% The cookie/ticket issuer (`authrealm`) has to be trusted by the
     %% target realm (itself or its SSO realm); the `scope.realm` check alone
     %% would accept an SSO cookie (`scope.realm = all`) for any realm.
     TrustedIssuer = bondy_realm:is_trusted_issuer(RealmUri, AuthRealmUri),

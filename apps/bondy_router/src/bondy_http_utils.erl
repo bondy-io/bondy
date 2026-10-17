@@ -16,9 +16,8 @@ because a listener bound to a Unix domain socket has no network peer and the
 rest of the stack — logging, events, `bondy_rbac_source` — is written in terms
 of one.
 
-`http_status/1` is the single source of truth for the error URI to HTTP status
-mapping. Both the REST handler and the API Gateway spec defaults read it here,
-so the two cannot disagree about what an error URI is worth.
+`http_status/1` maps an error URI to an HTTP status. Both the REST handler and
+the API Gateway spec defaults read it here.
 """.
 -include_lib("partisan/include/partisan_util.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -394,7 +393,7 @@ is_public_ip({A, B, _, _}) when
     A == 172 andalso B >= 16 andalso B =< 31;
     A == 192 andalso B == 168
 ->
-    % IP is private
+    %% IP is private
     false;
 is_public_ip({A, _, _, _, _, _, _, _}) when
     A == 65152 orelse A == 65153 orelse A == 65154
@@ -404,10 +403,10 @@ is_public_ip({A, _, _, _, _, _, _, _}) when
     %% 65154 -> fe80::/10. Link local
     false;
 is_public_ip(IPAddr) when ?IS_IP(IPAddr) ->
-    % IP is valid and public
+    %% IP is valid and public
     true;
 is_public_ip(undefined) ->
-    % IP is invalid
+    %% IP is invalid
     false.
 
 %% =============================================================================

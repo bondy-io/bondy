@@ -162,8 +162,7 @@ owner keeps it.
 }).
 
 -define(DEFAULT_COALESCE_MS, 5).
-%% The native op-based CRDT backing every secondary-index cell (the
-%% op-based twin of the retired `bondy_oplog_fold_index_entry`).
+%% The native op-based CRDT backing every secondary-index cell.
 -define(INDEX_CRDT, bondy_oplog_crdt_index_entry).
 
 %% =============================================================================
@@ -262,7 +261,7 @@ reset(Entry) ->
 init(#{writer_key := WriterKey, shard := Shard}) ->
     %% On-heap, so the mailbox is one queue in arrival order. An off-heap
     %% queue may take per-sender buffers, which ERTS appends in buffer order
-    %% (`proc_sig_queue_flush_buffers/2` in `erl_proc_sig_queue.c`), and a
+    %% (`proc_sig_queue_flush_buffers` in `erl_proc_sig_queue.c`), and a
     %% `flush_sync` could then overtake an `enqueue` another process sent
     %% before it. The dispatch back-pressure cap bounds the backlog.
     process_flag(message_queue_data, on_heap),

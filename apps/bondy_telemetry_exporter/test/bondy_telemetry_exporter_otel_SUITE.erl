@@ -298,14 +298,12 @@ unsampled_parent_no_span(_) ->
     ?assertEqual(<<"com.example.sentinel2">>, Span#span.name).
 
 %% A MINTED context (span-id-bound `bondy=<id>` tracestate entry) has no
-%% upstream span: the router CALL leg is exported as the trace's
-%% parentless ROOT span carrying exactly the pre-allocated ids, and the
-%% INVOCATION leg of the same trace parents to it — the natural
-%% call → invocation nesting. The marker is inert everywhere else: a
-%% stale entry naming a DIFFERENT span id (any downstream participant
-%% that started its own spans) joins normally, and the SDK client leg
-%% never roots even on an exact match (minting is a router-boundary
-%% behaviour).
+%% upstream span: the router CALL leg is exported as the trace's parentless
+%% ROOT span carrying exactly the pre-allocated ids, and the INVOCATION leg
+%% of the same trace parents to it. The marker is inert everywhere else: a
+%% stale entry naming a DIFFERENT span id (a downstream participant that
+%% started its own spans) joins normally, and the SDK client leg never
+%% roots even on an exact match (minting is a router-boundary behaviour).
 minted_root_span(_) ->
     TraceHex = <<"4bf92f3577b34da6a3ce929d0e0e4736">>,
     SpanHex = <<"00f067aa0ba902b7">>,
@@ -383,7 +381,7 @@ minted_root_span(_) ->
 
     %% The root path bypasses W3C extraction, so it validates ids
     %% itself, stricter than the propagator: UPPERCASE hex (which the
-    %% propagator accepts on extract — measured here — but W3C forbids
+    %% propagator accepts on extract, as the join below shows, but W3C forbids
     %% and which does not round-trip to the hex the children reference)
     %% JOINS instead of rooting even with a matching marker, and the
     %% all-zero trace id produces no span at all (the propagator

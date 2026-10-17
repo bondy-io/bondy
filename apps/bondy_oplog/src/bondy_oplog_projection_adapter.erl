@@ -124,39 +124,26 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
     atom() => term()
 }.
 
-%% The scope of a `clear/2` index wipe. The owner (`bondy_db`, via its
-%% topology) chooses the scope from the backend's keyspace layout:
-%%
-%% - `{suffix, IndexName}` — wipe every bucket ending with
-%%   `bondy_oplog_index_key:bucket_suffix(IndexName)` (`<<"/$idx/", IndexName>>`).
-%%   Correct on a backend whose handle holds a **single logical table**
-%%   (`per_entity`'s dedicated Bookie, the ETS adapter's per-`(NS, Index, Shard)`
-%%   table), where the only buckets present are this table's.
-%%
-%% - `{entity, EntityType, IndexName}` — wipe only the index buckets of
-%%   `EntityType` (`<<EntityType, "/$idx/", IndexName>>` in `shared_shards`, or
-%%   `<<Realm, "/", EntityType, "/$idx/", IndexName>>` in `single_bookie`).
-%%   Required on a backend whose handle (Bookie) **co-locates several entity
-%%   types**, where a bare-suffix wipe would also drop a sibling table that
-%%   declared the same `IndexName`.
+%% The scope of a `clear/2` index wipe, chosen by the owner (`bondy_db`) from
+%% the backend's keyspace layout. `{suffix, IndexName}` wipes every bucket
+%% ending with `bondy_oplog_index_key:bucket_suffix(IndexName)`; correct on a
+%% backend whose handle holds a single logical table (`per_entity`, the ETS
+%% adapter), where the only buckets present are this table's.
+%% `{entity, EntityType, IndexName}` wipes only the index buckets of
+%% `EntityType`; required on a backend whose handle co-locates several entity
+%% types (`shared_shards`, `single_bookie`), where a suffix wipe hits siblings.
 -type clear_scope() ::
     {suffix, IndexName :: atom()}
     | {entity, EntityType :: binary(), IndexName :: atom()}.
 
 %% The scope of a `cell_keys/2` primary-cell enumeration, used by the
 %% secondary-index rebuild to derive its complete cell directory from the
-%% durable projection. The owner (`bondy_db`, via its topology) chooses it from
-%% the backend's keyspace layout:
-%%
-%% - `{entity, EntityType}` — enumerate only the primary buckets of
-%%   `EntityType` (`EntityType` in `shared_shards`, `<<Realm,"/",EntityType>>`
-%%   in `single_bookie`). Required on a backend whose handle (Bookie)
-%%   co-locates several entity types, so a sibling table's cells are excluded.
-%%
-%% - `all_primary` — enumerate every non-index bucket in the handle. Correct on
-%%   a backend whose handle is a dedicated single-table Bookie with realm-keyed
-%%   primary buckets (`per_entity`), where the entity type is not encoded in the
-%%   bucket and the only buckets present are this table's.
+%% durable projection; the owner (`bondy_db`) chooses it from the backend's
+%% keyspace layout. `{entity, EntityType}` enumerates only the primary buckets
+%% of `EntityType`; required on a backend whose handle co-locates several
+%% entity types. `all_primary` enumerates every non-index bucket in the handle;
+%% correct on a dedicated single-table Bookie with realm-keyed primary buckets
+%% (`per_entity`), where the only buckets present are this table's.
 -type cell_keys_scope() ::
     {entity, EntityType :: binary()}
     | all_primary.
@@ -238,7 +225,7 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 %% not for the prefix it has already swept. The page is a slice of the sorted
 %% `cell_keys/2` result cut strictly after `cursor` and to `limit`
 %% (`bondy_oplog_projection_ets_proper_test`,
-%% `prop_cell_keys_page_is_a_slice_of_the_directory/0`). Probe with
+%% `prop_cell_keys_page_is_a_slice_of_the_directory`). Probe with
 %% `cell_keys_page_exported/1`.
 -callback cell_keys(
     handle(), Scope :: cell_keys_scope(), Opts :: cell_keys_opts()

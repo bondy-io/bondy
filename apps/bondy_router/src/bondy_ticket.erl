@@ -155,7 +155,7 @@ WAMP permission required to call the procedures.
 -include("bondy_security.hrl").
 
 -define(NOW, erlang:system_time(second)).
-% 2 mins
+%% 2 mins
 -define(LEEWAY_SECS, 2 * 60).
 
 %% Tickets live in the bondy_db `bondy_ticket` main table, bucketed by the auth
@@ -420,14 +420,11 @@ verify(Ticket, Opts) ->
             {error, invalid};
         Class:Reason:Stacktrace ->
             %% Everything above the signature check runs on attacker-controlled
-            %% input: `jose_jwt:peek/1` raises `case_clause` or
-            %% `function_clause` on some malformed JWTs, and
-            %% `bondy_auth_scope:normalize/1` is only defined for maps, so a
-            %% ticket carrying a non-map `scope` raises too. Report those as an
-            %% invalid ticket rather than letting them crash the caller.
-            %% Logged at warning, not error: a flood of malformed tickets is an
-            %% untrusted peer, not a fault in this node. The ticket itself is
-            %% never logged.
+            %% input: `jose_jwt:peek/1` raises on some malformed JWTs, and
+            %% `bondy_auth_scope:normalize/1` is defined for maps only. Report
+            %% those as an invalid ticket. Logged at warning: a flood of
+            %% malformed tickets is an untrusted peer, not a fault in this
+            %% node. The ticket itself is never logged.
             ?LOG_WARNING(#{
                 description => "Error while verifying ticket",
                 class => Class,

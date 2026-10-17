@@ -1,6 +1,5 @@
 %% =============================================================================
-%% Tests for the per-namespace `consistency_class` policy
-%% (`MST_DB_DESIGN.md` §15, §18 item 13).
+%% Tests for the per-namespace `consistency_class` policy.
 %%
 %% Verifies:
 %%   - default class is `ap` when not specified at register time

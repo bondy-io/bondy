@@ -1,6 +1,5 @@
 %% =============================================================================
-%% End-to-end tests for the applier's per-cell projection-write path
-%% (`MST_DB_DESIGN.md` §6.3).
+%% End-to-end tests for the applier's per-cell projection-write path.
 %%
 %% Verifies:
 %%   - `{cell_apply, Bucket, Key, FoldEvent}` events drive a read-modify-write
@@ -74,8 +73,8 @@ apply_writes_projection() ->
 
 apply_round_trips_through_db_core_read() ->
     %% Substrate read must see the frame the applier just wrote and
-    %% return the user-facing value (post-§3.6 the read API returns
-    %% `to_value/1`).
+    %% return the user-facing value (the read API returns the `to_value/1`
+    %% projection, not the state).
     {Id, NS, Cache, Proj} = setup_instance(),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"bob">>, {set, 42, <<"v">>}}),
     ok = bondy_oplog_test_projection:drain(Id),

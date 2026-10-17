@@ -200,7 +200,7 @@ test_1(Config) ->
         bondy_auth:authenticate(<<"foo">>, ?P1, undefined, U1Ctxt2)
     ),
 
-    %% user 2 is not granted access from Peer (see test_2)
+    %% user 2 is not granted access from Peer (see user2_rejected_outside_cidr)
     {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, SourceIP),
 
     ?assertEqual(

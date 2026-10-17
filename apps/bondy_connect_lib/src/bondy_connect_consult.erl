@@ -27,14 +27,13 @@ UTF-8 and `file:consult/1` rejects the whole file with
 `{Line, file_io_server, invalid_unicode}`; a code point above 255 makes it
 raise `badarg`. Which terms reach that range depends on the directive — `~p`
 renders a binary of printable latin-1 bytes as `<<"...">>`, so a raw sha256
-root did it about once in 2400 (measured: 21/50000, and it crash-looped a
-production shard); `~tw` never string-renders a binary but still emits an atom
-such as `'café'` verbatim — so changing the directive alone closed the binary
-case and left the atom case open (measured against OTP `io_lib` and
-`file:consult/1` on 2026-09-03).
+root reaches it; `~tw` never string-renders a binary but still emits an atom
+such as `'café'` verbatim — so changing the directive alone closes the binary
+case and leaves the atom case open.
 
 The directive is therefore a layout choice; the byte encoding is the
-invariant. Both are pinned by `prop_bondy_consult`, whose generator covers
+invariant. Both are pinned by `bondy_connect_consult_test:prop_round_trip/1`,
+whose generator covers
 binaries of arbitrary bytes, atoms and strings with latin-1 and wide
 characters, integers, floats, and nested lists, tuples and maps, and reads
 every case back through the real `file:consult/1`.

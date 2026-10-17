@@ -55,14 +55,11 @@ documents as a hazard for a different listener).
 
 %% Only combinations `bondy_listener_config` resolves: `tcp`/`tls`/`uds` on the
 %% transport axis, `http`/`wamp_rawsocket`/`bridge_relay` on the protocol axis,
-%% with `uds` + `bridge_relay` refused by `assert_transport_protocol/3`.
-%%
-%% `admin` is declared explicitly, at `port => 0`, rather than left for
-%% `bondy_listener_manager:with_reserved/1` to inject: an inventory that omits
-%% it gets the reserved default at its hardcoded port, which collides with
-%% whatever this OS process is already bound to. `?RAW_LISTENER` carries no
-%% `ping` block at all — `bondy_listener_config:assert_listener_ping/3` accepts
-%% that (absent) and refuses a PARTIAL one, and this suite is not about ping.
+%% with `uds` + `bridge_relay` refused. `admin` is declared explicitly, at
+%% `port => 0`: an inventory that omits it gets the reserved default at its
+%% hardcoded port, which collides with whatever this OS process already bound.
+%% `?RAW_LISTENER` carries no `ping` block: `bondy_listener_config` accepts an
+%% absent block and refuses a PARTIAL one, and this suite is not about ping.
 -define(INVENTORY, [
     {admin, #{
         transport => tcp,
@@ -121,9 +118,9 @@ configured_path_was_taken(Config) ->
 
 %% The resolved set is exactly what was declared plus the one listener no
 %% inventory can omit (`admin_local`) — nothing more, nothing fewer. In
-%% particular a legacy-only name (`wamp_tcp`, part of the nine hardcoded
-%% listeners this branch replaced) must be absent: a node on the configured
-%% path must not also start the hardcoded set.
+%% particular a legacy-only name (`wamp_tcp`, from the hardcoded legacy set)
+%% must be absent: a node on the configured path must not also start the
+%% hardcoded set.
 resolved_set_matches_the_declared_inventory(Config) ->
     Node = ?config(node, Config),
     Resolved = erpc:call(Node, bondy_listener_manager, listeners, []),
@@ -137,12 +134,10 @@ resolved_set_matches_the_declared_inventory(Config) ->
 %% against the declared raw-socket listener, and a real HTTP request against
 %% the declared `admin` listener. Ports come from `ranch:get_port/1` on the
 %% peer, never from a literal: every listener here is declared `port => 0`, so
-%% `bondy_listener_manager:listener/1`'s `bind` field still reads `{port, 0}`
-%% after boot — it carries the CONFIGURED target, not what the OS actually
-%% assigned. `ranch:get_port/1` is what ranch itself resolved that to; it
-%% raises `badarg` for a listener that never bound, which distinguishes "wrong
-%% port" from "never started" rather than confusing the two under
-%% `econnrefused`.
+%% `bondy_listener_manager:listener/1`'s `bind` field carries the CONFIGURED
+%% target, not what the OS assigned. `ranch:get_port/1` raises `badarg` for a
+%% listener that never bound, which distinguishes "wrong port" from "never
+%% started" rather than confusing the two under `econnrefused`.
 traffic_completes_on_the_declared_listeners(Config) ->
     Node = ?config(node, Config),
 

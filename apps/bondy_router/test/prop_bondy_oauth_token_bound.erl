@@ -133,17 +133,12 @@ prop_concurrent_issues_eventually_bounded() ->
 
 %% The model is `#{Device => ExpiresAt}` for the scopes the store should hold
 %% after the previous step — at most MAX of them. Every step re-derives what
-%% the store actually holds (through `lookup/3`) and checks it against the
-%% model:
-%%
-%% - `bounded`: never more than MAX live;
-%% - `no_silent_loss`: a scope vanishes ONLY when this step pushed the model
-%%   over the bound, and then exactly one does;
-%% - `policy`: the one evicted expires no later than every survivor.
-%%
-%% The model then adopts the store's choice of victim, so it never has to
-%% reproduce the implementation's tie-break among tokens that expire in the
-%% same second — it only has to agree that the choice was lawful.
+%% the store holds (through `lookup/3`) and checks it against the model:
+%% `bounded` (never more than MAX live), `no_silent_loss` (a scope vanishes
+%% ONLY when this step pushed the model over the bound, and then exactly one
+%% does) and `policy` (the one evicted expires no later than every survivor).
+%% The model then adopts the store's choice of victim, so it only has to
+%% agree that the choice was lawful, never reproduce the tie-break.
 run_sequence(_User, [], _Model) ->
     ok;
 run_sequence(User, [{issue, D} = Step | Rest], Model0) ->

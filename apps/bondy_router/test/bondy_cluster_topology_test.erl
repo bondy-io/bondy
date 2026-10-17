@@ -52,13 +52,13 @@ peer_node_maps_json_encode_test() ->
     Self = 'self@h',
     Peer = 'peer@h',
     Cases = [
-        % member + connected
+        %% member + connected
         {[Peer], [Peer]},
-        % member + DISCONNECTED
+        %% member + DISCONNECTED
         {[Peer], []},
-        % non-member + connected
+        %% non-member + connected
         {[], [Peer]},
-        % unknown
+        %% unknown
         {[], []}
     ],
     lists:foreach(
@@ -66,7 +66,7 @@ peer_node_maps_json_encode_test() ->
             M = bondy_cluster_topology:node_map(
                 Peer, Self, Members, Connected, 0
             ),
-            %% Must not crash (the invalid-UTF-8 regression), and round-trips.
+            %% Must not crash, and round-trips.
             Bin = iolist_to_binary(json:encode(M)),
             ?assert(is_map(json:decode(Bin)))
         end,

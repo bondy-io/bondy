@@ -3,7 +3,7 @@
 %% compaction to drop the stable prefix in O(log N) instead of O(P) per-key
 %% deletes.
 %%
-%% The ship gate is *byte-identical-root equivalence*: because the MST is
+%% The property is *byte-identical-root equivalence*: because the MST is
 %% history-independent, the tree of keys `> W` has a single canonical root,
 %% so `truncate(T, W)` must produce the same root hash as
 %%   (a) deleting every key `=< W` one at a time, and
@@ -41,8 +41,8 @@ to_kv(T) ->
 %% Reference truncation: delete every key `=< W`, one at a time.
 truncate_by_delete(T, W) ->
     Keys = [K || {K, _V} <- to_kv(T), K =< W],
-    %% Descending order — the order `truncate_below_or_equal/2` in the
-    %% instance uses, and the order `delete/2` is documented to prefer.
+    %% Descending order — the order compaction in `bondy_oplog_instance`
+    %% uses, and the order `delete/2` is documented to prefer.
     lists:foldl(
         fun(K, Acc) -> bondy_mst:delete(Acc, K) end,
         T,

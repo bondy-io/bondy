@@ -51,24 +51,12 @@ init(#{ref := Ref} = Req) ->
     %% `bondy_rbac_source` CIDR matching, neither of which has a meaning for the
     %% atom `local`.
     {LocalIP, _Port} = bondy_http_utils:peer(Req),
-    %% `enabled` AND `mode` are defaulted INTO the map, not merely read with a
-    %% default below: every `source_ip/1` clause matches on both, so a map
-    %% missing either fails with `function_clause` on every request that reaches
-    %% `bondy_http_gateway_rest_handler:init/2`.
-    %%
-    %% Both gaps are reachable, because `listeners.$name.proxy_protocol` and
-    %% `listeners.$name.proxy_protocol.mode` are two independent default-free
-    %% mappings. An HTTP listener may carry no block at all (`admin_local`
-    %% carries none), which leaves `enabled` absent; and one that sets only
-    %% `proxy_protocol = on` yields `[{enabled, true}]`, which leaves `mode`
-    %% absent. Verified directly: `source_ip/1` on the map `init/1` builds for
-    %% the latter matches none of its three clauses.
-    %%
-    %% `relaxed` is the value all eight legacy `*.proxy_protocol.mode` mappings
-    %% already carry as their schema default, so a legacy deployment is
-    %% unaffected — its own value wins this merge.
-    %% `bondy_tcp_proxy_protocol:init/2` carries the same two defaults for the
-    %% same reason.
+    %% `enabled` AND `mode` are defaulted INTO the map: every `source_ip/1`
+    %% clause matches on both, and `listeners.$name.proxy_protocol` and
+    %% `.mode` are two independent default-free mappings, so either may be
+    %% absent. `relaxed` is the schema default of every legacy
+    %% `*.proxy_protocol.mode` mapping, so a legacy value wins this merge.
+    %% `bondy_tcp_proxy_protocol:init/2` carries the same two defaults.
     Opts = maps:merge(
         #{enabled => false, mode => relaxed},
         maps:from_list(bondy_config:get([Ref, proxy_protocol], []))
@@ -79,7 +67,7 @@ init(#{ref := Ref} = Req) ->
     %% `source_ip/1` if the merge were ever removed.
     case maps:get(enabled, Opts) of
         true ->
-            %% G-2: the `Forwarded`/`X-Real-IP`/`X-Forwarded-For` headers are
+            %% The `Forwarded`/`X-Real-IP`/`X-Forwarded-For` headers are
             %% client-supplied and trivially spoofable. Only honour them when the
             %% IMMEDIATE socket peer is a configured trusted proxy; otherwise the
             %% socket peer IS the source IP. With no `trusted_proxies` configured
@@ -263,7 +251,7 @@ parse_for(Bin) ->
     IPAddr.
 
 %% @private
-%% G-2: is the immediate socket peer within a configured `trusted_proxies` CIDR?
+%% Is the immediate socket peer within a configured `trusted_proxies` CIDR?
 %% Only then may client-supplied forwarding headers be believed. The address
 %% families must agree so an IPv4 CIDR cannot accidentally match an IPv6 peer.
 -spec is_trusted_peer(inet:ip_address(), map()) -> boolean().
@@ -284,7 +272,7 @@ in_cidrs(IP, Cidrs) ->
     ).
 
 %% @private
-%% G-2 refinement: pick the correct element of a forwarding CHAIN. Walk from the
+%% Pick the correct element of a forwarding CHAIN. Walk from the
 %% RIGHT (the hop our trusted proxy vouched for) and return the first address NOT
 %% in a trusted-proxy CIDR — the real client. Entries an attacker BEHIND the
 %% trusted proxy could have PREPENDED sit to the left of the segment the trusted

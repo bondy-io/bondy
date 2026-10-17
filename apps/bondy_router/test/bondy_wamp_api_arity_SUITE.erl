@@ -49,11 +49,10 @@ all() ->
 %% Every `bondy.*` procedure whose first positional argument is NOT a realm,
 %% with the number of positional arguments it takes.
 %%
-%% DECLARED here rather than read from the scan, and that is the whole point.
-%% The family a procedure belongs to is read out of its own code, so a
-%% procedure moved BACK to a realm-first validator would silently leave a
-%% scanned set and stop being checked — the regression would remove its own
-%% detector. Compared against the scan below, and used as the input to the
+%% DECLARED here rather than read from the scan: the family a procedure
+%% belongs to is read out of its own code, so a procedure moved BACK to a
+%% realm-first validator would silently leave a scanned set and stop being
+%% checked. Compared against the scan below, and used as the input to the
 %% short-call case, a move in either direction fails here first.
 declared_no_realm() ->
     [
@@ -150,17 +149,13 @@ the_no_realm_set_is_the_declared_one(Config) ->
     ).
 
 %% Driven from the DECLARED list, not the scanned one — see
-%% `declared_no_realm/0`.
-%%
-%% Driven from the MASTER realm, which is the case that goes wrong quietly:
-%% from any other realm the short call is refused for a realm mismatch anyway,
-%% so a suite that only ever called from a tenant realm would see nothing.
-%%
-%% The assertion is `did not reply a #result{}` rather than a particular error,
-%% because the point is that the call does not ANSWER. A procedure that errors
-%% for its own reasons — an id it cannot parse — still satisfies it, and that
-%% is honest: what must not happen is a successful reply computed from a realm
-%% URI the caller never sent.
+%% `declared_no_realm/0` — and from the MASTER realm, which is the case that
+%% goes wrong quietly: from any other realm the short call is refused for a
+%% realm mismatch anyway. The assertion is `did not reply a #result{}` rather
+%% than a particular error, because the point is that the call does not
+%% ANSWER: a procedure that errors for its own reasons still satisfies it.
+%% What must not happen is a successful reply computed from a realm URI the
+%% caller never sent.
 a_short_call_to_a_no_realm_procedure_is_refused(_Config) ->
     Ctxt = bondy_context:local_context(?MASTER_REALM_URI),
     Answered = [

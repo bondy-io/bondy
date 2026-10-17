@@ -10,7 +10,8 @@
 %% peer-authored events visible to `bondy_db:read/3` after a real MST `sync`
 %% WITHOUT any explicit replay barrier — the distinguishing difference from
 %% the non-fused path (cf. `bondy_db_mv_register_e2e_test`, which must call
-%% `replay_cell_events_sync/1` because production casts it async).
+%% `bondy_oplog_applier:replay_cell_events_sync/1` because production casts
+%% it async).
 %%
 %% Coverage: distinct-key convergence (inline replay folds peer events),
 %% same-key lww convergence (equal value + equal MST root), read-your-peer's

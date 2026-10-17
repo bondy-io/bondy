@@ -40,25 +40,14 @@ in that transport's own suite and are deliberately not here.
 %% at all is evidence of a cancel rather than of the call completing.
 -define(SLOW_MS, 30000).
 
-%% The idle window `keepalive_survives_idle' waits out.
-%%
-%% Sized against the horizon of a connection that pings and never counts a
-%% pong, NOT against the ping interval: `bondy_connect_keepalive' retries an
-%% unanswered ping `max_attempts' times at `timeout' apiece before declaring
-%% the link dead, so with that case's config (idle 200, timeout 500, 2
-%% attempts) such a connection is down by ~1200ms. Waiting 2.5x that is what
-%% makes the case fail if the pong is never sent, never received, or received
-%% and not counted as activity.
-%%
-%% 500ms is not a tight deadline for the pong itself: a probe run with
-%% `timeout' set to 1ms still passed on all five transports, so on loopback the
-%% pong is back inside a millisecond.
-%%
-%% What this does NOT establish: that the pings are why the session survived.
-%% The router's own idle timeout on these listeners is far longer than this
-%% window, so nothing would have closed the session inside it anyway. The case
-%% is a guard against the CLIENT tearing down a healthy link, not evidence that
-%% the router needed convincing to keep it.
+%% The idle window `keepalive_survives_idle' waits out. Sized against the
+%% horizon of a connection that pings and never counts a pong, NOT against the
+%% ping interval: `bondy_connect_keepalive' retries an unanswered ping
+%% `max_attempts' times at `timeout' apiece before declaring the link dead, so
+%% with that case's config (idle 200, timeout 500, 2 attempts) such a connection
+%% is down by ~1200ms; 2.5x that fails the case if the pong is never sent,
+%% never received, or not counted as activity. The case guards against the
+%% CLIENT tearing down a healthy link; the router's idle timeout is far longer.
 -define(IDLE_MS, 3000).
 
 suite() ->
@@ -125,18 +114,14 @@ init_per_group(Transport, Config) ->
 end_per_group(_, _) ->
     ok.
 
-%% Both progressive dealer features are ON at boot -- measured, not assumed:
-%% `bondy_config:setup_wamp/0' seats them from `?DEALER_FEATURES', which builds
-%% on `?COMMON_RPC_FEATURES' where both are `true', and no `bondy.conf' key
-%% exists to say otherwise. Several comments in the tree still describe them as
-%% shipping default-off.
-%%
-%% They are set here anyway, because the value is global to the node and
+%% Both progressive dealer features are ON at boot: `bondy_config:setup_wamp/0'
+%% seats them from `?DEALER_FEATURES', which builds on `?COMMON_RPC_FEATURES'
+%% where both are `true', and no `bondy.conf' key exists to say otherwise. They
+%% are set here anyway, because the value is global to the node and
 %% `bondy_connect_rpc_SUITE:end_per_testcase/2' leaves both `false'; sharing a
 %% CT node with that suite would otherwise decide these cases. What is restored
-%% afterwards is whatever `init_per_suite' observed, NOT a literal -- writing
-%% `false' back is how a suite leaves the next one's outcome depending on
-%% running order.
+%% afterwards is whatever `init_per_suite' observed, NOT a literal: writing
+%% `false' back makes the next suite's outcome depend on running order.
 init_per_testcase(Case, Config) ->
     ok = bondy_connect_ct:drain_events(),
     case
@@ -347,10 +332,6 @@ anything — it just goes away, which is what a crashed client does. The dealer
 has to notice on its own, and until it does, a call to that URI is routed to a
 process that no longer exists and the caller waits out its timeout with no
 error to explain it.
-
-This case exists because a shared procedure URI between two earlier cases hit
-exactly that on one transport: the second caller's CALL was answered by
-nothing, not by `no_such_procedure`.
 """.
 disconnect_stops_routing(Config) ->
     Uri = <<"com.example.conformance.departed">>,
@@ -760,18 +741,14 @@ keepalive_survives_idle(Config) ->
 
     ok = bondy_connect_client:disconnect(Conn).
 
-%% @private The payload every serializer case round-trips.
-%%
-%% Deliberately restricted to the types WAMP itself defines, because that is
-%% the portability claim being tested: what a client may put in a CALL and
-%% expect back unchanged whatever the peers negotiated. Types only some codecs
-%% carry — a non-UTF-8 binary, a non-string map key, an integer beyond a
-%% double's exact range — are not WAMP types and are not here; they belong to a
-%% case about one codec, not to one that asserts three agree.
-%%
-%% It travels twice per case: caller -> callee in the CALL, and back in the
-%% RESULT. A codec that were asymmetric would show as an inequality on the
-%% return leg only.
+%% @private The payload every serializer case round-trips. Restricted to the
+%% types WAMP itself defines, because that is the portability claim under test:
+%% what a client may put in a CALL and expect back unchanged whatever the peers
+%% negotiated. Types only some codecs carry — a non-UTF-8 binary, a non-string
+%% map key, an integer beyond a double's exact range — are not WAMP types and
+%% belong to a case about one codec, not to one that asserts three agree. It
+%% travels twice per case: caller -> callee in the CALL, and back in the
+%% RESULT; an asymmetric codec shows as an inequality on the return leg only.
 payload() ->
     Args = [
         <<"ascii">>,

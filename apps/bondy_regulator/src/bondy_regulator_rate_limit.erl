@@ -271,22 +271,14 @@ reset(Key) ->
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
-%% The server exists to OWN `?TAB` — the registered buckets outlive any
+%% The server exists to OWN `?TAB`: the registered buckets outlive any
 %% individual caller, so the table must not be owned by one.
-%%
-%% It runs no reaper. It used to sweep the table every minute deleting rows
-%% whose `atomics:get/2` raised `badarg`, on the belief that an unused atomics
-%% array is garbage collected out from under its row. It is not: the row holds
-%% a reference to the array, which is exactly what keeps it alive, so the read
-%% always succeeded and the sweep never deleted anything — a full `ets:foldl`
-%% per minute, forever, reclaiming nothing while reading as though orphans were
-%% handled. (Falsifier: store an atomics ref in ETS, drop every other
-%% reference, garbage-collect every process, read it back from the row —
-%% `atomics:get/2` returns the value.)
-%%
-%% Registered buckets are reaped by their owner: `m:bondy_rate_limiter` sweeps
-%% its own on an idle TTL and calls `delete/1`. Owner-held buckets are built
-%% with `new/2` and are not in the table at all.
+%% It runs no reaper. A sweep that deletes rows whose `atomics:get/2` raises
+%% `badarg` reclaims nothing: the row holds a reference to the array, which
+%% keeps it alive, so the read always succeeds. Registered buckets are reaped
+%% by their owner, `m:bondy_rate_limiter`, which sweeps its own on an idle
+%% TTL and calls `delete/1`. Owner-held buckets are built with `new/2` and
+%% are not in the table at all.
 init(_) ->
     ?TAB = ets:new(?TAB, [
         named_table,
@@ -362,9 +354,7 @@ token_bucket_test() ->
         %% The server is REGISTERED: leaving it running orphans the name
         %% outside any supervision tree, and every later fixture's
         %% `application:ensure_all_started(bondy_regulator)` then fails
-        %% with `{already_started, _}` on the sup child (measured — it
-        %% cancelled bondy_rate_limit_test's whole fixture in full-eunit
-        %% runs while both were green standalone).
+        %% with `{already_started, _}` on the sup child.
         unlink(Pid),
         gen_server:stop(Pid)
     end.

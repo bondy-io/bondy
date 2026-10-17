@@ -1,6 +1,5 @@
 %% =============================================================================
-%% Tests for `bondy_oplog_core:subscribe/2` + the reference dispatcher
-%% (`MST_DB_DESIGN.md` §12, wired in D8).
+%% Tests for `bondy_oplog_core:subscribe/2` + the reference dispatcher.
 %%
 %% Pins: monitor-based cleanup, NS isolation, pattern matching
 %% (`all`, `{prefix, _}`, exact), best-effort delivery,

@@ -11,13 +11,14 @@ Two things matter here and neither is visible from reading a diff:
 
 1. **No user-enumeration oracle.** Every pre-authentication credential or
    identity failure - unknown user, disabled user, missing or bad signature,
-   wrong password - must produce a byte-identical `ABORT`. A distinct reason
+   wrong password - must produce an identical `ABORT`
+   (`pre_auth_failures_are_indistinguishable/0`). A distinct reason
    URI, message or even detail key would let a client distinguish "no such
    user" from "wrong password" (CWE-204).
 
-2. **The reason URI is part of the wire contract.** Each abort reason has
-   always mapped to a particular URI and clients branch on it, so the mapping is
-   asserted rather than left to the catalogue.
+2. **The reason URI is part of the wire contract.** Each abort reason maps
+   to a particular URI and clients branch on it, so the mapping is asserted
+   rather than left to the catalogue.
 """.
 
 -include_lib("eunit/include/eunit.hrl").

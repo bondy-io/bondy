@@ -6,7 +6,7 @@
 -module(bondy_mcp_upstream_sup).
 
 -moduledoc """
-Supervisor for the client direction (design §13): one
+Supervisor for the client direction: one
 `bondy_mcp_upstream` per enabled `mcp.upstreams.$name` declaration.
 
 Validates the declaration set as a whole before starting anything, and
@@ -16,11 +16,11 @@ boot, not a surface to silently narrow:
 
 - every upstream names an `http_connector` service, a realm and a
   prefix;
-- prefixes are unique per realm across upstreams — the §13.3 namespace
+- prefixes are unique per realm across upstreams — the namespace
   isolation: no upstream can shadow another's tool names — and outside
   the `wamp.` and `bondy.` reserved namespaces.
 
-The explicit `identity` declaration (§13.1; `service` is the only value)
+The explicit `identity` declaration (`service` is the only value)
 is enforced by `bondy_mcp_upstream:init/1` itself, the one point every
 start path goes through — a child missing it fails to start, and with it
 this supervisor and the application.
@@ -74,7 +74,7 @@ validate(Upstreams) ->
     end.
 
 %% @private
-%% The §13.1 identity declaration is enforced by `bondy_mcp_upstream`'s
+%% The identity declaration is enforced by `bondy_mcp_upstream`'s
 %% own `init/1` — the one point every start path (this supervisor, a
 %% direct test/console start) goes through — so it is deliberately NOT
 %% re-checked here. This validates only what the owner cannot see: the

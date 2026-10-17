@@ -61,7 +61,7 @@ The handle is **per-shard**, not per-`(shard, realm)`. The substrate
 (`bondy_oplog_core`) is keyed by `(Namespace, Index, Shard)` with no realm
 dimension; for topologies whose Bucket does not carry the realm, the
 facade folds `Realm` into the storage key with a NUL separator
-(`<<Realm/binary, 0, UserKey/binary>>` — G-1, versioned by the manifest's
+(`<<Realm/binary, 0, UserKey/binary>>`, versioned by the manifest's
 `key_encoding_version`) so a single per-shard handle serves every realm.
 
 ## What the behaviour does NOT cover

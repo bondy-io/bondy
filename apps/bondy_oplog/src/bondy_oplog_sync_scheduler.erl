@@ -346,23 +346,12 @@ pull.
 -define(GAP_STRIKE_TAB, bondy_oplog_sync_scheduler_gap_strikes).
 %% A `frontier_gap` only schedules a rebootstrap on the SECOND consecutive
 %% strike for the same (instance, peer) within this window; a successful round
-%% clears the count.
-%%
-%% The gap verdict's deterministic core — the peer's installed-consistency
-%% barrier on `get_frontier`, the complete-round gate, and the initiator's local
-%% settle — eliminates the SYSTEMATIC false positives (install lag, replay lag,
-%% capped rounds), so a verdict is evidence of compacted-past-me history. It is
-%% not yet evidence of a STANDING gap, because the watermark door mints a
-%% legitimate single-strike transient: when a peer door-FOLDS an in-flight event
-%% its applied VV advances past what its truncated MST can serve, and a third
-%% replica whose complete round lands in that window records a deficit it can
-%% only cover via the ORIGIN one round later (the origin cannot compact the
-%% event away — the peer-confirmed frontier needs the lagging replica's roots to
-%% contain it). Observed live in the compaction cluster suite. That transient
-%% heals on the next round and must NOT trigger the remedy, which is not free: a
-%% catalogue re-bootstrap streams the peer's whole projection and re-derives the
-%% local one. A standing gap cannot heal by syncing and strikes again on the
-%% very next round, so detection is delayed by one round, never lost.
+%% clears the count. A single verdict is evidence of compacted-past-me history
+%% but not of a STANDING gap: when a peer door-folds an in-flight event its
+%% applied VV advances past what its truncated MST can serve, and a third
+%% replica whose complete round lands in that window records a deficit the
+%% origin covers one round later. That transient heals by itself; a standing
+%% gap strikes again next round, so detection is delayed one round, never lost.
 -define(GAP_STRIKE_WINDOW_MS, 120_000).
 %% Consecutive `root_unservable_behind` strikes (same window as above)
 %% before the permanent-unservable escalation fires. Higher than the gap
@@ -663,7 +652,7 @@ run_tick(#state{tick_seq = Seq, load_ewma = Prev} = State) ->
     %% that across successive ticks every instance gets first crack at the
     %% scarce node-wide AAE concurrency slots. Without this, a fixed
     %% iteration order would let the head instances monopolise the cap and
-    %% starve the tail (the failure the user flagged for low caps).
+    %% starve the tail.
     Instances = rotate(lists:sort(bondy_oplog:list_instances()), Seq),
     lists:foreach(
         fun(InstanceId) -> dispatch_for(InstanceId, State) end,
@@ -828,17 +817,15 @@ schedule_tick(#state{interval_ms = Ms} = State) ->
 %% =============================================================================
 %% PRIVATE: APPLIED-FRONTIER HOLE DETECTOR
 %% =============================================================================
-%%
+
+%% @private
 %% A HOLE is a per-origin seq run this replica never received, with later seqs
 %% of the same origin folded above it. `bondy_oplog_registry:pending/1` is
 %% non-empty for an origin iff that origin has one, so this reads a fact the
-%% writer already holds. The alarm is on the AGE of that condition, which is
-%% OBSERVED age: the clock starts when this incarnation first sees the hole, and
-%% `pending` is itself volatile, so a restart genuinely re-observes it. It rides
-%% `?HOLE_TICK_MS` rather than the AE tick, so the age it reports does not move
-%% when an operator retunes `db.aae.interval`.
-
-%% @private
+%% writer already holds. The alarm is on the OBSERVED age of that condition:
+%% the clock starts when this incarnation first sees the hole, and `pending` is
+%% volatile, so a restart re-observes it. It rides `?HOLE_TICK_MS` rather than
+%% the AE tick, so the age it reports does not move with `db.aae.interval`.
 check_holes(#state{holes = Holes} = State) ->
     case bondy_oplog_config:frontier_hole_alarm_ms() of
         0 ->
@@ -1214,7 +1201,7 @@ update_backoff(InstanceId, _Reason) ->
 backoff_wait_ms(N) when N >= 1 ->
     Base = bondy_oplog_config:bootstrap_retry_base_ms(),
     Max = bondy_oplog_config:bootstrap_retry_max_ms(),
-    %% 2^31 caps the exponent to avoid overflow on adversarial N.
+    %% The exponent is capped at 30 so `Base bsl Exp` stays bounded for any N.
     Exp = min(N - 1, 30),
     Raw = min(Base bsl Exp, Max),
     case bondy_oplog_config:bootstrap_retry_jitter() of
@@ -1249,18 +1236,11 @@ backoff_remaining(InstanceId) ->
 %% @private
 %% Adaptive live-sync throttle. A converged shard re-syncs only to discover
 %% peer-side divergence, so once its local root stops moving, polling every peer
-%% every tick is pure churn. Dispatch on every tick while the local root is
-%% changing (active local write, normal replication, or catch-up pulling data
-%% in), and otherwise back the poll cadence off geometrically up to
-%% `live_sync_max_ms`. Any local root change — including data pulled in by a
-%% prior sync — resets the window to the base interval, so missed replication
-%% heals within at most one cap-length window and active divergence stays
-%% tick-fast. Bootstrap is unaffected.
-%%
-%% The re-bootstrap check comes first, BEFORE the fence exemption: a
-%% fence-backing instance whose peer reclaimed pages would otherwise redispatch
-%% a doomed live pull every tick. While a re-bootstrap session is in flight
-%% nothing else is dispatched for the instance.
+%% every tick is churn. Dispatch on every tick while the local root is changing,
+%% otherwise back the poll cadence off geometrically up to `live_sync_max_ms`;
+%% any local root change resets the window to the base interval. Bootstrap is
+%% unaffected. The re-bootstrap check comes first, before the fence exemption,
+%% and while a re-bootstrap is in flight nothing else is dispatched.
 maybe_dispatch_live(InstanceId, Peers) ->
     case rebootstrap_state(InstanceId) of
         inflight ->
@@ -1462,14 +1442,13 @@ maybe_flag_rebootstrap(_InstanceId, _Peer, _Reason) ->
     ok.
 
 %% @private
-%% The re-bootstrap disposition for a live instance this tick. `inflight` — a
-%% bootstrap session is already running, so dispatch nothing: live pulls would
-%% fail with the same terminal reason and waste cap slots. `{pending, Peer}` —
+%% The re-bootstrap disposition for a live instance this tick. `inflight`: a
+%% bootstrap session is already running, so dispatch nothing (live pulls would
+%% fail with the same terminal reason and waste cap slots). `{pending, Peer}`:
 %% flagged by a prior `peer_pages_unavailable` exit; dispatch a re-bootstrap
-%% instead of live syncs, `Peer` being the one that reported the unavailability;
-%% `{pending, undefined}` when the instance holds a re-fold mark that only a
-%% re-bootstrap clears (`bondy_oplog_instance:owes_install/1`). `none` — the
-%% normal live path.
+%% instead of live syncs, `Peer` being the one that reported it.
+%% `{pending, undefined}`: the instance holds a re-fold mark that only a
+%% re-bootstrap clears (`bondy_oplog_instance:owes_install/1`). `none`: live.
 rebootstrap_state(InstanceId) ->
     _ = ensure_table(?REBOOTSTRAP_TAB),
     case select_inflight_count({'_', InstanceId, bootstrap, '_', '_'}) > 0 of
@@ -1495,14 +1474,13 @@ owed_rebootstrap(InstanceId) ->
     end.
 
 %% @private
-%% Dispatches the re-bootstrap through the SAME gate chain as a `pre_bootstrap`
+%% Dispatches the re-bootstrap through the same gate chain as a `pre_bootstrap`
 %% dispatch (load yield -> retry backoff -> both caps), so a re-bootstrapping
-%% live instance competes for slots and paces retries exactly like any other
-%% bootstrap. The flagging peer is offered first — having reclaimed the pages,
-%% it certifiably holds a covering snapshot — but any member's snapshot covers
-%% them (reclamation requires all-member confirmation), so the rest of the peer
-%% list stays as fallback for the configured strategy. The pending flag is
-%% consumed only when a session actually dispatches.
+%% live instance competes for slots and paces retries like any other bootstrap.
+%% The flagging peer is offered first, but any member's snapshot covers the
+%% reclaimed pages (reclamation requires all-member confirmation), so the rest
+%% of the peer list stays as fallback for the configured strategy. The pending
+%% flag is consumed only when a session actually dispatches.
 maybe_dispatch_rebootstrap(InstanceId, Peer, Peers) ->
     Candidates =
         case lists:member(Peer, Peers) of
@@ -1594,8 +1572,8 @@ live_adaptive_enabled() ->
     bondy_oplog_config:live_sync_adaptive().
 
 %% @private
-%% Base poll interval; defaults to the tick interval so an active shard
-%% syncs every tick exactly as before.
+%% Base poll interval; defaults to the tick interval, so an active shard
+%% syncs every tick.
 live_sync_base_ms() ->
     bondy_oplog_config:live_sync_base_ms().
 
@@ -1607,14 +1585,10 @@ live_sync_max_ms() ->
 %% Fans out a live pull-direction sync, one session per peer, each gated
 %% independently. A live session already in flight for this exact (instance,
 %% peer) is skipped, so a slow bulk-syncing shard never stacks duplicate
-%% sessions on the same peer. When `Capped` (non-fence-backers), a peer is
-%% skipped once the node-wide AAE concurrency cap (`aae_max_concurrency`) is
-%% reached, and the throttle/rotation re-offers it on a later tick. That cap is
-%% what bounds bulk-sync RAM: at most `aae_max_concurrency` live page-pulls run
-%% at once, each bounded to `aae_pages_per_round` (= node page budget / this
-%% cap), so the node-wide peak is about the budget regardless of shard count.
-%% Spawned sessions are tracked and monitored so they count against the cap and
-%% are cleaned up on exit.
+%% sessions on the same peer. When `Capped`, a peer is skipped once the
+%% node-wide AAE concurrency cap (`aae_max_concurrency`) is reached and the
+%% throttle re-offers it on a later tick; that cap times `aae_pages_per_round`
+%% bounds bulk-sync RAM. Sessions are monitored so they count against the cap.
 dispatch_live_sync(InstanceId, Peers, Capped) ->
     SessionOpts = session_opts(),
     lists:foreach(

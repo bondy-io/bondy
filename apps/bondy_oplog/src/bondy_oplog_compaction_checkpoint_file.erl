@@ -131,14 +131,11 @@ close(#state{}) ->
 %% @private
 %% Decode without `[safe]`: this file holds bytes this node wrote itself, and
 %% `[safe]` rejects any atom not already in the atom table. A checkpoint
-%% carries atoms from modules that need not be loaded yet at the point the
-%% instance reads it during boot, so `[safe]` turns a valid checkpoint into
-%% `badarg` and the instance reports a corrupt file that is intact. `[safe]`
-%% belongs on the peer-shipped wire path, where the bytes are untrusted; here
-%% it can only produce false corruption.
-%%
-%% The `try` still maps a genuinely truncated or damaged file to
-%% `{error, {corrupted, Reason}}` rather than killing the caller.
+%% carries atoms from modules that need not be loaded yet when the instance
+%% reads it during boot, so `[safe]` would turn a valid checkpoint into
+%% `badarg` and report a corrupt file that is intact. The `try` still maps a
+%% genuinely truncated or damaged file to `{error, {corrupted, Reason}}`
+%% rather than killing the caller.
 decode(Bin) ->
     try erlang:binary_to_term(Bin) of
         {checkpoint_v1, W, S} ->

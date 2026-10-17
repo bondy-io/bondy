@@ -7,11 +7,10 @@
 
 -moduledoc """
 Tests for `bondy_http_connector_manager`: the config-driven multi-service
-startup pipeline (secrets resolution -> pool startup -> callee startup),
-previously the least-tested module in the app (services configured
-directly from `bondy.conf`/env, not exercised standalone by any other
-suite; `bondy_http_connector_callee_lifecycle_SUITE` boots the manager
-only incidentally, as part of the full app).
+startup pipeline (secrets resolution -> pool startup -> callee startup).
+No other suite exercises the manager standalone:
+`bondy_http_connector_callee_lifecycle_SUITE` boots it only incidentally,
+as part of the full app.
 
 Each test configures `bondy_http_connector`'s `services` env directly and
 starts its own manager instance. Services are configured with

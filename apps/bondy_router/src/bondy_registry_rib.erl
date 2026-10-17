@@ -87,8 +87,7 @@ back the same origin; deleting a merged cell on that signal would leave no
 tombstone, this node's frontier already claims those events, AAE would never
 re-ship them, and the returning node's routing would be silently blackholed
 until it rewrote its own cells. Retirement bans the origin, which is the only
-signal under which dropping the local copy is permanent by construction
-rather than by hope.
+signal under which dropping the local copy is permanent.
 
 **The cell.** `m:bondy_oplog_origin_retirement` computes the dead-origin
 complement and `bondy_oplog_cell_utils:reap/4` reaps them from every bucket
@@ -129,7 +128,7 @@ drops unreachable candidates at selection time (`prefer_reachable/2`, a
 preference so it can never empty a routable set) with the `rib_exclude`
 retry covering the residual race. That is a guard, not reclamation.
 
-`check/1` is blind to the whole problem by construction — a departed node
+`check/1` is blind to the whole problem: a departed node
 sits in `stub_truth_nodes/1` (expected) and `cell_nodes/2` (actual) alike,
 so the two views agree and report no divergence.
 """.
@@ -465,9 +464,8 @@ Covers every realm with cells in the table, including realms this node has no
 realm record for. It folds the TABLE (`bondy_db:fold_all/4`) rather than
 enumerating `bondy_realm:list/0`: realms are themselves replicated state in
 `main`, and nothing orders the `main` bootstrap before the `registry` one, so
-deriving the realm set from the realm registry made this rebuild silently skip
-cells depending on which bootstrap won the race (MEASURED 2026-08-22: the same
-plain restart passed or failed run to run). The data is its own index.
+deriving the realm set from the realm registry would make this rebuild skip
+cells depending on which bootstrap won the race. The data is its own index.
 """.
 -spec rebuild(Table :: atom()) -> ok.
 
@@ -538,7 +536,7 @@ realms() ->
 %% @private
 %% One cell, replayed through the same reaction a live merge would take.
 %%
-%% `fold_all/4` yields the STORAGE key (`<<Realm, 0, RawKey>>`), which
+%% `bondy_db:fold_all/4` yields the STORAGE key (`<<Realm, 0, RawKey>>`), which
 %% `decode_cell_key/1` already accepts — it is the form a merge event
 %% delivers — so no unfolding is needed and `on_remote_set/3` stays the single
 %% write point.
@@ -969,7 +967,7 @@ decode_cell_key(_) ->
 %% @private
 %% `[safe]` decode: the raw key was `term_to_binary`'d on the WRITING node
 %% (`cell_key/1`) and travels verbatim, so a merge event hands us
-%% peer-encoded bytes — the C-2 peer-bytes rule applies. Legitimate keys
+%% peer-encoded bytes. Legitimate keys
 %% are all-binary 4-tuples, so `[safe]` refuses nothing legitimate; it
 %% keeps a malformed peer key from interning arbitrary atoms (falsifier:
 %% `peer_key_with_unknown_atom_rejected_without_interning_test`).
@@ -1296,7 +1294,7 @@ safe_metric(Type, Spec) ->
     end.
 
 %% @private
-%% Reshapes a table's raw CRDT `to_value/1` projection into the summary map
+%% Reshapes a table's raw CRDT value projection into the summary map
 %% every consumer expects. Both RIB tables register the generic CRDT
 %% toolkit modules directly (no per-use-case wrapper — see
 %% `bondy_namespace_catalog`'s `?RIB_REGISTRATION_SCHEMA`), so their raw

@@ -72,10 +72,8 @@ shape again before putting it in front of a caller. Keeping the second check is
 deliberate -- it is the last thing between a relay's own words and a peer -- but
 the *rule* is written once.
 
-It was written twice, and had already drifted: one spelling accepted `0` in the
-leading position and the other did not, so a `6xx` survived the transport and
-was then silently dropped on its way to the caller. Nobody sends a `6xx`, which
-is exactly why nobody noticed.
+The rule is RFC 5321's: three ASCII digits, the first of them `2` to `5`. A
+`6xx` is refused by the transport and by `bondy_mail:to_error/1` alike.
 """.
 -spec is_reply_code(Term :: any()) -> boolean().
 

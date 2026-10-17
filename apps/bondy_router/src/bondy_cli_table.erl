@@ -23,7 +23,7 @@
 %%
 %% -------------------------------------------------------------------
 
-%-module(riak_core_console_table).
+%% Adapted from riak_core_console_table.
 -module(bondy_cli_table).
 -moduledoc """
 Renders ASCII tables for CLI output from a column spec and a list of rows,

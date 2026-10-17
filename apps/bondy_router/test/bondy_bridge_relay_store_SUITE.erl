@@ -3,9 +3,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Integration test for the bridge relay config store after its cut-over from
-%% plum_db to bondy_db (design §11.4 — the second domain migrated). Booting
-%% bondy_router exercises the cut-over: `bondy_namespace_catalog` provisions the
+%% Integration test for the bridge relay config store on bondy_db. Booting
+%% bondy_router exercises the store: `bondy_namespace_catalog` provisions the
 %% durable `bondy_bridge_relay` bondy_db table by default, and
 %% `bondy_bridge_relay` reads / writes it. The CRUD round-trip proves
 %% add → lookup → exists → list → remove all flow through bondy_db, and that a
@@ -80,18 +79,13 @@ reload_after_remove_test(_) ->
     ?assert(bondy_bridge_relay:exists(Name)),
     ok = bondy_bridge_relay:remove(Name).
 
-%% "How many unanswered probes mean a dead peer" is ONE judgement, and this end
-%% of a bridge has no reason to make it differently from the end that accepts the
-%% connection. The two ends are configured by unrelated code — `?PING_SPEC` here,
-%% `bondy_listener_config:option_defaults/2` for the listener — so nothing but
-%% this makes them agree; the outbound default shipped 2 while every listener
-%% shipped 3 (and the bridge schema's own commented example showed 3).
-%%
-%% Asserted against the listener AND against the literal: the first catches one
-%% side moving, the second catches both moving to a value nobody chose. It runs
-%% through `new/1` rather than reading a constant, because the default only
-%% exists as one, and `new/1` needs a booted node — which is why this case lives
-%% in a suite that boots one rather than beside the pure listener tests.
+%% "How many unanswered probes mean a dead peer" is ONE judgement, and both ends
+%% of a bridge make it alike. The two ends are configured by unrelated code —
+%% `?PING_SPEC` here, `bondy_listener_config:option_defaults/2` for the
+%% listener — so nothing but this case makes them agree. Asserted against the
+%% listener AND against the literal: the first catches one side moving, the
+%% second catches both moving to a value nobody chose. It runs through `new/1`,
+%% which needs a booted node, because the default only exists as a spec.
 outbound_ping_matches_the_listener_test(_) ->
     Bridge = bondy_bridge_relay:new(unvalidated_bridge()),
     Ping = maps:get(ping, Bridge),
@@ -100,12 +94,10 @@ outbound_ping_matches_the_listener_test(_) ->
     ?assertEqual(3, Attempts),
     ?assertEqual(maps:get(max_attempts, maps:get(ping, Listener)), Attempts),
     %% The input carries NO ping block, so this also pins that an absent one is
-    %% FILLED rather than left as `#{}`. It was `#{}` — a map
-    %% `bondy_bridge_relay_client:maybe_enable_ping/2` has no clause for, so the
-    %% client died with `function_clause` in `init/1` on any bridge that said
-    %% nothing about ping. Asserting the whole block rather than one key,
-    %% because all four are read with `maps:get/2` once ping is enabled and any
-    %% one of them missing is the same crash.
+    %% FILLED rather than left as `#{}`, which the client has no clause for.
+    %% Asserting the whole block rather than one key, because all four are
+    %% read with `maps:get/2` once ping is enabled and any one of them missing
+    %% is the same crash.
     ?assertEqual(
         #{
             enabled => true,
@@ -116,25 +108,15 @@ outbound_ping_matches_the_listener_test(_) ->
         Ping
     ).
 
-%% The same defect on the sibling blocks, which is why it is worth a case of its
-%% own rather than a line in the one above: `ping` was the only one that crashed,
-%% so a fix aimed at the crash would have left the rest.
+%% The sibling blocks of `ping`: an absent `reconnect` block is filled from its
+%% spec (`enabled => true`, 100 retries), or the bridge never reconnects; an
+%% absent `socket_opts` block is filled at the spec's values.
 %%
-%% `reconnect` was the quiet one — its spec has said `enabled => true` with 100
-%% retries the whole time, while a bridge that configured no block got `#{}`,
-%% reached `maybe_enable_reconnect/2`'s fall-through clause and never
-%% reconnected at all.
-%%
-%% `socket_opts` was not broken: it spelled out by hand exactly what its spec
-%% produces, and is asserted at those same values so that putting it on the
-%% shared idiom is pinned as value-preserving.
-%%
-%% `tls_opts` is the one that is deliberately NOT filled, and this is where that
-%% decision is recorded: `?TLS_OPTS_SPEC` defaults `versions` to `['tlsv1.3']`
-%% alone, so filling it would pin every bridge that states no TLS options to TLS
-%% 1.3 and drop a peer offering only 1.2. Asserting the absence of `versions` is
-%% the point — it fails if someone later makes this block uniform with its
-%% siblings, which is a change to what a bridge negotiates and not a tidy-up.
+%% `tls_opts` is deliberately NOT filled: `?TLS_OPTS_SPEC` defaults `versions`
+%% to `['tlsv1.3']` alone, so filling it would pin every bridge that states no
+%% TLS options to TLS 1.3 and drop a peer offering only 1.2. Asserting the
+%% absence of `versions` fails if someone makes this block uniform with its
+%% siblings.
 outbound_nested_blocks_are_filled_from_their_specs_test(_) ->
     Bridge = bondy_bridge_relay:new(unvalidated_bridge()),
     ?assertEqual(

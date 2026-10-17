@@ -69,12 +69,10 @@ write_path_test_() ->
 
 %% `rebuild/1` reconstructs the stub view from the projection alone — the
 %% catalogue-snapshot install path emits no per-cell merge event, so this is
-%% the only thing that rebuilds it after a bootstrap.
-%%
-%% Seeds a PEER cell directly in the projection, wipes the stub table to
-%% simulate the post-restart state (in-memory ETS, gone with the VM) and
-%% asserts `rebuild/1` puts the stub back. Wiping the table rather than
-%% relying on a fresh one is deliberate: the cell must be recovered from the
+%% the only thing that rebuilds it after a bootstrap. Seeds a PEER cell
+%% directly in the projection, wipes the stub table to simulate the
+%% post-restart state (in-memory ETS, gone with the VM) and asserts
+%% `rebuild/1` puts the stub back. The cell must be recovered from the
 %% PROJECTION, not left over from the write that seeded it.
 rebuild_restores_stubs() ->
     ok = ensure_stubs_tab(),
@@ -192,34 +190,23 @@ restate_unreadable(_Tab) ->
     ).
 
 %% @private
+%% `bondy_db:read/3` on a RIB table returns the RAW `bondy_oplog_crdt_struct`
+%% / `bondy_oplog_crdt_pn_counter` projection, so schema fields are already
+%% top-level: `count`, `invoke` and the `earliest`/`latest` ratchet registers
+%% over the group's entry-creation times (removals never shrink them).
+%% `reshape_summary/2` only normalises shape for consumers.
 summary(Table, Key) ->
     {ok, {Value, _Hlc}} = bondy_db:read(Table, ?REALM, Key),
     bondy_registry_rib:reshape_summary(registration, Value).
 
-%% `bondy_db:read/3` on a RIB table returns the RAW `bondy_oplog_crdt_
-%% struct`/`bondy_oplog_crdt_pn_counter` projection — the generic CRDT
-%% toolkit modules are registered directly (no per-use-case wrapper), so
-%% schema fields are already top-level: `count`, `invoke` and the
-%% `earliest`/`latest` min/max ratchet registers over the group's
-%% entry-creation times (removals never shrink them — they are lifetime
-%% watermarks, which is what bounds the cell to a scalar per field).
-%% `reshape_summary/2` only normalises shape for consumers, exercised on
-%% its own in the `reshape_summary/0` test below.
-%% The RIB hooks write async (`bondy_db:apply_async/4` — no
-%% read-your-writes barrier), so tests reading the cell right after a
-%% hook must flush the shard first.
 %% `reap_orphan_stubs/1`'s two decision axes, neither of which the
-%% end-to-end cluster suite can isolate.
-%%
-%% The dangerous branch is the SECOND one. Deleting a stub because its node
-%% left the membership would be wrong: a removal is reversible, and this
-%% node's frontier already claims the returning node's events, so AAE
-%% re-ships nothing and its routing stays blackholed until it happens to
-%% rewrite a cell. Only the backing cell being GONE licenses the delete —
-%% that is the membership signal already laundered through retirement.
-%%
-%% Membership is clustered and seeded by hand: the membership table is the one
-%% Partisan publishes into, created here without starting Partisan.
+%% end-to-end cluster suite can isolate. The dangerous branch is the SECOND
+%% one. Deleting a stub because its node left the membership would be wrong:
+%% a removal is reversible, and this node's frontier already claims the
+%% returning node's events, so AAE re-ships nothing and its routing stays
+%% blackholed. Only the backing cell being GONE licenses the delete.
+%% Membership is clustered and seeded by hand: the membership table is the
+%% one Partisan publishes into, created here without starting Partisan.
 orphan_stub_pruning() ->
     ok = application:set_env(bondy_cluster, enabled, true),
     Tab = ets:new(partisan_membership, [named_table, public, set]),
@@ -316,6 +303,9 @@ orphan_stub_pruning_clustered() ->
         "the backed stub must survive repeated sweeps"
     ).
 
+%% The RIB hooks write async (`bondy_db:apply_async/4` — no read-your-writes
+%% barrier), so a test reading the cell right after a hook must flush the
+%% shard first.
 flush(Table, Key) ->
     ok = bondy_db:await(Table, ?REALM, Key).
 
@@ -731,36 +721,12 @@ teardown_catalog({Pid, Tmp, Tab}) ->
         try
             gen_server:stop(Pid, normal, 30000)
         catch
-            _:_ -> ok
+            exit:noproc -> ok
         end,
     ok = bondy_db_config:set([databases, main, oplog, shard_count], 16),
     application:unset_env(bondy_router, platform_data_dir),
     _ = file:del_dir_r(Tmp),
     ok.
-
-%% The registry DB's oplog instance(s) start asynchronously after
-%% `?CAT:start_link/0` returns — a write issued immediately can race a
-%% not-yet-registered instance (`{error, {instance_unavailable, _}}`).
-%% Probed on `regs/1`'s own exact-match cell key, so it exercises the exact
-%% shard those writes will use, via the registration table (tier_2 — its
-%% write goes through `apply_with_context/4`'s extra applier-context
-%% round-trip, which registers slightly after the plain WAL/instance front
-%% the tier_0 subscription table would exercise) with a genuine, harmless
-%% op (a reading stamped 0, which every real reading outranks).
-await_ready(Table, RealmUri) ->
-    Key = cell_key(?EXACT_MATCH, ?URI),
-    await_ready(Table, RealmUri, Key, 250).
-
-await_ready(_Table, _RealmUri, _Key, 0) ->
-    error(rib_test_db_not_ready);
-await_ready(Table, RealmUri, Key, N) ->
-    case bondy_db:apply(Table, RealmUri, Key, {apply, count, {set, {0, 0}}}) of
-        ok ->
-            ok;
-        {error, {instance_unavailable, _}} ->
-            timer:sleep(20),
-            await_ready(Table, RealmUri, Key, N - 1)
-    end.
 
 %% A synthetic local entry for `?REALM`/`?URI`. `Invoke` is ignored for
 %% subscriptions (the type carries no invocation policy).
@@ -807,7 +773,7 @@ ensure_named_tab(Name, Type) ->
 
 %% A cell key is `term_to_binary`'d on the WRITING node (`cell_key/1`) and
 %% the bytes travel verbatim, so a merge event hands this node PEER-encoded
-%% bytes — `[safe]`-decode per the C-2 peer-bytes rule. Legitimate keys are
+%% bytes — `[safe]`-decode per the peer-bytes rule. Legitimate keys are
 %% all-binary 4-tuples, so `[safe]` refuses nothing legitimate; a
 %% non-conforming key carrying an unknown atom must be rejected WITHOUT
 %% interning it. The atom below exists only as bytes (a hand-built ETF

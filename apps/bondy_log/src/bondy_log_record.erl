@@ -25,12 +25,11 @@ their keys. The sparse index and the reader's `{key, T}` start treat the
 key as monotonic across frames, so that seek is exact only for an adapter
 whose keys are globally monotonic in append order. The oplog's is not
 (its fast path mints a key in the caller's process and appends through a
-separate call; a probe with 16 appenders lands 2–4 % of frames out of key
-order), which is why nothing in the oplog resumes a disk log by key: its
-consumer resumes by byte position, and retention is cut by the committed
-segment ordinal. An adapter that wants an exact key seek makes its keys
-monotonic by construction — one appending process assigning them — and
-says so.
+separate call, so frames can land out of key order), which is why nothing
+in the oplog resumes a disk log by key: its consumer resumes by byte
+position, and retention is cut by the committed segment ordinal. An
+adapter that wants an exact key seek has one appending process assign
+its keys, and says so.
 
 An adapter is passed to the log as `adapter` at open; the same module
 implements `bondy_log_identity` and `bondy_log_directory`, so a log is

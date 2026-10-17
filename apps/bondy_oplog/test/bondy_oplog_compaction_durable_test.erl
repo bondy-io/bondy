@@ -4,14 +4,12 @@
 %%
 %% Sealed packs are read via `prim_file:pread` on fds opened
 %% `[read, raw, binary]` (`bondy_mst_pack_sealed_view`). A raw fd is bound to
-%% the process that OPENED it — the instance gen_server, in `init/1`. Two
-%% off-process sealed-read seams had to close for durable compaction:
+%% the process that OPENED it — the instance gen_server, in `init/1`. So no
+%% sealed-pack read runs off-process:
 %%   1. The frontier + `bondy_mst:truncate/2` (the truncate rewrites the left
-%%      spine = the oldest = sealed pages) — fixed by running compaction
-%%      synchronously in the gen_server instead of an async worker.
-%%   2. The catalogue commit's pre-truncate fold. Folding the MST in the
-%%      APPLIER process (a full fold from a stale `last_replayed_root`) is a
-%%      sealed-pack read off-process — closed by not folding at commit at all:
+%%      spine = the oldest = sealed pages) run synchronously in the
+%%      gen_server, not in an async worker.
+%%   2. The catalogue commit does not fold the MST in the APPLIER process:
 %%      the commit truncates nothing the applied VV does not witness
 %%      (`capped_truncation_point/2`), and the applier's own replay, cast at
 %%      delivery, is the only fold path.

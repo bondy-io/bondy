@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Ephemeral ETS WAL (task #50). A fused ephemeral instance can opt into an
+%% Ephemeral ETS WAL. A fused ephemeral instance can opt into an
 %% in-memory WAL backend (`wal_backend => mem`, `bondy_oplog_wal_mem`) that
 %% drops the fsync from the ack path: events live in an ETS `ordered_set`, the
 %% fused drain reads them via `bondy_oplog_wal_mem_reader` the instant they are
@@ -152,9 +152,8 @@ compaction_bounds_mst() ->
     ?assert(After < Before),
     ok = bondy_db:close(Db).
 
-%% The bug PR-5 hit: under CONTINUOUS writes the overlay never drains to 0, so
-%% `bondy_oplog:compact`'s old `await_apply` barrier timed out every cycle and
-%% compaction never ran (the MST grew unbounded → install latency climbed). This
+%% Under CONTINUOUS writes the overlay never drains to 0, so a compaction that
+%% waits for an empty overlay never runs and the MST grows unbounded. This
 %% drives a writer that never pauses, runs several compaction cycles concurrently,
 %% and asserts the MST is actually bounded (live_size stays far below the total
 %% written) — i.e. compaction truncates WHILE writes are in flight.

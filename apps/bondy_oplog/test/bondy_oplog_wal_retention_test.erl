@@ -183,7 +183,7 @@ sweep_deletes_eligible_prefix_test() ->
     %% With a high watermark and a committed cursor at head,
     %% snapshot_watermark_segment lands on the *last sealed segment*
     %% (its entire content is covered by the watermark) — and that
-    %% one is preserved as the boundary, per §10. Segments strictly
+    %% one is preserved as the boundary. Segments strictly
     %% older are deleted via the implicit sweep that
     %% `advance_snapshot_watermark/2` triggers.
     Opts = maps:merge(small_segment_opts(), #{min_live_segments => 1}),
@@ -270,10 +270,8 @@ sweep_explicit_after_watermark_via_manual_state_test() ->
         LiveMid = live_segment_ids(Pid),
         %% Append more so new sealed segments accrue.
         fill_events_from(Pid, HLC, lists:max(LiveMid) + 1, 3),
-        %% A second watermark advance under a fresh now() — now the
-        %% just-added sealed segs are also covered. Use explicit
-        %% retention_sweep AFTER advance_snapshot_watermark so the
-        %% sweep returns the new deletions.
+        %% A second watermark advance under a fresh now() — the just-added
+        %% sealed segs are also covered, and the implicit sweep deletes them.
         ok = bondy_oplog_wal:advance_snapshot_watermark(
             Pid, bondy_connect_hlc:now(HLC) + 1
         ),

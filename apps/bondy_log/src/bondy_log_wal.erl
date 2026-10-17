@@ -692,6 +692,7 @@ Current shape:
     live_segments          => [segment_id()],
     live_segments_count    => non_neg_integer(),
     deleted_through        => non_neg_integer(),
+    scrubber_alerts        => [{segment_id(), atom()}],
     snapshot_watermark     => bondy_log_record:key() | undefined,
     committed_segment      => segment_id(),
     min_live_segments      => pos_integer(),
@@ -701,12 +702,10 @@ Current shape:
     max_live_segments      => pos_integer(),
     backpressure           => ok
                               | {hard, max_total_wal_size | max_live_segments},
-    head_lag_ms            => non_neg_integer() | undefined
+    head_lag_ms            => non_neg_integer() | undefined,
+    consumer_lag_bytes     => non_neg_integer() | undefined
 }
 ```
-
-The keys `committed_offset` / `committed_key` are stubbed until the
-consumer-commit machinery lands.
 """.
 -spec info(wal()) -> map().
 
@@ -819,10 +818,9 @@ retention_sweep(Pid) when is_pid(Pid) ->
 -doc """
 Sets the committed segment id used by the retention sweep.
 
-This is a stub interface for the consumer-commit machinery that lands
-later (along with `commit/4` and `committed/1`). For now it lets tests
-exercise retention without a consumer. `NewSegId` must be
-monotonically non-decreasing.
+`NewSegId` is monotonically non-decreasing: an id below the current one
+returns `{error, {committed_segment_regression, Current, New}}`. A
+successful call runs a retention sweep before it returns.
 """.
 -spec set_committed_segment(wal(), segment_id()) -> ok | {error, term()}.
 
@@ -1029,15 +1027,10 @@ terminate(
     State =
         case bondy_mst_io:datasync(Fd) of
             ok ->
-                %% The head fd is now durable up to `current_offset`.
-                %% Advance the durable boundary so any waiter at or below
-                %% head receives `ok` (their position IS durable) before
-                %% the writer exits; pollers of `durable_pos_ref` see the
-                %% accurate final state instead of a stale snapshot. Above-
-                %% head waiters get the natural `noproc` exit (their
-                %% position is unreachable in this writer's lifetime). The
-                %% call also cancels the flush timer as part of its
-                %% bookkeeping.
+                %% The head fd is durable up to `current_offset`, so
+                %% waiters at or below head receive `ok` before exit;
+                %% waiters above head get `noproc` from the exit.
+                %% `advance_durable/3` also cancels the flush timer.
                 advance_durable(State0, Seg, Off);
             {error, _} ->
                 _ = cancel_flush_timer(State0),
@@ -1696,17 +1689,11 @@ bootstrap(#state{} = State) ->
 segment_path(Dir, SegId) ->
     filename:join(Dir, bondy_log_segment:filename(SegId)).
 
-%% NOTE (append-batch encoding): the batch body is encoded and
-%% validated against `max_batch_bytes`, pre-rotating if the frame won't
-%% fit in the current segment, then the frame is written and the
-%% per-event return entries bound.
-%%
 %% Pre-rotation is the atomicity guarantee: a batch is either fully in
-%% segment N or fully in segment N+1, never split. `max_batch_bytes` is
-%% the memory bound on the encoded body; `max_segment_bytes` is a soft
-%% cap that may be exceeded by a single oversized batch (segments grow
-%% to hold their last frame, then the next append rotates). Callers
-%% that want strict segment sizing should set `max_batch_bytes =<
+%% segment N or fully in segment N+1, never split. `max_batch_bytes` bounds
+%% the encoded body; `max_segment_bytes` is a soft cap a single oversized
+%% batch may exceed (the segment grows to hold its last frame, then the next
+%% append rotates). Strict segment sizing needs `max_batch_bytes =<
 %% max_segment_bytes - SEG_HEADER_BYTES - FRAME_HEADER_BYTES`.
 
 %% @private
@@ -2003,25 +1990,12 @@ maybe_rotate(State, _FrameLen) ->
     {ok, State}.
 
 %% @private
-%% Returns:
-%%   {ok, NewState}            — rotation succeeded.
-%%   {error, Reason}           — rotation failed *before* the old fd was
-%%                               closed (only the initial datasync of
-%%                               `OldFd`). State0 is unchanged and the
-%%                               caller can retry.
-%%   {fatal, Reason, PartialState}
-%%                             — rotation failed *after* `OldFd` was
-%%                               closed. The writer's in-memory state
-%%                               (including the now-undefined `head_fd`)
-%%                               is at odds with State0 and recovery is
-%%                               required. `PartialState` reflects what
-%%                               is actually on disk: head_fd cleared,
-%%                               durable boundary advanced, segment_id
-%%                               still at OldSegId because the manifest
-%%                               commit did not succeed. The caller must
-%%                               stop the gen_server using this state so
-%%                               `terminate/2` doesn't datasync a closed
-%%                               fd.
+%% Returns `{ok, NewState}` or `{fatal, Reason, PartialState}`. A fatal
+%% result has closed and cleared `head_fd`: `halt_head/2` on datasync
+%% failure, or `open_next_segment/1` failing after the seal, which also
+%% leaves the durable boundary advanced and `segment_id` at the old id.
+%% The caller stops the gen_server with `PartialState` so `terminate/2`
+%% takes its `head_fd = undefined` clause.
 rotate(
     #state{
         head_fd = OldFd, segment_id = OldSegId, current_offset = OldOff
@@ -2135,15 +2109,14 @@ open_next_segment(
                     State2 = notify_durable_waiters(State1),
                     {ok, State2};
                 {error, _} = E ->
-                    %% Pre-commit failure: the new segment file is on
-                    %% disk but the manifest still names the old one —
-                    %% a manifest write that renamed and then failed its
-                    %% directory fsync raises instead of arriving here
-                    %% (`bondy_log_io:write_atomic/3`), so this rollback
-                    %% never deletes a segment the manifest names.
-                    %% Delete the orphan eagerly so a retry of `rotate`
-                    %% can `create/4` the same segment id without
-                    %% colliding on the `exclusive` open.
+                    %% Pre-commit failure: the new segment file is on disk
+                    %% but the manifest still names the old one, so this
+                    %% rollback never deletes a segment the manifest names
+                    %% (`bondy_log_io:write_atomic/3` raises on a failed
+                    %% directory fsync instead of arriving here). Delete
+                    %% the orphan eagerly so a retry of `rotate` can
+                    %% `create/4` the same segment id without colliding on
+                    %% the `exclusive` open.
                     _ = prim_file:close(NewFd),
                     _ = prim_file:delete(NewPath),
                     E
@@ -2222,15 +2195,10 @@ write_batch_frame(
                 last_append_at_ms = erlang:monotonic_time(millisecond)
             },
             Entries = [{H, {Seg, Off}} || H <- Keys],
-            %% The frame's bytes are in the OS page cache and the head
-            %% offset is published; the durability step (the fsync) is
-            %% applied by the caller — per call in `do_append_batch/2`,
-            %% or once per group in `flush_group/3` (driven by
-            %% `group_commit_append/3`). Publishing
-            %% the head offset here (before the fsync) is safe: the bytes
-            %% are written, and head has always been allowed to run ahead
-            %% of durable (readers reading head read non-durable data by
-            %% design).
+            %% The head offset is published before the fsync: the caller
+            %% applies durability, per call in `do_append_batch/2` or once
+            %% per group in `flush_group/3`. Readers of head read
+            %% non-durable data by design.
             publish_head_offset(HeadRef, NewOff),
             {ok, Entries, State1, FrameLen};
         {error, Reason} ->
@@ -2416,30 +2384,13 @@ patch_head_first_key(Live, HeadSegId, HeadFirstKey) ->
     ].
 
 %% @private
-%% Snapshot-watermark→segment mapping: the highest sealed segment
-%% whose entire content is key-covered by `Watermark`.
-%%
-%% A sealed segment S is "fully covered" iff every record in S has
-%% key ≤ Watermark. The test used is `first_key(S+1) =< Watermark`,
-%% which is equivalent when keys are globally monotonic in append order
-%% (every record in S then precedes the first record of S+1). The
-%% writer does not enforce that across frames (`bondy_log_record`), so
-%% for an adapter whose appenders can land frames out of key order this
-%% cut may over-approximate coverage by a segment; deletion is safe
-%% regardless because `compute_deletable/1` also requires
-%% `S < committed_segment`, which the consumer advances only past
-%% segments it has durably consumed. The head segment is never the
-%% answer — more records may yet be appended, so its content isn't
-%% bounded.
-%%
-%% Returns `0` when no segment qualifies, so the `S < watermark_seg`
-%% test in `compute_deletable/1` rejects everything.
-%%
-%% Note: the condition `first_key(S+1) > Watermark` would invert the
-%% high-watermark / more-deletable correspondence and make a `W=max`
-%% watermark prevent all deletions. We use `=<` here so the
-%% retention behaviour matches the prose ("largest segment whose
-%% entire content is key-covered by the watermark").
+%% The highest sealed segment whose entire content is key-covered by
+%% `Watermark`: the largest S with `first_key(S+1) =< Watermark`, or `0`
+%% when none, which makes `compute_deletable/1` reject everything. The
+%% test is exact only for keys globally monotonic in append order (see
+%% `bondy_log_record`); otherwise it can over-approximate, which is safe
+%% because `compute_deletable/1` also requires `S < committed_segment`.
+%% The head segment never qualifies.
 snapshot_watermark_segment(_Live, undefined) ->
     0;
 snapshot_watermark_segment([], _Watermark) ->
@@ -2451,7 +2402,7 @@ snapshot_watermark_segment(Live, Watermark) ->
 %% `Best` is the largest qualifying segment found so far, `0` initially.
 %% Clause order is significant — the `{_, undefined}`-successor clause
 %% precedes the catch-all so an unknown next-first-key halts the walk
-%% with whatever we've already proven covered.
+%% with the best segment found so far.
 walk_watermark([{_Id, _FirstKey}], _Watermark, Best) ->
     %% Singleton: the only remaining entry is the head segment, which
     %% is never fully covered.
@@ -2636,9 +2587,8 @@ maybe_size_trigger_fsync(State) ->
 
 %% @private
 %% Fsync if any bytes are pending. Called from the `flush_tick` timer
-%% handler. Returns `{ok, State}` (possibly unchanged) or `{error, _}`
-%% on datasync failure — the timer handler treats the error as
-%% best-effort and leaves the pending bytes for a later attempt.
+%% handler. Returns `{ok, State}` or `{fatal, Reason, State}` on datasync
+%% failure; the handler stops the writer on `fatal`.
 maybe_batched_fsync(#state{pending_fsync_bytes = 0} = S) -> {ok, S};
 maybe_batched_fsync(#state{head_fd = undefined} = S) -> {ok, S};
 maybe_batched_fsync(State) -> do_fsync_head(State).
@@ -2911,10 +2861,9 @@ current_backpressure(_) ->
     ok.
 
 %% @private
-%% Wall-time lag (ms) between `now()` and the last append. `undefined`
-%% before the first append. Feeds the operator's freshness gauges per
-%% The delta is always ≥0 because both timestamps come
-%% from `erlang:monotonic_time/1`, which never goes backwards.
+%% Milliseconds since the last append; `undefined` before the first.
+%% The delta is never negative: both timestamps come from
+%% `erlang:monotonic_time/1`.
 head_lag_ms(#state{last_append_at_ms = undefined}) ->
     undefined;
 head_lag_ms(#state{last_append_at_ms = T}) ->

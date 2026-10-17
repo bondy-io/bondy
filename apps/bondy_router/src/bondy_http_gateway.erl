@@ -198,15 +198,11 @@ admin_api_routes(Listener) ->
     Scheme = scheme(maps:get(transport, Listener)),
     Spec = bondy_http_gateway_api_spec_parser:parse(admin_spec()),
     %% Reads the store only to compile — `dispatch_table/2` consults the
-    %% realm table to drop routes whose realm is absent — and writes nothing.
-    %% The admin API's RBAC groups used to be provisioned from here, which
-    %% made building the EARLY `admin` listener's table a durable write; they
-    %% are provisioned by `apply_config/0` on the durable boot path instead
-    %% (`do_apply_config/0`). On a degraded boot this carrier is not asked
-    %% for routes at all (`bondy_http_services:specification_routes/3`).
-    %%
-    %% No base routes: the service route sets in `bondy_http_services' supply
-    %% those, and each is mounted by naming its own service.
+    %% realm table to drop routes whose realm is absent — and writes nothing;
+    %% the admin API's RBAC groups are provisioned by `apply_config/0` on the
+    %% durable boot path. On a degraded boot `bondy_http_services' does not
+    %% ask this carrier for routes. No base routes: the service route sets in
+    %% `bondy_http_services' supply those.
     Tables = bondy_http_gateway_api_spec_parser:dispatch_table([Spec], []),
     case lists:keyfind(Scheme, 1, Tables) of
         {Scheme, Rules} -> Rules;
@@ -322,15 +318,10 @@ handle_info(retry_subscribe, State0) ->
     %% re-arms this timer if it is still unavailable.
     {noreply, subscribe_oplog(State0)};
 handle_info({bondy_oplog_core_bootstrap_event, _NS, _Bucket}, State0) ->
-    %% A catalogue-snapshot bootstrap installed the API-spec table's
-    %% projection wholesale. That path emits no per-cell event, so without
-    %% this clause a freshly bootstrapped node keeps serving the dispatch
-    %% tables it built at `init/1` — which, on a fresh replica, are the specs
-    %% it did not have yet, i.e. none. The routes would simply be missing,
-    %% and nothing would rebuild them until the next live spec change.
-    %%
-    %% There is no key to accumulate: every spec in the table is new to us.
-    %% Rebuild the whole dispatch table rather than a keyed subset.
+    %% A catalogue-snapshot bootstrap installs the API-spec projection
+    %% wholesale and emits no per-cell event, so a freshly bootstrapped node
+    %% would keep serving the dispatch tables it built at `init/1`, which on
+    %% a fresh replica is none. Every spec is new, so rebuild the whole table.
     ok = rebuild_dispatch_tables(),
     {noreply, State0};
 handle_info(rebuild_specs, State0) ->
@@ -425,21 +416,14 @@ subscribe_oplog(State) ->
             {ok, Ref} = bondy_oplog_core:subscribe(
                 bondy_db:namespace(Table), all
             ),
-            %% RECONCILE ON ATTACH, do not assume we heard the event.
-            %%
-            %% A catalogue-snapshot bootstrap announces itself ONCE
-            %% (`bondy_oplog_core_bootstrap_event`), and that fanout reaches
-            %% only the subscribers that exist when it fires. The catalogue
-            %% provisions — and therefore AAE can bootstrap — the
-            %% `api_gateway` table before this process is started by
-            %% `bondy_router_sup`, so an install completing in that window would be
-            %% missed and this node would serve the dispatch tables it had
-            %% before, which on a fresh replica is no routes at all.
-            %%
+            %% The bootstrap event is one-shot and reaches only the subscribers
+            %% that exist when it fires. The catalogue provisions the
+            %% `api_gateway` table before `bondy_router_sup` starts this
+            %% process, so an install completing in that window is missed.
             %% The dispatch tables are DERIVED from the projection, so
-            %% rebuilding them here is correct regardless of what happened
-            %% before, and idempotent. Same discipline as
-            %% `bondy_aae_reactor:ensure_subscribed/1`.
+            %% rebuilding them here is idempotent and correct regardless of
+            %% what happened before (the same discipline as
+            %% `bondy_aae_reactor`).
             ok = rebuild_dispatch_tables(),
             State#state{oplog_sub = Ref}
     end.

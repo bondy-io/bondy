@@ -163,15 +163,10 @@ do_subscribe(RealmUri) ->
     Uri =
         <<"perf.topic.",
             (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    %% add/5 returns {ok, Entry} at runtime (spec claims a 3-tuple) — accept both.
-    case
-        bondy_registry:add(
-            subscription, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref
-        )
-    of
-        {ok, _} -> ok;
-        {ok, _, _} -> ok
-    end.
+    {ok, {_, _}} = bondy_registry:add(
+        subscription, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref
+    ),
+    ok.
 
 %% @private
 do_auth(RealmUri) ->

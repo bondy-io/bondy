@@ -129,7 +129,7 @@ format_log([Key | Rest], Config, Msg, Meta, Acc) when
     is_atom(Key) orelse
         is_atom(hd(Key))
 ->
-    % from OTP
+    %% from OTP
     case maps:find(Key, Meta) of
         error ->
             format_log(Rest, Config, Msg, Meta, Acc);
@@ -263,7 +263,7 @@ format_mfa({M, F, A}, _) when is_atom(M), is_atom(F), is_integer(A) ->
 format_mfa({M, F, A}, Config) when is_atom(M), is_atom(F), is_list(A) ->
     %% arguments are passed as a literal list ({mod, fun, [a, b, c]})
     format_mfa({M, F, length(A)}, Config);
-% passing in a pre-formatted string value
+%% passing in a pre-formatted string value
 format_mfa(MFAStr, Config) ->
     to_string(MFAStr, Config).
 
@@ -285,7 +285,7 @@ to_string(X, _) when is_reference(X) ->
 %% intact as UTF-8. `bondy_logger_formatter_test` holds both facts.
 to_string(X, C) when is_binary(X) ->
     case unicode:characters_to_list(X) of
-        % error or incomplete
+        %% error or incomplete
         {_, _, _} ->
             escape(format_str(C, X));
         List ->

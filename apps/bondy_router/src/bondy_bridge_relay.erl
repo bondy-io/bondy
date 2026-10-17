@@ -172,40 +172,22 @@ name creates it afresh rather than reviving what was there.
     ping => #{
         alias => <<"ping">>,
         required => true,
-        %% The FILLED block, not `#{}'. `maps_utils' returns a key's default as
-        %% it is written and does NOT run the key's own `validator' spec over it
-        %% (`maps_utils.erl:865' takes the `error' branch straight to
-        %% `maybe_get_default/3'), so `#{}' handed the client a ping map with no
-        %% `enabled' and no siblings — and
-        %% `bondy_bridge_relay_client:maybe_enable_ping/2' matches only
-        %% `enabled := true' and `enabled := false', so it died with
-        %% `function_clause' in `init/1'. Every bridge is built here
-        %% (`bondy_bridge_relay_manager' for the `bondy.conf' ones,
-        %% `bondy_bridge_relay_api' for the rest) and every
-        %% `bridge.$name.ping.*' mapping is `commented', so a bridge that says
-        %% nothing about ping took that path.
-        %%
-        %% Validating an empty map against the same spec is what makes the four
-        %% documented defaults apply, and keeps them written down once. A partial
-        %% block was never affected: a PRESENT key does run its spec, so its
-        %% siblings were always filled in.
+        %% The FILLED block, not `#{}': `maps_utils:validate/2' returns an
+        %% absent key's default as written and does not run the key's own
+        %% `validator' over it, so `#{}' would hand `bondy_bridge_relay_client'
+        %% a ping map with no `enabled'. Validating an empty map against the
+        %% spec applies the documented defaults and keeps them written once.
         default => fun() -> maps_utils:validate(#{}, ?PING_SPEC) end,
         validator => begin
             ?PING_SPEC
         end
     },
     %% Client opts!
-    %% Deliberately NOT filled from `?TLS_OPTS_SPEC', unlike its three siblings.
-    %% That spec defaults `versions' to `['tlsv1.3']' alone, so filling this
-    %% block would pin every bridge that states no TLS options to TLS 1.3 and
-    %% drop connections to a peer that offers only 1.2 — a narrowing, arriving
-    %% through a key nobody wrote. What is written here is what such a bridge has
-    %% always been given, and `ssl' decides the versions.
-    %%
-    %% The cost is that a default added to `?TLS_OPTS_SPEC' will not reach a
-    %% bridge that configures no `tls_opts', which is exactly the trap the other
-    %% three now avoid. It is accepted here, once, in exchange for not changing
-    %% what a TLS bridge negotiates.
+    %% Deliberately NOT filled from `?TLS_OPTS_SPEC', unlike its three siblings:
+    %% that spec defaults `versions' to `['tlsv1.3']' alone, which would pin a
+    %% bridge that states no TLS options to TLS 1.3 and drop a peer that offers
+    %% only 1.2. Here `ssl' decides the versions. The cost is that a default
+    %% added to `?TLS_OPTS_SPEC' does not reach a bridge with no `tls_opts'.
     tls_opts => #{
         alias => <<"tls_opts">>,
         required => true,
@@ -216,10 +198,8 @@ name creates it afresh rather than reviving what was there.
             ?TLS_OPTS_SPEC
         end
     },
-    %% Filled from its spec. Unlike `tls_opts' this one is value-preserving —
-    %% `keepalive' and `nodelay' are the only defaulted keys and both were
-    %% already written out here — so it costs nothing and gains the same
-    %% property `ping' and `reconnect' now have.
+    %% Filled from its spec, like `ping' and `reconnect': `keepalive' and
+    %% `nodelay' are the only defaulted keys.
     socket_opts => #{
         alias => <<"socket_opts">>,
         required => true,
@@ -239,13 +219,10 @@ name creates it afresh rather than reviving what was there.
         required => true,
         %% Harmonised with the other carriers, all 4194304
         %% (`websocket.max_frame_size`, `mcp.max_body_size`,
-        %% `longpoll.max_body_size`, and the RawSocket handshake ceiling).
-        %% This was `infinity`, which made a bridged peer the only ingress on
-        %% the node with no frame bound at all. A bridge relay is
-        %% cryptosign-authenticated, so this is not a pre-auth surface -- but
-        %% "authenticated" is not "trusted to size its own frames", and an
-        %% operator who genuinely relays larger payloads can raise it per
-        %% bridge.
+        %% `longpoll.max_body_size`, and the RawSocket handshake ceiling). A
+        %% bridge relay is cryptosign-authenticated, but "authenticated" is
+        %% not "trusted to size its own frames"; an operator who relays
+        %% larger payloads can raise it per bridge.
         default => 4194304,
         datatype => [integer, {in, [infinity, <<"infinity">>]}],
         validator => fun
@@ -606,8 +583,8 @@ end#{
     cacertfile := file:filename_all(),
     certfile := file:filename_all(),
     keyfile := file:filename_all(),
-    %% `ssl` exports neither `verify_type/0` nor `tls_version/0` (checked
-    %% against OTP 28's own export_type list), so both specs were vacuous.
+    %% `ssl` exports no type for the `verify` option, so its atoms are
+    %% spelled out here.
     verify := verify_none | verify_peer,
     versions := [ssl:protocol_version()]
 }.

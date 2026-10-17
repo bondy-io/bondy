@@ -88,13 +88,13 @@ match(_, <<>>, ?PREFIX_MATCH) ->
 match(Uri, Pattern, ?PREFIX_MATCH) when
     is_binary(Uri)
 ->
-    %% Z-1: match on a URI-COMPONENT boundary, not a raw byte prefix. A byte
-    %% prefix (`longest_common_prefix >= byte_size`) let a `com.app.order` grant
-    %% authorise the unrelated `com.app.orders_admin.x`. The prefix matches iff
-    %% the URIs are equal, or `Uri` byte-starts with `Pattern` AND the join is a
-    %% component boundary — either `Pattern` already ends with `.` (the operator
-    %% wrote a trailing-dot prefix such as `com.app.`) or the next byte of `Uri`
-    %% is `.`. (The empty "match-all" prefix is handled by the clause above.)
+    %% A prefix matches on a URI-component boundary, never on a raw byte
+    %% prefix: `com.app.order` does not cover `com.app.orders_admin.x`.
+    %% The match holds in one of three cases:
+    %% - `Uri` equals `Pattern`;
+    %% - `Uri` byte-starts with `Pattern` and `Pattern` ends with `.`;
+    %% - `Uri` byte-starts with `Pattern` and the next byte of `Uri` is `.`.
+    %% `bondy_wamp_uri_SUITE:do_match/1` checks the boundary cases.
     PS = byte_size(Pattern),
     case Uri of
         Pattern ->
@@ -147,11 +147,10 @@ uri_regex(Rule) ->
     uri_regex(Rule, Regex).
 
 %% @private
-%% The loose component class excludes whitespace, the URI separators — and
-%% ALL control characters (`\x00-\x1F`, `\x7F`). PCRE `\s` does NOT cover
-%% NUL, and a NUL-bearing URI accepted here would defeat the NUL-separator
-%% key encoding downstream (`bondy_db`'s G-1 realm fold) — a multi-tenancy
-%% boundary, not a cosmetic restriction.
+%% The loose component class excludes whitespace, the URI separators and
+%% all control characters (`\x00-\x1F`, `\x7F`). PCRE `\s` does not cover
+%% NUL. `bondy_db` separates storage-key components with NUL (see its
+%% moduledoc), so a URI that carries NUL would cross a tenant boundary.
 uri_regex(loose = Rule, undefined) ->
     {ok, Regex} = re:compile(
         "^([^\s\\.#\\x00-\\x1F\\x7F]+\\.)*([^\s\\.#\\x00-\\x1F\\x7F]+)$"

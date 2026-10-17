@@ -115,9 +115,9 @@ watermark_reanchored_on_truncated_root_test_() ->
 %% durable Fly bench surfaced: the applier's replay cursor
 %% (`last_replayed_root`) sits on the PRE-truncate root, then the truncate
 %% frees that root's pages. Unless the cursor is re-anchored on the
-%% post-truncate (live) root, the NEXT replay's
-%% `diff_to_list/2` raises (root gone) and falls back to a full `to_list/1` of
-%% the whole tree — an O(N)-per-cycle synchronous fold that starves the applier
+%% post-truncate (live) root, the NEXT replay's `bondy_mst:diff_to_list/2`
+%% raises (root gone) and falls back to a full `to_list/1` of the whole tree
+%% — an O(N)-per-cycle synchronous fold that starves the applier
 %% and stalls writes. This pins the invariant: after a partial-truncate
 %% compaction the cursor equals the current (truncated, non-empty) root, so the
 %% next diff stays incremental.

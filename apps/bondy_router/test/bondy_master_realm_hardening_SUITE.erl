@@ -5,10 +5,10 @@
 
 -module(bondy_master_realm_hardening_SUITE).
 -moduledoc """
-Regression tests for the master-realm hardening : the master realm
+The master-realm hardening rules: the master realm
 must not accept anonymous connections, the administrators grant must be scoped to
 the Bondy admin namespaces, and the boot migration must remediate a legacy
-(pre-hardening) master realm.
+master realm that predates these rules.
 """.
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").

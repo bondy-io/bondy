@@ -275,7 +275,6 @@ handle_frame({close, _Code, _Reason}, _St) ->
 %% @private Decode one WebSocket message payload into a WAMP record. Each WS
 %% message carries exactly one WAMP message, so there is no buffering. A decode
 %% failure is surfaced as a protocol error, never an assertion crash.
-%%
 %% The inbound payload is bounded by `max_message_length` **before** decoding:
 %% gun has no WebSocket max-frame-size option, so a hostile/slow router could
 %% otherwise force decode of an arbitrarily large frame into terms (an

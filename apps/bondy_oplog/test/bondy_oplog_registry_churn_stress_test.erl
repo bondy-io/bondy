@@ -3,8 +3,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Oplog-level concurrent stress hunt for the own-root page loss (Fly s16,
-%% s25: `registry/*` shards referencing pages absent from their ephemeral ETS
+%% Oplog-level concurrent stress hunt for the own-root page loss
+%% (`registry/*` shards referencing pages absent from their ephemeral ETS
 %% page table).
 %%
 %% The MST layer has been isolated and certified separately: the serialized op
@@ -31,10 +31,10 @@
 %% removed — store layer; `tombstoned`/`transient` ⇒ the miss came from the
 %% walk), so a failure names the layer rather than merely detecting the fault.
 %%
-%% THE DEFECT THIS LOCKS: `put_batch/2` published a root referencing pages it
-%% never copied into the receiver's store, because it built the donor tree on
-%% a volatile map store and discarded it after the merge. Fixed in
-%% `bondy_mst:copy_subtree/3'; the reasoning lives there.
+%% THE DEFECT THIS LOCKS: a `put_batch/2` that publishes a root referencing
+%% pages it never copied into the receiver's store, by building the donor
+%% tree on a volatile map store and discarding it after the merge. The
+%% `bondy_mst` merge copies the donor subtree; the reasoning lives there.
 %%
 %% METHOD, load-bearing: the fault is a RACE, so a single run proves nothing
 %% in either direction. `campaign/2' runs the matrix N times per cell and
@@ -43,10 +43,10 @@
 %% swept hashes in `persistent_term' (a global scan per collection) dropped
 %% the reproduction rate from ~45% to 7%.
 %%
-%% THIS MODULE IS THE REGRESSION LOCK. Four attempts to reproduce the fault at
-%% the pure `bondy_mst' level failed — uniform-random, hash-ordered and
-%% append-monotonic keys, and much larger receivers, all stayed green with the
-%% fix reverted — so a `bondy_mst'-only test would have been vacuous coverage.
+%% THIS MODULE IS THE REGRESSION LOCK. No pure `bondy_mst' reproduction is
+%% known: uniform-random, hash-ordered and append-monotonic keys, and much
+%% larger receivers, all stay green with the guard removed, so a
+%% `bondy_mst'-only test would be vacuous coverage.
 %% Until someone finds the minimal shape, this harness is the only thing that
 %% catches this class. Do not weaken its oracle, and re-run it via `campaign/2'
 %% when touching merge, split, truncate or the collector.

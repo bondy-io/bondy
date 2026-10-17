@@ -343,23 +343,12 @@ live_segment_ids(View) ->
     [Id || {Id, _FirstKey} <- maps:get(live_segments, View)].
 
 %% @private
-%% Resolves a `{key, T}` start to a concrete `{SegId, Offset}` pair plus
-%% the seek target the reader uses to filter the first batch of frames
-%% it decodes.
-%%
-%% 1. Pick the candidate segment by walking `live_segments` (with the
-%%    head segment patched in from `head_first_key`) and selecting the
-%%    largest segment whose `FirstKey <= T`.
-%% 2. Within that segment, binary-search the `.qidx` (for sealed
-%%    segments) or the writer's in-memory accumulator (for the head
-%%    segment) for the largest entry `key <= T`. The returned byte
-%%    offset is the seek's starting frame.
-%% 3. If the index has no entry `<= T` (the segment's frames have all
-%%    been written since the last sparse boundary), fall back to
-%%    scanning from the segment header — the linear scan will still
-%%    find the first frame `>= T` (the writer indexes the first frame
-%%    of every segment, so the only path here is a defensive one for
-%%    rebuilt or external indexes that omitted the first entry).
+%% Resolves a `{key, T}` start to `{SegId, Offset}` plus the seek target
+%% `T` that filters the first decoded frames. The candidate is the
+%% largest live segment (head patched in from `head_first_key`) with
+%% `FirstKey =< T`, else the earliest live segment. The offset is the
+%% largest index entry with `key =< T` from the `.qidx` (sealed) or the
+%% writer's accumulator (head), else the segment header.
 resolve_key_start(T, View) ->
     Current = maps:get(current_segment, View),
     HeadFirstKey = maps:get(head_first_key, View),
@@ -599,27 +588,11 @@ advance_segment(
     end.
 
 %% @private
-%% Reads one frame at `offset`. `Bound` is the byte position past which
-%% the reader must not read (head_offset for the head segment, file
-%% size for a sealed segment). `Kind` carries the interpretation of
-%% `Bound`:
-%%
-%% - `head` — `Bound` is the writer's published head offset. The
-%%   publish protocol guarantees that any frame whose header is visible
-%%   below `Bound` is fully written below `Bound` (the writer publishes
-%%   only after `prim_file:write/2` returns). Both `fsync_mode = sync`
-%%   and `fsync_mode = batched` follow this contract — `batched` only
-%%   defers the `datasync` past publish, it does not publish ahead of
-%%   the write. The `FrameEnd > Bound` branch is therefore unreachable
-%%   under any shipped fsync mode; it is retained as a defensive guard
-%%   so a hypothetical future publish-ahead mode (e.g. a "publish on
-%%   intent" or pre-write reservation scheme) cannot tip a reader into
-%%   the corruption-handling path against the head.
-%% - `sealed` — `Bound` is the file's exact byte size, frozen by the
-%%   writer's `datasync` + `close` before bumping the head atomic.
-%%   `FrameEnd > Bound` here means the segment is corrupt; surface as
-%%   `{error, truncated_segment}` so the recovery scanner can decide
-%%   policy.
+%% Reads one frame at `offset`. `Bound` is the byte position the reader
+%% never reads past: for `head` the writer's published head offset, for
+%% `sealed` the exact file size. A frame that ends past `Bound` on the
+%% head is not yet written (`not_enough_bytes_response/1`); on a sealed
+%% segment it is corruption, `{error, {truncated_segment, _}}`.
 read_frame(#iter{} = Iter, Kind, Bound) ->
     Off = Iter#iter.offset,
     case read_frame_header(Iter#iter.fd, Off, Iter#iter.frame_magic) of

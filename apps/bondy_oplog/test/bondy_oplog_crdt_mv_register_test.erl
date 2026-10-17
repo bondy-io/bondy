@@ -142,8 +142,8 @@ encoding_is_canonical_under_order_test() ->
 %% recovered context equals the original — a post-recovery write by the
 %% same origin observes it and DOMINATES, never regressing the context
 %% into a spurious sibling. This is the algorithmic half of the
-%% origin-context-monotonicity precondition; the substrate guarantees the
-%% other half (finish recovery before accepting writes — see PR-J4).
+%% origin-context-monotonicity precondition; the substrate is meant to
+%% guarantee the other half (finish recovery before accepting writes).
 recovery_via_encoding_preserves_context_test() ->
     S0 = ?MOD:init(),
     S1 = write(S0, 10, <<"a">>, 1, <<"v1">>),

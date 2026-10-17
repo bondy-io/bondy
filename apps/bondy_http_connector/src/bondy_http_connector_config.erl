@@ -63,13 +63,8 @@ set(Key, Value) ->
 %% =============================================================================
 
 %% @private
-%% Ensure lhttpc (used by erlcloud) has proper TLS defaults.
-%%
-%% The definition lives with the code that needs it, because it is a
-%% precondition of the AWS provider rather than of this application: doing it
-%% here and only here made every AWS secret resolution depend on this
-%% application having started first, which nothing said and nothing checked.
-%% Kept as a call so the defaults are in place from boot rather than from the
-%% first secret.
+%% Ensure lhttpc (used by erlcloud) has proper TLS defaults. Called at
+%% application start so the defaults are in place from boot rather than
+%% from the first secret resolution.
 init_lhttpc_ssl_options() ->
     bondy_connect_secret_resolver_aws_sm:ensure_transport().

@@ -4,7 +4,8 @@
 %% =============================================================================
 
 %% Falsifiers for `bondy_mcp_spec_parser:parse/1` — the pure overlay-document
-%% validator. Each rejection case aims at one specific §17 / §16.3 rule; the
+%% validator. Each rejection case aims at one specific naming or template rule;
+%% the
 %% acceptance cases pin the normalized shape the compiler consumes.
 -module(bondy_mcp_spec_parser_test).
 
@@ -153,7 +154,7 @@ name_rules() ->
             parse(doc([tool(#{<<"name">> => Name})]))
         )
     end,
-    %% §17: 1..256 bytes, printable ASCII, no whitespace.
+    %% A name is 1..256 bytes, printable ASCII, no whitespace.
     Reject(<<"has space">>),
     Reject(<<"tab\there">>),
     Reject(<<"caf", 16#C3, 16#A9>>),
@@ -173,7 +174,7 @@ kind_is_a_closed_set() ->
     ).
 
 %% A `resource` names a TOPIC (its binding is `wamp_topic`, not
-%% `wamp_procedure`) — the curated companion of MCP-D31, without which a
+%% `wamp_procedure`) — the curated companion, without which a
 %% topic-backed resource could never surface under curated mode.
 valid_resource_document() ->
     Entry = #{
@@ -293,14 +294,14 @@ template_consistency() ->
         {error, {invalid_template_var, <<"a-b">>}},
         parse(doc([template(#{<<"uri_template">> => <<"users:///{a-b}">>})]))
     ),
-    %% §16.3: every resource template declares its result shape.
+    %% Every resource template declares its result shape.
     ?assertMatch(
         {error, missing_result_schema},
         parse(doc([maps:remove(<<"result_kwargs_schema">>, template())]))
     ).
 
 redaction_policy() ->
-    %% §14.3: the audit redaction policy normalizes to a canonical
+    %% The audit redaction policy normalizes to a canonical
     %% (deduplicated, sorted) field list.
     {ok, #{entries := [E]}} = parse(
         doc([

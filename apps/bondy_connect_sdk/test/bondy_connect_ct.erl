@@ -405,10 +405,8 @@ add_cryptosign_realm(RealmUri, PubKey) ->
 %% must also accept the method that issues it. `issue_ticket/1' builds that
 %% session directly rather than dialling, so no case ever authenticates here
 %% with `wampcra' -- the method under test remains the only one used over the
-%% wire.
-%%
-%% `[security, ticket, authmethods]' is node-global, not per-realm: it is the
-%% set of methods a session may have used to be allowed to issue at all.
+%% wire. `[security, ticket, authmethods]' is node-global, not per-realm: it is
+%% the set of methods a session may have used to be allowed to issue at all.
 add_ticket_realm(RealmUri) ->
     ok = bondy_config:set(
         [security, ticket, authmethods],
@@ -445,18 +443,14 @@ add_ticket_realm(RealmUri) ->
         ]
     }).
 
-%% @private Every WAMP permission Bondy enforces, over every URI.
-%%
-%% The seven were derived by grepping the `bondy_rbac:authorize/3' call sites
-%% rather than taken from the `?WAMP_PERMISSIONS' macro in
-%% `bondy_security.hrl': that macro is unused by `src' and lists three
-%% `disclose_*' entries no `authorize/3' call ever checks, so it would grant
-%% more than exists while still being able to omit something real.
-%%
-%% Grants are validated only as loose URIs, so an under-grant is not reported
-%% at create time -- it surfaces much later as `wamp.error.not_authorized' from
-%% the operation itself. `wamp.cancel' is the one most easily missed, being its
-%% own permission distinct from `wamp.call'.
+%% @private Every WAMP permission Bondy enforces, over every URI: the seven
+%% the `bondy_rbac:authorize/3' call sites check, not the `?WAMP_PERMISSIONS'
+%% macro in `bondy_security.hrl', which `src' does not use and which lists three
+%% `disclose_*' entries no `authorize/3' call ever checks. Grants are validated
+%% only as loose URIs, so an under-grant is not reported at create time -- it
+%% surfaces much later as `wamp.error.not_authorized' from the operation
+%% itself. `wamp.cancel' is the one most easily missed, being its own
+%% permission distinct from `wamp.call'.
 grant(Roles) ->
     #{
         permissions => [

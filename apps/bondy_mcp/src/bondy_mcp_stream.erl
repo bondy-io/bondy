@@ -6,7 +6,7 @@
 -module(bondy_mcp_stream).
 
 -moduledoc """
-The `subscriptions/listen` stream (design §9, §5.3): the one long-lived
+The `subscriptions/listen` stream: the one long-lived
 thing in the modern era, owned by the request's own Cowboy process — no
 extra process exists. `bondy_mcp_http_handler` calls `open/6` from its
 dispatch and delegates its `cowboy_loop` `info/3` here for the life of the
@@ -25,7 +25,7 @@ running — then issues one WAMP `SUBSCRIBE` per honored
 requires it before any notification), carrying the subset actually
 honored.
 
-## Honoring the filter (§9.1, §9.2)
+## Honoring the filter
 
 `toolsListChanged` and `resourcesListChanged` are fed by the manifest
 manager's rebuild (`notify_manifest_changed/2`, called by
@@ -35,16 +35,16 @@ the acknowledgment. Each `resourceSubscriptions` URI resolves through the
 manifest to a WAMP topic (`bondy_mcp_wamp:resolve_update_topic/2`); an
 entry that does not resolve, or whose topic the principal lacks
 `wamp.subscribe` on, is SILENTLY omitted — RBAC-hidden and absent answer
-identically (§6), and the denial is audited as a §14.1 policy decision,
+identically (the leak rule), and the denial is audited as a policy decision,
 invisible on the wire.
 
 The server MUST NOT send a notification type the client did not request:
 delivery is gated on the stream's own filter state, and a delivered WAMP
 `EVENT` whose subscription id this stream does not hold is dropped.
-`notifications/resources/updated` carries ONLY the resource URI (§9.2) —
+`notifications/resources/updated` carries ONLY the resource URI —
 the client re-reads, which keeps RBAC on the read path.
 
-## The three endings (§9.3)
+## The three endings
 
 - Client closes the SSE stream / transport drops: nothing is sent; the
   session-manager `DOWN` cleanup runs.
@@ -56,7 +56,7 @@ the client re-reads, which keeps RBAC on the read path.
 Stream lifetime is governed by the listener's CONNECTION idle timer,
 seated from the `mcp` carrier's `idle_timeout` with
 `reset_idle_timeout_on_send` by `bondy_listener_config:
-held_stream_defaults/1` — no per-stream cast (§3.8: HTTP/2 discards it).
+held_stream_defaults/1` — no per-stream cast (HTTP/2 discards it).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -68,7 +68,7 @@ held_stream_defaults/1` — no per-stream cast (§3.8: HTTP/2 discards it).
 
 -record(stream, {
     %% The JSON-RPC id of the `subscriptions/listen` request — the
-    %% subscription's whole identity (§9.1).
+    %% subscription's whole identity.
     id :: binary() | integer(),
     realm :: binary(),
     session :: bondy_session:t(),
@@ -162,7 +162,7 @@ info({?BONDY_REQ, _Pid, _RealmUri, #event{} = Event}, Req, Stream) ->
             );
         error ->
             %% Not a subscription this stream holds — never forwarded:
-            %% the filter is a MUST, not a suggestion (§9.1).
+            %% the filter is a MUST, not a suggestion.
             ok
     end,
     {ok, Req, Stream};
@@ -191,7 +191,7 @@ info({mcp_manifest_changed, Realm, Kinds}, Req, #stream{realm = Realm} = S) ->
         end,
     {ok, Req, S};
 info({mcp_stream_close, Reason}, Req, #stream{id = Id} = Stream) ->
-    %% Server-initiated teardown (§9.3): notifications/cancelled naming
+    %% Server-initiated teardown: notifications/cancelled naming
     %% the listen request id, then the graceful completion response —
     %% distinguishable from a transport drop, which sends neither.
     ok = send(
@@ -216,7 +216,7 @@ info(_Msg, Req, Stream) ->
     {ok, Req, Stream}.
 
 -doc """
-Asks the stream at `Pid` to end gracefully — the §9.3 server-initiated
+Asks the stream at `Pid` to end gracefully — the server-initiated
 teardown. Asynchronous; the caller does not learn when the stream closed.
 """.
 -spec close(pid(), any()) -> ok.
@@ -251,9 +251,9 @@ notify_manifest_changed(RealmUri, Kinds) ->
 %% =============================================================================
 
 %% @private
-%% The §9.1 notifications filter, validated. Booleans and a list of
+%% The notifications filter, validated. Booleans and a list of
 %% binaries; anything else is -32602. `promptsListChanged` is accepted in
-%% the request but never honored — Bondy has no prompts (§8).
+%% the request but never honored — Bondy has no prompts.
 filter(Id, Params) ->
     F = maps:get(<<"notifications">>, Params, #{}),
     is_map(F) orelse invalid_params(Id, <<"notifications must be an object">>),
@@ -286,10 +286,10 @@ filter(Id, Params) ->
     }.
 
 %% @private
-%% The stored session (§5.3): `bondy_session_manager:open/3` runs
+%% The stored session: `bondy_session_manager:open/3` runs
 %% `bondy_session:new/3` in THIS process — the session's ref targets the
 %% stream — and monitors it, which is the whole cleanup story. Role:
-%% subscriber only (§5.5 is an upper bound; a stream never calls).
+%% subscriber only (a stream never calls).
 open_session(Id, RealmUri, AuthSt, Req) ->
     Result = bondy_session_manager:open(
         bondy_session_id:new(),
@@ -369,7 +369,7 @@ subscribe_resources(Uris, Entries, RealmUri, AuthSt, Session, St) ->
     {lists:reverse(Honored), Subs}.
 
 %% @private
-%% The first manifest entry whose update stream serves `Uri` (§9.2).
+%% The first manifest entry whose update stream serves `Uri`.
 resolve([], _) ->
     nomatch;
 resolve([Entry | Rest], Uri) ->
@@ -388,7 +388,7 @@ allowed(Topic, Ctxt0) ->
     end.
 
 %% @private
-%% A denied subscription attempt is a §14.1 policy decision. Denial only
+%% A denied subscription attempt is a policy decision. Denial only
 %% arises on a security-enabled realm, so the source is `rbac`.
 audit_denied(Uri, Entry, RealmUri, AuthSt, St) ->
     _ = bondy_mcp_audit:record(policy_decision, #{

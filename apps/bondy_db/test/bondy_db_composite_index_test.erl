@@ -3,9 +3,9 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Composite (covering permutation) secondary indices on a `shared_shards` (G-1)
-%% table — the substrate's "key capability" for RDF-quad / Datalog-EDB relations
-%% and the general piece-#2b machinery. A single relation (an RDF quad
+%% Composite (covering permutation) secondary indices on a `shared_shards`
+%% table — the substrate's "key capability" for RDF-quad / Datalog-EDB
+%% relations. A single relation (an RDF quad
 %% `(s,p,o,g)`) is materialised in SEVERAL config-declared collation orders so
 %% that any *prefix* access pattern is a bounded scan on some order:
 %%
@@ -15,7 +15,7 @@
 %%
 %% These pin: (1) the orders are user-declared, never auto-permuted; (2) a
 %% prefix scan returns the WHOLE fact (covering — no primary fetch); (3) every
-%% order is realm-scoped via the realm-FIRST key layout on G-1; (4) a range over
+%% order is realm-scoped via the realm-FIRST key layout; (4) a range over
 %% a collation slice; (5) `delete` removes the fact from EVERY order at once
 %% (the OLD→NEW term diff). Drives the real write path (`apply/4` →
 %% `cell_apply` → secondary writer), made deterministic with `await_index/2`.

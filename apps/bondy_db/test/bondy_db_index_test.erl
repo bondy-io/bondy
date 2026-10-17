@@ -3,19 +3,19 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% IDX-2 — secondary index provisioning + read API.
+%% Secondary index provisioning + read API.
 %%
 %% Covers: provisioning a table's declared indexes (registry shard-sets,
 %% `info/1` reporting), empty reads, single-shard equality + cross-shard
 %% range routing, bucket/realm isolation, the `{max_lag, Ms}` refusal,
 %% spec validation (reserved/duplicate/invalid), and teardown.
 %%
-%% The secondary writer (IDX-3) does not exist yet, so the populated-read
-%% tests insert index-entry cell frames straight into the index's ETS
-%% projection tables — using the *real* fold-state and cell-frame encoders
-%% — and read them back through `bondy_db:index_get/index_range`. That
-%% exercises the full substrate range + decode path (composite-key
-%% recovery, column decode, ordering) without the not-yet-built writer.
+%% The populated-read tests insert index-entry cell frames straight into the
+%% index's ETS projection tables — using the *real* fold-state and cell-frame
+%% encoders — and read them back through `bondy_db:index_get/index_range`.
+%% That exercises the substrate range + decode path (composite-key recovery,
+%% column decode, ordering) without `bondy_oplog_secondary_writer`;
+%% `bondy_db_index_writer_test` drives the writer.
 %% =============================================================================
 
 -module(bondy_db_index_test).
@@ -128,8 +128,8 @@ provision_reports_indexes({_Db, Table, _Sup, _Dir}) ->
 secondary_shards_registered({_Db, Table, _Sup, _Dir}) ->
     NS = maps:get(namespace, bondy_db:info(Table)),
     %% by_status has 4 shards (inherits primary shard_count); each is backed
-    %% by the native index-entry CRDT (PR-Z; the retired `index_entry` fold's
-    %% op-based twin), on the **same projection backend as the primary table**
+    %% by the native index-entry CRDT (`bondy_oplog_crdt_index_entry`), on the
+    %% **same projection backend as the primary table**
     %% — here `per_entity` is durable, so the index projection is leveled too.
     lists:foreach(
         fun(Shard) ->
@@ -186,12 +186,11 @@ unknown_index_error({_Db, Table, _Sup, _Dir}) ->
         bondy_db:index_range(Table, <<"r1">>, nope, <<"a">>, <<"z">>, #{})
     ).
 
-%% A finite max_lag refuses while a shard is flagged for rebuild. (Since
-%% IDX-4 the startup backfill freshens every shard at open, so the refusal
-%% path is exercised by simulating a saturation drop — marking the shards
-%% `needs_rebuild` — which makes them unconditionally stale until a rebuild
-%% clears the flag. The error now carries the lag diagnostic, `infinity`
-%% for a flagged shard.)
+%% A finite max_lag refuses while a shard is flagged for rebuild. The startup
+%% backfill freshens every shard at open, so the refusal path is exercised by
+%% simulating a saturation drop — marking the shards `needs_rebuild` — which
+%% makes them unconditionally stale until a rebuild clears the flag. The error
+%% carries the lag diagnostic, `infinity` for a flagged shard.
 max_lag_refusal({_Db, Table, _Sup, _Dir}) ->
     NS = maps:get(namespace, bondy_db:info(Table)),
     #{by_status := #{sec_shard_count := N}} = maps:get(
@@ -218,7 +217,7 @@ max_lag_refusal({_Db, Table, _Sup, _Dir}) ->
     ).
 
 %% =============================================================================
-%% Populated reads (direct substrate insertion; IDX-3 supplies the writer)
+%% Populated reads (direct substrate insertion, no secondary writer)
 %% =============================================================================
 
 populated_index_get({_Db, Table, _Sup, _Dir}) ->

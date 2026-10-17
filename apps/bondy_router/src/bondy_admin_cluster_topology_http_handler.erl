@@ -8,7 +8,7 @@
 Admin API endpoint (`GET /cluster/topology`) returning this node's view of the
 cluster as a Grafana Node Graph payload (`bondy_cluster_topology:graph/0`),
 JSON-encoded. Consumed by an Infinity datasource to render the cluster node
-graph — see `_design/OBSERVABILITY_GAPS.md`.
+graph.
 """.
 -include("http_api.hrl").
 

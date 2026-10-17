@@ -13,7 +13,7 @@
 %% `H0 < H` that has not yet arrived. Once `H` is stable no such operation can
 %% arrive, so the tombstone is pure overhead and the cell is reclaimable. That
 %% is what makes projection-cell GC possible; without it a tombstone is retained
-%% forever, which is the plum_db outcome the oplog rewrite set out to escape.
+%% forever.
 %% =============================================================================
 
 -module(bondy_oplog_stabilize_test).
@@ -90,7 +90,7 @@ ew_live_flag_is_kept_test() ->
 
 %% A disabled flag (no live dots) is reclaimable once STRICTLY below the
 %% stability point; at the boundary it is kept (a dot at exactly StableHlc
-%% with a higher origin may be undelivered — pre-barrier, outside A7).
+%% with a higher origin may be undelivered).
 ew_disabled_flag_discarded_once_stable_test() ->
     S0 = ?EW:apply_op(?EW:init(), enable, key(10, <<"a">>, 1), undefined),
     %% The disable OBSERVES the enable (context = the cell's own CC), so the

@@ -15,12 +15,10 @@ Two halves, generated differently because they fail differently:
   standing hole becomes an alarm. Every claim worth making about it is over a
   SCHEDULE of observations, not over a state.
 
-These carry the adequacy argument the detector previously got from a mutation
-run. `prop_detector_matches_model` quantifies over a space that contains the
-prefix-only implementation, so it fails on the first schedule that leaves
-anything pending and shrinks to a minimal witness.
-
-Rationale and rulings: `_design/applied_frontier_pending.md` §12.
+These carry the detector's adequacy argument: `prop_detector_matches_model`
+quantifies over a space that contains the prefix-only implementation, so it
+fails on the first schedule that leaves anything pending and shrinks to a
+minimal witness.
 """.
 
 -include_lib("proper/include/proper.hrl").

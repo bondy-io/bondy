@@ -279,14 +279,14 @@ invalid_group_commit_max_rejected_test() ->
     end.
 
 %% =============================================================================
-%% Group-commit failure injection (the two W1-QA carry-over branches)
+%% Group-commit failure injection
 %% =============================================================================
 %%
-%% These cover the two error branches of the boxcar path that the W1
-%% Architecture QA flagged as deferred because they need fault injection:
+%% These cover the two error branches of the boxcar path that need fault
+%% injection:
 %%
-%%   1. `flush_group/3` datasync failure — the group's single shared
-%%      `do_fsync_head` fails. per_write promised durability-on-return, so
+%%   1. group datasync failure — the group's single shared datasync in
+%%      `bondy_log_wal` fails. per_write promised durability-on-return, so
 %%      EVERY ok-write caller in the group must receive the error (not the
 %%      `{ok, _}` its own write would otherwise have produced), and the
 %%      writer must STOP, as for any failed datasync (see the
@@ -301,7 +301,7 @@ invalid_group_commit_max_rejected_test() ->
 
 %% (1) A failed group datasync fans the error out to every grouped caller
 %% and stops the writer. Distinct from the proper-test per-append fault:
-%% this exercises the *group* path (`flush_group/3`), where one datasync
+%% this exercises the *group* path in `bondy_log_wal`, where one datasync
 %% covers many callers.
 group_commit_flush_group_datasync_failure_errors_whole_group_test() ->
     Dir = mktemp_dir(),
@@ -341,7 +341,7 @@ group_commit_flush_group_datasync_failure_errors_whole_group_test() ->
 group_commit_fatal_during_drain_errors_group_and_stops_test() ->
     %% At max_segment_bytes=200 the K-th single-event append is the first to
     %% rotate into segment 1. The group leader (event 1) can never rotate
-    %% (the `maybe_rotate/2` `Cur > SEG_HEADER` guard), so K >= 2: events
+    %% (`bondy_log_wal`'s rotate guard, `Cur > SEG_HEADER`), so K >= 2: events
     %% 1..K-1 ride the group as oks, event K trips the (injected) fatal.
     K = probe_rotation_event(200),
     ?assert(K >= 2),
@@ -359,9 +359,9 @@ group_commit_fatal_during_drain_errors_group_and_stops_test() ->
         Replies = with_meck(
             bondy_log_segment,
             fun() ->
-                %% New-segment creation fails => `open_next_segment/1` fails
-                %% *after* the old fd is sealed+closed => `rotate/1` returns
-                %% `{fatal, {rotation_failed_after_seal, injected}, _}`.
+                %% New-segment creation fails => the writer's next-segment open
+                %% fails *after* the old fd is sealed+closed => `rotate/1`
+                %% returns `{fatal, {rotation_failed_after_seal, injected}, _}`.
                 ok = meck:expect(
                     bondy_log_segment,
                     create,

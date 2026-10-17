@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PR-C: the generic tier_2 context-stamp. A `tier_2` table routes
+%% The generic tier_2 context-stamp. A `tier_2` table routes
 %% `bondy_db:apply/4` through `apply_with_context`, which reads the cell's
 %% current causal context (`context_of/1`) in the applier's single-cell
 %% scope and stamps it into the event `meta` before WAL append. The CRDT's

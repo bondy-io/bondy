@@ -125,8 +125,10 @@ NB: we use `fail/1`'s returned signal, not a follow-up `get/1`. `fail/1` caps th
 count at `max_retries` (returning the `max_retries` atom there) and never lets it
 *exceed* the limit — so `get/1` (which only reports `max_retries` when
 `count > max_retries`) would never report exhaustion, and with `deadline => 0` it
-always returns the interval. The pre-A2 code read `get/1` after `fail/1` and so
-**never gave up** — the ping keepalive could not trigger a reconnect.
+always returns the interval. Reading `get/1` after `fail/1` would **never give
+up**, and the ping keepalive could not trigger a reconnect
+(`bondy_connect_resilience_SUITE:ping_failure_triggers_reconnect` pins the
+give-up).
 """.
 -spec on_ping_timeout(t()) ->
     disabled | {ping, Deadline :: pos_integer(), t()} | {give_up, t()}.

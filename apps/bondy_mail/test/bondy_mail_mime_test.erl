@@ -254,10 +254,9 @@ encoded(Overrides) ->
     Encoded.
 
 %% @private
-%% The bytes before the first blank line. Unambiguous by definition -- that
-%% blank line is what separates headers from a body in every internet message
-%% format -- which is why this is a safe thing to parse by hand and the body is
-%% not.
+%% The bytes before the first blank line. RFC 5322 section 3.5 separates the
+%% header section from the body with exactly one empty line, which is why this
+%% is a safe thing to parse by hand and the body is not.
 header_block(Encoded) ->
     [Block | _] = binary:split(Encoded, ~"\r\n\r\n"),
     Block.

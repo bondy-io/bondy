@@ -653,22 +653,13 @@ reap_complement(MemberOrigins, Forgotten, Swept, Replication) ->
     }}.
 
 %% @private
-%% RETIREMENT REPLICATION + FRONTIER REAPING. One round trip per member
-%% serves both, but they consume it differently, and that difference is the
-%% whole point:
-%%
-%% - LEARNING unions whatever came back. The set is grow-only, so a union
-%%   from a subset of members is monotone and cannot be wrong — it is the
-%%   model's `Propagate(r, p)`, a single-peer union, applied to each member
-%%   that answered. Refusing to learn because a THIRD member was unreachable
-%%   would stall propagation cluster-wide on one flaky node, and buy nothing.
-%% - REAPING requires every member to have answered AND every answer to
-%%   contain the origin — the model's `ReapGuard` "universal" branch, where
-%%   the quantifier ranges over all members. A member that did not answer
-%%   has not agreed; it may still need the deficit signal.
-%%
-%% Fail-closed applies to the reap alone: no persistence, no local
-%% instances, or any member unheard from reaps nothing this pass.
+%% Retirement replication + frontier reaping share one round trip per member
+%% but consume it differently. LEARNING unions whatever came back: the set is
+%% grow-only, so a union from a subset of members is monotone (`Propagate` in
+%% `proofs/tla/OriginRetirementSet.tla`, applied per answering member).
+%% REAPING requires every member to have answered AND every answer to contain
+%% the origin (the model's universal `ReapGuard` branch); a member that did not
+%% answer has not agreed. Fail-closed applies to the reap alone.
 replicate_and_reap([]) ->
     %% Solo. A frontier entry is a CLAIM compared against peers, and
     %% solitude now says nothing about the peers this node will have later:
@@ -780,8 +771,8 @@ learn_retirements(PeerSets) ->
 %% deficit signal about. Only ever called with an answer from every member
 %% (see `replicate_and_reap/1`); `[]` licenses nothing, which is what makes
 %% that precondition safe to state rather than assume.
-%% `universal_is_the_intersection_of_member_sets/0` covers the empty list,
-%% a member with an empty set, and disjoint answers.
+%% `bondy_oplog_frontier_reap_test:universal_is_the_intersection_of_member_sets`
+%% covers the empty list, a member with an empty set, and disjoint answers.
 universal([]) ->
     [];
 universal([First | Rest]) ->
@@ -821,21 +812,13 @@ reap_instance_frontier(InstanceId, Universal) ->
     end.
 
 %% @private
-%% Level-ness is REPORTED, not required — requiring it would stop the reap
-%% after the first replica (see the moduledoc). A peer that still carries the
-%% entry at a different sequence means the origin was retired before the
-%% cluster converged on its events, and the ban has frozen that difference
-%% permanently: this is the operator's one chance to see it.
-%%
-%% Read from `bondy_oplog_peer_state` — a local ETS lookup of each peer's
-%% vector as observed at its last completed round — rather than over the
-%% transport. As the reap's GATE that snapshot would be unsound (a dead
-%% origin's events keep propagating between rounds), but as a diagnostic it
-%% costs nothing, whereas a fresh read would be one drain-barriered
-%% `get_frontier` per member per shard on the pass that follows a
-%% decommission. Being a snapshot, it can name a divergence a peer has since
-%% closed, and can miss one opened after its last round. Unfiltered by
-%% recency on purpose: a silent peer is exactly the one likely to be behind.
+%% Level-ness is REPORTED, not required; requiring it would stop the reap after
+%% the first replica (see the moduledoc). A peer still carrying the entry at a
+%% different sequence means the origin was retired before the cluster converged
+%% on its events, and the ban has frozen that difference: this is the
+%% operator's one chance to see it. Read from `bondy_oplog_peer_state`, each
+%% peer's vector at its last completed round, so it can name a divergence since
+%% closed or miss one since opened; as a diagnostic that costs nothing.
 report_unconverged(InstanceId, Candidates, Local) ->
     Peers = [
         {P, F}

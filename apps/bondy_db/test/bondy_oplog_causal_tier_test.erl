@@ -3,8 +3,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PR-A: `causal_tier()` is wired end-to-end (provisioning only, no
-%% behaviour change). Pins: the registry records the tier; a table with
+%% `causal_tier()` is wired end-to-end (provisioning only). Pins: the
+%% registry records the tier; a table with
 %% no native CRDT (or a tier_0 native CRDT) defaults to `tier_0`; and
 %% `open_table` fails fast when a `tier_2` CRDT is not `order_independent`.
 

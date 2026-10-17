@@ -739,7 +739,7 @@ add_member(RealmUri, Username, Groups) ->
     {ok, _} = bondy_rbac_user:add(RealmUri, User),
     ok.
 
-%% Membership now lives in the cell-per-fact `security_group_members` relation,
+%% Membership lives in the cell-per-fact `security_group_members` relation,
 %% written synchronously (read-your-writes), so there is no asynchronous index
 %% to flush before a members/3 read.
 flush_member_index() ->

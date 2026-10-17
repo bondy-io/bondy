@@ -41,14 +41,12 @@ mismatch.
 
 CRC algorithm choice is encoded on-disk via `Flags` bit 2. v1 frames
 and v2 frames with the bit clear use zlib CRC32 (`erlang:crc32/1`).
-CRC32C activation was evaluated and deferred: on representative
-workloads the win falls below the 5 % threshold. The on-disk seam —
-`Flags` bit 2 reserved, `crc_algo/2` and `compute_crc/2` dispatch on
-algorithm — is retained so a future change can land a CRC32C provider
-as a one-line widening of `compute_crc/2` without a format change. The
-dispatch lives in the private `compute_crc/2` / `default_crc/1` helpers
-at the bottom of this module — kept module-local because the frame
-format is the only consumer.
+`encode/2` rejects bit 2 (it is outside every known-flags mask), so no
+writer sets it. `crc_algo/2` and `compute_crc/2` dispatch on the
+algorithm, so a CRC32C provider is a widening of `compute_crc/2`
+without a format change. The dispatch lives in the private
+`compute_crc/2` / `default_crc/1` helpers at the bottom of this module
+— kept module-local because the frame format is the only consumer.
 
 ### Versions
 
@@ -56,8 +54,8 @@ format is the only consumer.
   any bit set. v2 readers accept v1 frames unchanged.
 - **v2** — current writer version. Same layout as v1 on the wire
   except the version byte. Flag bits 0 (compression) and 1
-  (encryption) are active; bit 2 (CRC32C) is reserved on-disk but
-  unused — the CRC32C upgrade was evaluated and deferred. v2 readers
+  (encryption) are active; bit 2 (CRC32C) is reserved on-disk and
+  outside the known-flags mask. v2 readers
   accept both v1 and v2; v1 readers meeting a v2 frame return
   `unsupported_version`.
 
@@ -312,12 +310,9 @@ verify_crc_and_decode(Crc, Version, Flags, FrameLen, Body) ->
     end.
 
 %% @private
-%% The CRC algorithm a frame was written with is encoded in `Flags`.
-%% Only `crc32` is ever produced today; CRC32C was evaluated and
-%% deferred (the win falls below the 5 % threshold in every realistic
-%% configuration). The switch is structural rather than behavioural so
-%% a future widening to `crc32c` on `Flags` bit 2 is a one-line change
-%% to this function plus a new clause in `compute_crc/2`.
+%% The CRC algorithm of a frame is a function of its version and `Flags`.
+%% Both versions answer `crc32`; a `crc32c` reader is a clause here on
+%% `Flags` bit 2 plus a clause in `compute_crc/2`.
 crc_algo(?VERSION_V1, _Flags) ->
     crc32;
 crc_algo(?VERSION_V2, _Flags) ->
@@ -354,15 +349,9 @@ known_flags(?VERSION_V2) -> ?KNOWN_FLAGS_V2.
 %% CRC helpers
 %% -----------------------------------------------------------------------------
 %%
-%% The algorithm is encoded on-disk via the frame's `Flags` field, not
-%% implicitly. v1 frames and v2 frames with `Flags` bit 2 clear use
-%% zlib CRC32 (`erlang:crc32/1`). CRC32C activation (Flags bit 2 set)
-%% is reserved on-disk but unimplemented — the upgrade was evaluated
-%% and deferred. When/if it lands, it is a second clause of
-%% `compute_crc/2` plus a `crc_algo/2` switch on bit 2.
-%% `default_crc/1` is the writer hot-path entry point — it collapses
-%% the two-call shape (`compute_crc(default_crc_algo(), _)`) into one
-%% local call without leaving the frame module.
+%% The moduledoc states the algorithm choice. `default_crc/1` is the
+%% writer hot-path entry point: one local call in place of
+%% `compute_crc(default_crc_algo(), _)`.
 
 -type crc_algo() :: crc32.
 

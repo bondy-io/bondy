@@ -354,14 +354,13 @@ try_start_pool(#state{name = Name} = State0) ->
     end.
 
 %% Pool state flips to `up` fail-open, on the very first successful
-%% probe — a service that is merely flaky shouldn't stay unreachable to
-%% callers a moment longer than necessary. `liveness.success_threshold`
-%% instead gates ALARM clearing (`maybe_clear_alarm/1`, also consulted
-%% by every subsequent up-state probe in `handle_probe_success/1`): with
-%% the default of 1 it clears immediately here, matching a plain
-%% recover-on-first-success expectation; a higher threshold keeps the
-%% alarm active — deliberately decoupled from traffic — until the
-%% recovery looks stable, so a flapping upstream doesn't flap the page.
+%% probe — a merely flaky service stays reachable to callers.
+%% `liveness.success_threshold` instead gates ALARM clearing
+%% (`maybe_clear_alarm/1`, also consulted by every subsequent up-state probe
+%% in `handle_probe_success/1`): with the default of 1 it clears immediately
+%% here; a higher threshold keeps the alarm active — deliberately decoupled
+%% from traffic — until the recovery looks stable, so a flapping upstream
+%% does not flap the page.
 mark_up(
     #state{name = Name, service_name = ServiceName, retry = Retry0} = State0
 ) ->
@@ -539,16 +538,13 @@ cancel_liveness_timer(#state{liveness_timer = Timer}) ->
     ok.
 
 %% @private
-%% Alarm id is a `{Tag, ServiceName}` pair (consistent with the existing
-%% `bondy_alarm_handler` id convention — see e.g. the reclamation/AAE
-%% alarms) so `bondy_alarm_active{alarm_id}` (bondy_prometheus_db) carries
-%% the service in its label without a second dimension.
-%%
-%% The structured fields go in `details`, NOT in the description: they are the
-%% keys `bondy_alarm_catalogue` declares for this alarm as `detail_keys`, and
-%% `bondy_alarm_catalogue_test:declared_detail_keys_are_delivered` fails if the
-%% two disagree. `alarm_handler:set_alarm/1` passes the 3-tuple through
-%% unchanged (sasl-4.4 `alarm_handler.erl:103`).
+%% Alarm id is a `{Tag, ServiceName}` pair, the `bondy_alarm_handler` id
+%% convention, so `bondy_alarm_active{alarm_id}` carries the service in its
+%% label without a second dimension. The structured fields go in `details`,
+%% NOT in the description: they are the keys `bondy_alarm_catalogue` declares
+%% for this alarm as `detail_keys`, and
+%% `bondy_alarm_catalogue_test:declared_detail_keys_are_delivered` fails if
+%% the two disagree. `alarm_handler:set_alarm/1` passes the 3-tuple through.
 set_service_down_alarm(#state{
     service_name = ServiceName, endpoint = Endpoint, last_error = LastError
 }) ->

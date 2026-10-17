@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% =============================================================================
 %% Tests for `bondy_http_connector_http_pool:liveness_url/2` — the pure
 %% function that resolves the periodic liveness probe's target URL from
 %% the pool's endpoint and the configured `liveness.path`. Covers the
@@ -11,7 +10,6 @@
 %% configured path, none of which are exercised by
 %% `bondy_http_connector_http_pool_SUITE` (its scenarios all use the
 %% default path).
-%% =============================================================================
 
 -module(bondy_http_connector_http_pool_test).
 

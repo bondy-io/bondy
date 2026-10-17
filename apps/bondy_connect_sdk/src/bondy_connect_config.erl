@@ -27,15 +27,13 @@ are not exported.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 %% The advanced-profile features the client actually implements. The rule
-%% is **advertise == handle**: we only claim a feature whose behaviour the
-%% client honours. `progressive_call_results` is advertised for both RPC
-%% roles: as caller via `call_async/5` with `receive_progress => true`
-%% ({progress, Payload} deliveries before the terminal reply), as callee
-%% via the `progress` fun injected into the handler details. Note the WAMP
-%% spec pairs it with `call_canceling`, which both roles announce.
-%% `progressive_calls` (caller-side argument streaming) is likewise advertised
-%% for both roles: as caller via `call_stream/5` + `send_input`/`finish_input`,
-%% as callee via the `input` fun injected into the handler details.
+%% is **advertise == handle**: the client claims only a feature whose
+%% behaviour it honours. `progressive_call_results` is advertised for both
+%% RPC roles (caller via `call_async/5` with `receive_progress => true`,
+%% callee via the `progress` fun in the handler details); the WAMP spec pairs
+%% it with `call_canceling`, which both roles announce. `progressive_calls`
+%% is likewise advertised for both roles (caller via `call_stream/5` +
+%% `send_input`/`finish_input`, callee via the `input` fun).
 -define(DEFAULT_ROLES, #{
     caller => #{
         features => #{
@@ -157,10 +155,7 @@ validate(Spec) when is_map(Spec) ->
             ws_path => maps:get(ws_path, Spec, <<"/ws">>),
             %% `validate/1' builds a CLOSED map, so a key absent from here
             %% never reaches the transport at all — silently, with the
-            %% transport's own default applying instead. That is how
-            %% `longpoll_path` was ignored while a case believed it was
-            %% dialling a bad path, and the connection established normally
-            %% against the real endpoint.
+            %% transport's own default applying instead.
             longpoll_path =>
                 maps:get(longpoll_path, Spec, <<"/wamp/longpoll">>),
             longpoll_poll_timeout =>
@@ -245,13 +240,10 @@ validate_ping(Spec) ->
 
 %% @private Validate the optional `handler' load-regulation config,
 %% consumed by `bondy_connect_load:new/1'. Recognised keys:
-%%
-%% - `max_concurrency' — the per-connection in-flight cap (non-neg int; `0' =
-%%   unlimited).
-%% - `rate' — a `bondy_regulator_rate_limit' token-bucket spec (a map; its
-%%   contents are validated by the regulator when the bucket is built).
-%%
-%% Both are optional; an absent `handler' means unlimited concurrency and no rate
+%% `max_concurrency', the per-connection in-flight cap (non-neg int; `0' =
+%% unlimited), and `rate', a `bondy_regulator_rate_limit' token-bucket spec
+%% (a map the regulator validates when the bucket is built). Both are
+%% optional; an absent `handler' means unlimited concurrency and no rate
 %% limit. Unknown keys are rejected so typos surface early.
 validate_handler(#{handler := H}) when is_map(H) ->
     _ = maps:foreach(

@@ -681,16 +681,11 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
             %% in the 'via' stack are part of the route back to the Caller.
             Via = maps:get(via, SendOpts, undefined),
 
-            %% We enqueue an invocation promise so that we can match it
-            %% with the future YIELD or ERROR response from the Callee.
-            %% We add the via stack so that we can route back the YIELD or
-            %% ERROR response to Caller.
-            %% Notice that this is a second promise for the associated CALL.
-            %% The first one was enqueued at the origin node and it is used
-            %% to trigger a timeout to the caller or match the RESULT |
-            %% ERROR that this second promise will match in this node,
-            %% which is the one connected to the Callee (or a Bridge Relay
-            %% to a node that is connected to the Callee).
+            %% A second promise for this CALL: the origin node's promise
+            %% times out the caller and matches the RESULT | ERROR; this one,
+            %% on the node connected to the Callee (or a Bridge Relay towards
+            %% it), matches the YIELD or ERROR and carries the via stack that
+            %% routes the response back to the Caller.
             CallId = key_value:get(
                 ['$private', call_id], Msg#call.options, undefined
             ),
@@ -727,16 +722,12 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
             bondy_router_peer:send(RealmUri, To, Invocation, SendOpts)
     end;
 forward(#cancel{} = M, _Addressed, #{from := Caller} = Opts) ->
-    %% A remote Caller (or its node, after the caller died) is cancelling
-    %% a previous CALL made to a local Callee. The CALL request id plus the
-    %% Caller identify the invocation uniquely, so the invocation id and the
-    %% actual local callee are recovered from the invocation promise — the
-    %% CANCEL may be node-addressed (carrying only the owner node, not the
-    %% resolved callee) when routing ran on the RIB, so the address the
-    %% CANCEL arrived on is not the callee. Mode semantics: `kill` keeps the
-    %% promise (the callee's ERROR settles the call), `killnowait` and `skip`
-    %% take it so any late response is discarded; `skip` sends no INTERRUPT.
-    %% A callee that did not announce call_canceling is treated as `skip`.
+    %% A remote Caller (or its node, after the caller died) cancels a CALL to
+    %% a local Callee. The CANCEL may be node-addressed when routing ran on the
+    %% RIB, so the invocation id and the local callee come from the invocation
+    %% promise, keyed by CALL request id plus Caller. `kill` keeps the promise
+    %% (the callee's ERROR settles the call); `killnowait` and `skip` take it;
+    %% `skip` sends no INTERRUPT. A callee without call_canceling is `skip`.
 
     RealmUri = ?GET_REALM_URI(Opts),
 
@@ -806,15 +797,12 @@ forward(#result{} = M, Caller, #{from := _Callee} = Opts) ->
 
     case maps:get(progress, M#result.details, false) of
         true ->
-            %% A progressive RESULT settles nothing: the call promise stays
-            %% in place to match further RESULTs (and eventually the final
-            %% one), and — per the WAMP timeout semantics for progressive
-            %% calls — slides the promise expiry (capped by any
-            %% CALL.Options._deadline). A progressive RESULT for a promise
-            %% that was not marked receive_progress can only come from a
-            %% peer node without progressive support (a version-mixed
-            %% cluster); a peer cannot be aborted, so demote it to the
-            %% final result (flag removed, promise taken).
+            %% A progressive RESULT settles nothing: the promise stays to match
+            %% further RESULTs and its expiry slides (capped by any
+            %% CALL.Options._deadline). A progressive RESULT for a promise not
+            %% marked receive_progress can only come from a peer node without
+            %% progressive support; a peer cannot be aborted, so demote it to
+            %% the final result (flag removed, promise taken).
             case bondy_rpc_promise:find(Key) of
                 {ok, Promise} ->
                     case
@@ -1703,7 +1691,7 @@ find_input_stream(RealmUri, Caller, CallId) ->
 %% @private
 %% A promise matched the request id. It is a stream chunk iff the promise was
 %% marked `progressive_input`; otherwise the id is live on a non-progressive
-%% call — a protocol violation (D1).
+%% call — a protocol violation.
 classify_input_stream(Kind, Promise) ->
     case bondy_rpc_promise:get(progressive_input, Promise, false) of
         true ->
@@ -2062,18 +2050,13 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
                 %% We return no message as we already replied
                 {ok, Ctxt};
             _ when IsLocal == false orelse CalleeType == bridge_relay ->
-                %% We will forward the call to the cluster peer node or
-                %% bridged node where the Callee is located, so we need to
-                %% gather all local context and create a new Call. This new
-                %% Call will include a '$private' field under 'options'.
+                %% The Callee is on a cluster peer or a bridged node, so the
+                %% call is forwarded with a '$private' field under 'options'.
                 %% A traced call gets the cluster-forward hop marker stamped
-                %% FIRST — the same one-seat contract as
-                %% `prepare_call_rib/3`: the marker rides the forwarded
-                %% options (this node's call promise, `promise_trace(Msg)`
-                %% at the send site) and the invocation details
-                %% `prepare_call_options/5` builds from them (the target
-                %% node's invocation promise). The local branch below stays
-                %% unstamped: no forward, no hop span.
+                %% FIRST, as in `prepare_call_rib/3`: the marker rides the
+                %% forwarded options and the invocation details built from
+                %% them. The local branch below stays unstamped: no forward,
+                %% no hop span.
                 Msg1 = Msg#call{
                     options = bondy_telemetry:maybe_hop_trace(
                         Msg#call.options
@@ -2107,25 +2090,13 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     Caller = bondy_context:ref(Ctxt),
 
     %% Progressive Calls: is this CALL a subsequent argument chunk of an
-    %% in-flight progressive-input stream — i.e. does it reuse the caller's
+    %% in-flight progressive-input stream, i.e. does it reuse the caller's
     %% request id? Answering costs a promise lookup, so it is asked only of a
-    %% caller that announced `progressive_calls` in HELLO.
-    %%
-    %% The SESSION flag, not `is_feature_implemented/1`. The router-wide value is a
-    %% capability — it says this build implements progressive calls, and it is
-    %% now always true — so testing it here would run the lookup on every CALL
-    %% from every caller. This caller is local (`handle_call/5` handles local
-    %% callers only), so its negotiated flags are in `Ctxt`, and a caller that
-    %% did not announce the feature cannot have an open stream to find:
-    %% `maybe_gate_progressive_caller/2' throws on the FIRST chunk from such a
-    %% caller, so none is ever opened.
-    %%
-    %% One branch narrows with it. `find_input_stream/3' also reports
-    %% `violation' — a duplicate request id live on a NON-progressive call —
-    %% and that now goes undetected for a caller that announced nothing. It is
-    %% still strictly more detection than before: this test used to be the
-    %% capability, which shipped `off', so on a default deployment the lookup
-    %% never ran and no caller was checked at all.
+    %% caller that announced `progressive_calls` in HELLO: the SESSION flag,
+    %% not `is_feature_implemented/1`, which is a build capability and would
+    %% run the lookup on every CALL. A caller that announced nothing cannot
+    %% have an open stream (`maybe_gate_progressive_caller/2' throws on its
+    %% first chunk), so only `find_input_stream/3''s `violation' goes unseen.
     case
         bondy_context:is_feature_enabled(Ctxt, caller, progressive_calls) andalso
             find_input_stream(RealmUri, Caller, CallId)
@@ -2243,18 +2214,13 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
             {Promise, SendOpts1} =
                 case Msg of
                     #call{} ->
-                        %% The callee is on another node or bridged
-                        %% cluster so we forward the call.
-                        %% We will store a local call promise,
-                        %% to match the incoming forwarded RESULT |
-                        %% ERROR.
-                        %% The remote node will store an invocation
-                        %% promise.
-                        %% A receive_progress option (already caller-gated)
-                        %% marks the promise so progressive RESULTs coming
-                        %% back do not settle it. We store the callee so a
-                        %% CANCEL (user-issued or caller-death) can be
-                        %% routed to the callee's node.
+                        %% The callee is on another node or bridged cluster,
+                        %% so the call is forwarded. This local call promise
+                        %% matches the forwarded RESULT | ERROR; the remote
+                        %% node stores an invocation promise. A caller-gated
+                        %% receive_progress option marks the promise so that
+                        %% progressive RESULTs do not settle it. The callee is
+                        %% stored so a CANCEL can be routed to its node.
                         P = bondy_rpc_promise:new_call(
                             RealmUri,
                             Caller,

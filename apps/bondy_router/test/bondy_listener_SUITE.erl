@@ -108,14 +108,12 @@ init_per_suite(Config) ->
     ok = bondy_ct:ensure_etc(),
     %% A real WAMP WebSocket handshake reaches `bondy_wamp_protocol:init/3',
     %% which builds a session id from `bondy_config:node_hash/0', which reads
-    %% `partisan_config:get(name)`. Verified directly: without this, that read
-    %% raises `badarg` (the key is never set) and every handshake in this
-    %% suite fails with 400 regardless of subprotocol. `partisan_config:init/0`
-    %% is the function `partisan_sup`'s own `init/1` calls to populate it, and
-    %% its doc sanctions calling it directly for tests ("idempotent, which is
-    %% required for testing") — it only sets persistent_term/application-env
-    %% config, so it does not start the peer-connection supervision tree the
-    %% full `partisan` application would.
+    %% `partisan_config:get(name)`. Without this, that read raises `badarg`
+    %% and every handshake in this suite fails with 400.
+    %% `partisan_config:init/0`
+    %% is what `partisan_sup`'s own `init/1` calls to populate it; its doc
+    %% sanctions calling it directly for tests, and it does not start the
+    %% peer-connection supervision tree.
     ok = partisan_config:init(),
     %% `bondy_listener_manager:init/0` appends the internal `admin_local`
     %% listener, whose socket path is `platform_runtime_dir`-relative and read
@@ -134,25 +132,18 @@ init_per_suite(Config) ->
     %% NODE-GLOBAL and outlive this suite in a `rebar3 ct` run that goes on
     %% to another suite in the same VM. Every case below that calls
     %% `bondy_listener_manager:init/0` first sets its own `listeners` value,
-    %% so nothing here leaks from one case to the NEXT case in this suite —
-    %% verified by reading every case: each one sets `listeners` (to a real
-    %% inventory or explicitly to `undefined`) before relying on it. What is
-    %% not restored is the value the LAST case in `all/0` happens to leave
-    %% behind, which is what `end_per_suite/1` puts back.
+    %% so nothing leaks from one case to the next. What is not restored is
+    %% the value the LAST case in `all/0` leaves behind, which is what
+    %% `end_per_suite/1` puts back.
     Original = bondy_config:get(listeners, undefined),
     %% The listeners ranch has bound when this suite begins. Every inventory
     %% `bondy_listener_manager:init/0` resolves — this suite's private ones
-    %% included — carries the reserved `admin` and the injected `admin_local`
-    %% (`with_reserved/1`), and those names are NODE-GLOBAL in ranch. So when
-    %% `bondy_router` is already running in this VM (an earlier suite's
-    %% one-shot `bondy_ct:start_bondy/0`), each case's
+    %% included — carries the reserved `admin` and the injected `admin_local`,
+    %% and those names are NODE-GLOBAL in ranch. So when `bondy_router` is
+    %% already running in this VM, each case's
     %% `bondy_listener_manager:stop(all)` also stops the node's REAL `admin`
-    %% and `admin_local` sockets, and a later suite — whose `start_bondy/0`
-    %% is then a no-op — finds `econnrefused` on 18081. Measured:
-    %% `--suite=bondy_listener_api_SUITE,bondy_listener_SUITE,
-    %% bondy_admin_listener_SUITE` failed three `bondy_admin_listener_SUITE`
-    %% cases that pass in any order where this suite runs first. Recorded
-    %% here so `end_per_suite/1` can put back exactly what was bound.
+    %% and `admin_local` sockets, and a later suite finds `econnrefused` on
+    %% 18081. Recorded here so `end_per_suite/1` can put back what was bound.
     Bound = maps:keys(ranch:info()),
     [
         {original_listeners, Original},
@@ -162,18 +153,12 @@ init_per_suite(Config) ->
     ].
 
 end_per_suite(Config) ->
-    %% Restoring `bondy_config`'s value is not enough on its own: if
-    %% `bondy_router` is already running by the time a later suite starts —
-    %% e.g. a bigger `rebar3 ct` run where some earlier suite already called
-    %% `bondy_ct:start_bondy/0` — `bondy_listener_manager:init/0` will not run
-    %% again on its own (`bondy_ct:start_bondy/0` is a one-shot per VM), so
-    %% the resolved-inventory cache this suite last wrote would survive
-    %% regardless of what `bondy_config:get(listeners, _)` now says. Calling
-    %% `init/0` here makes the fix work in both cases: `bondy_router` not yet
-    %% started (a later `start_bondy/0` resolves fresh from the restored
-    %% value anyway) and `bondy_router` already started (this call is the
-    %% only thing that will refresh the cache before that later suite reads
-    %% it).
+    %% Restoring `bondy_config`'s value is not enough on its own: when
+    %% `bondy_router` is already running (`bondy_ct:start_bondy/0` is a one-shot
+    %% per VM), `bondy_listener_manager:init/0` does not run again on its own,
+    %% so the resolved-inventory cache this suite last wrote would survive
+    %% regardless of what `bondy_config:get(listeners, _)` says. Calling
+    %% `init/0` here refreshes the cache in both cases.
     ok = bondy_config:set(listeners, ?config(original_listeners, Config)),
     ok = restore_runtime_dir(?config(original_runtime_dir, Config)),
     ok = bondy_listener_manager:init(),
@@ -210,26 +195,14 @@ listener(Name, Extra) ->
     L.
 
 %% `bondy_listener_ranch` builds its ranch options through
-%% `bondy_config:listener_transport_opts/2`. That resolves via `app_config`,
-%% which reads `persistent_term` — NOT application environment — so
-%% `application:set_env/3` is invisible to it. And `bondy_config:get/1` has no
-%% default, so a listener with no block raises rather than returning
-%% `undefined`, and `key_value:to_map/1` has no clause for `undefined` either.
-%% Each test listener therefore needs its block installed before the driver
-%% starts it.
-%%
-%% A full boot does this from application env via `bondy_config:init/1`; this
-%% suite starts only ranch and cowboy, so it installs the block directly.
-%%
-%% `ip_version` and `proxy_protocol` are stated here to give every case that
-%% uses this helper one known block, NOT because either is required: no default
-%% of any kind is in play in this suite, which bypasses cuttlefish entirely, and
-%% both consumers now supply their own. `normalise_socket_opts/1` falls back to
-%% `inet` for an absent `ip_version`, and `bondy_tcp_proxy_protocol:init/2`
-%% merges `enabled` and `mode` into whatever the block holds. The absent-block
-%% path is covered by `wamp_handshake_on_a_listener_with_no_option_block`, which
-%% installs nothing at all and completes a handshake, and the partial-block path
-%% by the two `partial_proxy_protocol_*` cases.
+%% `bondy_config:listener_transport_opts/2`, which reads `persistent_term` —
+%% NOT application environment — so `application:set_env/3` is invisible to it,
+%% and a listener with no block raises rather than returning `undefined`. Each
+%% test listener therefore needs its block installed before the driver starts
+%% it; this suite starts only ranch and cowboy, so it installs the block
+%% directly.
+%% `ip_version` and `proxy_protocol` give every case one known block, NOT
+%% because either is required: both consumers supply their own defaults.
 set_listener_env(Name) ->
     bondy_config:set(Name, [
         {transport_opts, [
@@ -347,12 +320,10 @@ manager_resolves_and_starts_by_phase(_Config) ->
     %%
     %% The NORMAL phase, deliberately: `admin_local` is `early` and declares
     %% `admin_api`, so starting the early phase here would reach
-    %% `bondy_http_gateway:admin_api_routes/1`, and through it
-    %% `bondy_config:get(priv_dir)` and the admin realm's RBAC groups. This
-    %% suite runs on ranch and cowboy alone, and booting most of a node into it
-    %% to check a selection rule would cost the isolation that makes the rest of
-    %% these cases cheap. Driving the normal phase exercises the same rule from
-    %% the other side: `ct_late` binds, and both `early` listeners must not.
+    %% `bondy_http_gateway:admin_api_routes/1` and the admin realm's RBAC
+    %% groups, which this ranch-and-cowboy-only suite never boots. Driving the
+    %% normal phase exercises the same rule from the other side: `ct_late`
+    %% binds, and both `early` listeners must not.
     ok = bondy_listener_manager:start(normal),
     ?assertMatch(Port when is_integer(Port), ranch:get_port(ct_late)),
     %% Not up: that is what lets the probe paths answer while the node still
@@ -366,10 +337,9 @@ manager_resolves_and_starts_by_phase(_Config) ->
     %% must have skipped it as well. Checked through the manager's own inventory
     %% rather than `ranch:get_port(admin_local)`: that name is NODE-GLOBAL, and in
     %% a full `rebar3 ct` run an earlier suite's `bondy_ct:start_bondy/0` leaves a
-    %% real `admin_local` registered in ranch, so the ranch assertion failed on VM
-    %% state this suite does not own while the selection rule it was testing was
-    %% intact. `ct_early` above still covers the operator-declared side over a
-    %% real socket.
+    %% real `admin_local` registered in ranch, which this suite does not own.
+    %% `ct_early` above still covers the operator-declared side over a real
+    %% socket.
     {ok, AdminLocal} = bondy_listener_manager:listener(admin_local),
     ?assertEqual(early, maps:get(start_phase, AdminLocal)),
 
@@ -398,21 +368,14 @@ tls_listeners_are_derived(_Config) ->
 
 listener_with_no_option_block_starts(_Config) ->
     %% A listener specified by its inventory entry and NOTHING else: no
-    %% `[ct_bare, ...]` block anywhere in configuration. That is a legitimate
-    %% listener — transport, protocol and a bind target fully determine it, and
-    %% the per-listener option keys carry no defaults of their own — so it must
-    %% bind a real socket, not raise.
+    %% `[ct_bare, ...]` block anywhere in configuration. Transport, protocol and
+    %% a bind target fully determine it, and the per-listener option keys carry
+    %% no defaults of their own, so it must bind a real socket, not raise.
     %%
     %% Deliberately NOT using this suite's `listener/2` helper: that installs an
-    %% option block, which is what hid three no-default reads
-    %% (`bondy_config:listener_transport_opts/2`'s block and `num_acceptors`,
-    %% and `normalise_socket_opts/1`'s `ip_version`). Each raised out of
-    %% `bondy_listener:start/1` rather than returning `{error, _}`, so
-    %% `bondy_router_app`'s `ok ?= start_normal_listeners()` could not catch it and the
-    %% node did not boot.
-    %%
-    %% `fun bondy_config:get/2` is the production accessor, so the resolver and
-    %% the driver read exactly what a real boot reads.
+    %% option block, which hides a no-default read that raises out of
+    %% `bondy_listener:start/1`. `fun bondy_config:get/2` is the production
+    %% accessor.
     Inventory = [
         {ct_bare, #{transport => tcp, protocol => wamp_rawsocket, port => 0}}
     ],
@@ -434,18 +397,14 @@ listener_with_no_option_block_starts(_Config) ->
     %% store): an absent block is no overrides, not a raise.
     ?assertEqual(#{}, bondy_config:listener_protocol_opts(ct_bare)),
 
-    %% And it serves: an accepted connection's handler SURVIVES. Without a
-    %% `proxy_protocol` block `bondy_tcp_proxy_protocol:init/2` returned `#{}`
-    %% and `source_ip/2` had no clause for it, so the handler died on every
-    %% accepted connection — a listener that binds but serves nothing.
+    %% And it serves: an accepted connection's handler SURVIVES. A listener
+    %% whose handler dies on every accepted connection binds but serves nothing.
     %%
     %% Counting connections cannot show this: `ranch:procs/2` counts the process
     %% as soon as it is spawned, before `init/1` runs, so the count reaches 1
-    %% either way (verified — with the defect reintroduced, a count-based
-    %% assertion still passed). Monitoring it does show it, and reports the exit
-    %% reason. The handler's `idle_timeout` defaults to `infinity` for a
-    %% listener with no block, so it has no reason of its own to exit inside
-    %% the window.
+    %% either way. Monitoring it does show it, and reports the exit reason. The
+    %% handler's `idle_timeout` defaults to `infinity` for a listener with no
+    %% block, so it has no reason of its own to exit inside the window.
     BoundPort = ranch:get_port(ct_bare),
     {ok, Sock} = gen_tcp:connect({127, 0, 0, 1}, BoundPort, [binary], 5000),
     ok = await_connections(L, 1),
@@ -503,12 +462,10 @@ uds_listener_accepts(_Config) ->
     %%
     %% NOT placed under `?config(priv_dir, Config)`: CT nests it under
     %% `ct_run.<node>.<ts>/lib.<app>.<suite>.logs/run.<ts>/log_private/`, which
-    %% measured 189 characters on this checkout — over `sockaddr_un.sun_path`,
-    %% 104 bytes on Darwin (108 on Linux). Verified directly:
-    %% `gen_tcp:listen(0, [{ifaddr, {local, Path}}])` returns `ok` for a
-    %% 26-character path and `{error, einval}` for a 155-character one. `/tmp`
-    %% keeps the path short; the pid suffix still makes it unique against
-    %% other parallel CT runs sharing that directory.
+    %% exceeds `sockaddr_un.sun_path` — 104 bytes on Darwin (108 on Linux) — and
+    %% `gen_tcp:listen/2` answers `{error, einval}` for such a path. `/tmp`
+    %% keeps
+    %% the path short; the pid suffix keeps it unique.
     Path = filename:join("/tmp", "bondy_ct_" ++ os:getpid() ++ ".sock"),
     L = listener(ct_uds, #{transport => uds, path => Path}),
     ok = bondy_listener:start(L),
@@ -520,11 +477,9 @@ uds_listener_accepts(_Config) ->
     %% no key an operator could use to widen it — is narrowed to 0600
     %% (`bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves`
     %% asserts that end). Narrowing every path bind would break a sidecar under
-    %% a different uid on upgrade, with no key to opt out.
-    %%
-    %% Asserted as "not 0600" rather than against a computed mode: the umask is
-    %% not readable from Erlang, and 0777 & ~umask equals 0600 only under a
-    %% umask of 0177.
+    %% a different uid on upgrade, with no key to opt out. Asserted as "not
+    %% 0600" rather than against a computed mode: the umask is not readable
+    %% from Erlang, and 0777 & ~umask equals 0600 only under a umask of 0177.
     {ok, #file_info{mode = Mode}} = file:read_file_info(Path),
     ?assertNotEqual(8#600, Mode band 8#777),
 
@@ -571,16 +526,10 @@ top_level_ip_does_not_reach_ranch(_Config) ->
     %% ranch transport option, and `key_value:to_map/1` is shallow, so an `ip`
     %% sitting at the top of a listener's `transport_opts` block survives the
     %% merge in `bondy_config:listener_transport_opts/2` and reaches
-    %% `ranch:start_listener/5`, whose `validate_transport_opt/3` catch-all
-    %% answers `false` for an unknown key — `{error, {bad_option, ip}}`, which
-    %% `fold_until_error/2` propagates and `bondy_router_app:start_normal_listeners/0`
-    %% turns into a refused boot.
-    %%
-    %% The block below puts the address at the top of `transport_opts` and the
-    %% same address on the spec. No schema key renders that shape, but
-    %% `bondy_config` still has to strip it, because the inventory's own `ip` key
-    %% reaches the same code. The listener name and ephemeral port are this
-    %% suite's, not `wamp_tcp`'s 18082, which the CT runner VM already holds.
+    %% `ranch:start_listener/5`, which answers `{error, {bad_option, ip}}` and
+    %% the boot refuses. The block below puts the address at the top of
+    %% `transport_opts` and the same address on the spec: the inventory's own
+    %% `ip` key reaches the same code.
     ok = bondy_config:set(ct_raw_ip, [
         {transport_opts, [{ip, "127.0.0.1"}, {num_acceptors, 2}]}
     ]),
@@ -652,15 +601,13 @@ ws_listener_restricted_to_one_protocol(_Config) ->
     ok = bondy_listener_manager:init(),
     %% NOT `start(all)`: `init/0` always injects the early-phase `admin` and
     %% `admin_local` listeners, both declaring `admin_api`, and compiling
-    %% their dispatch table reaches `bondy_http_gateway:admin_spec/0`'s
-    %% `priv_dir`/admin-realm machinery, which this suite's ranch+cowboy-only
-    %% harness never boots — verified directly: `start(all)` here raises
-    %% `badarg` in `app_config:maybe_badarg/1` via `admin_spec/0`, before this
-    %% test's own listeners are even reached.
-    %% `manager_resolves_and_starts_by_phase` above documents and avoids the
-    %% same landmine. Both of this test's
-    %% listeners default to `start_phase => normal`, so `start(normal)` is
-    %% enough to bind them.
+    %% their dispatch table reaches `bondy_http_gateway`'s
+    %% `priv_dir`/admin-realm
+    %% machinery, which this suite's ranch+cowboy-only harness never boots, so
+    %% `start(all)` here raises `badarg` before this test's own listeners are
+    %% reached. Both of this test's listeners default to `start_phase =>
+    %% normal`,
+    %% so `start(normal)` is enough to bind them.
     ok = bondy_listener_manager:start(normal),
 
     WampPort = ranch:get_port(ct_wamp_only),
@@ -887,12 +834,11 @@ http_versions_decide_alpn(_Config) ->
     ok = bondy_listener_manager:stop(all).
 
 splat_merges_into_an_existing_transport_block(_Config) ->
-    %% `splat/3` writes each leaf beside its siblings rather than replacing the
-    %% block that holds them. Nothing in the schema now writes a listener's
-    %% `transport_opts` except the splat itself, so this is no longer reachable
-    %% from configuration -- it guards the property directly, because a
-    %% regression to replace-semantics would silently drop whatever a caller had
-    %% already put there.
+    %% The splat writes each leaf beside its siblings rather than replacing the
+    %% block that holds them. Nothing in the schema writes a listener's
+    %% `transport_opts` except the splat itself, so this case guards the
+    %% property directly: a regression to replace-semantics would silently
+    %% drop whatever a caller had already put there.
     ok = bondy_config:set(
         [ct_merge, transport_opts],
         [{socket_opts, [{backlog, 4096}, {nodelay, true}]}]
@@ -912,18 +858,14 @@ splat_merges_into_an_existing_transport_block(_Config) ->
     ?assertEqual(true, key_value:get(nodelay, SocketOpts)).
 
 rawsocket_linger_reaches_the_socket_as_one_second(_Config) ->
-    %% The restored `linger.timeout` default, checked at the socket rather than
-    %% in `option_defaults/2`. Three things have to hold in sequence for it to
-    %% arrive and none of them is exercised by asserting on the defaults map:
-    %% `with_option_defaults/1` has to put it in the spec, the splat has to write
-    %% it under `[Name, transport_opts, socket_opts]`, and
-    %% `normalise_socket_opts/1` has to turn `linger_timeout` into `inet`'s
+    %% The `linger.timeout` default, checked at the socket rather than in
+    %% `option_defaults/2`. Three things have to hold in sequence for it to
+    %% arrive: `with_option_defaults/1` has to put it in the spec, the splat has
+    %% to write it under `[Name, transport_opts, socket_opts]`, and
+    %% `bondy_config` has to turn `linger_timeout` into `inet`'s
     %% `{linger, {true, N}}` pair. It goes through the MANAGER for that reason —
     %% `bondy_listener_config:resolve/2` does not apply option defaults.
-    %%
-    %% `1`, not `1000`: `inet` documents that component in seconds
-    %% (`kernel/src/inet.erl:1124`, OTP 28.5), and the pre-correction value was a
-    %% 1000-second blocking close on every raw-socket listener.
+    %% `1`, not `1000`: `inet` documents that component in seconds.
     ok = bondy_config:set(listeners, [
         {ct_linger, #{
             transport => tcp, protocol => wamp_rawsocket, port => 0
@@ -970,7 +912,7 @@ new_style_tls_material_is_visible_to_rotation(_Config) ->
     ).
 
 new_style_mtls_material_is_visible_to_rotation(_Config) ->
-    %% Same defect as `new_style_tls_material_is_visible_to_rotation/1`,
+    %% Same property as `new_style_tls_material_is_visible_to_rotation/1`, for
     %% mTLS instead of the server certificate: a listener whose `verify` and
     %% `cacertfile` live ONLY in its `tls` block must still be found by
     %% `bondy_cert_manager`'s own mTLS bookkeeping (`get_client_auth/1`), or
@@ -999,16 +941,14 @@ new_style_mtls_material_is_visible_to_rotation(_Config) ->
 
 splatted_cors_and_security_headers_reach_the_consumers(_Config) ->
     %% The render → splat → consumer boundary, which no other case spans: the
-    %% schema suite asserts on `bondy_router.listeners' only and says so, and
-    %% both consumers predate the inventory.
+    %% schema suite asserts on `bondy_router.listeners' only and says so.
     %%
-    %% `bondy_config:splat/3' descends every map and writes LEAVES, so
-    %% `bondy_config:get([Name, cors], _)' answers a PROPLIST while both
-    %% consumers require a map. Only the four historical names escaped, because
-    %% their legacy translations put a real map at `[Name, cors]' first and
-    %% `key_value:put/3' merges into it — so this case uses a name with no
-    %% legacy translation, which is every name an operator picks, `admin'
-    %% included.
+    %% `bondy_config:splat_listener_blocks/1' descends every map and writes
+    %% LEAVES, so `bondy_config:get([Name, cors], _)' answers a PROPLIST while
+    %% both consumers require a map. Only the four legacy names escape, because
+    %% their legacy translations put a real map at `[Name, cors]' first — so
+    %% this
+    %% case uses a name with no legacy translation, as every operator name is.
     Cors = #{
         enabled => true,
         allowed_origins => '*',
@@ -1136,14 +1076,13 @@ wamp_handshake_on_a_listener_with_no_option_block(_Config) ->
 rawsocket_ping_interval_comes_from_the_ping_block(_Config) ->
     %% Where the probe interval comes FROM, on the wire. The listener's own
     %% `idle_timeout` is 8h and its ping block's is 300ms, so a PING frame inside
-    %% two seconds can only have come from the ping block. Read from
-    %% `idle_timeout`, as `bondy_wamp_tcp_connection_handler:maybe_enable_ping/2`
-    %% used to, the first probe is eight hours away and this case times out.
+    %% two seconds can only have come from the ping block; read from
+    %% `idle_timeout`, the first probe is eight hours away and this case times
+    %% out.
     %%
     %% Driven through the manager rather than `bondy_listener_config:resolve/2`:
     %% the handler reads the block from `[Name, ping]`, which nothing populates
-    %% until `bondy_config:splat_listener_blocks/1` has copied it out of the
-    %% inventory entry, and that is the manager's job.
+    %% until the manager has copied it out of the inventory entry.
     ok = bondy_config:set(listeners, [
         {ct_ping, #{
             transport => tcp,
@@ -1312,10 +1251,10 @@ one_port_two_addresses(_Config) ->
     %% distinct addresses; this is what establishes the OS permits it too. The
     %% resolver agreeing with itself proves nothing.
     %%
-    %% `127.0.0.1` and `::1` rather than two loopback aliases: measured on darwin
-    %% 25.5, `gen_tcp:listen(0, [{ip, {127,0,0,2}}])` answers `eaddrnotavail`
+    %% `127.0.0.1` and `::1` rather than two loopback aliases: on Darwin
+    %% `gen_tcp:listen(0, [{ip, {127,0,0,2}}])` answers `eaddrnotavail`
     %% because only `127.0.0.1` is on `lo0`, so a 127.0.0.0/8 pair would pass on
-    %% Linux and fail here.
+    %% Linux and fail there.
     ok = set_listener_env(ct_share_v4),
     ok = set_v6_listener_env(ct_share_v6),
     Port = a_free_port(),
@@ -1362,7 +1301,7 @@ connection_alarms_reach_ranch(_Config) ->
     %% 125, not the 128 `set_listener_env/1` uses: both percentages of 125 land
     %% on a fraction above a half (93.75 and 112.5), so `trunc` and `round` give
     %% different answers and the truncation is actually pinned. At 128 they agree
-    %% and a `round` mutant survives — measured.
+    %% and a `round` mutant survives.
     ok = bondy_config:set(ct_alarms, [
         {transport_opts, [
             {num_acceptors, 2},
@@ -1585,21 +1524,14 @@ http_status(Port, Host, Path) ->
 virtual_hosts_are_routed_independently(_Config) ->
     %% The wire-level proof that a route set's HOST is honoured, and the
     %% falsification of the two ordering rules `bondy_http_services` derives from
-    %% `cowboy_router`'s source.
-    %%
-    %% One carrier contributes both a named host and `'_'`. Cowboy commits to the
-    %% first host entry whose host matches and never falls through
-    %% (`match_path([], _, _, _)` answers `{error, notfound, path}`,
-    %% `cowboy_router.erl:253`), so:
-    %%
-    %%   * `/everywhere` on `api.example.com` answers ONLY because every `'_'`
-    %%     route is replicated into each named host entry. Without that it is
-    %%     404 — which is what a specification-declared host did before this
-    %%     branch, taking `/ws` and `/metrics` off that host.
-    %%   * `/only-here` on `api.example.com` answers ONLY because the `'_'` entry
-    %%     is emitted LAST. `'_'` matches unconditionally
-    %%     (`cowboy_router.erl:225`), so emitted first it would swallow the
-    %%     request and 404.
+    %% `cowboy_router`'s source. One carrier contributes both a named host and
+    %% `'_'`. Cowboy commits to the first host entry whose host matches and
+    %% never
+    %% falls through, so `/everywhere` on `api.example.com` answers ONLY because
+    %% every `'_'` route is replicated into each named host entry, and
+    %% `/only-here` on `api.example.com` answers ONLY because the `'_'` entry is
+    %% emitted LAST: `'_'` matches unconditionally and emitted first swallows
+    %% it.
     ok = application:set_env(bondy_router, http_services, [
         {vhost, #{carrier => vhost, protocol => undefined}}
     ]),
@@ -1641,16 +1573,10 @@ max_cookies_is_enforced_per_listener(_Config) ->
     %% Cowboy's protocol loop does not read: cowlib takes the limit per call
     %% (`cow_cookie:parse_cookie/2`), so it only reaches a request because
     %% `bondy_http_utils:parse_cookies/1` reads it back out of the listener's
-    %% `protocol_opts` and passes it to `cowboy_req:parse_cookies/2`. Handing
-    %% the option to Cowboy and asserting on the resolved configuration would
-    %% therefore both pass with the read site deleted; only a request proves it.
-    %%
-    %% Two listeners, because the option has two live values and each needs its
-    %% own socket: what an operator wrote, and — since every
-    %% `listeners.$name.*` mapping is default-free — the 100 cowlib applies when
-    %% nothing was written. The second half is not decoration: unbounded cookie
-    %% parsing is what Bondy did before cowboy 2.18, so `ct_cookies_default`
-    %% pins the new upstream limit reaching a listener nobody configured.
+    %% `protocol_opts`. Asserting on the resolved configuration would pass with
+    %% the read site deleted; only a request proves it. Two listeners, because
+    %% the option has two live values: what an operator wrote, and the 100
+    %% cowlib applies when nothing was written (every mapping is default-free).
     ok = application:set_env(bondy_router, http_services, [
         {cookies, #{carrier => cookies, protocol => undefined}}
     ]),
@@ -1700,7 +1626,6 @@ max_cookies_is_enforced_per_listener(_Config) ->
 %% `bondy_http_utils:parse_cookies/1` returned. Raw `gen_tcp` for the same
 %% reason `http_status/3` uses it: the request header IS the subject, and an
 %% HTTP client with its own cookie jar would not send this one verbatim.
-%%
 %% `N` cookies of the form `cN=1` stay well under the 4096-byte
 %% `max_header_value_length` Cowboy defaults to at N = 101 (~800 bytes), so a
 %% 400 here is the cookie COUNT limit and not the header SIZE limit.

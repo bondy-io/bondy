@@ -6,8 +6,9 @@
 %% one that is already raised is a restatement, not a second alarm. Callers do
 %% restate freely (`bondy_oplog_responder` and `bondy_oplog_applier` set theirs
 %% once per offending item), so the handler must be idempotent in the ID —
-%% otherwise the alarm list grows per event and, because `clear_alarm/1`
-%% removes only the first match, the alarm can never be cleared again.
+%% otherwise the alarm list grows per event and a list-based clear (OTP's
+%% default `alarm_handler` uses `lists:keydelete/3`) removes only the first
+%% match, so the alarm can never be cleared again.
 %%
 %% Driven through `gen_event` callbacks directly: no running Bondy needed.
 %% =============================================================================
@@ -33,10 +34,9 @@ repeated_set_of_the_same_alarm_does_not_accumulate_test() ->
     S = set_n({?ID, <<"desc">>}, 1000, state()),
     ?assertEqual([{?ID, <<"desc">>}], alarms(S)).
 
-%% The consequence that made the leak more than cosmetic: `clear_alarm/1` uses
-%% `lists:keydelete/3`, which removes ONE entry, so N accumulated duplicates
-%% would leave N-1 stale alarms behind and the alarm would look permanently
-%% raised.
+%% OTP's default `alarm_handler` clears with `lists:keydelete/3`, which removes
+%% ONE entry, so N accumulated duplicates would leave N-1 stale alarms behind
+%% and the alarm would look permanently raised.
 one_clear_clears_a_repeatedly_set_alarm_test() ->
     S0 = set_n({?ID, <<"desc">>}, 100, state()),
     S1 = clear(?ID, S0),
@@ -384,14 +384,11 @@ flipping_affects_ready_alone_is_a_transition_test() ->
     ?assertEqual([updated, raised], [maps:get(action, E) || E <- history_(S1)]).
 
 %% `affects_ready/0` reads a PUBLISHED boolean rather than calling the handler,
-%% so it can lag the alarm map. This is the falsifier for that: after every
-%% transition shape — first raise, a second non-blocking alarm, clearing the
-%% blocking one, and a restatement that flips the flag — the published value
-%% must equal the oracle `handle_call(affects_ready, _)` recomputes.
-%%
-%% Kills the two ways a cache goes wrong: a transition that forgets to publish
-%% (the raise and the clear are separate code paths), and a publication that
-%% inspects the alarm being written instead of the whole map.
+%% so it can lag the alarm map. After every transition shape — first raise, a
+%% second non-blocking alarm, clearing the blocking one, and a restatement that
+%% flips the flag — the published value must equal the oracle
+%% `handle_call(affects_ready, _)` recomputes. This catches a transition that
+%% forgets to publish and a publication that inspects only the alarm written.
 published_readiness_matches_the_handler_test() ->
     Check = fun(S) ->
         ?assertEqual(blocking_(S), bondy_alarm_handler:affects_ready()),
@@ -553,11 +550,9 @@ clearing_an_unraised_alarm_emits_nothing_test() ->
 %% gen_event handler down and the node loses EVERY alarm it holds, so a
 %% misspelled raise must not be able to end the alarm subsystem.
 %%
-%% Dropping it SILENTLY is not. A producer would be reporting a fault that
-%% appears nowhere at all, with nothing to say it tried — the failure this
-%% whole subsystem exists to prevent, one level down. So the falsifier is the
-%% LOG RECORD and not the surviving state: the state survives either way, and a
-%% case that only checked it would pass against the catch-all this replaced.
+%% Dropping it SILENTLY is not: a producer would be reporting a fault that
+%% appears nowhere at all. So the falsifier is the LOG RECORD and not the
+%% surviving state, which a silent catch-all also preserves.
 an_unkeyable_raise_is_logged_test() ->
     ?assertMatch(
         #{level := warning, alarm := ?UNKEYABLE},

@@ -186,18 +186,16 @@ than exposing them:
   adapter.
 
 Every default is leveled's own (`?OPTION_DEFAULTS` in `leveled_bookie`),
-which applied before by omission, with two exceptions.
+with two exceptions.
 
-`cache_size` stays at 2000, the value `bondy_db` has always passed. It sits
-20% under leveled's 2500 and the difference is not worth a behaviour change.
+`cache_size` is 2000. It sits 20% under leveled's 2500 and the difference
+is not worth a behaviour change.
 
-`max_journalsize` is leveled's 1 GB rather than the 100 MB `bondy_db`
-previously passed. That 100 MB came from a default the code itself
-described as tuned for fast tests, and it costs a large store ten times the
-journal files, file handles and compaction runs it needs. The option is the
-inker's roll threshold for the head file, not a format parameter, so raising
-it leaves sealed journals untouched and only makes files rolled from now on
-larger.
+`max_journalsize` is leveled's 1 GB. A 100 MB journal costs a large store
+ten times the journal files, file handles and compaction runs it needs. The
+option is the inker's roll threshold for the head file, not a format
+parameter, so a change leaves sealed journals untouched and only sizes the
+files rolled afterwards.
 """.
 -spec leveled_opts() -> proplists:proplist().
 

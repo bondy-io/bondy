@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Realm-scoped secondary index reads on a `shared_shards` (G-1) table — the
+%% Realm-scoped secondary index reads on a `shared_shards` table — the
 %% production `main` topology, where the realm is folded into the cell KEY
 %% (not the bucket). The index entry key is therefore
 %% `<<enc(Term), 0, Realm, 0, Key>>`, so a term's entries span every realm

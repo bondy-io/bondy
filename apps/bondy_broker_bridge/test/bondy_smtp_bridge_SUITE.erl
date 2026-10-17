@@ -211,7 +211,8 @@ refused_sender_sends_nothing(Config) ->
 -doc """
 A stalled relay does not serialise event handling.
 
-This is the design's central claim, and it is measured rather than assumed.
+This is the design's central claim, and this case measures it rather than
+assumes it.
 
 Note what is NOT measured: how long `publish` takes. Delivery to a local
 subscriber is a cast, so the publisher returns before the subscriber has run and
@@ -221,10 +222,9 @@ three seconds and the pool is four workers wide, so eight messages take exactly
 two rounds -- about six seconds -- when the callback queues them. A callback that
 waited for delivery would handle one event at a time and need `8 x 3s = 24s`.
 
-"Exactly" because workers are chosen by rotation. While they were chosen by
-hashing an eight-message burst landed 3/2/2/1 as readily as 2/2/2/2, and this
-case passed or failed on the draw -- which is what surfaced the uneven spread
-in the first place.
+"Exactly" because `bondy_mail_worker` chooses workers by rotation. A hash
+would land an eight-message burst 3/2/2/1 as readily as 2/2/2/2, and this case
+would pass or fail on the draw.
 
 The bound sits between the two, far enough from six to tolerate a slow machine
 and far enough from twenty-four to fail the shape that matters.

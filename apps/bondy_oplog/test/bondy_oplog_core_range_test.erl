@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Tests for `bondy_oplog_core:range/4` (`MST_DB_DESIGN.md` §9, wired in D5).
+%% Tests for `bondy_oplog_core:range/4`.
 %%
 %% Pins: projection-only ranges, overlay-only ranges, projection+overlay
 %% merge per key, limit, direction, include_overlay flag, fence on

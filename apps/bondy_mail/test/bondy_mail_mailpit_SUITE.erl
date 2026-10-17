@@ -424,8 +424,7 @@ relays(CaCertFile) ->
     [
         %% `allowed_from` is set only on this relay, and only so that
         %% `display_name_is_parsed_as_a_name` can supply a sender. Every other
-        %% relay here leaves it closed, which is the default and is what the
-        %% first version of that case ran into.
+        %% relay here leaves it closed, which is the default.
         Common#{
             name => ~"plain",
             port => ?PLAIN_PORT,

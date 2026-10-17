@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Tests for the freshness family (`MST_DB_DESIGN.md` §11, wired in D7):
+%% Tests for the freshness family:
 %% `ensure_fresh/2`, `ensure_fresh_for_keys/2`, `freshness/1`, plus the
 %% `bump_ae/3` / `last_ae_at/3` registry primitives the family rests on.
 %% =============================================================================

@@ -501,22 +501,10 @@ skip_bytes_or_text(Bin, 27, Rest) ->
         _ ->
             error
     end;
-skip_bytes_or_text(_Bin, 31, Rest) ->
-    skip_indefinite_chunks(Rest, 1);
+skip_bytes_or_text(Bin, 31, Rest) ->
+    skip_until_break(Rest, 1, Bin);
 skip_bytes_or_text(_, _, _) ->
     error.
-
-%% @private
-skip_indefinite_chunks(<<16#ff, Rest/binary>>, _StartPos) ->
-    %% Break code - end of indefinite-length item
-    {ok, <<16#ff>>, Rest};
-skip_indefinite_chunks(Bin, _StartPos) ->
-    case skip_cbor_value(Bin) of
-        {ok, _ChunkBin, Rest} ->
-            skip_indefinite_chunks(Rest, 0);
-        error ->
-            error
-    end.
 
 %% @private
 skip_array(Bin, Info, Rest) when Info < 24 ->

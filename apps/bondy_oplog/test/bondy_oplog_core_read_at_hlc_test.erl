@@ -1,6 +1,5 @@
 %% =============================================================================
-%% Tests for `bondy_oplog_core:read_at_hlc/3` (`MST_DB_DESIGN.md` §10, wired
-%% in D6).
+%% Tests for `bondy_oplog_core:read_at_hlc/3`.
 %%
 %% Pins: projection at-or-before T returns; projection past T refuses;
 %% overlay events through T fold in; nothing-yet returns initial_value

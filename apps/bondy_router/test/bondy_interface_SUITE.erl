@@ -284,8 +284,8 @@ reflection_reads_without_bondy_mcp(_Config) ->
 welcome_advertises_reflection(_Config) ->
     %% `bondy_config:setup_wamp/0` seats `?DEALER_FEATURES` /
     %% `?BROKER_FEATURES` into `[wamp, Role, features, _]` — the single
-    %% source both WELCOME and `is_feature_implemented/1` read — so this is
-    %% the announcement, flipped in the same increment as the procedures.
+    %% source both WELCOME and `is_feature_implemented/1` read — so this case
+    %% checks the announcement itself.
     ?assertEqual(true, bondy_config:get([wamp, dealer, features, reflection])),
     ?assertEqual(true, bondy_config:get([wamp, broker, features, reflection])).
 

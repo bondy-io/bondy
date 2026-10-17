@@ -185,10 +185,8 @@ empty_uri(_) ->
 
     ok.
 
-%% The loose component class must reject ALL control characters. PCRE `\s`
-%% does not cover NUL, and a NUL-bearing URI accepted as a realm would defeat
-%% the NUL-separator storage-key encoding downstream (`bondy_db` G-1) — a
-%% multi-tenancy boundary. Regression for the tightened classes.
+%% The loose component class rejects every control character, NUL included
+%% (PCRE `\s` does not cover NUL).
 control_chars_rejected(_) ->
     Bad = [
         <<"a", 0, "b">>,
@@ -231,9 +229,8 @@ do_match(_) ->
     ?assert(bondy_wamp_uri:match(<<"a.">>, <<"a">>, ?PREFIX_MATCH)),
     ?assert(bondy_wamp_uri:match(<<"a.b">>, <<"a">>, ?PREFIX_MATCH)),
 
-    %% Z-1: prefix matching is component-boundary-aware, NOT byte-wise. A grant
-    %% prefixed `com.app.order` must NOT leak onto sibling URIs that merely share
-    %% the byte prefix across a component boundary.
+    %% Prefix matching is component-boundary-aware: the grant `com.app.order`
+    %% does not cover `com.app.orders_admin.x`.
     ?assertEqual(
         false,
         bondy_wamp_uri:match(

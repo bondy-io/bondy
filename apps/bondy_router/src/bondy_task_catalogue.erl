@@ -42,7 +42,7 @@ a property of the code at all, and that is this table's whole subject:
 - **`args`** — one JSON Schema per positional argument, in order. It is what
   `bondy.task.catalogue` returns, and it is the difference between an agent
   that can RECOMMEND a remediation and one that can only name it: no shipped
-  MCP overlay exposes these procedures as tools (MCP-D32), so the catalogue is
+  MCP overlay exposes these procedures as tools, so the catalogue is
   the whole planning surface. Only the LIST LENGTH is verified —
   `bondy_task_catalogue_test:argument_counts_match_the_handlers` reads the
   arity each handler validates out of the compiled abstract code — so the
@@ -157,14 +157,10 @@ list() ->
     [
         %% `bondy_listener_manager:suspend/1`: stops accepting NEW connections
         %% on a phase; established connections are unaffected. Disruptive
-        %% rather than recoverable because a client trying to connect is
-        %% refused, and `node` rather than `cluster` because a phase is this
-        %% node's own listeners.
-        %%
-        %% `idempotent => false` is the absence of a claim, not a warning:
-        %% `bondy_listener_api_SUITE` pins `resume_is_idempotent` and says in
-        %% its own moduledoc which cases it does not cover — suspend is not
-        %% among the pinned ones.
+        %% because a client trying to connect is refused; `node` because a
+        %% phase is this node's own listeners. `idempotent => false` is the
+        %% absence of a claim: `bondy_listener_api_SUITE` pins
+        %% `resume_is_idempotent` only.
         #{
             id => ~"bondy.listener.suspend",
             title => ~"Suspend a listener phase",
@@ -420,15 +416,12 @@ list() ->
                 #{kind => procedure, ref => ~"bondy.mail.relay.list"}
             ]
         },
-        %% The only `destructive` entry, and the grade is about what the
-        %% removal RELEASES rather than about anything the call writes.
-        %% Membership is the reclamation authority
+        %% The only `destructive` entry: the grade is about what the removal
+        %% RELEASES. Membership is the reclamation authority
         %% (`bondy_oplog_instance:reclamation_members/0`), so once a node is
-        %% out, `bondy_oplog_origin_retirement` may reap its origins by
-        %% complement — and a node rejoining under the same name is handed a
-        %% NEW origin, its former frontier entries gone. There is no task that
-        %% undoes that, which is why `reverses` is absent where the bridge and
-        %% overlay pairs have one.
+        %% out its origins may be reaped, and a node rejoining under the same
+        %% name is handed a NEW origin. No task undoes that, so `reverses` is
+        %% absent.
         #{
             id => ~"bondy.cluster.leave",
             title => ~"Remove a node from the cluster",

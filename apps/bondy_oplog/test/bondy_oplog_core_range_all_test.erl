@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Tests for `bondy_oplog_core:range_all/4,5` (`MST_DB_DESIGN.md` §18 item 2).
+%% Tests for `bondy_oplog_core:range_all/4,5`.
 %%
 %% Pins cross-shard scatter-merge: enumerating every shard registered
 %% under `(NS, Index)`, running the single-shard `range/5` per shard with

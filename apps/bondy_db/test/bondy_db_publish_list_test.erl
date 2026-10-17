@@ -294,7 +294,7 @@ live(Cells) ->
 %% `list/2` narrows to one realm; `fold_all/4` is the same scan without that
 %% narrowing, for callers that cannot name the realms up front. It yields the
 %% STORAGE key (`<<Realm, 0, Key>>`) because it does not know the realm to
-%% strip — the caller splits on the first NUL, which is exact under G-1.
+%% strip — the caller splits on the first NUL, exact under the realm fold.
 fold_all_spans_realms() ->
     {Db, T} = open(fold_all_realms, false),
     try
@@ -395,10 +395,11 @@ fold_all_unsupported_topology() ->
     ],
     ok.
 
-%% G-1's injectivity precondition, enforced at the facade: a NUL inside a
-%% realm would fold realms `<<"a">>` and `<<"a",0,"b">>` onto colliding
-%% storage cells, and the shorter realm's scan band would CONTAIN the longer
-%% realm's rows — a cross-tenant leak. Writes AND scans must refuse.
+%% The realm fold's injectivity precondition, enforced at the facade: a NUL
+%% inside a realm would fold realms `<<"a">>` and `<<"a",0,"b">>` onto
+%% colliding storage cells, and the shorter realm's scan band would CONTAIN
+%% the longer realm's rows — a cross-tenant leak. Writes AND scans must
+%% refuse.
 nul_realm_refused() ->
     {Db, T} = open(nul_realm, false),
     try

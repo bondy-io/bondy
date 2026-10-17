@@ -16,19 +16,15 @@ The catalogue is a literal table today, so nothing here is reachable from a
 real entry — which is the point. The rendering is the last thing between the
 table and a JSON encoder, and a table is edited by hand.
 
-`render/1` was exported for this module and this module did not exist
-(found 2026-09-01). The gap was not free: `key/1` had lost its total clause and
-the encoder claimed a totality it did not have, which is exactly what the first
-case below now pins.
+A map key that is neither an atom nor a binary renders as a binary; the first
+case below pins it.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
 
-%% The defect this module was missing. `encodable/1`'s last clause renders any
-%% value, but a map's KEYS go through `key/1` — so a non-atom, non-binary key
-%% raised `function_clause` from inside the fold, which no `encodable/1` clause
-%% could catch. A tuple key is the shape a hand-edited table most plausibly
-%% grows.
+%% A map's KEYS are rendered separately from its values, so a non-atom,
+%% non-binary key is the case a value-level catch-all cannot cover. A tuple
+%% key is the shape a hand-edited table most plausibly grows.
 a_map_key_that_is_neither_atom_nor_binary_renders_test() ->
     R = bondy_task_api:render(#{args => [#{{1, 2} => ~"odd"}]}),
     [Arg] = maps:get(~"args", R),

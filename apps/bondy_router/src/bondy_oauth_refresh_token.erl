@@ -46,7 +46,7 @@ new(Key) ->
 
     %% Add additional random bytes for extra entropy
 
-    % 64 additional random bits
+    %% 64 additional random bits
     MinRandomBytes = 8,
     ConfigLen = crypto:strong_rand_bytes(?REFRESH_TOKEN_LEN),
     Len = min(byte_size(UUID) + MinRandomBytes, ConfigLen) - MinRandomBytes,
@@ -68,7 +68,7 @@ new(Key, SecretKey) ->
 
     %% Create HMAC for integrity protection
     HMAC = crypto:mac(hmac, sha256, SecretKey, UUID),
-    % Use first 128 bits
+    %% Use first 128 bits
     HMACTruncated = binary:part(HMAC, 0, 16),
 
     Id = base64_encode(<<UUID/binary, HMACTruncated/binary>>),

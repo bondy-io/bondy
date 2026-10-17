@@ -212,7 +212,7 @@ Used for adding proxy entries only as it skips all checks.
 Fails with `badarg` if  `Entry` is not a proxy entry.
 """.
 -spec add(Partition :: pid(), entry()) ->
-    {ok, IsFirstEntry :: boolean()} | {error, any()}.
+    {ok, {entry(), IsFirstEntry :: boolean()}} | {error, any()}.
 
 add(Partition, Entry) when is_pid(Partition) ->
     Store = store(Partition),

@@ -3,18 +3,18 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Falsifiers for the pure MCP ⇄ WAMP mapping: §16.1's symmetric `@args`
-%% flattening in both directions, §10.2's structured retryable
+%% Falsifiers for the pure MCP ⇄ WAMP mapping: the symmetric `@args`
+%% flattening in both directions, the structured retryable
 %% classification, the transport's header Value Encoding (sentinel decode
 %% in both directions), RFC 6570 template binding with `uri_vars_schema`
 %% coercion, and the wire `Tool` descriptor (camelCase annotations, the
-%% permissive default input schema, the §7.5 hash in `_meta`).
+%% permissive default input schema, the content hash in `_meta`).
 -module(bondy_mcp_wamp_test).
 
 -include_lib("eunit/include/eunit.hrl").
 
 %% =============================================================================
-%% §16.1 arguments — both directions
+%% Arguments — both directions
 %% =============================================================================
 
 call_args_test() ->
@@ -51,7 +51,7 @@ flatten_payload_test() ->
     ).
 
 %% =============================================================================
-%% Results and §10.2 errors
+%% Results and errors
 %% =============================================================================
 
 call_result_test() ->

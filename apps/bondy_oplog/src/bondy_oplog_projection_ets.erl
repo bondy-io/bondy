@@ -172,16 +172,13 @@ first_row(Tab, Seed, Low, _High) ->
     end.
 
 %% @private
-%% Step forward from `Prev`, emitting at most `N` rows. Rows accumulate
-%% newest-first.
-%%
-%% Leaving the bucket is detected by the key tag, not by a bound: the
-%% successor of a bucket's last key is the FIRST key of the next bucket,
-%% which is a well-formed key of the same shape. The pins are
-%% `prop_never_leaves_its_bucket/0` and the confinement example beside it.
-%%
-%% `High =:= infinity` cannot be folded into the comparison because atoms
-%% sort BEFORE binaries, so `Key < infinity` is false for every key.
+%% Step forward from `Prev`, emitting at most `N` rows, newest-first. Leaving
+%% the bucket is detected by the key tag, not by a bound: the successor of a
+%% bucket's last key is the first key of the next bucket, a well-formed key of
+%% the same shape (`bondy_oplog_projection_ets_proper_test`,
+%% `prop_never_leaves_its_bucket`). `High =:= infinity` cannot be folded into
+%% the comparison because atoms sort before binaries, so `Key < infinity` is
+%% false for every key.
 walk(_Tab, _Bucket, _Prev, _High, N, Acc) when N =< 0 ->
     Acc;
 walk(Tab, Bucket, Prev, High, N, Acc) ->

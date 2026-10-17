@@ -98,15 +98,12 @@ cluster_get_by_id_across_nodes(Config) ->
         erpc:call(Coordinator, ?MODULE, do_get, [?REALM, 999999999999999])
     ).
 
-%% `page_members/4` pairs each member session with the node holding it, and that
-%% node is the whole point — it is what `bondy.registration.callee.list`
-%% reports. The realm-wide form must span the cluster: reading
-%% `bondy_registry:match/3` instead would answer with the coordinator's OWN
-%% entries only under write-only RIB, silently omitting the peer's callees and
-%% shrinking the answer as the cluster grows.
-%%
-%% The page size is deliberately smaller than one node's share, so the walk
-%% must cross a page boundary AND a node boundary to see both.
+%% `page_members/4` pairs each member session with the node holding it, and
+%% that node is what `bondy.registration.callee.list` reports. The realm-wide
+%% form must span the cluster: `bondy_registry:match/3` would answer with the
+%% coordinator's OWN entries only under write-only RIB, silently omitting the
+%% peer's callees. The page size is deliberately smaller than one node's
+%% share, so the walk must cross a page boundary AND a node boundary.
 cluster_member_pages_span_nodes(Config) ->
     Coordinator = ?config(coordinator, Config),
     Peer = peer_node(Config),

@@ -419,9 +419,9 @@ partitions_survive_manager_crash(_Config) ->
 
     RingBefore = persistent_term:get({bondy_http_transport_queue, ring}),
 
-    %% Simulate a manager crash. The supervisor will restart it, which
-    %% calls bondy_http_transport_queue:init/0 again (now idempotent). We
-    %% reproduce that sequence manually here.
+    %% Simulate a manager crash. The supervisor restarts it, which calls
+    %% `bondy_http_transport_queue:init/0` again; `init/0` is idempotent. This
+    %% case reproduces that sequence manually.
     ManagerPid = whereis(bondy_http_transport_queue_manager),
     ?assert(is_pid(ManagerPid)),
 

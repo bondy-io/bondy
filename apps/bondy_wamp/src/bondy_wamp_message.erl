@@ -31,10 +31,9 @@ options/details maps are invalid.
     | wamp_unsubscribed()
     | wamp_yield().
 
-%% Per-message aliases for the record types in `bondy_wamp.hrl`. Callers spell
-%% these module-qualified (`bondy_wamp_message:call()`) precisely so they do not
-%% have to include the header to name one message; both were referenced that way
-%% long before they existed here, which made every such spec resolve to `any()`.
+%% Per-message aliases for the record types in `bondy_wamp.hrl`. A caller
+%% names one message as `bondy_wamp_message:call()` without including the
+%% header.
 -type call() :: wamp_call().
 -type publish() :: wamp_publish().
 

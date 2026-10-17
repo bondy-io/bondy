@@ -246,10 +246,9 @@ clamped to `Max` and falling back to `Default`.
 
 KWArgs rather than a CALL option, for the reason `dry_run/1` gives: a page
 size is an argument to the procedure, and for a `bondy.*` procedure Bondy is
-the callee. It was `CALL.Options._limit` until 2026-09-01; the option form
-never reached a callee at all, because `bondy_dealer` builds INVOCATION.Details
-from `?WAMP_PPT_ATTRS ++ ?WAMP_TRACE_ATTRS` only, so no procedure outside the
-static `bondy.*` table could ever have implemented it.
+the callee. A CALL option would never reach a callee, because `bondy_dealer`
+builds INVOCATION.Details from `?WAMP_PPT_ATTRS ++ ?WAMP_TRACE_ATTRS` only, so
+no procedure outside the static `bondy.*` table could implement it.
 
 **Deliberately tolerant.** A junk or out-of-range limit falls back to
 `Default` rather than erroring, because a page size has a sane default and

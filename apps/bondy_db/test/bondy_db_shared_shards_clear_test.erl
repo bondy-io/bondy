@@ -264,7 +264,8 @@ open_indexed(Db, ET) ->
         indexes => [#{name => ?IDX, extract => []}]
     }).
 
-%% As `open_indexed/2`, with the writer flushing only on `flush_sync/1`.
+%% As `open_indexed/2`, with the writer flushing only on
+%% `bondy_oplog_secondary_writer:flush_sync/1`.
 open_unflushed(Db, ET) ->
     bondy_db:open_table(Db, ET, #{
         fold_module => ?FOLD,

@@ -1,4 +1,4 @@
-%% Stage 6 stress test: random interleavings of (append, sync) on two
+%% Stress test: random interleavings of (append, sync) on two
 %% replicas, verifying convergence after quiescence.
 %%
 %% Not a full PropEr property, but exercises the same shape: many

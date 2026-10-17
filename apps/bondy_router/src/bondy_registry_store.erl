@@ -596,7 +596,7 @@ find(Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
     EntryId = bondy_registry_entry:id(Pattern),
     Pairs = find_pairs(Store, Type, RealmUri, Session, EntryId),
 
-    %% Match the plum_db contract, keyed on `{limit, _}`: a bounded request gets
+    %% The result shape is keyed on `{limit, _}`: a bounded request gets
     %% the `{List, Cont}` form (`?EOT` for empty); an unbounded one a bare list.
     %% bondy_db reads always materialise the whole (bounded) set, so the
     %% continuation is always already exhausted (`?EOT`).
@@ -1088,7 +1088,7 @@ When there are no more objects in the table, `'$end_of_table'` is returned.
 match_prefix(?EOT) ->
     ?EOT;
 match_prefix(#continuation{}) ->
-    %% ART does not support limits yet
+    %% Prefix and wildcard matches are not paginated
     ?EOT.
 
 -doc """
@@ -1113,7 +1113,7 @@ At the moment this call always returns `'$end_of_table'`.
 match_wildcard(?EOT) ->
     ?EOT;
 match_wildcard(#continuation{}) ->
-    %% ART does not support limits yet
+    %% Prefix and wildcard matches are not paginated
     ?EOT.
 
 -doc """
@@ -1237,7 +1237,7 @@ At the moment this call always returns `'$end_of_table'`.
 find_prefix_matches(?EOT) ->
     ?EOT;
 find_prefix_matches(#continuation{}) ->
-    %% ART does not support limits yet
+    %% Prefix and wildcard matches are not paginated
     ?EOT.
 
 -doc """
@@ -1267,7 +1267,7 @@ At the moment this call always returns `'$end_of_table'`.
 find_wildcard_matches(?EOT) ->
     ?EOT;
 find_wildcard_matches(#continuation{}) ->
-    %% ART does not support limits yet
+    %% Prefix and wildcard matches are not paginated
     ?EOT.
 
 -doc """
@@ -1808,8 +1808,7 @@ policy_atom(?WILDCARD_MATCH) -> wildcard.
 %% Data stored at each `#{EntryKey => _}` slot inside a ptrie leaf. We
 %% inline Nodestring and ProtocolSessionId so post-match filtering
 %% (remote vs local, Opts.eligible/exclude, Opts.invoke) can run without
-%% an extra plum_db lookup — mirrors the fields the old ART match-spec
-%% filtered on.
+%% an extra store lookup.
 ptrie_entry_data(Entry) ->
     ptrie_entry_data(Entry, bondy_registry_entry:type(Entry)).
 
@@ -2350,8 +2349,8 @@ ptrie_match(Store, Type, RealmUri, Uri, Opts, Ptrie, Policy) ->
         {L, infinity} ->
             ptrie_match_result(Store, Type, Opts, L);
         {L, _} ->
-            %% Prefix/wildcard queries do not support pagination (ART
-            %% didn't either). Return all + ?EOT so the caller does not
+            %% Prefix/wildcard queries do not support pagination.
+            %% Return all + ?EOT so the caller does not
             %% try to continue.
             ptrie_match_result(Store, Type, Opts, {L, ?EOT})
     end.

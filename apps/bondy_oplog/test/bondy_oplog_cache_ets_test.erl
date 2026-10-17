@@ -4,8 +4,7 @@
 %%
 %% Pins the cache contract: get/fill/delete round-trip, invalidate_all,
 %% optional max_entries eviction, info shape. Bucket is a first-class
-%% call-time parameter (`MST_DB_DESIGN.md` §6, §18 item 14); every
-%% cache operation takes it explicitly.
+%% call-time parameter; every cache operation takes it explicitly.
 %% =============================================================================
 
 -module(bondy_oplog_cache_ets_test).

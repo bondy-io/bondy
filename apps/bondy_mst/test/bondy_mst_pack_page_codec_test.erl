@@ -39,7 +39,7 @@ round_trip_preserves_page_test() ->
     Bytes = bondy_mst_pack_store:serialise(Page),
     ?assertEqual(Page, bondy_mst_pack_store:deserialise(Bytes)).
 
-%% The regression lock. Before the fix this raised `badarg`.
+%% The regression lock: a `[safe]` decode raises `badarg` here.
 deserialise_accepts_an_atom_absent_from_the_atom_table_test() ->
     Name = never_loaded_name(1),
     Bytes = page_bytes_naming(Name),

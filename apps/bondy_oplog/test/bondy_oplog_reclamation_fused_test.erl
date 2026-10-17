@@ -40,7 +40,7 @@ reclamation_fused_test_() ->
         fun struct_reclaims_via_schema_stabilize_policy/0
     ]}.
 
-%% Mirrors `bondy_oplog_reclamation_test:solo_reclaims_the_tail_tombstone/0`
+%% Mirrors `bondy_oplog_reclamation_test:disabled_reclaims_the_tail_tombstone/0`
 %% exactly, on a fused instance.
 solo_fused_reclaims_the_tail_tombstone() ->
     Id = start_fused_instance(undefined, #{}),

@@ -1,9 +1,9 @@
 %% =============================================================================
-%% Shared test helpers for bondy_mst eunit suites.
+%% Shared test helpers for bondy_oplog eunit suites.
 %%
 %% Centralises the boilerplate for fabricating projection cell frames
 %% (V2 wire format with optional value column) and projecting fold
-%% states to the user-facing values that the substrate now returns from
+%% states to the user-facing values that the substrate returns from
 %% `bondy_oplog_core:read/3..5`.
 %% =============================================================================
 
