@@ -48,3 +48,6 @@ apps/bondy_cbor/bench/output/*
 /proofs/tla/states
 /harness/fleet-scale/report.py
 /next.md
+
+## Local agent instructions; never shipped.
+CLAUDE.md
