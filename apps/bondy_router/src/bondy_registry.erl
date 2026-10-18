@@ -697,10 +697,6 @@ code_change(_OldVsn, State, _Extra) ->
 %% register a procedure for the URI where the value for the invoke option does
 %% not match that of the initial registration. Accordingly this function might
 %% return an error tuple.
-%%
-%% IMPORTANT: This function must be safe to call by
-%% bondy_registry_partition instances. As a result it MUST NEVER make a call to
-%% bondy_registry_partition itself.
 %% -----------------------------------------------------------------------------
 maybe_add(registration, RealmUri, Uri, Opts, Ref, Partition) ->
     case bondy_ref:target_type(Ref) of
@@ -781,9 +777,6 @@ maybe_add_sessionless_subscription(RealmUri, Uri, MP, Opts, Ref, Partition) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% IMPORTANT: This function must be safe to call by
-%% bondy_registry_partition instances. As a result it MUST NEVER make a call to
-%% bondy_registry_partition itself.
 %% -----------------------------------------------------------------------------
 add_callback_registration(RealmUri, Uri, Opts0, Ref, Partition) ->
     {callback, MF} = bondy_ref:target(Ref),
@@ -807,9 +800,6 @@ add_callback_registration(RealmUri, Uri, Opts0, Ref, Partition) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% IMPORTANT: This function must be safe to call by
-%% bondy_registry_partition instances. As a result it MUST NEVER make a call to
-%% bondy_registry_partition itself.
 %% -----------------------------------------------------------------------------
 maybe_add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
     Invoke = maps:get(invoke, Opts, ?INVOKE_SINGLE),
@@ -827,117 +817,42 @@ maybe_add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% IMPORTANT: This function must be safe to call by
-%% bondy_registry_partition instances. As a result it MUST NEVER make a call to
-%% bondy_registry_partition itself.
+%% Shared Registration (WAMP RFC 13.3.9): the first Callee to register a URI
+%% decides whether more registrations are allowed and their Invocation Rules.
+%% The check and the insert run in the partition process, so concurrent
+%% registrations of a URI are serialised
+%% (`bondy_registry_SUITE:concurrent_single_registrations_admit_one`). `Add`
+%% runs in the partition and must not call it.
 %% -----------------------------------------------------------------------------
 add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
-    Type = registration,
+    Entry = new_registration(RealmUri, Ref, Uri, Opts),
     MatchOpts = #{
         match => maps:get(match, Opts, ?EXACT_MATCH),
         invoke => '_'
     },
-    MatchResult = bondy_registry_partition:match(
-        Partition, Type, RealmUri, Uri, MatchOpts
-    ),
-
-    case MatchResult of
-        [] ->
-            Entry = new_registration(RealmUri, Ref, Uri, Opts),
-            bondy_registry_partition:add(Partition, Entry);
-        L ->
-            %% Shared Registration (WAMP RFC 13.3.9): the first Callee to
-            %% register a URI determines whether additional registrations are
-            %% allowed and their Invocation Rules. When invoke is not
-            %% 'single', the Dealer MUST fail a later registration whose
-            %% invoke option does not match the initial one.
-
-            SessionId = bondy_ref:session_id(Ref),
-            Invoke = maps:get(invoke, Opts, ?INVOKE_SINGLE),
-
-            %% TODO extract this so that it is implemented as a function that
-            %% the dealer will send.
-
-            case resolve_inconsistencies(Invoke, SessionId, L) of
-                ok ->
-                    Entry = new_registration(RealmUri, Ref, Uri, Opts),
-                    bondy_registry_partition:add(Partition, Entry);
-                {error, {already_exists, _}} = Error ->
-                    Error
-            end
-    end.
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% We might have inconsistencies that might have occurred during a net
-%% split.
-%%
-%% There are two cases:
-%% 1. Multiple registrations w/invoke == single
-%% 2. Multiple registrations with differring invoke strategies
-%% -----------------------------------------------------------------------------
--spec resolve_inconsistencies(
-    Invoke :: binary(),
-    SessionId :: optional(bondy_session_id:t()),
-    [bondy_registry_entry:t()]
-) -> ok | {error, any()}.
-
-resolve_inconsistencies(_, _, []) ->
-    ok;
-resolve_inconsistencies(Invoke, SessionId, L) ->
-    Groups = bondy_router_utils:groups_from_list(
-        fun(Entry) -> bondy_registry_entry:invocation_policy(Entry) end,
-        L
-    ),
-    resolve_inconsistencies(Invoke, SessionId, L, Groups, maps:keys(Groups)).
-
-%% @private
-resolve_inconsistencies(_, _, _, Groups, [H]) when H == ?INVOKE_SINGLE ->
-    case maps:get(H, Groups) of
-        [Match] ->
-            %% Result is 'ok' iff entry is missing from main store
-            %% (due to inconsistency). Otherwise is the already_exists
-            %% error.
-            resolve_existing(registration, Match);
-        Matches ->
-            %% Multiple registrations w/invoke == single
-            %% We need to revoke all but the first one registered, so we sort
-            Sorted = sort_registration_matches(Matches),
-
-            %% Result is 'ok' iff all entries are missing from main store
-            %% (due to inconsistency). Otherwise is the already_exists
-            %% error with the first entry alive.
-            resolve_duplicates(Sorted)
-    end;
-resolve_inconsistencies(Invoke, SessionId, _, Groups, [H]) when H == Invoke ->
-    %% The registrations are consistent (all using the same invocation
-    %% policy). However, we still need to check for duplicates within
-    %% the same session.
-    Dups = find_registration_duplicates(maps:get(Invoke, Groups), SessionId),
-    resolve_duplicates(Dups);
-resolve_inconsistencies(_, _, L, _, [_]) ->
-    %% The caller is trying to register using an invocation policy
-    %% that does not match the one being used so far for this procedure.
-    %% We test each one to discard an inconsistency between trie and
-    %% main store.
-    %% Normally we will get {error, {already_exists, Entry}} where
-    %% Entry is the first element in L.
-    Sorted = sort_registration_matches(L),
-    resolve_existing(registration, Sorted);
-resolve_inconsistencies(_, _, L, _, [_ | _]) ->
-    %% The worse case: 2 or more groups.
-    Sorted = sort_registration_matches(L),
-
-    case resolve_existing(registration, Sorted) of
-        ok ->
-            ok;
-        {error, {already_exists, _Entry}} = Error ->
-            %% TODO if we have INVOKE_SINGLE, we need to
-            %% revoke all other registrations.
-            %% if other policy, revoke all registrations for other
-            %% policies
-            Error
-    end.
+    Invoke = maps:get(invoke, Opts, ?INVOKE_SINGLE),
+    SessionId = bondy_ref:session_id(Ref),
+    Add = fun() ->
+        L = bondy_registry_partition:match(
+            Partition, registration, RealmUri, Uri, MatchOpts
+        ),
+        Policies = lists:usort([
+            bondy_registry_entry:invocation_policy(E)
+         || E <- L
+        ]),
+        Conflicts =
+            case Policies =:= [Invoke] andalso Invoke =/= ?INVOKE_SINGLE of
+                true ->
+                    find_registration_duplicates(L, SessionId);
+                false ->
+                    sort_registration_matches(L)
+            end,
+        maybe
+            ok ?= resolve_existing(Conflicts),
+            bondy_registry_partition:add(Partition, Entry)
+        end
+    end,
+    bondy_registry_partition:execute(Partition, Add).
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -980,54 +895,18 @@ find_registration_duplicates(Entries, SessionId) ->
     ].
 
 %% @private
-revoke(_) ->
-    %% TODO
-    ok.
-
-%% @private
--spec resolve_duplicates([bondy_registry_partition:reg_match()]) ->
+%% The first live entry refuses the registration; a dead one does not count.
+-spec resolve_existing([bondy_registry_partition:reg_match()]) ->
     ok | {error, {already_exists, entry()}}.
 
-resolve_duplicates([H | T]) ->
-    case resolve_existing(registration, H) of
-        ok ->
-            %% This means we had an inconsistency between the indices
-            %% and the main store and the entry doesn't exist, so we try with
-            %% the next
-            resolve_duplicates(T);
-        {error, {already_exists, _}} = Error ->
-            %% H is active and earlieast registered single, we need to revoke
-            %% all others.
-            ok = revoke(T),
-            Error
-    end;
-resolve_duplicates([]) ->
-    %% No duplicates or all the entries were inconsistent (indices vs store).
-    ok.
-
-%% @private
--spec resolve_existing(
-    entry_type(),
-    bondy_registry_partition:reg_match()
-    | [bondy_registry_partition:reg_match()]
-) -> ok | {error, {already_exists, entry()}}.
-
-resolve_existing(_, []) ->
+resolve_existing([]) ->
     ok;
-resolve_existing(Type, [H | T]) ->
-    case resolve_existing(Type, H) of
-        ok ->
-            resolve_existing(Type, T);
-        Error ->
-            Error
-    end;
-resolve_existing(_Type, Entry) ->
-    case bondy_registry_entry:is_alive(Entry) of
+resolve_existing([H | T]) ->
+    case bondy_registry_entry:is_alive(H) of
         true ->
-            {error, {already_exists, Entry}};
+            {error, {already_exists, H}};
         false ->
-            %% It will be eventually pruned, so ignore
-            ok
+            resolve_existing(T)
     end.
 
 %% @private

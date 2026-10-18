@@ -28,6 +28,7 @@ groups() ->
     [
         {rpc, [sequence], [
             register_invoke_single,
+            concurrent_single_registrations_admit_one,
             register_shared,
             register_callback,
             pattern_based_registration_is_not_optional,
@@ -631,6 +632,50 @@ register_invoke_single(Config) ->
             Uri, #{invoke => ?INVOKE_ROUND_ROBIN}, RealmUri, Ref
         )
     ).
+
+%% Callees in distinct processes race to register the same URI with
+%% `invoke => single`, released together, over several URIs.
+concurrent_single_registrations_admit_one(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Opts = #{invoke => ?INVOKE_SINGLE, shared_registration => true},
+    Self = self(),
+    Results = lists:map(
+        fun(_) ->
+            Uri =
+                <<"com.example.",
+                    (bondy_router_utils:generate_fragment(12))/binary>>,
+            Workers = [
+                spawn_link(fun() ->
+                    Ref = bondy_ref:new(internal, self()),
+                    receive
+                        go -> ok
+                    end,
+                    Self !
+                        {registered, self(),
+                            bondy_registry:add(
+                                registration, RealmUri, Uri, Opts, Ref
+                            )},
+                    receive
+                        stop -> ok
+                    end
+                end)
+             || _ <- lists:seq(1, 16)
+            ],
+            _ = [W ! go || W <- Workers],
+            Replies = [
+                receive
+                    {registered, W, Reply} -> {W, Reply}
+                end
+             || W <- Workers
+            ],
+            Entries = [E || {_, {ok, {E, _}}} <- Replies],
+            _ = [ok = bondy_registry:remove(E) || E <- Entries],
+            _ = [W ! stop || W <- Workers],
+            length(Entries)
+        end,
+        lists:seq(1, 20)
+    ),
+    ?assertEqual(lists:duplicate(20, 1), Results).
 
 register_shared(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
