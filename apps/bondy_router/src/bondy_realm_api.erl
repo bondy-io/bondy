@@ -50,9 +50,24 @@ handle_call(?BONDY_REALM_DELETE, M, Ctxt) ->
         ok ->
             R = bondy_wamp_message:result(M#call.request_id, #{}),
             {reply, R};
-        {error, Reason} ->
-            E = bondy_wamp_api_utils:error(Reason, M),
-            {reply, E}
+        {error, {in_use, Uris}} ->
+            Error = bondy_connect_error:new(conflict, #{
+                message =>
+                    ~"The realm is the prototype or SSO realm of other realms.",
+                description =>
+                    ~"Delete the realms listed in details.realms first.",
+                details => #{realms => Uris}
+            }),
+            {reply, bondy_wamp_api_utils:error(Error, M)};
+        {error, active_users} ->
+            Error = bondy_connect_error:new(conflict, #{
+                message => ~"The realm has users.",
+                description =>
+                    ~"Delete its users first, or call again with force set."
+            }),
+            {reply, bondy_wamp_api_utils:error(Error, M)};
+        {error, not_found = Reason} ->
+            {reply, bondy_wamp_api_utils:error(Reason, M)}
     end;
 handle_call(?BONDY_REALM_GET, M, Ctxt) ->
     [Uri] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),

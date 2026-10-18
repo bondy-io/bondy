@@ -1660,7 +1660,9 @@ update(Uri, Data) when is_binary(Uri) ->
 
 -doc "Deletes a realm. Equivalent to `delete/2` with `force` disabled.".
 -spec delete(t() | uri()) ->
-    ok | {error, not_found | active_users} | no_return().
+    ok
+    | {error, not_found | active_users | {in_use, [uri()]}}
+    | no_return().
 
 delete(Term) ->
     delete(Term, #{force => false}).
@@ -1669,9 +1671,11 @@ delete(Term) ->
 Deletes a realm and everything scoped to it: its key material, users, groups,
 grants, sources, tickets, tokens and retained messages.
 
-Refuses with `{error, active_users}` when the realm still has users, unless
-`force` is set. Existing sessions are closed and new connections refused before
-the data is removed.
+Refuses with `{error, {in_use, Uris}}` while the realms `Uris` name it as their
+prototype or SSO realm, whatever `force` says: those realms resolve their
+users and settings through it. Refuses with `{error, active_users}` when the
+realm still has users, unless `force` is set. Existing sessions are closed and
+new connections refused before the data is removed.
 
 Deleting the realm record is synchronous; removing the associated data is not —
 it is handed to a router worker, so the realm reads as gone before the last of
@@ -1679,11 +1683,11 @@ its data does. Raises `badarg` for the master and internal realms, which cannot
 be deleted.
 """.
 -spec delete(t() | uri(), delete_opts()) ->
-    ok | {error, not_found | active_users} | no_return().
+    ok
+    | {error, not_found | active_users | {in_use, [uri()]}}
+    | no_return().
 
 delete(#realm{uri = Uri} = Realm, Opts0) ->
-    %% TODO What is this is master realm? or prototype? or SSO?
-
     %% Cannot delete master and internal realms
     Uri =/= ?MASTER_REALM_URI andalso
         Uri =/= ?CONTROL_REALM_URI orelse
@@ -1691,8 +1695,15 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
 
     Opts = maps_utils:validate(Opts0, ?DELETE_OPTS),
     Force = maps:get(force, Opts, false),
+    Dependents = [
+        U
+     || #realm{uri = U, prototype_uri = P, sso_realm_uri = S} <- list(),
+        P =:= Uri orelse S =:= Uri
+    ],
 
     case bondy_rbac_user:list(Uri, #{limit => 1}) of
+        _ when Dependents =/= [] ->
+            {error, {in_use, Dependents}};
         {L, _Cont} when length(L) > 0 andalso Force == false ->
             %% If there are users in the realm, the caller will need to first
             %% explicitly delete the users

@@ -7,7 +7,9 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 -include("bondy_db_tables.hrl").
 -include("bondy_security.hrl").
 
@@ -41,7 +43,10 @@ all() ->
         migration,
         strip_private_keys,
         delete_removes_key_material,
-        delete_removes_retained_messages
+        delete_removes_retained_messages,
+        delete_refuses_a_referenced_prototype,
+        delete_refuses_a_referenced_sso_realm,
+        delete_api_reports_a_refusal_as_a_conflict
     ].
 
 init_per_suite(Config) ->
@@ -249,6 +254,54 @@ is_prototype(_) ->
         bondy_realm:update(Uri, #{is_prototype => false}),
         "Property is immutable"
     ).
+
+%% A realm another realm inherits from cannot be deleted while it does: the
+%% dependent resolves its SSO realm through the prototype on every HELLO
+%% (`bondy_realm:sso_realm_uri/1`).
+delete_refuses_a_referenced_prototype(_) ->
+    ProtoUri = gen_uri(),
+    _ = bondy_realm:create(#{uri => ProtoUri, is_prototype => true}),
+    Uri = gen_uri(),
+    _ = bondy_realm:create(#{uri => Uri, prototype_uri => ProtoUri}),
+    ?assertEqual({error, {in_use, [Uri]}}, bondy_realm:delete(ProtoUri)),
+    ?assertMatch({ok, _}, bondy_realm:lookup(ProtoUri)),
+    ?assertEqual(undefined, bondy_realm:sso_realm_uri(Uri)),
+    ok = bondy_realm:delete(Uri),
+    ?assertEqual(ok, bondy_realm:delete(ProtoUri)).
+
+delete_refuses_a_referenced_sso_realm(_) ->
+    SSOUri = gen_uri(),
+    _ = bondy_realm:create(#{uri => SSOUri, is_sso_realm => true}),
+    Uri = gen_uri(),
+    _ = bondy_realm:create(#{uri => Uri, sso_realm_uri => SSOUri}),
+    ?assertEqual({error, {in_use, [Uri]}}, bondy_realm:delete(SSOUri)),
+    ?assertMatch({ok, _}, bondy_realm:lookup(SSOUri)),
+    ok = bondy_realm:delete(Uri),
+    ?assertEqual(ok, bondy_realm:delete(SSOUri)).
+
+%% The admin API reports the refusal as a permanent `conflict` naming the
+%% dependent realms, not as an internal error a client would retry.
+delete_api_reports_a_refusal_as_a_conflict(_) ->
+    ProtoUri = gen_uri(),
+    _ = bondy_realm:create(#{uri => ProtoUri, is_prototype => true}),
+    Uri = gen_uri(),
+    _ = bondy_realm:create(#{uri => Uri, prototype_uri => ProtoUri}),
+    Ctxt = bondy_context:local_context(?MASTER_REALM_URI),
+    Call = bondy_wamp_message:call(1, #{}, ?BONDY_REALM_DELETE, [ProtoUri]),
+    {reply, Error0} = bondy_realm_api:handle_call(
+        ?BONDY_REALM_DELETE, Call, Ctxt
+    ),
+    Error = bondy_wamp_message:decode_partial(Error0),
+    ?assertEqual(<<"bondy.error.conflict">>, Error#error.error_uri),
+    ?assertMatch(
+        #{
+            <<"nature">> := <<"permanent">>,
+            <<"details">> := #{<<"realms">> := [Uri]}
+        },
+        Error#error.kwargs
+    ),
+    ok = bondy_realm:delete(Uri),
+    ok = bondy_realm:delete(ProtoUri).
 
 prototype_uri(_) ->
     ProtoUri = gen_uri(),
