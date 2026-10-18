@@ -310,11 +310,36 @@ decoy(SessionId, Realm, Authid0, Method, SourceIP) when
     Method == ?WAMP_SCRAM_AUTH; Method == ?WAMP_CRA_AUTH
 ->
     Authid = casefold(Authid0),
-    Secret = crypto:mac(hmac, sha512, decoy_realm_secret(Realm), Authid),
+    Keys = lists:sort(bondy_realm:private_keys(Realm)),
+    RealmSecret = crypto:hash(sha512, term_to_binary(Keys, [deterministic])),
+    Secret = crypto:mac(hmac, sha512, RealmSecret, Authid),
+    %% Each field is a differently labelled HMAC of `Secret`, truncated.
+    Password =
+        case Method of
+            ?WAMP_SCRAM_AUTH ->
+                #{params := Params} = bondy_password:default_opts(scram),
+                bondy_password:from_data(scram, Params, #{
+                    salt => decoy_bytes(
+                        Secret, ~"salt", bondy_password_scram:salt_length()
+                    ),
+                    stored_key => decoy_bytes(Secret, ~"stored_key", 32),
+                    server_key => decoy_bytes(Secret, ~"server_key", 32)
+                });
+            ?WAMP_CRA_AUTH ->
+                #{params := Params} = bondy_password:default_opts(cra),
+                bondy_password:from_data(cra, Params, #{
+                    salt => decoy_bytes(
+                        Secret, ~"salt", bondy_password_cra:salt_length()
+                    ),
+                    salted_password => decoy_bytes(
+                        Secret,
+                        ~"salted_password",
+                        bondy_password_cra:hash_length()
+                    )
+                })
+        end,
     User = maps:put(
-        password,
-        decoy_password(decoy_protocol(Method), Secret),
-        bondy_rbac_user:new(#{username => Authid})
+        password, Password, bondy_rbac_user:new(#{username => Authid})
     ),
     #{
         provider => ?BONDY_AUTH_PROVIDER,
@@ -757,35 +782,6 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
         end,
         Requirements
     ).
-
-%% @private
-decoy_protocol(?WAMP_SCRAM_AUTH) -> scram;
-decoy_protocol(?WAMP_CRA_AUTH) -> cra.
-
-%% @private
-decoy_realm_secret(Realm) ->
-    Keys = lists:sort(bondy_realm:private_keys(Realm)),
-    crypto:hash(sha512, term_to_binary(Keys, [deterministic])).
-
-%% @private
-%% Each field is a differently labelled HMAC of `Secret`, truncated.
-decoy_password(scram, Secret) ->
-    #{params := Params} = bondy_password:default_opts(scram),
-    bondy_password:from_data(scram, Params, #{
-        salt => decoy_bytes(
-            Secret, ~"salt", bondy_password_scram:salt_length()
-        ),
-        stored_key => decoy_bytes(Secret, ~"stored_key", 32),
-        server_key => decoy_bytes(Secret, ~"server_key", 32)
-    });
-decoy_password(cra, Secret) ->
-    #{params := Params} = bondy_password:default_opts(cra),
-    bondy_password:from_data(cra, Params, #{
-        salt => decoy_bytes(Secret, ~"salt", bondy_password_cra:salt_length()),
-        salted_password => decoy_bytes(
-            Secret, ~"salted_password", bondy_password_cra:hash_length()
-        )
-    }).
 
 %% @private
 decoy_bytes(Secret, Label, Len) when Len =< 64 ->

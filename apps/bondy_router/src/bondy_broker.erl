@@ -437,7 +437,8 @@ forward(#publish{} = M, undefined, FwdOpts) ->
     %% We publish to all matching local subscribers and we get back the list of
     %% local bridge relays and the cluster peer nodes where we found remote
     %% subscribers
-    ok = do_publish(RealmUri, MatchResult, MakeEvent, Fwd, remote),
+    AuthLists = auth_lists(M#publish.options),
+    ok = do_publish(RealmUri, MatchResult, MakeEvent, Fwd, remote, AuthLists),
 
     {ok, PubId}.
 
@@ -660,7 +661,13 @@ do_publish(#publish{} = M, Ctxt) ->
     %% If retained options is provided the message will be retained, this is
     %% regardless of whether there are any current subscribers to the topic or
     %% not.
-    ok = maybe_retain(Opts, RealmUri, TopicUri, MatchOpts, MakeEvent),
+    ok = maybe_retain(
+        Opts,
+        RealmUri,
+        TopicUri,
+        maps:merge(MatchOpts, auth_lists(Opts)),
+        MakeEvent
+    ),
 
     %% We publish to all matching local subscribers and/or forward to
     %% local bridge relays and remote subscribers in the cluster peer nodes.
@@ -679,7 +686,9 @@ do_publish(#publish{} = M, Ctxt) ->
     end,
 
     T1 = erlang:monotonic_time(microsecond),
-    ok = do_publish(RealmUri, Subscriptions, MakeEvent, Fwd, local),
+    ok = do_publish(
+        RealmUri, Subscriptions, MakeEvent, Fwd, local, auth_lists(Opts)
+    ),
     FanoutUs = erlang:monotonic_time(microsecond) - T1,
 
     %% Stage split for the delivery-latency tail. This runs inline in the
@@ -691,9 +700,11 @@ do_publish(#publish{} = M, Ctxt) ->
     {ok, PubId}.
 
 %% @private
-do_publish(_, ?EOT, _, _, _) ->
+do_publish(_, ?EOT, _, _, _, _) ->
     ok;
-do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin) when
+do_publish(
+    RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin, AuthLists
+) when
     is_function(MakeEvent, 1), is_function(Fwd, 1)
 ->
     %% REVIEW Consider creating a broadcast tree out of the registry's
@@ -724,11 +735,19 @@ do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin) when
 
             case {Publish, IsCallback} of
                 {true, true} ->
-                    %% @TODO we should pass a 2nd argument with the subscription
-                    %% options to remove unwanted info in Details
-                    Event = MakeEvent(EntryId),
-                    CBArgs = bondy_registry_entry:callback_args(Entry),
-                    ok = apply_dynamic_callback(Event, Subscriber, CBArgs);
+                    case is_recipient(AuthLists, Subscriber) of
+                        true ->
+                            %% @TODO we should pass a 2nd argument with the
+                            %% subscription options to remove unwanted info in
+                            %% Details
+                            Event = MakeEvent(EntryId),
+                            CBArgs = bondy_registry_entry:callback_args(Entry),
+                            ok = apply_dynamic_callback(
+                                Event, Subscriber, CBArgs
+                            );
+                        false ->
+                            ok
+                    end;
                 {true, false} ->
                     case bondy_ref:is_bridge_relay(Subscriber) of
                         true ->
@@ -740,13 +759,18 @@ do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin) when
                             %% cluster.
                             Fwd(Subscriber);
                         false ->
-                            %% @TODO we should pass a 2nd argument with the
-                            %% subscription options to remove unwanted info in
-                            %% Details
-                            Event = MakeEvent(EntryId),
-                            ok = bondy_router_peer:send(
-                                RealmUri, Subscriber, Event
-                            )
+                            case is_recipient(AuthLists, Subscriber) of
+                                true ->
+                                    %% @TODO we should pass a 2nd argument with
+                                    %% the subscription options to remove
+                                    %% unwanted info in Details
+                                    Event = MakeEvent(EntryId),
+                                    ok = bondy_router_peer:send(
+                                        RealmUri, Subscriber, Event
+                                    );
+                                false ->
+                                    ok
+                            end
                     end;
                 {false, _} ->
                     ok
@@ -793,9 +817,8 @@ make_match_opts(SessionId, Opts) ->
     %% WAMP Subscriber Black- and Whitelisting: an event reaches a subscriber
     %% only if its session id is in `eligible` (when present) and not in
     %% `exclude` (when present).
-    %% Subscriber Exclusion: we only support sessionIds for now
-    %% TODO Add support for eligible_authid, eligible_authrole, exclude_authid
-    %% and exclude_authrole.
+    %% The authid and authrole lists are applied at delivery
+    %% (`auth_lists/1`).
     Exclusions0 = maps:get(exclude, Opts, []),
 
     %% Publisher exclusion:
@@ -818,7 +841,7 @@ make_match_opts(SessionId, Opts) ->
 
     MatchOpts0 = #{exclude => Exclusions},
 
-    %% Subscriber Eligibility: we only support sessionIds for now
+    %% Subscriber Eligibility by session id.
     %% No `match' key, so every policy is considered: pattern-based subscription
     %% is not optional (see `bondy_config:setup_wamp/0').
     case maps:find(eligible, Opts) of
@@ -829,6 +852,53 @@ make_match_opts(SessionId, Opts) ->
                 sets:from_list(L), sets:from_list(Exclusions)
             ),
             MatchOpts0#{eligible => sets:to_list(Eligible)}
+    end.
+
+%% @private
+%% The authid and authrole lists of Subscriber Black- and Whitelisting. They
+%% need the subscriber's session, which only the node holding it has, so each
+%% node applies them to its own subscribers at delivery; a publication
+%% forwarded to a peer or a bridge relay carries the options with it.
+auth_lists(Opts) ->
+    maps:with(
+        [eligible_authid, eligible_authrole, exclude_authid, exclude_authrole],
+        Opts
+    ).
+
+%% @private
+%% A subscriber without a session (an internal callback) has no authid or
+%% authrole, so an eligible list never admits it. A session that has ended
+%% receives nothing.
+is_recipient(AuthLists, _) when map_size(AuthLists) == 0 ->
+    true;
+is_recipient(AuthLists, Subscriber) ->
+    case bondy_ref:session_id(Subscriber) of
+        undefined ->
+            not (maps:is_key(eligible_authid, AuthLists) orelse
+                maps:is_key(eligible_authrole, AuthLists));
+        SessionId ->
+            case bondy_session:lookup(SessionId) of
+                {ok, Session} ->
+                    %% A session with several roles is eligible when any of
+                    %% them is listed, and excluded when any of them is.
+                    Authids = [bondy_session:authid(Session)],
+                    Roles = bondy_session:authroles(Session),
+                    listed(eligible_authid, Authids, AuthLists, true) andalso
+                        listed(eligible_authrole, Roles, AuthLists, true) andalso
+                        not listed(exclude_authid, Authids, AuthLists, false) andalso
+                        not listed(exclude_authrole, Roles, AuthLists, false);
+                {error, not_found} ->
+                    false
+            end
+    end.
+
+%% @private
+%% Whether any of `Values` is in the list under `Key`, or `Absent` when the
+%% publisher sent no such list.
+listed(Key, Values, AuthLists, Absent) ->
+    case maps:find(Key, AuthLists) of
+        {ok, List} -> lists:any(fun(V) -> lists:member(V, List) end, Values);
+        error -> Absent
     end.
 
 %% @private
@@ -989,15 +1059,22 @@ send_retained(Entry) ->
             ({continue, Cont}) ->
                 bondy_retained_message_manager:match(Cont);
             (M) ->
-                Event = bondy_retained_message:to_event(M, SubsId),
-                try
-                    bondy_router_peer:send(RealmUri, Ref, Event)
-                catch
-                    %% A gone subscriber: `!` to an `undefined` pid raises
-                    %% `badarg`, and a gone HTTP transport fails its enqueue.
-                    error:badarg ->
-                        ok;
-                    error:{badmatch, {error, transport_not_found}} ->
+                AuthLists = auth_lists(bondy_retained_message:match_opts(M)),
+                case is_recipient(AuthLists, Ref) of
+                    true ->
+                        Event = bondy_retained_message:to_event(M, SubsId),
+                        try
+                            bondy_router_peer:send(RealmUri, Ref, Event)
+                        catch
+                            %% A gone subscriber: `!` to an `undefined` pid
+                            %% raises `badarg`, and a gone HTTP transport
+                            %% fails its enqueue.
+                            error:badarg ->
+                                ok;
+                            error:{badmatch, {error, transport_not_found}} ->
+                                ok
+                        end;
+                    false ->
                         ok
                 end
         end,

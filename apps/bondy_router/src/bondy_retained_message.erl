@@ -81,10 +81,18 @@ The publisher's delivery constraints, in WAMP terms: `eligible` restricts
 delivery to the listed sessions, `exclude` withholds it from them. An empty
 `eligible` list excludes every session, which WAMP treats as intentional rather
 than as an omitted option.
+
+The authid and authrole lists are stored as given and applied by
+`bondy_broker` when it delivers the message, since they need the subscriber's
+session.
 """.
 -type match_opts() :: #{
     eligible => [id()],
-    exclude => [id()]
+    exclude => [id()],
+    eligible_authid => [binary()],
+    eligible_authrole => [binary()],
+    exclude_authid => [binary()],
+    exclude_authrole => [binary()]
 }.
 
 -doc """
@@ -114,6 +122,7 @@ Scan controls for a paged match: `first` is the inclusive key to resume from,
 -export([match/4]).
 -export([match/5]).
 -export([to_event/2]).
+-export([match_opts/1]).
 -export([size/1]).
 
 %% =============================================================================
@@ -316,6 +325,12 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
                 bondy_retained_message_manager:incr_counters(Realm, 1, Size)
         end,
     bondy_db:apply(Table, Realm, Topic, {set, Retained}).
+
+-doc "Returns the publisher's delivery constraints stored with `Retained`.".
+-spec match_opts(Retained :: t()) -> match_opts().
+
+match_opts(#bondy_retained_message{match_opts = Opts}) ->
+    Opts.
 
 -doc """
 Returns the WAMP EVENT to send to a subscriber for `Retained`, under

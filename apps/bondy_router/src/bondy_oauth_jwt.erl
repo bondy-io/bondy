@@ -48,6 +48,18 @@ decode(Term) ->
 verify(RealmUri, JWT) ->
     verify(RealmUri, JWT, #{}).
 
+-doc """
+Verifies `JWT` for `RealmUri`: its issuer must be trusted by the realm, its
+signature must verify under the issuer's key, it must not have expired, its
+scope must cover the realm, and its claims must equal `MatchSpec` on every key
+`MatchSpec` names.
+
+Access tokens are bearer tokens (RFC 6750). The scope's `client_id` and
+`device_id` record whom the token was issued to, for refresh and revocation;
+they are not compared with the presenter, whose client is not authenticated
+here. Binding a token to its client needs sender-constrained tokens (RFC 8705,
+RFC 9449).
+""".
 -spec verify(RealmUri :: binary(), JWT :: binary(), MatchSpec :: map()) ->
     {ok, claims()} | {error, error()}.
 
@@ -82,7 +94,6 @@ matches(RealmUri, Claims, Spec) ->
     Keys = maps:keys(Spec),
 
     maybe
-        %% TODO we should verify Client and Device if provided
         true ?= bondy_auth_scope:matches_realm(TokenScope, RealmUri),
         true ?=
             maps_utils:collect(Keys, Claims) =:=

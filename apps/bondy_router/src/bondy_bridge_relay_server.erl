@@ -285,8 +285,14 @@ active(enter, idle, State) ->
     {keep_state_and_data, Actions};
 active(
     internal, {hello, Uri, Details}, #state{auth_context = undefined} = State0
-) ->
-    %% TODO validate Details
+) when
+    is_binary(Uri),
+    is_map(Details),
+    is_map_key(authid, Details),
+    is_binary(map_get(authid, Details)),
+    (not is_map_key(authroles, Details) orelse
+        is_list(map_get(authroles, Details)))
+->
     ?LOG_DEBUG(#{
         description => "Got hello",
         details => Details
@@ -305,57 +311,90 @@ active(
         {keep_state, State, Actions}
     catch
         error:{not_found, Uri} ->
-            Abort = {
-                abort,
+            abort(
                 undefined,
                 no_such_realm,
-                #{
-                    message => <<"Realm does not exist.">>,
-                    realm => Uri
-                }
-            },
-            ok = send_message(Abort, State0),
-            {stop, normal, State0};
+                #{message => <<"Realm does not exist.">>, realm => Uri},
+                State0
+            );
         throw:connections_not_allowed = Reason ->
-            Abort =
-                {abort, undefined, Reason, #{
+            abort(
+                undefined,
+                Reason,
+                #{
                     message =>
                         <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
                     realm => Uri
-                }},
-            ok = send_message(Abort, State0),
-            {stop, normal, State0};
+                },
+                State0
+            );
         throw:{no_authmethod, ReqMethods} ->
-            Abort =
-                {abort, undefined, no_authmethod, #{
+            abort(
+                undefined,
+                no_authmethod,
+                #{
                     message =>
                         <<"The requested authentication methods are not available for this user on this realm.">>,
                     realm => Uri,
                     authmethods => ReqMethods
-                }},
-            ok = send_message(Abort, State0),
-            {stop, normal, State0};
+                },
+                State0
+            );
         throw:{authentication_failed, Reason} ->
-            Abort =
-                {abort, undefined, authentication_failed, #{
+            abort(
+                undefined,
+                authentication_failed,
+                #{
                     message => <<"Authentication failed.">>,
                     realm => Uri,
                     reason => Reason
-                }},
-            ok = send_message(Abort, State0),
-            {stop, normal, State0}
+                },
+                State0
+            )
     end;
+active(internal, {hello, _, _}, #state{auth_context = undefined} = State) ->
+    abort(
+        undefined,
+        protocol_violation,
+        #{
+            message => <<
+                "HELLO must carry a realm URI and a map of details naming a "
+                "binary authid, and authroles, if any, as a list."
+            >>
+        },
+        State
+    );
 active(internal, {hello, _, _}, #state{} = State) ->
     %% Assumption: no concurrent session establishment on this transport
     %% Session already being established, invalid message
-    Abort =
-        {abort, undefined, protocol_violation, #{
-            message => <<"You've sent the HELLO message twice">>
-        }},
-    ok = send_message(Abort, State),
-    {stop, normal, State};
+    abort(
+        undefined,
+        protocol_violation,
+        #{message => <<"You've sent the HELLO message twice">>},
+        State
+    );
+active(
+    internal, {authenticate, _, _}, #state{auth_context = undefined} = State
+) ->
+    abort(
+        undefined,
+        protocol_violation,
+        #{message => <<"AUTHENTICATE must follow a HELLO.">>},
+        State
+    );
+active(internal, {authenticate, Signature, Extra}, State) when
+    not is_binary(Signature); not is_map(Extra)
+->
+    abort(
+        undefined,
+        protocol_violation,
+        #{
+            message =>
+                <<"AUTHENTICATE must carry a binary signature and a map of extra.">>
+        },
+        State
+    );
 active(internal, {authenticate, Signature, Extra}, State0) ->
-    %% TODO validate Details
     ?LOG_DEBUG(#{
         description => "Got authenticate",
         signature => Signature,
@@ -375,15 +414,17 @@ active(internal, {authenticate, Signature, Extra}, State0) ->
         throw:{authentication_failed, Reason} ->
             AuthCtxt = State0#state.auth_context,
             RealmUri = bondy_auth:realm_uri(AuthCtxt),
-            SessionId = bondy_auth:realm_uri(AuthCtxt),
-            Abort =
-                {abort, SessionId, authentication_failed, #{
+            SessionId = bondy_auth:session_id(AuthCtxt),
+            abort(
+                SessionId,
+                authentication_failed,
+                #{
                     message => <<"Authentication failed.">>,
                     realm_uri => RealmUri,
                     reason => Reason
-                }},
-            ok = send_message(Abort, State0),
-            {stop, normal, State0}
+                },
+                State0
+            )
     end;
 active(internal, {aae_sync, SessionId, Opts}, State) ->
     RealmUri = session_realm(SessionId, State),
@@ -646,6 +687,11 @@ challenge(Realm, Details, State0) ->
         {error, Reason0} ->
             throw({authentication_failed, Reason0})
     end.
+
+%% @private
+abort(SessionId, Reason, Details, State) ->
+    ok = send_message({abort, SessionId, Reason, Details}, State),
+    {stop, normal, State}.
 
 %% @private
 send_challenge(Details, Method, State0) ->
