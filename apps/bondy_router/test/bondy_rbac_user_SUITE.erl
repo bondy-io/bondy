@@ -7,6 +7,9 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 -include("bondy_security.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy.hrl").
+-include("bondy_uris.hrl").
 
 -define(LU1, <<"local_user_1">>).
 -define(LU2, <<"local_user_2">>).
@@ -30,6 +33,8 @@ all() ->
         add_group,
         remove_group,
         remove_user,
+        remove_refuses_a_linked_sso_user,
+        delete_api_reports_a_linked_sso_user_as_a_conflict,
         list_members,
         group_deletion_cleans_members,
         membership_is_relation_authoritative,
@@ -466,10 +471,60 @@ remove_user(_) ->
         {error, {no_such_user, _}},
         bondy_rbac_user:remove(?REALM1_URI, ?SSOU1)
     ),
+    ok = bondy_rbac_user:remove(?REALM2_URI, ?SSOU1),
     ?assertEqual(
         ok,
         bondy_rbac_user:remove(?SSO_REALM_URI, ?SSOU1)
     ).
+
+remove_refuses_a_linked_sso_user(_) ->
+    Username = <<"sso_linked">>,
+    User = #{
+        username => Username,
+        password => Username,
+        sso_realm_uri => ?SSO_REALM_URI
+    },
+    {ok, _} = bondy_rbac_user:add(?REALM1_URI, bondy_rbac_user:new(User)),
+    {ok, _} = bondy_rbac_user:add(?REALM2_URI, bondy_rbac_user:new(User)),
+    ?assertEqual(
+        {error, {in_use, [?REALM1_URI, ?REALM2_URI]}},
+        bondy_rbac_user:remove(?SSO_REALM_URI, Username)
+    ),
+    _ = bondy_rbac_user:fetch(?SSO_REALM_URI, Username),
+    ok = bondy_rbac_user:remove(?REALM1_URI, Username),
+    ?assertEqual(
+        {error, {in_use, [?REALM2_URI]}},
+        bondy_rbac_user:remove(?SSO_REALM_URI, Username)
+    ),
+    ok = bondy_rbac_user:remove(?REALM2_URI, Username),
+    ?assertEqual(ok, bondy_rbac_user:remove(?SSO_REALM_URI, Username)).
+
+delete_api_reports_a_linked_sso_user_as_a_conflict(_) ->
+    Username = <<"sso_linked_api">>,
+    User = #{
+        username => Username,
+        password => Username,
+        sso_realm_uri => ?SSO_REALM_URI
+    },
+    {ok, _} = bondy_rbac_user:add(?REALM1_URI, bondy_rbac_user:new(User)),
+    Ctxt = bondy_context:local_context(?MASTER_REALM_URI),
+    Call = bondy_wamp_message:call(
+        1, #{}, ?BONDY_USER_DELETE, [?SSO_REALM_URI, Username]
+    ),
+    {reply, Error0} = bondy_rbac_api:handle_call(
+        ?BONDY_USER_DELETE, Call, Ctxt
+    ),
+    Error = bondy_wamp_message:decode_partial(Error0),
+    ?assertEqual(<<"bondy.error.conflict">>, Error#error.error_uri),
+    ?assertMatch(
+        #{
+            <<"nature">> := <<"permanent">>,
+            <<"details">> := #{<<"realms">> := [?REALM1_URI]}
+        },
+        Error#error.kwargs
+    ),
+    ok = bondy_rbac_user:remove(?REALM1_URI, Username),
+    ok = bondy_rbac_user:remove(?SSO_REALM_URI, Username).
 
 %% The `member` relation's reverse access path: list a group's members via
 %% the substrate `by_group` index, paginated and realm-isolated, instead of

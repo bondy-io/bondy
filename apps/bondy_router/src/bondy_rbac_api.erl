@@ -54,6 +54,15 @@ handle_call(?BONDY_USER_DELETE, #call{} = M, Ctxt) ->
         ok ->
             R = bondy_wamp_message:result(M#call.request_id, #{}),
             {reply, R};
+        {error, {in_use, Uris}} ->
+            Error = bondy_connect_error:new(conflict, #{
+                message =>
+                    ~"Users in other realms sign on through this user.",
+                description =>
+                    ~"Delete the user from the realms listed in details.realms first.",
+                details => #{realms => Uris}
+            }),
+            {reply, bondy_wamp_api_utils:error(Error, M)};
         {error, Reason} ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}

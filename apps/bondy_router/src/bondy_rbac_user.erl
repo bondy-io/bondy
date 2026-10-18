@@ -248,6 +248,10 @@ end#{
     | {no_such_realm, uri()}
     | {no_such_user, username_int()}
     | {no_such_groups, [bondy_rbac_group:name()]}.
+-type remove_error() ::
+    {no_such_user, username()}
+    | reserved_name
+    | {in_use, [uri()]}.
 
 -export_type([t/0]).
 -export_type([external/0]).
@@ -610,7 +614,7 @@ Removes user `Arg` from `RealmUri`. Equivalent to `remove/3` with default
 options.
 """.
 -spec remove(RealmUri :: uri(), Arg :: username() | t()) ->
-    ok | {error, {no_such_user, username()} | reserved_name}.
+    ok | {error, remove_error()}.
 
 remove(RealmUri, Arg) ->
     remove(RealmUri, Arg, #{}).
@@ -624,22 +628,38 @@ this. Local sessions for the user are closed with `bondy.user.deleted`.
 
 Returns `{error, {no_such_user, Username}}` when there is no such user and
 `{error, reserved_name}` for a reserved one.
+
+Returns `{error, {in_use, RealmUris}}`, and removes nothing, while other realms
+hold a local user of the same name linked to `RealmUri` as its SSO realm.
+`RealmUris` lists those realms in order. Removing the SSO user would leave each
+local user without credentials, and a user created later under the name would
+take over their grants. Remove the local users first.
 """.
 -spec remove(uri(), username() | t(), Opts :: map()) ->
-    ok | {error, {no_such_user, username()} | reserved_name}.
+    ok | {error, remove_error()}.
 
 remove(RealmUri, #{type := ?USER_TYPE, username := Username}, Opts) ->
     remove(RealmUri, Username, Opts);
 remove(RealmUri, Username0, _Opts) when is_binary(Username0) ->
-    %% TODO do not allow remove when this is an SSO realm and user exists in
-    %% other realms (we need a reverse index - array with the list of realms
-    %% this user belongs to.
     try
         Username = normalise_username(Username0),
 
         ok = not_reserved_name_check(Username),
 
         User = fetch(RealmUri, Username),
+        Linked = [
+            Uri
+         || Uri <- lists:sort([bondy_realm:uri(R) || R <- bondy_realm:list()]),
+            Uri =/= RealmUri,
+            case lookup(Uri, Username) of
+                {ok, Local} ->
+                    username(Local) =:= Username andalso
+                        sso_realm_uri(Local) =:= RealmUri;
+                {error, not_found} ->
+                    false
+            end
+        ],
+        Linked =:= [] orelse throw({in_use, Linked}),
         Aliases = maps:get(aliases, User, []),
         Table = table(),
 
