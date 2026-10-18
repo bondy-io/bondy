@@ -893,7 +893,9 @@ init_groups(RealmUri) ->
     ok.
 
 %% @private
--doc "Tear down all APIs for that realm when event occurs.".
+%% A spec's routes are installed only while its realm exists, so a rebuild
+%% takes the deleted realm's routes down; its specs stay stored as
+%% `pending_realm` and come back if the realm is created again.
 on_realm_deleted(_RealmUri, State) ->
-    %% TODO: tear down all APIs for this realm
+    ok = rebuild_dispatch_tables(),
     State.

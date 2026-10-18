@@ -20,8 +20,10 @@
 -define(REALM, <<"com.bondy.test.gateway_store">>).
 -define(SPEC_ID, <<"com.bondy.test.gateway_store">>).
 
+%% `realm_delete_takes_its_routes_down` runs after the parallel group: a spec
+%% stored by another case schedules a rebuild that would mask its failure.
 all() ->
-    bondy_ct:all().
+    bondy_ct:all() ++ [realm_delete_takes_its_routes_down].
 
 groups() ->
     [{main, [], bondy_ct:tests(?MODULE)}].
@@ -146,6 +148,38 @@ pending_realm_spec_activates_with_its_realm_test(_) ->
     }),
     _ = bondy_http_gateway:routes(#{transport => tcp}),
     ?assertMatch(#{status := active}, status_of(Id)),
+    ok = bondy_http_gateway:delete(Id).
+
+%% Deleting a realm takes its routes down: the gateway rebuilds on the
+%% `bondy.realm.deleted` event, and the spec is `pending_realm` again. The
+%% spec is `active` only once the rebuild its own store schedules has run, so
+%% no rebuild is pending when the realm goes; nothing here calls `routes/1`,
+%% which would rebuild by itself.
+realm_delete_takes_its_routes_down(_) ->
+    Realm = <<"com.bondy.test.gateway_store.deleted_realm">>,
+    Id = <<"com.bondy.test.gateway_store.deleted_realm_spec">>,
+    _ = bondy_realm:create(#{
+        uri => Realm,
+        description => <<"API Gateway deleted realm">>,
+        security_enabled => false
+    }),
+    ok = store_raw(Id, (spec(Id, Realm))#{<<"ts">> => 1}),
+    ?assert(
+        bondy_ct:wait_until(
+            fun() ->
+                find_status(Id) =:= {ok, #{id => Id, status => active}}
+            end,
+            5000
+        )
+    ),
+
+    ok = bondy_realm:delete(Realm),
+    ?assert(
+        bondy_ct:wait_until(
+            fun() -> maps:get(status, status_of(Id)) =:= pending_realm end,
+            5000
+        )
+    ),
     ok = bondy_http_gateway:delete(Id).
 
 %% Loading an invalid spec through the API fails and stores nothing.

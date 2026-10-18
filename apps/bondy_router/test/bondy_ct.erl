@@ -698,6 +698,7 @@
     freeze_gc/1,
     with_load_busy/1,
     with_memory_high/1,
+    wait_until/2,
     stop_nodes/1,
     stop_node/1,
     stop_node/2,
@@ -718,6 +719,27 @@
 
 all() ->
     [{group, main}].
+
+%% Polls `Fun` every 50 ms until it returns `true`, for at most `Timeout`
+%% milliseconds. Returns whether it did.
+wait_until(Fun, Timeout) ->
+    Deadline = erlang:monotonic_time(millisecond) + Timeout,
+    wait_until_loop(Fun, Deadline).
+
+%% @private
+wait_until_loop(Fun, Deadline) ->
+    case Fun() of
+        true ->
+            true;
+        false ->
+            case erlang:monotonic_time(millisecond) >= Deadline of
+                true ->
+                    false;
+                false ->
+                    timer:sleep(50),
+                    wait_until_loop(Fun, Deadline)
+            end
+    end.
 
 groups(Module) ->
     [{main, [parallel], tests(Module)}].

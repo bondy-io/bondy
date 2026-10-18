@@ -10,6 +10,11 @@
 %% `invalid_client` / `invalid_grant`. Every case here asserts the wrong status
 %% is NOT what the client gets.
 %%
+%% The token endpoint authenticates the client and the resource owner with the
+%% realm's `password` method, so it honours that method's sources: a realm that
+%% does not let a password authenticate from the client's address issues no
+%% token (`password_policy_is_honoured`).
+%%
 %% The store refusal is injected at the facade (`bondy_db:apply/4`, passthrough
 %% for every table but the token table) rather than by saturating a shard: the
 %% classification is what is under test, not the oplog's admission control.
@@ -25,6 +30,7 @@
 -include("http_api.hrl").
 
 -define(REALM_URI, <<"com.example.test.oauth2_transient">>).
+-define(LAN_ONLY_REALM_URI, <<"com.example.test.oauth2_lan_only">>).
 -define(OWNER, <<"owner_1">>).
 -define(CLIENT, <<"client_1">>).
 -define(PASS, <<"aWe11KeptSecret">>).
@@ -45,6 +51,7 @@
 -export([token_endpoint_replies_503_when_busy/1]).
 -export([token_endpoint_gate_disabled_admits_when_busy/1]).
 -export([crafted_refresh_string_with_nul_is_refused_not_crashed/1]).
+-export([password_policy_is_honoured/1]).
 
 all() ->
     [
@@ -58,6 +65,7 @@ all() ->
         token_endpoint_replies_503_under_memory_pressure,
         token_endpoint_replies_503_when_busy,
         token_endpoint_gate_disabled_admits_when_busy,
+        password_policy_is_honoured,
         crafted_refresh_string_with_nul_is_refused_not_crashed
     ].
 
@@ -223,7 +231,7 @@ token_endpoint_replies_503_when_store_refuses(_Config) ->
         "grant_type=password&username=owner_1&password=aWe11KeptSecret"
         "&client_device_id=device_e2e"
     >>,
-    {Status, Headers, RespBody} = post_token(?CLIENT, ?PASS, Body),
+    {Status, Headers, RespBody} = post_token(?REALM_URI, ?CLIENT, ?PASS, Body),
     ?assertEqual(?HTTP_SERVICE_UNAVAILABLE, Status),
     ?assertNotEqual(?HTTP_BAD_REQUEST, Status),
     ?assertEqual(<<"1">>, maps:get(<<"retry-after">>, Headers)),
@@ -233,7 +241,7 @@ token_endpoint_replies_503_when_store_refuses(_Config) ->
     ),
     %% And with the store back, the same request is a 200 with a token.
     ok = meck:unload(bondy_db),
-    {200, _, OkBody} = post_token(?CLIENT, ?PASS, Body),
+    {200, _, OkBody} = post_token(?REALM_URI, ?CLIENT, ?PASS, Body),
     ?assertMatch(
         #{<<"access_token">> := _, <<"refresh_token">> := _},
         json:decode(iolist_to_binary(OkBody))
@@ -253,7 +261,9 @@ token_endpoint_replies_503_under_memory_pressure(_Config) ->
         "&client_device_id=device_mem"
     >>,
     bondy_ct:with_memory_high(fun() ->
-        {Status, Headers, RespBody} = post_token(?CLIENT, ?PASS, Body),
+        {Status, Headers, RespBody} = post_token(
+            ?REALM_URI, ?CLIENT, ?PASS, Body
+        ),
         ?assertEqual(?HTTP_SERVICE_UNAVAILABLE, Status),
         ?assertEqual(<<"1">>, maps:get(<<"retry-after">>, Headers)),
         ?assertMatch(
@@ -267,7 +277,7 @@ token_endpoint_replies_503_under_memory_pressure(_Config) ->
         ),
         ?assertNot(meck:called(bondy_auth, init, '_'))
     end),
-    {200, _, OkBody} = post_token(?CLIENT, ?PASS, Body),
+    {200, _, OkBody} = post_token(?REALM_URI, ?CLIENT, ?PASS, Body),
     ?assertMatch(
         #{<<"access_token">> := _, <<"refresh_token">> := _},
         json:decode(iolist_to_binary(OkBody))
@@ -287,7 +297,9 @@ token_endpoint_replies_503_when_busy(_Config) ->
     >>,
     bondy_ct:with_load_busy(fun() ->
         ?assertNot(bondy_regulator_memory:high()),
-        {Status, Headers, RespBody} = post_token(?CLIENT, ?PASS, Body),
+        {Status, Headers, RespBody} = post_token(
+            ?REALM_URI, ?CLIENT, ?PASS, Body
+        ),
         ?assertEqual(?HTTP_SERVICE_UNAVAILABLE, Status),
         ?assertEqual(<<"1">>, maps:get(<<"retry-after">>, Headers)),
         ?assertMatch(
@@ -300,7 +312,7 @@ token_endpoint_replies_503_when_busy(_Config) ->
         ),
         ?assertNot(meck:called(bondy_auth, init, '_'))
     end),
-    {200, _, OkBody} = post_token(?CLIENT, ?PASS, Body),
+    {200, _, OkBody} = post_token(?REALM_URI, ?CLIENT, ?PASS, Body),
     ?assertMatch(
         #{<<"access_token">> := _, <<"refresh_token">> := _},
         json:decode(iolist_to_binary(OkBody))
@@ -318,7 +330,7 @@ token_endpoint_gate_disabled_admits_when_busy(_Config) ->
     >>,
     try
         bondy_ct:with_load_busy(fun() ->
-            {Status, _, OkBody} = post_token(?CLIENT, ?PASS, Body),
+            {Status, _, OkBody} = post_token(?REALM_URI, ?CLIENT, ?PASS, Body),
             ?assertEqual(200, Status),
             ?assertMatch(
                 #{<<"access_token">> := _},
@@ -344,7 +356,7 @@ crafted_refresh_string_with_nul_is_refused_not_crashed(_Config) ->
     ?assertMatch({error, _}, bondy_oauth_token:lookup(?REALM_URI, Crafted)),
     %% The same through the endpoint: a 400 `invalid_grant`, not a crash.
     Body = <<"grant_type=refresh_token&refresh_token=not-a-token%00x">>,
-    {Status, _Headers, RespBody} = post_token(?CLIENT, ?PASS, Body),
+    {Status, _Headers, RespBody} = post_token(?REALM_URI, ?CLIENT, ?PASS, Body),
     ?assertEqual(?HTTP_BAD_REQUEST, Status),
     ?assertMatch(
         #{<<"uri">> := <<"bondy.error.invalid_grant">>},
@@ -379,6 +391,48 @@ issue_token(User, DeviceId) ->
     ),
     bondy_oauth_token:issue(password, Ctxt, #{device_id => DeviceId}).
 
+%% The same users as the main realm, but `password` may authenticate only from
+%% 10.0.0.0/8 and the request comes from loopback: no grant may be issued.
+password_policy_is_honoured(_Config) ->
+    _ = bondy_realm:create(#{
+        uri => ?LAN_ONLY_REALM_URI,
+        authmethods => [?WAMP_OAUTH2_AUTH, ?PASSWORD_AUTH],
+        security_enabled => true,
+        groups => [
+            #{name => <<"api_clients">>}, #{name => <<"resource_owners">>}
+        ],
+        users => [
+            #{
+                username => ?OWNER,
+                password => ?PASS,
+                groups => [<<"resource_owners">>]
+            },
+            #{
+                username => ?CLIENT,
+                password => ?PASS,
+                groups => [<<"api_clients">>]
+            }
+        ],
+        sources => [
+            #{
+                usernames => <<"all">>,
+                authmethod => ?PASSWORD_AUTH,
+                cidr => <<"10.0.0.0/8">>
+            }
+        ]
+    }),
+    Body = <<
+        "grant_type=password&username=owner_1&password=aWe11KeptSecret"
+        "&client_device_id=device_lan"
+    >>,
+    {Status, _, RespBody} = post_token(
+        ?LAN_ONLY_REALM_URI, ?CLIENT, ?PASS, Body
+    ),
+    ?assertNotEqual(200, Status),
+    ?assertNot(
+        maps:is_key(<<"access_token">>, json:decode(iolist_to_binary(RespBody)))
+    ).
+
 %% @private
 %% A cowboy request map with just what `is_authorized/2` and `reply/2` read:
 %% the listener ref (CORS config lookup), the peer, the Basic credentials, and
@@ -407,14 +461,14 @@ client_request(ClientId, Password) ->
 %% is read. A successful grant is `{true, Req, St}` with the token in `Req`'s
 %% response body, read off the returned request. Returns `{Status, Headers,
 %% Body}`.
-post_token(ClientId, Password, Body) ->
+post_token(RealmUri, ClientId, Password, Body) ->
     Req0 = maps:merge(client_request(ClientId, Password), #{
         path => <<"/token">>,
         has_body => true,
         body_length => byte_size(Body)
     }),
     Opts = #{
-        realm_uri => ?REALM_URI,
+        realm_uri => RealmUri,
         token_path => <<"/token">>,
         revoke_path => <<"/revoke">>
     },

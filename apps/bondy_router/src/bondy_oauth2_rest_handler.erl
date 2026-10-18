@@ -421,10 +421,10 @@ authenticate(resource_owner, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
 
 %% @private
 do_authenticate(Password, Roles, Ctxt) ->
-    %% TODO If the user configured realm authmethods with OAUTH2 but not
-    %% PASSWORD this will fail.  We need to ask bondy_auth to authenticate using
-    %% password even if password is not an allowed method (this)
-
+    %% Clients and resource owners authenticate with the realm's `password`
+    %% method, so its sources apply here: a realm that refuses a password from
+    %% this address issues no token. A realm without `password` can still accept
+    %% tokens issued by its SSO realm (`bondy_realm:is_trusted_issuer/2`).
     case bondy_auth:authenticate(?PASSWORD_AUTH, Password, Roles, Ctxt) of
         {ok, _, NewCtxt} ->
             NewCtxt;
