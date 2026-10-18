@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_cache_ets).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Reference `bondy_oplog_cache_adapter` implementation backed by a single
 `public set` ETS table per `(NS, Index, Shard)` triple.
 
@@ -38,7 +36,7 @@ The adapter's handle is the ETS tid. The table reserves one row,
 advance `Generation` before they remove rows, and a ticket is the
 `Generation` it was taken at. All callbacks are wait-free except
 `invalidate_all/1`, which scans the table.
-""").
+""".
 
 -behaviour(bondy_oplog_cache_adapter).
 

@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_path).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance storage path layout.
 
 A persistent instance keeps its on-disk artefacts (WAL, MST backend,
@@ -29,7 +27,7 @@ This module replaces the former `bondy_oplog_path_strategy` behaviour
 implementations): the two layouts differ by a couple of lines, so they
 are expressed here as a single `layout()` parameter rather than as a
 pluggable module.
-""").
+""".
 
 -type layout() :: flat | sharded.
 
@@ -46,10 +44,10 @@ pluggable module.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Resolves the layout from an options map. Reads the `path_layout` key,
 defaulting to `sharded`. Crashes on an unrecognised value.
-""").
+""".
 -spec layout(Opts :: map()) -> layout().
 
 layout(Opts) when is_map(Opts) ->
@@ -59,7 +57,7 @@ layout(Opts) when is_map(Opts) ->
         Other -> error({invalid_path_layout, Other})
     end.
 
-?DOC("""
+-doc """
 Checks that `InstanceId` can name ONE directory component. Returns `ok` or
 raises `{invalid_instance_id, InstanceId, Reason}`.
 
@@ -92,7 +90,7 @@ The library enforces this ONCE, at admission
 instance regardless of how its directories are configured — an explicit
 `wal_dir`, or the per-process `/tmp` default, never pass through
 `storage_path/3`. Pinned by `bondy_oplog_lifecycle_test`.
-""").
+""".
 -spec validate_instance_id(InstanceId :: binary()) -> ok.
 
 validate_instance_id(InstanceId) when is_binary(InstanceId) ->
@@ -103,7 +101,7 @@ validate_instance_id(InstanceId) when is_binary(InstanceId) ->
             error({invalid_instance_id, InstanceId, Reason})
     end.
 
-?DOC("""
+-doc """
 Returns the per-instance directory for `InstanceId` under `BaseDir`
 using the given `Layout`. The result terminates in `<InstanceId>`.
 
@@ -111,7 +109,7 @@ using the given `Layout`. The result terminates in `<InstanceId>`.
 otherwise. Every instance the library starts has already passed it at
 admission (`bondy_oplog_instance_dyn_sup:start_instance/2`); it is
 re-checked here because this is a public function with callers of its own.
-""").
+""".
 -spec storage_path(
     InstanceId :: binary(), BaseDir :: binary(), Layout :: layout()
 ) -> file:filename_all().
@@ -128,11 +126,11 @@ storage_path(InstanceId, BaseDir, sharded) when
     {Shard1, Shard2} = shard_prefixes(InstanceId),
     filename:join([BaseDir, Shard1, Shard2, InstanceId]).
 
-?DOC("""
+-doc """
 Convenience over `storage_path/3`: resolves the layout from `Opts`
 (via `layout/1`) and returns the per-instance directory for
 `InstanceId` under `BaseDir`.
-""").
+""".
 -spec instance_dir(
     InstanceId :: binary(), BaseDir :: binary(), Opts :: map()
 ) -> file:filename_all().
@@ -140,22 +138,22 @@ Convenience over `storage_path/3`: resolves the layout from `Opts`
 instance_dir(InstanceId, BaseDir, Opts) ->
     storage_path(InstanceId, BaseDir, layout(Opts)).
 
-?DOC("""
+-doc """
 Returns the WAL directory an instance keeps inside `InstanceDir`.
 
 Used when no explicit `wal_dir` is configured; see
 `bondy_oplog_instance_sup:wal_base_dir/2`.
-""").
+""".
 -spec wal_dir(InstanceDir :: file:filename_all()) -> file:filename_all().
 
 wal_dir(InstanceDir) ->
     internal_dir(InstanceDir, <<"wal">>).
 
-?DOC("""
+-doc """
 Returns the origin directory an instance keeps inside `InstanceDir`.
 
 See `bondy_oplog_instance_sup:origin_persist_path/2`.
-""").
+""".
 -spec origin_dir(InstanceDir :: file:filename_all()) -> file:filename_all().
 
 origin_dir(InstanceDir) ->

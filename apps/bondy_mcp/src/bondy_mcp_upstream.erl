@@ -375,7 +375,7 @@ ensure_service(#state{service = Service} = State) when
 ->
     {ok, State};
 ensure_service(#state{conf = Conf} = State) ->
-    try find_service(Conf) of
+    case find_service(Conf) of
         {ok, Service} ->
             Pool = bondy_http_connector_manager:pool_name(
                 maps:get(name, Service)
@@ -383,9 +383,6 @@ ensure_service(#state{conf = Conf} = State) ->
             {ok, State#state{service = Service, pool = Pool}};
         {error, Reason} ->
             {error, Reason, State}
-    catch
-        _:_ ->
-            {error, connector_not_started, State}
     end.
 
 %% @private
@@ -407,7 +404,9 @@ ensure_wamp_session(#state{realm_uri = RealmUri} = State) ->
         {error, Reason} ->
             {error, {session_open_failed, Reason}, State}
     catch
-        _:Reason ->
+        error:{not_found, RealmUri} = Reason ->
+            {error, {session_open_failed, Reason}, State};
+        exit:{_, {gen_server, call, _}} = Reason ->
             {error, {session_open_failed, Reason}, State}
     end.
 

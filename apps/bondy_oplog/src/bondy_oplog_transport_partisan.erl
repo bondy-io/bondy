@@ -7,11 +7,10 @@
 -behaviour(bondy_oplog_transport).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Partisan transport for the sync protocol.
 
 `peer_id` is interpreted as a **Partisan node name** (the values returned
@@ -36,7 +35,7 @@ deployments.
 
 Both are passed through `Opts`. When `channel` is absent the call uses
 Partisan's default channel.
-""").
+""".
 
 -export([request/4]).
 -export([self_id/1]).

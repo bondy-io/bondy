@@ -85,10 +85,9 @@ ensure_reg_realms_table() ->
         {write_concurrency, true}
     ],
     _ =
-        try
-            ets:new(?REG_REALMS_TAB, Opts)
-        catch
-            _:_ -> ok
+        case ets:whereis(?REG_REALMS_TAB) of
+            undefined -> ets:new(?REG_REALMS_TAB, Opts);
+            Tid -> Tid
         end,
     ok.
 
@@ -297,30 +296,21 @@ handle_call({open, Session0, EnqueuedAt}, _From, State0) ->
     %% process terminates
     Ref = erlang:monitor(process, Pid),
 
-    %% This must be safe to avoid crashing the server as this acts as a
-    %% session supervisor
-    try
-        ok = register_procedures(Session),
-        Refs = State0#state.monitor_refs,
-        State = State0#state{monitor_refs = Refs#{Id => Ref, Ref => Id}},
-
-        %% Schedule OIDC token refresh if this is an oidcrp session
-        ok = maybe_schedule_oidc_refresh(Session),
-
-        ServiceUs = erlang:monotonic_time(microsecond) - ServiceStart,
-        ok = bondy_telemetry:session_manager_open(QueueUs, ServiceUs),
-
-        {reply, {ok, Session}, State}
-    catch
-        Class:Reason:Stacktrace ->
+    case register_procedures(Session) of
+        ok ->
+            Refs = State0#state.monitor_refs,
+            State = State0#state{monitor_refs = Refs#{Id => Ref, Ref => Id}},
+            ok = maybe_schedule_oidc_refresh(Session),
+            ServiceUs = erlang:monotonic_time(microsecond) - ServiceStart,
+            ok = bondy_telemetry:session_manager_open(QueueUs, ServiceUs),
+            {reply, {ok, Session}, State};
+        {error, Reason} ->
             ?LOG_ERROR(#{
                 description =>
                     "Error while registering session 'get' procedure",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
+                reason => Reason
             }),
-            erlang:demonitor(Ref),
+            true = erlang:demonitor(Ref, [flush]),
             ok = timed_cleanup(error, Session, undefined),
             ErrServiceUs = erlang:monotonic_time(microsecond) - ServiceStart,
             ok = bondy_telemetry:session_manager_open(QueueUs, ErrServiceUs),
@@ -382,12 +372,9 @@ handle_info(Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, State) ->
-    try
-        gproc_pool:disconnect_worker(pool(), State#state.name)
-    catch
-        _:_ ->
-            ok
-    end.
+    #{name := PoolName} = pool(),
+    true = gproc_pool:disconnect_worker(PoolName, State#state.name),
+    ok.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -413,13 +400,13 @@ register_procedures(Session) ->
     %% ets:insert_new is atomic, so exactly one worker registers per realm.
     case ets:insert_new(?REG_REALMS_TAB, {RealmUri}) of
         true ->
-            try
-                ok = register_node_session_get(RealmUri)
-            catch
-                Class:Reason:Stacktrace ->
+            case register_node_session_get(RealmUri) of
+                ok ->
+                    ok;
+                {error, _} = Error ->
                     %% Undo the guard so a later open retries the registration.
                     true = ets:delete(?REG_REALMS_TAB, RealmUri),
-                    erlang:raise(Class, Reason, Stacktrace)
+                    Error
             end;
         false ->
             ok
@@ -445,7 +432,9 @@ register_node_session_get(RealmUri) ->
         {error, already_exists} ->
             %% The guard and the registry can diverge only across a supervisor
             %% restart; the existing wildcard is exactly what we wanted.
-            ok
+            ok;
+        {error, _} = Error ->
+            Error
     end.
 
 %% @private
@@ -490,13 +479,13 @@ cleanup(Session, Reason) ->
     %% only flushes, so without this a connection that died WITHOUT the
     %% graceful `close` cast (a crash, a kill, a dropped transport whose
     %% handler never ran) leaked its session rows in ETS forever.
-    %% Guarded like `do_close/3`'s call: this path must never crash the
-    %% manager, which acts as a session supervisor.
+    %% During shutdown the event manager is unregistered, so its `notify/1`
+    %% raises `badarg`.
     _ =
         try
             bondy_session:close(Session, Reason)
         catch
-            _:_ -> ok
+            error:badarg -> ok
         end,
     ok.
 
@@ -550,18 +539,7 @@ do_close_all(Bindings, Opts0, ReasonUri) ->
 
     Fun = fun
         ({continue, Cont}) ->
-            try
-                bondy_session:match(Cont)
-            catch
-                Class:Reason:Stacktrace ->
-                    ?LOG_ERROR(#{
-                        description => "Error while closing session",
-                        class => Class,
-                        reason => Reason,
-                        stacktrace => Stacktrace
-                    }),
-                    []
-            end;
+            bondy_session:match(Cont);
         (Session) ->
             do_for_worker(
                 fun(ServerRef) ->
@@ -571,19 +549,8 @@ do_close_all(Bindings, Opts0, ReasonUri) ->
             )
     end,
 
-    try
-        Matches = bondy_session:match(Bindings, Opts),
-        ok = bondy_router_utils:foreach(Fun, Matches)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while closing all sessions",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ok
-    end.
+    Matches = bondy_session:match(Bindings, Opts),
+    ok = bondy_router_utils:foreach(Fun, Matches).
 
 %% @private
 do_invalidate_rbac_all(Bindings) ->
@@ -591,40 +558,17 @@ do_invalidate_rbac_all(Bindings) ->
 
     Fun = fun
         ({continue, Cont}) ->
-            try
-                bondy_session:match(Cont)
-            catch
-                Class:Reason:Stacktrace ->
-                    ?LOG_ERROR(#{
-                        description =>
-                            "Error while invalidating session RBAC context",
-                        class => Class,
-                        reason => Reason,
-                        stacktrace => Stacktrace
-                    }),
-                    []
-            end;
+            bondy_session:match(Cont);
         (Session) ->
             %% Re-evaluate in place (no teardown): the next authorize rebuilds
-            %% the context from the subject's current grants (§9.5).
+            %% the context from the subject's current grants.
             ok = bondy_session:invalidate_rbac_context(
                 bondy_session:id(Session)
             )
     end,
 
-    try
-        Matches = bondy_session:match(Bindings, Opts),
-        ok = bondy_router_utils:foreach(Fun, Matches)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while invalidating all session contexts",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ok
-    end.
+    Matches = bondy_session:match(Bindings, Opts),
+    ok = bondy_router_utils:foreach(Fun, Matches).
 
 %% @private
 maybe_send_goodbye(_, undefined) ->
@@ -637,11 +581,13 @@ maybe_send_goodbye(Session, ReasonUri) ->
         #{message => <<"The session was closed by the Router.">>},
         ReasonUri
     ),
+    %% `bondy_ref:pid/1` raises `badarg` once the session's gproc name is
+    %% gone, and `!` raises `badarg` for a ref with no pid.
     _ =
         try
             bondy_router_peer:send(RealmUri, ProcRef, Msg)
         catch
-            _:_ -> ok
+            error:badarg -> ok
         end,
     ok.
 

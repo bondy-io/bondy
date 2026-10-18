@@ -142,7 +142,9 @@ alarm_demanded(Topic) ->
     try
         bondy_registry:has_matches(subscription, ?MASTER_REALM_URI, Topic)
     catch
-        _:_ -> false
+        %% The registry pool lookup and the index tables raise `badarg` once
+        %% they are gone.
+        error:badarg -> false
     end.
 
 %% @private

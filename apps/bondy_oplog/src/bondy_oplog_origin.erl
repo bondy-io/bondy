@@ -5,11 +5,10 @@
 
 -module(bondy_oplog_origin).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Origin identity for the MST event-store replication layer.
 
 An *Origin* identifies a replica — the node-instance that creates events.
@@ -42,7 +41,7 @@ restart without WAL recovery rejecting its own segments as
 
 `validate/1` enforces the only structural invariant: Origin is a
 non-empty binary. Uniqueness is the operator's responsibility.
-""").
+""".
 
 -type t() :: binary().
 
@@ -59,7 +58,7 @@ non-empty binary. Uniqueness is the operator's responsibility.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns the per-VM default Origin, generating it lazily on first call.
 
 The value is cached in `persistent_term` under the key `{?MODULE, default}`.
@@ -73,7 +72,7 @@ option.
 Concurrent first calls all return the one value that is cached: the value
 is generated under a node-local lock, after checking the cache again
 (`bondy_oplog_origin_test:concurrent_first_calls_agree_test/0`).
-""").
+""".
 -spec default() -> t().
 
 default() ->
@@ -86,15 +85,15 @@ default() ->
             Id
     end.
 
-?DOC("""
+-doc """
 Generates a fresh 128-bit random Origin identifier.
-""").
+""".
 -spec new() -> t().
 
 new() ->
     crypto:strong_rand_bytes(?BONDY_OPLOG_ORIGIN_BYTES).
 
-?DOC("""
+-doc """
 Returns the origin persisted at `Path`, generating and persisting one only
 when `Path` does not exist (`enoent`).
 
@@ -112,7 +111,7 @@ with `bondy_mst_io:write_file_atomic/2`. A persisted origin is returned only
 after its directory has been fsynced, so an origin written by a start whose
 directory fsync failed is durable before a retried start uses it
 (`bondy_oplog_origin_test`).
-""").
+""".
 -spec load_or_create(Path :: file:filename_all()) ->
     {ok, t()} | {error, term()}.
 
@@ -131,9 +130,9 @@ load_or_create(Path) ->
             Error
     end.
 
-?DOC("""
+-doc """
 Validates an origin value. Returns `ok` if valid, `{error, Reason}` otherwise.
-""").
+""".
 -spec validate(term()) -> ok | {error, term()}.
 
 validate(Bin) when is_binary(Bin), byte_size(Bin) > 0 ->

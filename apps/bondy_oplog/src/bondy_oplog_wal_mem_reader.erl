@@ -18,9 +18,7 @@
 
 -module(bondy_oplog_wal_mem_reader).
 
--include("bondy_doc.hrl").
-
-?MODULEDOC("""
+-moduledoc """
 Read side of the in-memory ephemeral WAL (`bondy_oplog_wal_mem`).
 
 Mirrors the surface of `bondy_log_reader` that the fused drain uses —
@@ -37,7 +35,7 @@ work unchanged on `{Seg, Seq}` positions.
 
 The drain dispatches to this module (vs `bondy_log_reader`) on the
 instance's `wal_backend` flag; `bondy_log_reader` itself is untouched.
-""").
+""".
 
 %% Default events read per `next/1` when the caller does not pass `{chunk, _}`.
 %% Set at `open/3` from the fused drain's `apply_batch_max` so a mem batch
@@ -87,12 +85,12 @@ instance's `wal_backend` flag; `bondy_log_reader` itself is untouched.
 open(WalPid, Start) ->
     open(WalPid, Start, []).
 
-?DOC("""
+-doc """
 Opens a reader over the mem WAL's table at `Start`. `Opts` are accepted for
 parity with `bondy_log_reader:open/3` (e.g. `{follow, _}`) and ignored —
 the mem reader never blocks; `next/1` simply returns `end_of_log` when the
 cursor has caught up to the head.
-""").
+""".
 -spec open(pid(), bondy_log_reader:start_position(), list()) ->
     {ok, t()} | {error, term()}.
 
@@ -124,7 +122,7 @@ open_over(WalPid, #{tab := Tab, mem_seg := Seg, atomics := ARef}, Start, Opts) -
     },
     apply_start(Iter0, Start).
 
-?DOC("""
+-doc """
 Returns the next chunk of events in the **contiguous prefix** past `cursor` (up
 to `chunk`), or `end_of_log` when the cursor has caught up. The position
 returned is the `Seq` of the last delivered event.
@@ -139,7 +137,7 @@ microseconds); `Seq > reserved` is the genuine end of the log. A missing
 `Seq =< committed` is a GC'd prefix (a reader opened behind the GC watermark) and
 is skipped forward to `committed`. Point lookups keep reads O(chunk·log n)
 regardless of cursor advance or GC.
-""").
+""".
 -spec next(t()) -> bondy_log_reader:next_result().
 
 next(#mem_iter{seg = Seg, cursor = Cursor} = Iter) ->
@@ -165,11 +163,11 @@ next(#mem_iter{seg = Seg, cursor = Cursor} = Iter) ->
 position(#mem_iter{seg = Seg, cursor = Cursor}) ->
     {Seg, Cursor}.
 
-?DOC("""
+-doc """
 The mem WAL's current head (`reserved` Seq). The fused drain compares it to the
 reader cursor to tell an in-flight gap (retry) from the true end of the log
 (park): `cursor < reserved` with an empty read means a gap.
-""").
+""".
 -spec reserved(t()) -> non_neg_integer().
 
 reserved(#mem_iter{atomics = ARef}) ->

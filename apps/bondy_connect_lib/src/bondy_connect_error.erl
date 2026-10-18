@@ -240,8 +240,10 @@ is_type(_) ->
     false.
 
 -doc """
-Converts any term into an error value. Total: it never raises, whatever it is
-given.
+Converts any term into an error value. Meant to be total:
+`prop_bondy_connect_error:prop_from_term_is_total/0` and the `from_term_*`
+tests in `bondy_connect_error_test` drive it with hostile terms, improper
+lists among them.
 
 Recognises the error shapes Bondy produces today - bare atoms, tagged tuples,
 already-projected error maps - and maps them onto catalogue types. A term it
@@ -252,15 +254,7 @@ but never to a peer.
 -spec from_term(Term :: any()) -> t().
 
 from_term(Term) ->
-    try
-        do_from_term(Term)
-    catch
-        _:_ ->
-            %% do_from_term/1 is meant to be total. If it ever is not, an
-            %% opaque internal error is still a better outcome than an
-            %% exception raised from inside an error handler.
-            internal(Term)
-    end.
+    do_from_term(Term).
 
 -doc """
 Converts a caught exception into an error value.
@@ -690,9 +684,13 @@ convert({invalid_value, Key, Value, Description}) ->
     });
 convert({property_range_limit, Key, Limit}) ->
     new(property_range_limit, #{details => #{key => Key, limit => Limit}});
-convert({inconsistency_error, Keys}) when is_list(Keys) ->
+%% `length/1` fails in a guard on an improper list, so such a `Keys` falls
+%% through to the single-key clause and is rendered as text.
+convert({inconsistency_error, Keys}) when is_list(Keys), length(Keys) >= 0 ->
     new(inconsistency_error, #{details => keys_details(Keys)});
-convert({inconsistency_error, Keys, Description}) when is_list(Keys) ->
+convert({inconsistency_error, Keys, Description}) when
+    is_list(Keys), length(Keys) >= 0
+->
     new(inconsistency_error, #{
         description => to_binary(Description),
         details => keys_details(Keys)
@@ -862,7 +860,7 @@ from_projection(Uri0, Map) ->
             Found -> Found
         end,
 
-    Base = new(Type, #{details => maps:get(~"details", Map, #{})}),
+    Base = new(Type, #{details => details_of(Map)}),
     Uri = safe_uri(Uri0, maps:get(uri, Base)),
 
     Base#{
@@ -877,6 +875,12 @@ from_projection(Uri0, Map) ->
         ),
         causes => to_causes(maps:get(~"causes", Map, []))
     }.
+
+%% @private
+details_of(#{~"details" := Details}) when is_map(Details) ->
+    Details;
+details_of(_) ->
+    #{}.
 
 %% @private
 %% Keeps a rejected URI for the logs, so that a peer sending a malformed one is
@@ -939,7 +943,7 @@ trace_id() ->
     }).
 
 %% @private
-to_causes(Causes) when is_list(Causes) ->
+to_causes(Causes) when is_list(Causes), length(Causes) >= 0 ->
     [maybe_from_term(C) || C <- Causes];
 to_causes(_) ->
     [].
@@ -956,7 +960,7 @@ interpolate(Template, Details) when
         nomatch -> Template;
         _ -> iolist_to_binary(interpolate_parts(Template, Details))
     end;
-interpolate(Template, Details) ->
+interpolate(Template, Details) when is_map(Details) ->
     interpolate(to_binary(Template), Details).
 
 %% @private
@@ -1081,7 +1085,7 @@ to_binary(Term) when is_list(Term) ->
     try iolist_to_binary(Term) of
         Bin -> to_binary(Bin)
     catch
-        _:_ -> format_term(Term)
+        error:badarg -> format_term(Term)
     end;
 to_binary(Term) ->
     format_term(Term).
@@ -1153,13 +1157,7 @@ sanitise_list(Tail, _, Acc) ->
 is_text([]) ->
     false;
 is_text(Term) ->
-    try
-        io_lib:printable_unicode_list(Term)
-    catch
-        _:_ ->
-            %% Improper lists reach printable_unicode_list/1 as a bad argument.
-            false
-    end.
+    io_lib:printable_unicode_list(Term).
 
 %% =============================================================================
 %% PRIVATE: CATALOGUE

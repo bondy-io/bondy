@@ -294,3 +294,37 @@ non_binary_traceparent_is_undefined_test() ->
         undefined,
         bondy_telemetry:trace_id_of(#{'_traceparent' => not_a_binary})
     ).
+
+%% An internal context carries no `subprotocol`, which
+%% `bondy_context:subprotocol/1` has no clause for.
+wamp_message_without_a_subprotocol_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    Id = {?MODULE, ?FUNCTION_NAME},
+    ok = telemetry:attach(
+        Id,
+        [bondy, wamp, message],
+        fun(_Event, _Measurements, Meta, _Config) -> Self ! {Id, Meta} end,
+        undefined
+    ),
+    try
+        ok = bondy_telemetry:wamp_message(
+            {goodbye, #{}, ~"wamp.close.normal"}, #{realm_uri => ~"com.x"}
+        ),
+        receive
+            {Id, Meta} ->
+                ?assertMatch(
+                    #{
+                        transport := undefined,
+                        frame_type := undefined,
+                        encoding := undefined,
+                        realm_type := user
+                    },
+                    Meta
+                )
+        after 1000 ->
+            ?assert(false)
+        end
+    after
+        ok = telemetry:detach(Id)
+    end.

@@ -1,5 +1,5 @@
 # CHANGELOG
-## Unreleased
+## 1.0.0
 
 ### Action required
 * Upgrading from a pre-release that carries `bondy_db` (for example `1.0.0-rc.olive` or `1.0.0-rc.pear`) requires stopping every node and starting them all on this release. See [Upgrading from the bondy_db pre-releases](doc/guides/configuration/upgrading_from_bondy_db_prereleases.md).

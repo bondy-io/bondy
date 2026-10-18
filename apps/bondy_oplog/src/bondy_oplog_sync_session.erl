@@ -6,11 +6,10 @@
 -module(bondy_oplog_sync_session).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 A single anti-entropy sync session.
 
 Implements the **pull-direction** of the MST reconciliation protocol:
@@ -104,7 +103,7 @@ Neither condition subsumes the other —
 `proofs/tla/MuxBucketSkip_Minus_ServeGate.cfg` and
 `proofs/tla/MuxBucketSkip_Minus_AdoptIfComplete.cfg` each violate
 `NoOverClaim`.
-""").
+""".
 
 -type opts() :: #{
     transport => module(),
@@ -143,10 +142,10 @@ Neither condition subsumes the other —
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Synchronously runs a pull-direction sync session. Returns `{ok, Root}`
 on success, where `Root` is the local root hash after merging.
-""").
+""".
 -spec run(instance_id(), peer_id(), opts()) ->
     {ok, bondy_mst:hash() | undefined} | {error, term()}.
 
@@ -208,11 +207,11 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
     ),
     Result.
 
-?DOC("""
+-doc """
 Spawns the session in a separate process and returns immediately.
 Completion is reported via `peer_state` and via telemetry. The spawned
 process exits normally on success and with an error reason on failure.
-""").
+""".
 -spec start(instance_id(), peer_id(), opts()) -> {ok, pid()}.
 
 start(Instance, Peer, Opts) ->
@@ -260,7 +259,7 @@ log_failure(Instance, Peer, Reason) ->
     end,
     ok.
 
-?DOC(false).
+-doc false.
 -spec is_peer_unreachable(term()) -> boolean().
 
 %% A `partisan_gen_server:call` to an absent node exits with `nodedown`; to a
@@ -276,7 +275,7 @@ is_peer_unreachable({partisan_call_failed, {noproc, _}}) ->
 is_peer_unreachable(_) ->
     false.
 
-?DOC("""
+-doc """
 Catalogue-mode bootstrap session. The peer streams its projection
 cells in chunks (`get_catalogue_snapshot_init` +
 `{get_catalogue_snapshot_next, Cursor}`); the initiator installs each
@@ -291,7 +290,7 @@ projection shard is not registered) the call falls through to plain `run/3`.
 `WasLive` is captured at session start so `finalize_catalogue_bootstrap`
 can decide whether to mark live (fresh) or skip the lifecycle update
 (recovering).
-""").
+""".
 -spec bootstrap_catalogue(instance_id(), peer_id(), opts()) ->
     {ok, bondy_mst:hash() | undefined}
     | {error, cursor_expired}
@@ -671,12 +670,12 @@ absorb_chunks(Chunks, Pending0) ->
         Pending1
     ).
 
-?DOC("""
+-doc """
 Spawns a `bootstrap_catalogue/3` session in a separate process and
 returns immediately. Failures are logged and the process exits with
 `{bootstrap_catalogue_failed, Reason}`. Used by the sync scheduler for
 auto-bootstrap of catalogue-mode pre_bootstrap instances.
-""").
+""".
 -spec start_bootstrap_catalogue(instance_id(), peer_id(), opts()) ->
     {ok, pid()}.
 

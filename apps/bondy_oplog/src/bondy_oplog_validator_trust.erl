@@ -6,16 +6,14 @@
 -module(bondy_oplog_validator_trust).
 -behaviour(bondy_oplog_validator).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 No-op validator implementation for closed trusted clusters.
 
 This is the default validator the library installs when an instance
 is started without an explicit `validator` option. It carries no
 state, never alters events, and never rejects them.
-""").
+""".
 
 -export([init/2]).
 -export([sign_event/2]).

@@ -125,3 +125,21 @@ probe_does_not_create_atoms_test() ->
 fresh_nodestring(Line) ->
     Suffix = integer_to_binary(erlang:phash2({?MODULE, Line})),
     <<"bondy_never_a_node_", Suffix/binary, "@nowhere.invalid">>.
+
+%% Partisan configured (its node name stored) while its connections table is
+%% absent: Partisan cannot answer, so the probe fails open. `count/1` reads
+%% the missing table as zero connections, which is why the probe checks for
+%% the table first.
+configured_partisan_without_its_table_fails_open_test_() ->
+    Key = {partisan_config, name},
+    {setup,
+        fun() ->
+            ?assertEqual(undefined, ets:whereis(partisan_peer_connections)),
+            Prev = persistent_term:get(Key, undefined),
+            persistent_term:put(Key, 'probe_self@nowhere.invalid'),
+            Prev
+        end,
+        fun
+            (undefined) -> persistent_term:erase(Key);
+            (Prev) -> persistent_term:put(Key, Prev)
+        end, ?_assert(bondy_dealer:is_reachable(atom_to_binary(node())))}.

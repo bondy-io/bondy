@@ -87,6 +87,8 @@ do_handle_open_body(Req0, State) ->
     {ok, Body, Req1} = cowboy_req:read_body(Req0),
 
     try json:decode(Body) of
+        NotAnObject when not is_map(NotAnObject) ->
+            reply_invalid_json(Req1, State);
         Decoded ->
             Protocols = maps:get(
                 <<"protocols">>, Decoded, []
@@ -108,18 +110,25 @@ do_handle_open_body(Req0, State) ->
                     {ok, Req2, State}
             end
     catch
-        _:_ ->
-            ReplyBody = json:encode(#{
-                <<"error">> => <<"invalid_json">>
-            }),
-            Req2 = cowboy_req:reply(
-                ?HTTP_BAD_REQUEST,
-                #{<<"content-type">> => <<"application/json">>},
-                ReplyBody,
-                Req1
-            ),
-            {ok, Req2, State}
+        %% The three reasons `json:decode/1` raises on malformed input.
+        error:unexpected_end ->
+            reply_invalid_json(Req1, State);
+        error:{invalid_byte, _} ->
+            reply_invalid_json(Req1, State);
+        error:{unexpected_sequence, _} ->
+            reply_invalid_json(Req1, State)
     end.
+
+%% @private
+reply_invalid_json(Req0, State) ->
+    ReplyBody = json:encode(#{<<"error">> => <<"invalid_json">>}),
+    Req = cowboy_req:reply(
+        ?HTTP_BAD_REQUEST,
+        #{<<"content-type">> => <<"application/json">>},
+        ReplyBody,
+        Req0
+    ),
+    {ok, Req, State}.
 
 %% @private
 open_session(Protocol, Req0, State) ->

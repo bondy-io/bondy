@@ -473,19 +473,13 @@ count_by_procedure() ->
     ],
     lists:foldl(
         fun(Tab, Acc0) ->
-            try ets:select(Tab, MS) of
-                Uris ->
-                    lists:foldl(
-                        fun(Uri, Acc) ->
-                            maps:update_with(Uri, fun(N) -> N + 1 end, 1, Acc)
-                        end,
-                        Acc0,
-                        Uris
-                    )
-            catch
-                _:_ ->
-                    Acc0
-            end
+            lists:foldl(
+                fun(Uri, Acc) ->
+                    maps:update_with(Uri, fun(N) -> N + 1 end, 1, Acc)
+                end,
+                Acc0,
+                ets:select(Tab, MS)
+            )
         end,
         #{},
         ?TABLES

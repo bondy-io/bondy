@@ -6,11 +6,10 @@
 -module(bondy_oplog_peer_source_sample).
 -behaviour(bondy_oplog_peer_source).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Random-sampling peer source for open-network deployments.
 
 `Opts` keys:
@@ -20,7 +19,7 @@ Random-sampling peer source for open-network deployments.
 
 Returns a uniformly-random subset (without replacement). When the pool
 is smaller than `count`, returns the whole pool.
-""").
+""".
 
 -export([peers_for/2]).
 

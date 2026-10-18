@@ -12,7 +12,18 @@
 -include("bondy_registry.hrl").
 
 -moduledoc """
+A registry partition: one `gen_server` per slot of the registry's `hash`
+`gproc_pool`, and the `bondy_registry_store` it creates in `init/1`.
 
+`pick/1` chooses a partition by hashing a realm URI, so all the entries of a
+realm live in one partition.
+
+The read and write functions run in the caller's process. Each one fetches
+the partition's store from `persistent_term`, where `init/1` publishes it
+under the partition's pid, and works on the store directly. The server
+process runs the `execute` and `async_execute` functions one at a time, and
+keeps one ptrie janitor per ptrie handle in the store, restarting a janitor
+that exits against the same handle.
 """.
 
 -define(IS_TYPE(X), (X == registration orelse X == subscription)).
@@ -75,13 +86,9 @@
 -export([find/4]).
 -export([find_session_entry/6]).
 -export([list_local/5]).
--export([fold/4]).
--export([fold/5]).
 -export([fold/6]).
 -export([lookup/3]).
--export([lookup/2]).
 -export([lookup/4]).
--export([lookup/5]).
 -export([remove/2]).
 -export([take/2]).
 
@@ -291,16 +298,7 @@ take(Partition, Entry) when is_pid(Partition) ->
         {ok, Value}
     end).
 
--doc "".
--spec lookup(
-    Partition :: pid(), IndexEntry :: bondy_registry_store:index_entry()
-) ->
-    {ok, Entry :: entry()} | {error, not_found}.
-
-lookup(Partition, IndexEntry) when is_pid(Partition) ->
-    bondy_registry_store:lookup(store(Partition), IndexEntry).
-
--doc "".
+-doc "Returns the entry of `Type` stored under `EntryKey`; see `bondy_registry_store:lookup/3`.".
 -spec lookup(
     Partition :: pid(), Type :: entry_type(), EntryKey :: entry_key()
 ) ->
@@ -309,7 +307,7 @@ lookup(Partition, IndexEntry) when is_pid(Partition) ->
 lookup(Partition, Type, EntryKey) when is_pid(Partition) ->
     bondy_registry_store:lookup(store(Partition), Type, EntryKey).
 
--doc "".
+-doc "Returns the entry of `Type` with id `EntryId` in `RealmUri`; see `bondy_registry_store:lookup/5`.".
 -spec lookup(
     Partition :: pid(),
     Type :: entry_type(),
@@ -322,31 +320,15 @@ lookup(Partition, Type, RealmUri, EntryId) when is_pid(Partition) ->
     Store = store(Partition),
     bondy_registry_store:lookup(Store, Type, RealmUri, EntryId, []).
 
--doc "".
--spec lookup(
-    Partition :: pid(),
-    Type :: entry_type(),
-    RealmUri :: uri(),
-    EntryId :: id(),
-    Opts :: key_value:t()
-) ->
-    {ok, Entry :: entry()} | {error, not_found}.
-
-lookup(Partition, Type, RealmUri, EntryId, Opts) ->
-    Store = store(Partition),
-    bondy_registry_store:lookup(Store, Type, RealmUri, EntryId, Opts).
-
--doc "".
+-doc "Continues a `find/4` call; see `bondy_registry_store:find/1`.".
 -spec find(continuation()) -> find_result().
 
 find(Cont) ->
     bondy_registry_store:find(Cont).
 
 -doc """
-Finds entries in the registry using a pattern.
-
-This is used for entry maintenance and not for routing. For routing based on
-and URI use the `match_` functions instead.
+Finds the entries of `Type` that match the key pattern `Pattern`; see
+`bondy_registry_store:find/3`.
 """.
 -spec find(pid(), entry_type(), entry_key()) -> [entry()].
 
@@ -354,10 +336,8 @@ find(Partition, Type, Pattern) when ?IS_TYPE(Type) ->
     bondy_registry_store:find(store(Partition), Type, Pattern).
 
 -doc """
-Finds entries in the registry using a pattern.
-
-This is used for entry maintenance and not for routing. For routing based on
-and URI use the `match_` functions instead.
+Finds the entries of `Type` that match the key pattern `Pattern`; see
+`bondy_registry_store:find/4`.
 """.
 -spec find(pid(), entry_type(), entry_key(), bondy_registry_store:store_opts()) ->
     bondy_registry_store:find_result().
@@ -403,32 +383,7 @@ list_local(Partition, Type, RealmUri, AfterId, Limit) when ?IS_TYPE(Type) ->
         store(Partition), Type, RealmUri, AfterId, Limit
     ).
 
--doc "".
--spec fold(
-    Partition :: pid(),
-    Fun :: bondy_registry_store:store_fold_fun(),
-    Acc :: any(),
-    Cont :: continuation()
-) ->
-    any() | {any(), continuation() | eot()}.
-
-fold(Partition, Fun, Acc, Cont) ->
-    bondy_registry_store:fold(store(Partition), Fun, Acc, Cont).
-
--doc "".
--spec fold(
-    Partition :: pid(),
-    Fun :: bondy_registry_store:store_fold_fun(),
-    Acc :: any(),
-    Cont :: continuation(),
-    Opts :: bondy_registry_store:store_opts()
-) ->
-    any() | {any(), continuation() | eot()}.
-
-fold(Partition, Fun, Acc, Cont, Opts) ->
-    bondy_registry_store:fold(store(Partition), Fun, Acc, Cont, Opts).
-
--doc "".
+-doc "Folds `Fun` over the entries of `Type` in `RealmUri`; see `bondy_registry_store:fold/6`.".
 -spec fold(
     Partition :: pid(),
     Type :: entry_type(),
@@ -442,7 +397,7 @@ fold(Partition, Fun, Acc, Cont, Opts) ->
 fold(Partition, Type, RealmUri, Fun, Acc, Opts) ->
     bondy_registry_store:fold(store(Partition), Type, RealmUri, Fun, Acc, Opts).
 
--doc "".
+-doc "Returns the entry type and realm URI that `Cont` was created for.".
 -spec continuation_info(continuation()) ->
     #{type := entry_type(), realm_uri := uri()}.
 
@@ -626,10 +581,12 @@ cleanup(#state{janitors = Js}) ->
     %% because we are already inside terminate/2.
     maps:foreach(
         fun(Pid, _Handle) ->
+            %% `proc_lib:stop/3` exits `noproc` for a janitor that already
+            %% exited.
             try
                 bondy_registry_ptrie_janitor:stop(Pid)
             catch
-                _:_ -> ok
+                exit:noproc -> ok
             end
         end,
         Js
@@ -652,31 +609,6 @@ start_janitor(Handle) ->
     Pid.
 
 do_execute(_State, Fun, []) ->
-    try
-        resulto:flatten(
-            resulto:result(Fun())
-        )
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error during async execute",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
-    end;
+    resulto:flatten(resulto:result(Fun()));
 do_execute(_State, Fun, Args) ->
-    try
-        resulto:flatten(
-            resulto:result(erlang:apply(Fun, Args))
-        )
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error during async execute",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
-    end.
+    resulto:flatten(resulto:result(erlang:apply(Fun, Args))).

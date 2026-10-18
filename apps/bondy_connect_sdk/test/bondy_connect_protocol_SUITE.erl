@@ -19,6 +19,7 @@ all() ->
         %% Config validation
         config_defaults_to_anonymous,
         config_missing_realm,
+        config_invalid_realm,
         config_bad_authmethod,
         local_rejects_unsupported_endpoint,
 
@@ -93,6 +94,13 @@ config_defaults_to_anonymous(_) ->
 
 config_missing_realm(_) ->
     ?assertEqual({error, missing_realm}, bondy_connect_config:validate(#{})).
+
+config_invalid_realm(_) ->
+    Realm = <<"not a uri!">>,
+    ?assertEqual(
+        {error, {invalid_realm, Realm}},
+        bondy_connect_config:validate(#{realm => Realm})
+    ).
 
 config_bad_authmethod(_) ->
     ?assertEqual(

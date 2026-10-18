@@ -163,11 +163,7 @@ send(Conn, {_ToName, ToEmail}, {_FromName, FromEmail}, Subject, Message, Opt) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec process_response(integer(), list(), string() | binary())
     -> {ok, binary()} | {error, Reason :: any()}.
 
@@ -196,11 +192,7 @@ process_response(StatusCode, _RespHeaders, _RespBody) ->
     {error, {StatusCode, server_error}}.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 formatted_body(From, To, Subject, _Body, #{<<"template_id">> := TemplateId} = Options) ->
     TemplateData = maps:get(<<"template_data">>, Options),
     FormattedBody = ?SINGLE_EMAIL_SINGLE_RECIPIENT_TEMPLATE_REQUEST(From, To,

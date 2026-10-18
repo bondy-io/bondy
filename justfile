@@ -1041,7 +1041,7 @@ jepsen-clean:
 
 # =============================================================================
 # Test harness — M0 Fly fault-injection spike (harness/m0-fly-spike)
-# Design: _design/test-harness/06 §M0. Requires `fly auth login` + a Fly org.
+# Requires `fly auth login` + a Fly org.
 # =============================================================================
 
 # One-shot: build+deploy 3 nodes, probe fault capability, render the report.

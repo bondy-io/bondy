@@ -130,9 +130,12 @@ local_context(RealmUri) when is_binary(RealmUri) ->
         try
             bondy_realm:is_security_enabled(RealmUri)
         catch
-            _:_ ->
-                %% Case when the realm has been removed, it is fine as we only
-                %% use this call for internal reasons
+            %% `bondy_realm:fetch/1` raises these for a removed realm or
+            %% prototype, and for a degraded boot whose realm table is not
+            %% open. An internal context then keeps security on.
+            error:{not_found, Uri} when is_binary(Uri) ->
+                true;
+            error:bondy_realm_table_unavailable ->
                 true
         end,
 
@@ -171,18 +174,19 @@ Closes the context. This function calls `close/2` with `normal` as reason.
 close(Ctxt0) ->
     close(Ctxt0, normal).
 
--doc "Closes the context.".
+-doc """
+Closes the context. A context with a `session` or a `ref` flushes the
+registrations, subscriptions and pending calls of that peer. A context with
+neither has nothing to flush.
+""".
 -spec close(t(), Reason :: normal | crash | shutdown) -> ok.
 
-close(Ctxt, _Reason) ->
-    try bondy_context:ref(Ctxt) of
-        Ref ->
-            RealmUri = bondy_context:realm_uri(Ctxt),
-            ok = bondy_router:flush(RealmUri, Ref)
-    catch
-        _:_ ->
-            ok
-    end.
+close(Ctxt, _Reason) when
+    is_map_key(session, Ctxt); is_map_key(ref, Ctxt)
+->
+    ok = bondy_router:flush(realm_uri(Ctxt), ref(Ctxt));
+close(#{}, _Reason) ->
+    ok.
 
 -doc """
 Returns the sessionId of the provided context or `undefined` if there is none.

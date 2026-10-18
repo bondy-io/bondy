@@ -313,9 +313,17 @@ write_cell(Tab, Type, RealmUri, Policy, Uri, Action, Extra) ->
             end,
         log_rib_error(Result, Action, Type, RealmUri, Policy, Uri)
     catch
-        Class:Reason:Stacktrace ->
+        error:{registry_not_provisioned, _} = Reason:Stacktrace ->
             log_rib_exception(
-                Class, Reason, Stacktrace, Action, Type, RealmUri, Policy, Uri
+                error, Reason, Stacktrace, Action, Type, RealmUri, Policy, Uri
+            );
+        error:{noproc, {bondy_oplog_instance, _}} = Reason:Stacktrace ->
+            log_rib_exception(
+                error, Reason, Stacktrace, Action, Type, RealmUri, Policy, Uri
+            );
+        exit:{_, {gen_server, call, _}} = Reason:Stacktrace ->
+            log_rib_exception(
+                exit, Reason, Stacktrace, Action, Type, RealmUri, Policy, Uri
             )
     end.
 
@@ -483,11 +491,11 @@ rebuild(Table) ->
             }),
             ok
     catch
-        Class:Reason:Stacktrace ->
+        error:{registry_not_provisioned, _} = Reason:Stacktrace ->
             ?LOG_WARNING(#{
                 description => "Registry RIB rebuild after bootstrap failed",
                 table => Table,
-                class => Class,
+                class => error,
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
@@ -525,7 +533,7 @@ realms() ->
                 {ok, Acc1} -> Acc1;
                 {error, _} -> Acc
             catch
-                _:_ -> Acc
+                error:{registry_not_provisioned, _} -> Acc
             end
         end,
         sets:new([{version, 2}]),
@@ -544,13 +552,12 @@ realms() ->
 %% Total by contract: one undecodable or unreshapeable cell must not abandon
 %% the rest of the table.
 rebuild_cell(Type, {Key, RawValue, _Hlc}) ->
+    %% `reshape_summary/2` has no clause for a value of the wrong shape.
     try reshape_summary(Type, RawValue) of
-        Summary when is_map(Summary) ->
-            on_remote_set(Type, Key, Summary);
-        _ ->
-            ok
+        Summary ->
+            on_remote_set(Type, Key, Summary)
     catch
-        _:_ ->
+        error:function_clause ->
             ok
     end.
 
@@ -577,7 +584,7 @@ on_remote_merge(Type, Key) ->
     try
         Table = db_table(Type),
         case decode_cell_key(Key) of
-            {ok, {RealmUri, _Policy, _Uri, _Node} = Decoded} ->
+            {ok, {RealmUri, Policy, Uri, _Node} = Decoded} ->
                 %% `Key` as delivered by a merge event may be the
                 %% realm-folded wire form (`decode_cell_key/1` accepts
                 %% both); `bondy_db:read/3` folds the realm into the key
@@ -587,18 +594,22 @@ on_remote_merge(Type, Key) ->
                 %% for the peer's.
                 RawKey = term_to_binary(Decoded),
                 case bondy_db:read(Table, RealmUri, RawKey) of
-                    {ok, {Value, _Hlc}} ->
-                        on_remote_set(Type, Key, reshape_summary(Type, Value));
+                    {ok, {Value, Hlc}} ->
+                        rebuild_cell(Type, {Key, Value, Hlc});
                     {error, not_found} ->
-                        on_remote_clear(Type, Key)
+                        on_remote_clear(Type, Key);
+                    {error, _} = Error ->
+                        log_rib_error(
+                            Error, on_remote_merge, Type, RealmUri, Policy, Uri
+                        )
                 end;
             error ->
                 ok
         end
     catch
-        Class:Reason:Stacktrace ->
+        error:{registry_not_provisioned, _} = Reason:Stacktrace ->
             log_rib_exception(
-                Class,
+                error,
                 Reason,
                 Stacktrace,
                 on_remote_merge,
@@ -858,15 +869,15 @@ prune_cellless_stubs(RealmUri, Node) ->
 %% @private
 %% Whether the cell a stub summarises is absent from the local projection.
 %% Fail-closed: anything other than a definite `not_found` — an unreadable
-%% table, an unprovisioned type — leaves the stub alone, because this answer
-%% decides a DELETION.
+%% shard (`{error, _}`), an unprovisioned type — leaves the stub alone, because
+%% this answer decides a DELETION.
 cell_is_gone({Type, RealmUri, Policy, Uri, Node}) ->
-    try
-        Table = db_table(Type),
-        Key = term_to_binary({RealmUri, Policy, Uri, Node}),
-        bondy_db:read(Table, RealmUri, Key) == {error, not_found}
+    try db_table(Type) of
+        Table ->
+            Key = term_to_binary({RealmUri, Policy, Uri, Node}),
+            bondy_db:read(Table, RealmUri, Key) == {error, not_found}
     catch
-        _:_ ->
+        error:{registry_not_provisioned, _} ->
             false
     end.
 
@@ -983,7 +994,7 @@ decode_raw_cell_key(Raw) ->
         _ ->
             error
     catch
-        _:_ ->
+        error:badarg ->
             error
     end.
 
@@ -1064,11 +1075,11 @@ restore() ->
             bondy_registry:partitions()
         )
     catch
-        Class:Reason:Stacktrace ->
+        error:{badmatch, '$end_of_table'} = Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description =>
                     "Failed to restore this node's registry RIB cells",
-                class => Class,
+                class => error,
                 reason => Reason,
                 stacktrace => Stacktrace
             })
@@ -1130,10 +1141,13 @@ registration_fields(_Store, _Tab, subscription, _RealmUri, _Policy, _Uri) ->
 %% `bondy_registry_partition:store/1`, with an unreadable pool reported the
 %% same way as an unprovisioned one.
 store(RealmUri) ->
+    %% gproc raises `badarg` before the pool exists; `pick_worker/2` returns
+    %% `false` while no worker is connected, which `store/1` has no clause for.
     try
         bondy_registry_partition:store(RealmUri)
     catch
-        _:_ -> undefined
+        error:badarg -> undefined;
+        error:function_clause -> undefined
     end.
 
 %% @private
@@ -1259,7 +1273,7 @@ cell_nodes(Type, RealmUri) ->
             try reshape_summary(Type, RawValue) of
                 #{count := 0} ->
                     Acc;
-                Summary when is_map(Summary) ->
+                #{} ->
                     case decode_cell_key(Key) of
                         {ok, {_Realm, Policy, Uri, Node}} ->
                             K = {Type, Policy, Uri},
@@ -1270,7 +1284,7 @@ cell_nodes(Type, RealmUri) ->
                             Acc
                     end
             catch
-                _:_ ->
+                error:function_clause ->
                     Acc
             end
         end,
@@ -1279,9 +1293,9 @@ cell_nodes(Type, RealmUri) ->
     ).
 
 %% @private
-%% Record a metric without ever raising: several callers here are total by
-%% contract (reactor reactions, the partition-serialised recompute), and a
-%% metrics hiccup must never take them down.
+%% Several callers here are total by contract (reactor reactions, the
+%% partition-serialised recompute), so a missing metrics subsystem must not
+%% take them down. `bondy_metrics` raises `badarg` while its ETS table is absent.
 safe_metric(Type, Spec) ->
     try
         case Type of
@@ -1289,7 +1303,7 @@ safe_metric(Type, Spec) ->
             gauge -> bondy_metrics:gauge(Spec)
         end
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end.
 

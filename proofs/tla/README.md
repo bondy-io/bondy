@@ -860,8 +860,8 @@ proof links this module to the Erlang.
 
 The section above ends by recording what shipped: a cap on the claim itself.
 That function (`merge_batch_frontier/4`) was reverted; its successor is
-`bondy_oplog_cell_apply:claim/2`, built in `_design/applied_frontier.md`
-increment 3 — per origin, the highest seq that materialised, strictly below the
+`bondy_oplog_cell_apply:claim/2` — per origin, the highest seq that
+materialised, strictly below the
 lowest seq **this batch** observed failing. Its own docstring records the limit:
 a failure in another batch is out of its reach. This module measures that limit
 and the two candidate representations against the same interleavings.

@@ -142,7 +142,18 @@ base64_decode(Nonce) ->
     try
         base64:decode(Nonce)
     catch
-        _:_ ->
+        %% The reasons `base64:decode/1` raises on malformed input; the case
+        %% `bondy_auth_wamp_scram_SUITE:malformed_client_nonce_is_rejected`
+        %% exercises each one.
+        error:badarg ->
+            throw(invalid_base64_format);
+        error:badarith ->
+            throw(invalid_base64_format);
+        error:missing_padding ->
+            throw(invalid_base64_format);
+        error:function_clause ->
+            throw(invalid_base64_format);
+        error:{case_clause, _} ->
             throw(invalid_base64_format)
     end.
 

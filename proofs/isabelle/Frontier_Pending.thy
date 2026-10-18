@@ -22,8 +22,7 @@ text \<open>
   lowest seq this batch is known to have FAILED to materialise; the result is
   max-merged into the registry by @{text "bondy_oplog_registry:merge_frontier/2"}.
   Its own docstring records the limit --- ``a failure in a LATER batch, below a
-  claim already made, is out of this function's reach'' --- and
-  @{text "_design/applied_frontier.md"} \<open>\<section>\<close>10.2 records that splitting the
+  claim already made, is out of this function's reach'' --- and splitting the
   reproduction across two batches defeats it.
 
   This theory establishes three things about that limit.
@@ -622,9 +621,8 @@ text \<open>
   intervals is bounded by the count of holes --- not by the count of seqs above
   the hole. This is the bound that makes a permanently unroutable bucket
   survivable: one unfillable seq costs one interval no matter how many later
-  seqs of that origin fold behind it. Without it, the pending set of
-  @{text "risk 2"} in @{text "_design/applied_frontier.md"} would grow without
-  bound.
+  seqs of that origin fold behind it. Without it, the pending set would grow
+  without bound.
 \<close>
 
 definition holes :: "seq set \<Rightarrow> seq set" where

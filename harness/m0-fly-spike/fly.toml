@@ -1,6 +1,6 @@
 # =============================================================================
 # M0 Fly fault-injection spike — 3-node Bondy router cluster.
-# Design: _design/test-harness/06 §M0, 03 §3. Pinned tag: develop-perf.1.
+# Pinned tag: develop-perf.1.
 #
 # Deploy from the REPO ROOT (build context = repo root for `COPY . /bondy/src`):
 #   fly deploy --config harness/m0-fly-spike/fly.toml \

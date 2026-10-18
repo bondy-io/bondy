@@ -112,7 +112,7 @@ defmodule Bench.E2E.Telemetry do
   # but no handler is attached so the bench's per-event counter +
   # histogram update cost is skipped. Lets the residual-profiling sweep
   # isolate bench-side collection overhead from the always-paid
-  # Erlang-side cost. See `_design/latest/APPLIER_PIPELINE_RESIDUAL_PLAN.md` §4.
+  # Erlang-side cost.
   @applier_breakdown_keys [
     :batch_verify,
     :batch_fold,

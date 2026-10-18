@@ -537,7 +537,7 @@ is_reserved_name(Term) when is_binary(Term) ->
     try binary_to_existing_atom(Term, utf8) of
         Atom -> is_reserved_name(Atom)
     catch
-        _:_ ->
+        error:badarg ->
             false
     end;
 is_reserved_name(anonymous) ->
@@ -1677,3 +1677,19 @@ split_key(Bin) ->
         nomatch ->
             error({badarg, Bin})
     end.
+
+%% =============================================================================
+%% EUNIT
+%% =============================================================================
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+is_reserved_name_of_a_binary_naming_no_atom_test() ->
+    %% Every reserved name is an existing atom, so `badarg` means not reserved.
+    Bin = ~"bondy_rbac_test_no_atom_is_named_like_this_1f0c",
+    ?assertError(badarg, binary_to_existing_atom(Bin, utf8)),
+    ?assertNot(is_reserved_name(Bin)).
+
+-endif.

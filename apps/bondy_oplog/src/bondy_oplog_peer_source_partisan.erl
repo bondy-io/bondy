@@ -6,11 +6,10 @@
 -module(bondy_oplog_peer_source_partisan).
 -behaviour(bondy_oplog_peer_source).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Partisan-membership peer source for clustered deployments.
 
 Returns a uniformly-random subset of the cluster members this node is
@@ -40,7 +39,7 @@ that race belongs to the caller.
 Used by `bondy_oplog_sync_scheduler` once per tick; membership and
 connectivity are both re-read every call, so peers that join, leave or
 reconnect are picked up on the next round without any explicit refresh.
-""").
+""".
 
 -export([peers_for/2]).
 

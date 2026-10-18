@@ -14,7 +14,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Persistent `bondy_mst_store` backend backed by an append-only
 content-addressed pack-file format (see `bondy_mst_pack_writer` /
 `bondy_mst_pack_reader` and the pack-store design notes).
@@ -101,7 +101,7 @@ the next put will re-evaluate the thresholds. Bounding incoming
 pack size keeps the linear `scan_incoming/3` cost on reopen
 proportional to the threshold rather than to the lifetime put
 volume.
-""").
+""".
 
 -record(?MODULE, {
     writer :: bondy_mst_pack_writer:t(),
@@ -559,7 +559,7 @@ free(#?MODULE{} = T, Hash, _Page) when is_binary(Hash) ->
         free
     ).
 
-?DOC("""
+-doc """
 Pack-rewrite compaction. Given a list of `KeepRoots`, computes the
 transitively reachable hash set and rewrites every sealed pack into a
 single new sealed pack containing only those entries. Tombstones do not
@@ -587,7 +587,7 @@ in its pre-call state, and reports `compacted => false` with the
 error in metadata. The single non-recoverable case — failing to
 open a sealed view *after* the manifest swap — raises; the next
 reopen recovers via the on-disk manifest.
-""").
+""".
 -spec gc(t(), KeepRoots :: [binary()]) -> {t(), map()}.
 
 gc(#?MODULE{sealed_views = []} = T, KeepRoots) when is_list(KeepRoots) ->
@@ -609,13 +609,9 @@ gc(#?MODULE{} = T, KeepRoots) when is_list(KeepRoots) ->
             undefined ->
                 0;
             PackId ->
-                try
-                    filelib:file_size(
-                        bondy_mst_pack_paths:sealed_pack_path(Dir, PackId)
-                    )
-                catch
-                    _:_ -> 0
-                end
+                filelib:file_size(
+                    bondy_mst_pack_paths:sealed_pack_path(Dir, PackId)
+                )
         end,
     BytesFreed = max(OldBytes - NewBytes, 0),
     Meta = Meta0#{bytes_freed => BytesFreed},
@@ -644,12 +640,12 @@ destroy(#?MODULE{writer = W} = T) ->
 %% API — extensions
 %% =============================================================================
 
-?DOC("""
+-doc """
 Seals the current `incoming.pack` into a new sealed `pack-NNNN`
 pair and refreshes the sealed-view cache.  Returns `{ok, T1}` for
 the post-seal state (regardless of whether a new pack was created
 or the call was a no-op against an empty incoming).
-""").
+""".
 -spec seal(t()) -> {ok, t()} | {error, term()}.
 
 seal(#?MODULE{writer = W} = T) ->
@@ -694,7 +690,7 @@ seal(#?MODULE{writer = W} = T) ->
             E
     end.
 
-?DOC("""
+-doc """
 Asynchronous counterpart to the synchronous `seal/1`: if the auto-seal
 threshold is crossed and no seal is already in flight, rolls the current
 `incoming.pack` aside (cheap — see `bondy_mst_pack_writer:roll_incoming/1`)
@@ -714,7 +710,7 @@ Returns:
 
 Unlike `seal/1` this does NOT flush staged tombstones — that write barrier
 is deferred to `complete_seal/2`, keeping the roll off the hot path.
-""").
+""".
 -spec maybe_roll_for_seal(t()) ->
     {rolled, bondy_mst_pack_writer:seal_job(), t()}
     | {defer, t()}
@@ -775,7 +771,7 @@ do_roll_for_seal(#?MODULE{writer = W} = T, Records, Bytes) ->
             {noop, T}
     end.
 
-?DOC("""
+-doc """
 Executes a `seal_job()` produced by `maybe_roll_for_seal/1`. Pure with
 respect to store state — it writes the new `pack-NNNN` pair from the job's
 in-memory snapshot and touches no live state — so it is safe to run in a
@@ -783,23 +779,23 @@ separate worker process while the store keeps serving puts and reads.
 
 Returns `ok` or `{error, _}`. On error the caller must NOT `complete_seal/2`
 — the rolled snapshot stays in flight and recovery re-seals it on reopen.
-""").
+""".
 -spec run_seal_job(bondy_mst_pack_writer:seal_job()) -> ok | {error, term()}.
 
 run_seal_job(Job) when is_map(Job) ->
     bondy_mst_pack_writer:run_seal_job(Job).
 
-?DOC("""
+-doc """
 The target pack id of a `seal_job()`. Stateless accessor used by the seal
 orchestration to know which pack to `complete_seal/2` once the worker
 reports the job done.
-""").
+""".
 -spec seal_job_pack_id(bondy_mst_pack_writer:seal_job()) -> pos_integer().
 
 seal_job_pack_id(Job) when is_map(Job) ->
     maps:get(pack_id, Job).
 
-?DOC("""
+-doc """
 Finalises the asynchronous seal whose worker has completed `run_seal_job/1`
 for `PackId`: commits the manifest, drops the in-flight snapshot, and mounts
 the new sealed pack as a sealed view so reads move from the in-flight
@@ -808,7 +804,7 @@ the post-seal write barrier (mirroring `seal/1`).
 
 Returns `{ok, T1}` or `{error, _}` (a manifest-commit or view-open failure;
 the caller should treat it as fatal — a reopen re-mounts the durable pack).
-""").
+""".
 -spec complete_seal(t(), pos_integer()) -> {ok, t()} | {error, term()}.
 
 complete_seal(#?MODULE{writer = W} = T, PackId) ->
@@ -835,11 +831,11 @@ complete_seal(#?MODULE{writer = W} = T, PackId) ->
             E
     end.
 
-?DOC("""
+-doc """
 Whether a seal is currently in flight — a `maybe_roll_for_seal/1` has rolled
 but its `complete_seal/2` has not yet run. The in-flight=1 cap reads this to
 decide between rolling and deferring.
-""").
+""".
 -spec seal_in_flight(t()) -> boolean().
 
 seal_in_flight(#?MODULE{writer = W}) ->
@@ -855,7 +851,7 @@ instance_id(#?MODULE{writer = W}) -> bondy_mst_pack_writer:instance_id(W).
 sealed_pack_ids(#?MODULE{sealed_views = Views}) ->
     [V#sealed_view.pack_id || V <- Views].
 
-?DOC("""
+-doc """
 Returns a snapshot of the per-instance gauges described in design
 §13. Synchronous and cheap (no I/O beyond the manifest cursor and
 `filelib:file_size/1` on each sealed pack). Intended to be plugged
@@ -869,7 +865,7 @@ Fields:
 - `bytes_total`           — sum of sealed-pack file sizes (sealed
                             packs only; `incoming.pack` excluded)
 - `current_root_hash`     — current MST root, or `undefined`
-""").
+""".
 -spec info(t()) -> map().
 info(#?MODULE{} = T) ->
     #{
@@ -1656,30 +1652,20 @@ prune_applied_tombstones(W, FreeSet) ->
 %% =============================================================================
 
 %% @private
-%% Sum of `filelib:file_size/1` over every sealed pack file. Used by
-%% `info/1` (`bytes_total` gauge) and by `gc/2` (pre-call snapshot for
-%% the `bytes_freed` measurement). Best-effort: a missing/locked file
-%% contributes 0 rather than aborting — these are observability
-%% measurements, not invariants.
+%% Sum of `filelib:file_size/1` over every sealed pack file, for the
+%% `bytes_total` gauge and the `bytes_freed` measurement. A file that
+%% cannot be stat'ed contributes 0: `filelib:file_size/1` returns 0
+%% for every `read_file_info` error and raises for none.
 sealed_views_bytes(#?MODULE{writer = W, sealed_views = Views}) ->
     Dir = bondy_mst_pack_writer:dir(W),
     lists:foldl(
         fun(#sealed_view{pack_id = Id}, Acc) ->
             Path = bondy_mst_pack_paths:sealed_pack_path(Dir, Id),
-            Acc + safe_file_size(Path)
+            Acc + filelib:file_size(Path)
         end,
         0,
         Views
     ).
-
-%% @private
-safe_file_size(Path) ->
-    try filelib:file_size(Path) of
-        N when is_integer(N), N >= 0 -> N;
-        _ -> 0
-    catch
-        _:_ -> 0
-    end.
 
 %% @private
 emit_put(T, PageBytes, DurationUs, ContentHit) ->

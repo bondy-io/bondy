@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_mux).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 A generic routing multiplexer — a value addressed by a routing key, in one of
 two shapes:
 
@@ -25,7 +23,7 @@ how a consumer extracts the key and applies the work stays with the consumer.
 
 A `{single, V}` has no key, so adding a member to it is a programmer error: a
 worker that may gain siblings is seeded in directory mode (`dir/1`).
-""").
+""".
 
 -type key() :: term().
 -type value() :: term().

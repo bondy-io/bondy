@@ -30,7 +30,8 @@ all() ->
         sse_stream_down_cleanup,
         close_transport,
         send_unknown_transport,
-        held_stream_outlives_http_default_on_both_versions
+        held_stream_outlives_http_default_on_both_versions,
+        open_refuses_a_non_object_body
     ].
 
 init_per_suite(Config) ->
@@ -369,3 +370,32 @@ make_event(N) ->
         args = [<<"payload-", (integer_to_binary(N))/binary>>],
         kwargs = undefined
     }.
+
+%% An open body must be a JSON object. A body that decodes to any other JSON
+%% value is refused like unparseable JSON, with a 400 `invalid_json`.
+open_refuses_a_non_object_body(_Config) ->
+    {ok, _} = application:ensure_all_started(gun),
+    {ok, Conn} = gun:open("127.0.0.1", 18080, #{protocols => [http]}),
+    {ok, _} = gun:await_up(Conn, 5000),
+    Refused = [
+        begin
+            Ref = gun:post(
+                Conn,
+                "/wamp/sse/open",
+                [{<<"content-type">>, <<"application/json">>}],
+                Body
+            ),
+            {response, nofin, Status, _} = gun:await(Conn, Ref, 5000),
+            {ok, Reply} = gun:await_body(Conn, Ref, 5000),
+            {Body, Status, json:decode(Reply)}
+        end
+     || Body <- [<<"[1]">>, <<"5">>, <<"\"text\"">>, <<"not json">>]
+    ],
+    ok = gun:close(Conn),
+    ?assertEqual(
+        [
+            {B, 400, #{<<"error">> => <<"invalid_json">>}}
+         || {B, _, _} <- Refused
+        ],
+        Refused
+    ).

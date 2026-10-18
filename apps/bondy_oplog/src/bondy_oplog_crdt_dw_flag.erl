@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Disable-Wins Flag (DWFlag) — tier_2 operation-based CRDT.
 
 The op-based equivalent of the pure `pure_dwflag`. A boolean flag with
@@ -43,7 +41,7 @@ enable | disable
 `enable` adds the op's dot to the token cell; `disable` extends the cell's
 remove frontier. The flag is `true` iff a surviving enable remains — i.e.
 an enable that observed every disable.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

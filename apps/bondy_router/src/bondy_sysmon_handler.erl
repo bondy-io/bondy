@@ -52,8 +52,8 @@ called to initialize the event handler.
 """.
 init([]) ->
     %% prometheus is a dependency app of bondy_router, so it is running by
-    %% the time this handler is installed; the catch covers embedded or
-    %% test setups that install the handler without it.
+    %% the time this handler is installed. Without it, as in embedded or test
+    %% setups, its ETS tables are absent and `declare/1` raises `badarg`.
     _ =
         try
             prometheus_counter:declare([
@@ -65,7 +65,7 @@ init([]) ->
                 {labels, [type]}
             ])
         catch
-            _:_ -> ok
+            error:badarg -> ok
         end,
     State = #state{},
     {ok, State, hibernate}.
@@ -112,14 +112,16 @@ handle_event(_Event, #state{} = State) ->
 %% =============================================================================
 
 %% @private
-%% A raising gen_event callback would remove this handler; never let the
-%% metric update take the logging down with it.
+%% A raising gen_event callback would remove this handler. `inc/3` raises
+%% `badarg` without the prometheus tables, and `unknown_metric` when `init/1`
+%% could not declare the counter.
 count_event(Type) when is_atom(Type) ->
     _ =
         try
             prometheus_counter:inc(bondy_sysmon_events_total, [Type], 1)
         catch
-            _:_ -> ok
+            error:badarg -> ok;
+            error:{unknown_metric, _, _} -> ok
         end,
     ok;
 count_event(_) ->

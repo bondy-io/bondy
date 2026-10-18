@@ -6,6 +6,21 @@
 -module(bondy_regulator_rate_limit).
 
 -moduledoc """
+Token-bucket rate limiters.
+
+A bucket holds at most `capacity` tokens (default 20) and refills at `rate`
+tokens per millisecond (default 0.005). `allow/2` admits a request when the
+bucket holds at least the requested number of tokens, and takes them. The
+token count and the last refill time live in an `atomics` array, so a caller
+reads and updates a bucket without a process call.
+
+`new/3` registers a bucket under a key in an ETS table that this module's
+server owns. `new/2` creates a bucket that is not registered; its doc says
+when to use each.
+
+`allow/2` reads the token count and writes it back as separate atomics
+operations. Two processes that call it on one bucket at the same time can
+both be admitted against the same tokens.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -168,6 +183,15 @@ make(Algo, Key, Opts) ->
     ).
 
 -doc """
+Takes `Increment` tokens from the bucket, after refilling it for the time
+since its last refill.
+
+Returns `{true, Info}` when the bucket held enough tokens. `Info` gives the
+tokens left in `remaining`, and in `resets_in` the milliseconds until another
+`Increment` fits, or `0` when one fits now. Returns `{false, Info}`, with
+`remaining` `0`, when it did not; the bucket is then left unchanged.
+
+Given a key, fails with `badarg` when no bucket is registered under it.
 """.
 -spec allow(key() | t(), Increment :: pos_integer()) ->
     {true, info()} | {false, info()} | no_return().
@@ -204,6 +228,8 @@ allow(Key, Increment) ->
     allow(fetch(Key), Increment).
 
 -doc """
+As `allow/2`, but on refusal the caller sleeps for `resets_in` milliseconds
+and tries once more, returning the result of that second attempt.
 """.
 -spec wait(key() | t(), Increment :: pos_integer()) ->
     {true, info()} | {false, info()} | no_return().
@@ -218,6 +244,10 @@ wait(Term, Increment) ->
     end.
 
 -doc """
+Returns the bucket's token count, refilled to now, without taking a token.
+`resets_in` is the milliseconds until one token is available.
+
+Given a key, fails with `badarg` when no bucket is registered under it.
 """.
 -spec peek(key() | t()) -> info() | no_return().
 
@@ -241,13 +271,12 @@ peek(Key) ->
     peek(fetch(Key)).
 
 -doc """
+Removes a registered bucket from the table. A bucket created with `new/2`
+has no row, so deleting it does nothing.
 """.
 -spec delete(key() | t()) -> ok.
 
 delete(#?MODULE{key = undefined}) ->
-    %% An unregistered bucket (`new/2`) owns no row. Its atomics array is
-    %% freed when the last reference to the term goes, so there is nothing
-    %% here to delete.
     ok;
 delete(#?MODULE{} = T) ->
     delete(T#?MODULE.key);

@@ -123,13 +123,7 @@ parse(Bin) when is_binary(Bin) ->
 
     case byte_size(CleanUuid) of
         32 ->
-            try
-                <<A:64, B:64>> = hex_utils:hexstr_to_bin(CleanUuid),
-                <<A:64, B:64>>
-            catch
-                _:_ ->
-                    error(badarg)
-            end;
+            binary:decode_hex(CleanUuid);
         _ ->
             error(badarg)
     end.

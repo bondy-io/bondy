@@ -142,6 +142,9 @@ different source — the caller should restart from the first page), or
     {ok, cursor()} | {error, stale | malformed}.
 
 decode_cursor(Fingerprint, Bin) when is_binary(Fingerprint), is_binary(Bin) ->
+    %% `Bin` is wire input. `base64:decode/1` raises `error` with `badarg`,
+    %% `missing_padding`, `function_clause`, `badarith` or `{case_clause, _}`
+    %% on malformed text (OTP 29 stdlib); `[safe]` raises `error:badarg`.
     try binary_to_term(base64:decode(Bin), [safe]) of
         #cursor{fingerprint = Fingerprint} = Cursor ->
             {ok, Cursor};
@@ -150,7 +153,7 @@ decode_cursor(Fingerprint, Bin) when is_binary(Fingerprint), is_binary(Bin) ->
         _ ->
             {error, malformed}
     catch
-        _:_ ->
+        error:_ ->
             {error, malformed}
     end.
 

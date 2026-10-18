@@ -1,8 +1,8 @@
 ## =============================================================================
 ## Bondy config -- M0 Fly fault-injection spike (harness/m0-fly-spike)
 ## =============================================================================
-## Pinned tag: develop-perf.1 (4995ea12). Derived from _design/test-harness/03 #2
-## and reconciled key-by-key against schema/bondy.schema at the pinned tag
+## Pinned tag: develop-perf.1 (4995ea12). Reconciled key-by-key against
+## schema/bondy.schema at the pinned tag
 ## (every key/datatype/default below was verified to exist -- a wrong key fails
 ## cuttlefish validation and the node never boots).
 ##

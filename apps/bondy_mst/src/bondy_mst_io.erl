@@ -61,7 +61,7 @@ suites) so concurrent test modules don't see each other's mocks.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Fsyncs directory `Dir`, meant to make a rename into it, or a file created in
 it, survive a power loss. On Darwin OTP issues `F_BARRIERFSYNC` rather than a
 full flush to the media (`efile_sync` in OTP's `unix_prim_file.c`).
@@ -70,7 +70,7 @@ The directory is opened in `directory` mode: without it OTP refuses to open a
 directory, with `{error, eisdir}` on every Unix (`efile_open`, same file).
 Any error, including a `Dir` that is not a directory, is returned
 (`bondy_mst_io_test`); an open error is also logged, once per VM.
-""").
+""".
 -spec fsync_dir(file:filename_all()) -> ok | {error, term()}.
 
 fsync_dir(Dir) ->
@@ -84,7 +84,7 @@ fsync_dir(Dir) ->
             E
     end.
 
-?DOC("""
+-doc """
 Datasync seam. Every disk-durability point in the project funnels
 through here so platform-specific tightening (macOS `F_FULLFSYNC`,
 Linux `io_uring`-based sync, etc.) lands in one place and the test
@@ -95,35 +95,35 @@ byte-identical to `prim_file:datasync/1`. Test code that fault-injects
 this function must hold the `?MODULE` global lock (see
 `with_io_fault_lock/1` in the test suites) so concurrent test modules
 don't see another suite's mock.
-""").
+""".
 -spec datasync(file:fd()) -> ok | {error, term()}.
 
 datasync(Fd) ->
     prim_file:datasync(Fd).
 
-?DOC("""
+-doc """
 Write seam — same rationale as `datasync/1`. The WAL's frame appends
 funnel through here, so a test can make a write fail after only part of
 its bytes reached the file, as `enospc` can.
-""").
+""".
 -spec write(file:fd(), iodata()) -> ok | {error, term()}.
 
 write(Fd, Bytes) ->
     prim_file:write(Fd, Bytes).
 
-?DOC("""
+-doc """
 Rename seam — same rationale as `datasync/1`. Every atomic
 rename-into-place in the project (WAL manifest, sparse index,
 consumer offset, snapshot watermark; pack manifest, sealed pack
 + idx, tombstones) funnels through here.
-""").
+""".
 -spec rename(file:filename_all(), file:filename_all()) ->
     ok | {error, term()}.
 
 rename(From, To) ->
     prim_file:rename(From, To).
 
-?DOC("""
+-doc """
 Replaces the file at `Path` with `Bytes`, meant to leave either the whole old
 file or the whole new one after a crash or power loss: writes `<Path>.tmp`,
 datasyncs it, renames it over `Path`, then fsyncs the enclosing directory.
@@ -131,7 +131,7 @@ datasyncs it, renames it over `Path`, then fsyncs the enclosing directory.
 Returns `{error, _}` only for a failure before the rename, which leaves the old
 file and no temp file. A failed directory fsync raises `{dir_fsync_failed,
 Dir, Reason}` (`bondy_mst_io_test`); see the moduledoc.
-""").
+""".
 -spec write_file_atomic(file:filename_all(), iodata()) ->
     ok | {error, term()}.
 

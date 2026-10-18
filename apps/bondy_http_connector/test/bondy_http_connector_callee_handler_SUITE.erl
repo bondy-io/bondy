@@ -54,7 +54,8 @@ running Bondy dealer or HTTP backend.
 
     success_200_json/1,
     success_201_json/1,
-    error_response_includes_status_and_body/1
+    error_response_includes_status_and_body/1,
+    non_json_body_is_passed_through/1
 ]).
 
 %% readiness_gate
@@ -119,7 +120,8 @@ groups() ->
         {response_shaping, [parallel], [
             success_200_json,
             success_201_json,
-            error_response_includes_status_and_body
+            error_response_includes_status_and_body,
+            non_json_body_is_passed_through
         ]},
         {readiness_gate, [sequence], [
             handle_call_pending_service,
@@ -427,6 +429,21 @@ error_response_includes_status_and_body(_Config) ->
     ?assertEqual(
         #{<<"error">> => <<"not found">>},
         maps:get(<<"body">>, KWArgs)
+    ).
+
+%% Each body hits one raise of `json:decode/1`: `{invalid_byte, _}`,
+%% `unexpected_end` and `{unexpected_sequence, _}`.
+non_json_body_is_passed_through(_Config) ->
+    lists:foreach(
+        fun(Body) ->
+            {ok, _, _, OkKW} =
+                bondy_http_connector_callee_handler:http_to_wamp(200, Body),
+            ?assertEqual(Body, maps:get(<<"body">>, OkKW)),
+            {error, _, _, _, ErrKW} =
+                bondy_http_connector_callee_handler:http_to_wamp(500, Body),
+            ?assertEqual(Body, maps:get(<<"body">>, ErrKW))
+        end,
+        [<<"not json">>, <<"{\"a\":">>, <<"\"\\udc00\"">>]
     ).
 
 %% ===================================================================

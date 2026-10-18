@@ -1003,9 +1003,13 @@ open_tables(Db, [#{name := Name} = Spec | Rest], EffTables) ->
     end.
 
 %% @private
-close_main(Db, Sup) ->
-    ok = close_db(main, Db),
-    stop_sup(Sup).
+%% `bondy_db:close/1` stops `Sup` through the topology's `shutdown/1`, so only a
+%% DB that never opened leaves `Sup` to stop here.
+close_main(undefined, Sup) ->
+    ok = close_db(main, undefined),
+    stop_sup(Sup);
+close_main(Db, _Sup) ->
+    close_db(main, Db).
 
 %% @private
 close_db(DbName, Db) ->
@@ -1029,11 +1033,12 @@ stop_sup(Sup) ->
     ok.
 
 %% @private
+%% Teardown runs after a DB process died, so a call to it exits `noproc`.
 best_effort(Fun, Arg) ->
     try
         Fun(Arg)
     catch
-        _:_ -> ok
+        exit:{noproc, _} -> ok
     end.
 
 %% @private

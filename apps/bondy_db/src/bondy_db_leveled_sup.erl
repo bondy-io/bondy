@@ -7,10 +7,9 @@
 -behaviour(supervisor).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 `one_for_one` supervisor for leveled Bookies under a `bondy_db`
 topology.
 
@@ -93,7 +92,7 @@ leveled traps no exits, so a Bookie terminated by its supervisor dies
 without running leveled's close: it exits `shutdown`, where a closed one
 exits `normal`. Every Bookie is therefore closed with `close_bookie/1`
 before its child is terminated (`bondy_db_leveled_sup_test`).
-""").
+""".
 
 -export([start_link/0]).
 -export([stop/1]).
@@ -146,12 +145,8 @@ stop(Sup) when is_pid(Sup) ->
     ],
     lists:foreach(
         fun(Id) ->
-            _ =
-                try
-                    supervisor:terminate_child(Sup, Id)
-                catch
-                    _:_ -> ok
-                end,
+            %% `not_found`: the child exited after `which_children/1` listed it.
+            ok = terminated(supervisor:terminate_child(Sup, Id)),
             _ = persistent_term:erase(?PT_KEY(Sup, Id))
         end,
         Ids
@@ -160,12 +155,7 @@ stop(Sup) when is_pid(Sup) ->
     %% parent (start_link/0) or just a holder of the pid — `kill`
     %% works either way and we have already flushed the children.
     Ref = erlang:monitor(process, Sup),
-    _ =
-        try
-            unlink(Sup)
-        catch
-            _:_ -> ok
-        end,
+    true = unlink(Sup),
     exit(Sup, kill),
     receive
         {'DOWN', Ref, process, Sup, _} -> ok
@@ -209,18 +199,9 @@ handle erase). Used by a topology rolling back a partially-started pool:
 
 stop_bookie(Sup, Key) when is_pid(Sup) ->
     ok = close_bookie(persistent_term:get(?PT_KEY(Sup, Key), undefined)),
-    _ =
-        try
-            supervisor:terminate_child(Sup, Key)
-        catch
-            _:_ -> ok
-        end,
-    _ =
-        try
-            supervisor:delete_child(Sup, Key)
-        catch
-            _:_ -> ok
-        end,
+    %% `not_found`: `Key` was never started (a rollback covers every shard).
+    ok = terminated(supervisor:terminate_child(Sup, Key)),
+    ok = terminated(supervisor:delete_child(Sup, Key)),
     _ = persistent_term:erase(?PT_KEY(Sup, Key)),
     ok.
 
@@ -476,6 +457,12 @@ key_sup_spec(Key) ->
 started({ok, Pid}) -> {ok, Pid};
 started({error, {already_started, Pid}}) -> {ok, Pid};
 started({error, _} = Err) -> Err.
+
+%% @private
+%% The pool is `one_for_one`, so `terminate_child/2` and `delete_child/2`
+%% answer `ok` or `{error, not_found}` (stdlib `supervisor:handle_call/3`).
+terminated(ok) -> ok;
+terminated({error, not_found}) -> ok.
 
 %% @private
 child_bookies(_Sup, {anon, _, Root}, Pid, worker, [leveled_bookie]) ->

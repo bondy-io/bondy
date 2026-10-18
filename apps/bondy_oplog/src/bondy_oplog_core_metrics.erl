@@ -7,10 +7,8 @@
 
 -behaviour(gen_server).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-namespace gauge emitter for the `bondy_oplog_core` substrate.
 
 Subscribes to the substrate's one-shot events (`[bondy_oplog_core, read]`,
@@ -70,7 +68,7 @@ The atomics arrays are owned by `bondy_metrics`. A restart of *this*
 module re-attaches the telemetry handlers and resets the in-process
 last-tick snapshot; the underlying counter totals are preserved across
 the restart. A restart of `bondy_metrics` wipes the counters.
-""").
+""".
 
 -define(SERVER, ?MODULE).
 -define(HANDLER_ID, ?MODULE).
@@ -146,31 +144,31 @@ start_link() ->
 start_link(Opts) when is_map(Opts) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Opts, []).
 
-?DOC("""
+-doc """
 Current configuration and the namespaces tracked in the last snapshot.
-""").
+""".
 -spec info() -> map().
 
 info() ->
     gen_server:call(?SERVER, info).
 
-?DOC("""
+-doc """
 Force an immediate gauge emit for every known namespace; otherwise the
 tick fires every `interval_ms`. Useful in tests and for manual probes.
-""").
+""".
 -spec snapshot_now() -> ok.
 
 snapshot_now() ->
     gen_server:call(?SERVER, snapshot_now).
 
-?DOC("""
+-doc """
 Enable or disable the periodic gauge emit at runtime. Disabling cancels
 any pending tick; enabling re-arms the timer. Counter accumulation is
 unaffected — callers can still observe totals via `bondy_metrics:value/1`
 or force an emit with `snapshot_now/0`.
 
 Operator and test affordance; not part of any consumer API.
-""").
+""".
 -spec set_enabled(boolean()) -> ok.
 
 set_enabled(Enabled) when is_boolean(Enabled) ->

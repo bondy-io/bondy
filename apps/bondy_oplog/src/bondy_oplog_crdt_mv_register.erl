@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Multi-value register (MVRegister) — the first **tier_2** native CRDT.
 
 A multi-value register holds the set of values written *concurrently*:
@@ -121,7 +119,7 @@ origin stamp, not in `apply_op/4` (which cannot tell a local mint from a
 remote replay). The guard resets on restart by design; the cross-restart
 case is covered instead by durable recovery rebuilding the exact context
 before the next write (pinned by `bondy_db_tier2_durability_test`).
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

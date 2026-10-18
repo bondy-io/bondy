@@ -89,7 +89,7 @@ parse(<<?SCHEME, Variant:1/binary, ":", TokenData/binary>>) when
     catch
         throw:Reason ->
             {error, Reason};
-        _:_ ->
+        error:badarg ->
             {error, invalid_token}
     end;
 parse(_) ->
@@ -132,7 +132,7 @@ verify(<<?SCHEME, Variant:1/binary, ":", TokenData/binary>>, SecretKey) when
     catch
         throw:Reason ->
             {error, Reason};
-        _:_ ->
+        error:badarg ->
             {error, invalid_token}
     end;
 verify(_, _) ->
@@ -149,7 +149,8 @@ encode_key_part(Term) ->
 %% @private
 decode_key_part(Term) when is_binary(Term) ->
     %% `[safe]` prevents atom-table exhaustion from crafted client tokens.
-    %% `parse/1` already catches the resulting `badarg` as `invalid_token`.
+    %% `parse/1` and `verify/2` return the resulting `badarg` as
+    %% `invalid_token`.
     binary_to_term(base64_decode(Term), [safe]).
 
 %% @private
@@ -157,8 +158,31 @@ base64_encode(Term) ->
     base64:encode(Term, #{mode => urlsafe, padding => false}).
 
 %% @private
+%% `base64:decode/2` raises `badarg`, `badarith`, `function_clause` or
+%% `case_clause` on malformed input. Checking the alphabet and the length
+%% first leaves it no input it rejects.
 base64_decode(Bin) ->
+    is_base64url(Bin) orelse throw(invalid_token),
     base64:decode(Bin, #{mode => urlsafe, padding => false}).
+
+%% @private
+%% Unpadded base64url: a final group of one character encodes no whole byte.
+is_base64url(Bin) ->
+    byte_size(Bin) rem 4 =/= 1 andalso is_base64url_alphabet(Bin).
+
+%% @private
+is_base64url_alphabet(<<C, Rest/binary>>) when
+    (C >= $A andalso C =< $Z) orelse
+        (C >= $a andalso C =< $z) orelse
+        (C >= $0 andalso C =< $9) orelse
+        C =:= $- orelse
+        C =:= $_
+->
+    is_base64url_alphabet(Rest);
+is_base64url_alphabet(<<>>) ->
+    true;
+is_base64url_alphabet(_) ->
+    false.
 
 %% @private
 do_parse(Variant, IdBin, KeyBin) ->
@@ -503,6 +527,36 @@ verify_variant2_token_no_dot_test() ->
 
     Result = bondy_oauth_refresh_token:verify(InvalidToken, SecretKey),
     ?assertEqual({error, invalid_token}, Result).
+
+parse_key_part_outside_the_alphabet_test() ->
+    Token = <<"bondy:rtoken:1:id.ab+c">>,
+    ?assertEqual(
+        {error, invalid_token}, bondy_oauth_refresh_token:parse(Token)
+    ).
+
+parse_key_part_with_a_dangling_character_test() ->
+    Token = <<"bondy:rtoken:1:id.abcde">>,
+    ?assertEqual(
+        {error, invalid_token}, bondy_oauth_refresh_token:parse(Token)
+    ).
+
+parse_key_part_that_is_not_a_term_test() ->
+    %% Valid base64url whose bytes `binary_to_term/2` rejects with `badarg`.
+    Token = <<"bondy:rtoken:1:id.AAAA">>,
+    ?assertEqual(
+        {error, invalid_token}, bondy_oauth_refresh_token:parse(Token)
+    ).
+
+verify_id_outside_the_alphabet_test() ->
+    {_Id, Token} = bondy_oauth_refresh_token:new(
+        test_binary_key(), test_secret_key()
+    ),
+    [Prefix, KeyPart] = binary:split(Token, ~"."),
+    Bad = <<Prefix/binary, "=.", KeyPart/binary>>,
+    ?assertEqual(
+        {error, invalid_token},
+        bondy_oauth_refresh_token:verify(Bad, test_secret_key())
+    ).
 
 %% -----------------------------------------------------------------------------
 %% Token component tests

@@ -6,10 +6,8 @@
 -module(bondy_db_topology_memory_owner).
 -behaviour(gen_server).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 DB-scoped owner process for the `bondy_db_topology_memory` ETS tables —
 the in-RAM analogue of `bondy_db_leveled_sup` for leveled Bookies.
 
@@ -68,7 +66,7 @@ owned handle is tracked with the adapter module that closes it
 `bondy_oplog_projection_ets:close/1` and a cache via
 `bondy_oplog_cache_ets:close/1` — both reduce to `ets:delete/1` here,
 but going through the adapter keeps the contract clean.
-""").
+""".
 
 %% API
 -export([start/0]).
@@ -233,16 +231,12 @@ handle_cast(_Msg, State) ->
 terminate(_Reason, #{handles := Handles}) ->
     %% Tables would be auto-deleted on process exit anyway; deleting
     %% explicitly here keeps the teardown unambiguous and runs in the
-    %% owner (the process the VM permits to do it).
-    _ = [
-        try
-            Adapter:close(Handle)
-        catch
-            _:_ -> ok
-        end
-     || {Handle, Adapter} <- maps:to_list(Handles)
-    ],
-    ok.
+    %% owner (the process the VM permits to do it). Every handle in
+    %% `Handles` is a live table this process owns: `close_owned/2` drops a
+    %% handle as it closes it, and only the owner can delete a table.
+    maps:foreach(
+        fun(Handle, Adapter) -> ok = Adapter:close(Handle) end, Handles
+    ).
 
 %% =============================================================================
 %% PRIVATE

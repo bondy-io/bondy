@@ -10,7 +10,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Rebuilds the `pack-NNNN.idx` companion of a sealed `pack-NNNN.pack`
 by streaming the pack and re-emitting the index file.
 
@@ -67,7 +67,7 @@ the new `.idx`.
     idx_bytes         :: non_neg_integer()
 }
 ```
-""").
+""".
 
 -export([rebuild/4]).
 

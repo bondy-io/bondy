@@ -16,18 +16,45 @@
 %%  limitations under the License.
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% This module implements Mops, a very simple mustache-inspired expression
-%% language.
-%% All expressions in Mops are evaluated against a Context, an erlang `map()'
-%% where all keys are of type `binary()'.
-%%
-%% The following are the key characteristics and features:
-%% *
-%% @end
-%% -----------------------------------------------------------------------------
 -module(mops).
+-moduledoc """
+Mops is a mustache-style expression language. `eval/2` evaluates the
+expressions in a term against a context, a map with binary keys.
+
+## Expressions
+
+A binary that holds `{{Path}}` evaluates to the value at `Path` in the
+context, of whatever type. `Path` is a list of keys separated by `.`, so
+`{{foo.bar}}` reads key `bar` of the map under key `foo`. A key is looked up
+as a binary first, then as an existing atom. A path that does not resolve
+fails with `{badkeypath, Path}`; `mops_SUITE` covers an absent key and a path
+through a value that is not a map.
+
+A binary in double quotes is a string template: `"Hello {{name}}"`
+evaluates to a binary. A binary value is inserted as it is, and any other
+value is formatted with `~p`. Text before `{{` in a binary that is not
+quoted fails with `{badarg, Bin}`.
+
+`eval/2` walks maps, lists and tuples and evaluates every binary in them.
+Any other term is returned unchanged.
+
+## Pipes
+
+`{{Path |> Op}}` applies `Op` to the value, and pipes chain left to right.
+The operators are `integer`, `float`, `boolean`, `abs`, `head`, `tail`,
+`last`, `min`, `max`, `length`, `size`, `base64:encode`, `base64:decode`,
+`nth(N)`, `random(N)`, `get(Key)`, `get(Key, Default)`, `put(Key, Value)`,
+`merge(Expr)`, `with([Keys])` and `without([Keys])`. An operator that does
+not apply to its value fails with `{invalid_expression, [Op, Value]}`.
+
+## Deferred evaluation
+
+A context value of `proxy/0` marks a key that is not known yet. An
+expression that reads it evaluates to `{'$mops_proxy', Fun}`: calling `Fun`
+with a later context finishes the evaluation, and may itself return another
+proxy when that context also defers a key. `mops_SUITE` covers a template
+completed over two contexts.
+""".
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
 -define(PIPE_OP, <<$|, $>>>).
@@ -100,67 +127,41 @@
 %% API
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Evaluates **Term** using the context **Ctxt**
-%% Returns **Term** in case the term is not a binary and does not contain a
-%% mops expression. Otherwise, it tries to evaluate the expression using the
-%% **Ctxt**.
-%%
-%% The following are example mops expressions and their meanings:
-%% - `&lt;&lt;"{{foo}}"&gt;&gt;' - resolve the value for key `&lt;&lt;"foo"&gt;&gt;` in the context.
-%% It fails if the context does not have a key named `&lt;&lt;"foo"&gt;&gt;'.
-%% - `&lt;&lt;"\"{{foo}}\"&gt;&gt;' - return a string by resolving the value for key
-%% `&lt;&lt;"foo"&gt;&gt;' in the context. It fails if the context does not have a key
-%% named `&lt;&lt;"foo"&gt;&gt;'.
-%% - `&lt;&lt;"{{foo.bar}}"&gt;&gt;' - resolve the value for key path in the context.
-%% It fails if the context does not have a key named `&lt;&lt;"foo"&gt;&gt;' which has a value that is either a `function()` or a `map()` with a key named `&lt;&lt;"bar"&gt;&gt;'.
-%% - `&lt;&lt;"{{foo |> integer}}"&gt;&gt;' - resolves the value for key `&lt;&lt;"foo"&gt;&gt;' in the
-%% context and converts the result to an integer. If the result was a
-%% `function()', it returns a function composition.
-%% It fails if the context does not have a key named `&lt;&lt;"foo"&gt;&gt;'
-%%
-%% Examples:
-%% <pre language="erlang">
-%% > mops:eval(foo, #{&lt;&lt;"foo"&gt;&gt; => bar}).
-%% > foo
-%% > mops:eval(&lt;&lt;"foo"&gt;&gt;, #{&lt;&lt;"foo"&gt;&gt; => bar}).
-%% > &lt;&lt;"foo"&gt;&gt;
-%% > mops:eval(1, #{&lt;&lt;"foo"&gt;&gt; => bar}).
-%% > 1
-%% > mops:eval(&lt;&lt;"{{foo}}"&gt;&gt;, #{&lt;&lt;"foo"&gt;&gt; => bar}).
-%% > bar
-%% > mops:eval(&lt;&lt;"{{foo.bar}}"&gt;&gt;, #{&lt;&lt;"foo"&gt;&gt; => #{&lt;&lt;"bar"&gt;&gt; => foobar}}).
-%% > foobar
-%% </pre>
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Evaluates the expressions in `T` against `Ctxt`, as `eval/3` with no options.
+
+```erlang
+1> mops:eval(<<"{{foo.bar}}">>, #{<<"foo">> => #{<<"bar">> => 1}}).
+1
+2> mops:eval(<<"\"n = {{n}}\"">>, #{<<"n">> => 3}).
+<<"n = 3">>
+3> mops:eval(foo, #{}).
+foo
+```
+""".
 -spec eval(any(), context()) -> any().
 
 eval(T, Ctxt) ->
     eval(T, Ctxt, #{}).
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Evaluates the expressions in `T` against `Ctxt`.
+
+The `callback` option names a fun of arity 2, called as
+`Fun(will_get_path, Path)`, or a module implementing `will_get_path/1`. It
+receives each path before the lookup and returns the path to look up.
+""".
 -spec eval(any(), context(), map()) -> any().
 
 eval(T, Ctxt, Opts) ->
     do_eval(T, Ctxt, Opts).
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the context value that defers a key; see the module doc.".
 -spec proxy() -> '$mops_proxy'.
 
 proxy() -> '$mops_proxy'.
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns `true` when `Term` is a deferred result of `eval/2,3`.".
 -spec is_proxy(any()) -> boolean().
 
 is_proxy({'$mops_proxy', _}) -> true;
@@ -257,14 +258,7 @@ eval_list(List, Ctxt, Opts) ->
             lists:reverse(L)
     end.
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Parses the provided binary to determine if it represents a mops expression,
-%% and if it does, evaluates it against the context, otherwise returns it
-%% untouched.
-%% @end
-%% -----------------------------------------------------------------------------
 -spec eval_expr(binary(), state()) ->
     {'$mops_proxy', function()} | any() | no_return().
 
@@ -359,12 +353,7 @@ eval_expr(Bin, #state{is_open = false, is_string = true} = St) when
             eval_expr(<<>>, acc(St, Bin))
     end.
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Accumulates the evaluation in the case of strings (quoted) expressions.
-%% @end
-%% -----------------------------------------------------------------------------
 
 acc(St, <<>>) ->
     St;
@@ -377,12 +366,7 @@ acc(#state{acc = Acc} = St, Val) when is_binary(Val) ->
 acc(#state{acc = Acc} = St, Val) ->
     St#state{acc = [io_lib:format("~p", [Val]) | Acc]}.
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Parses a single mustache expression
-%% @end
-%% -----------------------------------------------------------------------------
 parse_expr(Bin, #state{context = Ctxt} = St) ->
     case binary:split(Bin, St#state.pop, [global]) of
         [Val] ->
@@ -445,7 +429,9 @@ get(Path, {'$mops_proxy', _} = Val) ->
     end,
     {ok, {'$mops_proxy', Fun}};
 get([H | T], Ctxt) when is_map(Ctxt) ->
-    get(T, safe_maps_get(H, Ctxt)).
+    get(T, safe_maps_get(H, Ctxt));
+get([H | _], _NotAMap) ->
+    error({badkey, H}).
 
 safe_maps_get(K, Map) when is_binary(K) ->
     safe_maps_get(K, Map, '$error').
@@ -770,13 +756,7 @@ maybe_merge(L, {'$mops_proxy', _} = R) ->
 maybe_merge(L, R) ->
     maps:merge(L, R).
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Evaluates only binary terms and any other term wrapped in a
-%% '$mops_proxy' tuple. For all other terms, returns the term untouched.
-%% @end
-%% -----------------------------------------------------------------------------
 maybe_eval({'$mops_proxy', T}, Ctxt) ->
     do_eval(T, Ctxt);
 maybe_eval(Term, Ctxt) when is_binary(Term) ->
@@ -820,12 +800,7 @@ maybe_trim(<<$", _Rest/binary>> = Bin) ->
 maybe_trim(Bin) ->
     trim(Bin).
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Eliminates whitespaces in a binary
-%% @end
-%% -----------------------------------------------------------------------------
 trim(Bin) ->
     trimb(Bin, <<>>).
 

@@ -545,6 +545,15 @@ reshape_summary() ->
     ?assertEqual(
         #{count => 7},
         bondy_registry_rib:reshape_summary(subscription, 7)
+    ),
+    %% The RIB rebuild and consistency check skip a cell on exactly this shape.
+    ?assertError(
+        function_clause,
+        bondy_registry_rib:reshape_summary(subscription, #{count => 7})
+    ),
+    ?assertError(
+        function_clause,
+        bondy_registry_rib:reshape_summary(registration, #{count => 1})
     ).
 
 %% The remote-merge reactions maintain the stub store: `{set, Summary}`

@@ -221,18 +221,21 @@ header_or_cookie_credential(RealmUri, Req) ->
 %% Bondy ticket carries `authrealm` and `scope`, an access token carries `aud`
 %% and `kid`. This runs on unverified input and only picks the verifier — both
 %% verifiers re-read and check the signature themselves, so nothing here is
-%% trusted. `jose_jwt:peek/1` raises several different ways on malformed input,
-%% hence the blanket catch.
+%% trusted. `jose_jwt:peek/1` decodes JSON through the adapter `jose` selects
+%% at runtime, so its error space has no fixed set of shapes.
 classify(Credential) ->
     try jose_jwt:peek(Credential) of
         {jose_jwt, #{~"authrealm" := R, ~"scope" := _}} when is_binary(R) ->
             ticket;
         {jose_jwt, #{~"aud" := A, ~"kid" := _}} when is_binary(A) ->
             oauth2;
-        _ ->
+        {jose_jwt, #{}} ->
             unknown
     catch
-        _:_ ->
+        %% The reason can carry fragments of the credential, so it is not
+        %% logged.
+        error:_Reason ->
+            ?LOG_DEBUG(#{description => "Credential is not a decodable JWT"}),
             unknown
     end.
 

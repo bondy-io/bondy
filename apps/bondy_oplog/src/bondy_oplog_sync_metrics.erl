@@ -6,10 +6,9 @@
 -module(bondy_oplog_sync_metrics).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Metrics for the AAE sync response path.
 
 An AAE sync response is packed up to `bondy_oplog_config:sync_max_response_bytes/0`
@@ -49,7 +48,7 @@ The metric families are node-wide with a low-cardinality `kind` label (`page` |
 `cell`); the per-item detail (instance, key, size) rides in a rate-limited
 WARNING log so metric cardinality stays bounded even with millions of instances
 per node.
-""").
+""".
 
 -define(M_OVERSIZED_TOTAL, bondy_oplog_sync_oversized_item_total).
 -define(M_OVERSIZED_LAST_BYTES, bondy_oplog_sync_oversized_item_last_bytes).

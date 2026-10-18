@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_cell_frame).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Codec for **projection cell value frames** (V2).
 
 A projection adapter stores each cell as a binary frame:
@@ -69,7 +67,7 @@ the frame to the user-facing HEAD wire format:
 
 Where `ValueBytes` is `ValueBin` (HasValueColumn=1) or `StateBin`
 (HasValueColumn=0).
-""").
+""".
 
 -define(VERSION, 2).
 -define(HLC_BYTES, 8).

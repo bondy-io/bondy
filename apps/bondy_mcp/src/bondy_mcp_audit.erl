@@ -189,10 +189,15 @@ record(Type, Fields) ->
                 #{record => Record}
             )
     catch
-        Class:Reason ->
+        error:Reason when
+            Reason =:= function_clause;
+            Reason =:= badarg;
+            is_tuple(Reason), element(1, Reason) =:= badkey;
+            is_tuple(Reason), element(1, Reason) =:= badmap
+        ->
             ?LOG_ERROR(#{
                 description => "MCP audit record emission failed",
-                class => Class,
+                class => error,
                 reason => Reason,
                 type => Type
             }),

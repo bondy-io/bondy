@@ -125,7 +125,7 @@ init([RealmUri, Service, PoolName]) ->
             }),
             {stop, {shutdown, {session_open_failed, Reason}}}
     catch
-        Class:CatchReason:Stack ->
+        error:{not_found, RealmUri} = CatchReason ->
             ?LOG_ERROR(#{
                 description =>
                     "Exception while opening WAMP session for RPC "
@@ -133,9 +133,7 @@ init([RealmUri, Service, PoolName]) ->
                     "will not be registered.",
                 realm => RealmUri,
                 service => ServiceName,
-                class => Class,
-                reason => CatchReason,
-                stacktrace => Stack
+                reason => CatchReason
             }),
             {stop, {shutdown, {session_open_failed, CatchReason}}}
     end.

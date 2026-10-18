@@ -703,7 +703,7 @@ Current shape:
     backpressure           => ok
                               | {hard, max_total_wal_size | max_live_segments},
     head_lag_ms            => non_neg_integer() | undefined,
-    consumer_lag_bytes     => non_neg_integer() | undefined
+    consumer_lag_bytes     => non_neg_integer()
 }
 ```
 """.
@@ -2786,27 +2786,24 @@ build_info(#state{} = State) ->
 %% compare "converged" can still hold an undrained WAL tail, and this is
 %% the number that exposes it. Conservative on edge cases: an offset that
 %% was never committed, or whose segment was already swept, counts every
-%% live byte as lag. `undefined` on any read failure (the caller filters).
+%% live byte as lag, as does an unreadable `consumer.offset` file:
+%% `bondy_log_state:read_consumer_offset/1` returns `{error, _}` for one
+%% and raises for nothing.
 consumer_lag_bytes(#state{dir = Dir} = State) ->
-    try
-        CO =
-            case bondy_log_state:read_consumer_offset(Dir) of
-                {ok, CO0} -> CO0;
-                {error, _} -> bondy_log_state:new_consumer_offset()
-            end,
-        case bondy_log_state:commit_count(CO) of
-            0 ->
-                State#state.bytes_total;
-            _ ->
-                consumer_lag_bytes(
-                    State,
-                    bondy_log_state:committed_segment(CO),
-                    bondy_log_state:committed_frame_offset(CO)
-                )
-        end
-    catch
-        _:_ ->
-            undefined
+    CO =
+        case bondy_log_state:read_consumer_offset(Dir) of
+            {ok, CO0} -> CO0;
+            {error, _} -> bondy_log_state:new_consumer_offset()
+        end,
+    case bondy_log_state:commit_count(CO) of
+        0 ->
+            State#state.bytes_total;
+        _ ->
+            consumer_lag_bytes(
+                State,
+                bondy_log_state:committed_segment(CO),
+                bondy_log_state:committed_frame_offset(CO)
+            )
     end.
 
 %% @private
@@ -3033,28 +3030,9 @@ publish_durable_pos(Ref, SegId, Offset) ->
 %% =============================================================================
 
 %% @private
-%% Single safe entry point for all WAL telemetry. The event name is the
-%% log's `telemetry_prefix` followed by `Suffix`. Wraps
-%% `telemetry:execute/3` in a try/catch so a buggy handler can never
-%% propagate into the writer's gen_server. The WAL must not crash on
-%% telemetry handler failure.
+%% The event name is the log's `telemetry_prefix` followed by `Suffix`.
 emit(#state{telemetry_prefix = Prefix}, Suffix, Measurements, Metadata) ->
-    Event = Prefix ++ Suffix,
-    try
-        telemetry:execute(Event, Measurements, Metadata)
-    catch
-        Class:Reason:Stack ->
-            ?LOG_WARNING(#{
-                description =>
-                    "telemetry:execute/3 raised; suppressing to keep the "
-                    "WAL writer alive",
-                event => Event,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stack
-            }),
-            ok
-    end.
+    telemetry:execute(Prefix ++ Suffix, Measurements, Metadata).
 
 %% @private
 %% `Prefix ++ [append]`. Emitted after every successful

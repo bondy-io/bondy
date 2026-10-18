@@ -8,7 +8,6 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 %% The substrate's reserved primary-index id (matches `bondy_db`'s `?INDEX`
@@ -80,7 +79,7 @@
 -define(MAX_SEAL_RETRIES, 3).
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 The per-instance Merkle Search Tree owner.
 
 Exactly one process per running instance; one MST per instance; one
@@ -140,7 +139,7 @@ local-ahead-of-peer install yields the same final MST, merge being commutative
 and idempotent; overlay eviction is per-event HLC-conditional; and the local
 applier blocks on `drain_install_queue`, so no install cast is ever queued
 behind that barrier.
-""").
+""".
 
 %% Ephemeral fused-writer drain state, present only when `#state.fused`: the
 %% instance runs the WAL drain and inline install itself, with no applier. The
@@ -623,7 +622,7 @@ process alias, answered when the row is evicted (see
 append(Target, Op, Meta, Notify) ->
     gen_server:call(target(Target), {append, Op, Meta, Notify}, infinity).
 
-?DOC("""
+-doc """
 Lock-free single-event append for instances whose validator is
 stateless (advertises `bondy_oplog_validator:is_stateless/0 -> true`).
 Builds the event in the caller's process, calls the WAL gen_server
@@ -642,7 +641,7 @@ durable and be applied once the subtree restarts
 Callers should not use this directly; route through
 `bondy_oplog:append/2,3`, which checks fast-path eligibility from
 the registry and falls back to the gen_server when ineligible.
-""").
+""".
 -spec append_fast(
     instance_id(),
     bondy_oplog_event:op(),
@@ -736,7 +735,7 @@ do_append_fast(InstanceId, FastPath, Op, Meta, Notify) ->
             append(InstanceId, Op, Meta, Notify)
     end.
 
-?DOC("""
+-doc """
 Lock-free batch append. Same eligibility as `append_fast/3`: the
 instance's validator must advertise `is_stateless/0 -> true`. The
 caller mints every event's `{HLC, Origin, Seq}` key, signs each
@@ -763,7 +762,7 @@ Returns the assigned `event_key()` list in input order, or
 Routed through automatically by `bondy_oplog:append_many/2` when
 the registry exposes a fast-path bundle; the consumer-facing API
 stays unchanged.
-""").
+""".
 -spec append_many_fast(
     instance_id(),
     [{bondy_oplog_event:op(), bondy_oplog_event:meta()}]
@@ -1062,10 +1061,10 @@ wal_append_batch(WalPid, Events) ->
             {error, Reason}
     end.
 
-?DOC("""
+-doc """
 Appends a batch of operations atomically (all-or-nothing within the
 instance). Returns the assigned keys in input order.
-""").
+""".
 -spec append_many(
     instance_id() | pid(),
     [{bondy_oplog_event:op(), bondy_oplog_event:meta()}]
@@ -1090,7 +1089,7 @@ append_many(Target, OpsAndMetas, Notify) when is_list(OpsAndMetas) ->
         target(Target), {append_many, OpsAndMetas, Notify}, infinity
     ).
 
-?DOC("""
+-doc """
 Inserts an event received from a peer. Idempotent. Validation runs in
 the caller's process: an Origin matching the instance's local Origin
 raises `error/1` without disturbing the instance gen_server. The
@@ -1116,7 +1115,7 @@ before issuing the verify call. The `pid()` form is supported for
 test/internal convenience only: it pays two extra `gen_server:call`
 round trips (origin lookup, then instance-id reverse lookup) before
 the verify call begins.
-""").
+""".
 -spec append_remote(instance_id() | pid(), bondy_oplog_event:t()) ->
     ok | {error, term()}.
 
@@ -1246,7 +1245,7 @@ fused_instance_pid_for(Pid) when is_pid(Pid) ->
         Id -> fused_instance_pid_for(Id)
     end.
 
-?DOC("""
+-doc """
 Blocks until the per-instance applier has promoted every overlay row
 into the MST, or until `Timeout` ms have elapsed.
 
@@ -1263,7 +1262,7 @@ function as a synchronisation point.
 
 Returns `ok` once the overlay is empty, or `{error, timeout}` on
 expiry. A missing overlay (subtree mid-restart) returns `ok`.
-""").
+""".
 -spec await_apply(instance_id() | pid()) -> ok | {error, timeout}.
 
 await_apply(Target) ->
@@ -1510,14 +1509,14 @@ handle in its own process (which raises `not_on_controlling_process`).
 mst_last(Target) ->
     gen_server:call(target(Target), mst_last).
 
-?DOC("""
+-doc """
 Returns the configured Origin for `Target`.
 
 **Pass an `instance_id()` (binary)** for hot-path callers — this form
 reads the value directly from the registry without messaging. The
 `pid()` form is a test/internal convenience that issues a synchronous
 `gen_server:call` to the instance.
-""").
+""".
 -spec origin(instance_id() | pid()) -> bondy_oplog_origin:t().
 
 origin(Target) ->
@@ -1526,29 +1525,29 @@ origin(Target) ->
         not_found -> error({noproc, Target})
     end.
 
-?DOC("""
+-doc """
 Returns a diagnostic summary of an instance's state. Cheap;
 appropriate for status pages and operational tools.
-""").
+""".
 -spec info(instance_id() | pid()) -> map().
 
 info(Target) ->
     gen_server:call(target(Target), info).
 
-?DOC("""
+-doc """
 Returns the validator module and a snapshot of the validator state
 for the per-instance applier. The applier uses this to re-verify
 event signatures (S1) in its own process before dispatching events
 to the instance for install. `verify_event/2` is read-only on the
 validator state, so the snapshot remains valid for the lifetime of
 the applier.
-""").
+""".
 -spec get_validator(pid()) -> {module(), term()}.
 
 get_validator(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, get_validator, infinity).
 
-?DOC("""
+-doc """
 Folds the instance's MST for the durable applier's cold-replay and returns the
 `{Key, Value}` pairs to re-apply, together with the current root.
 
@@ -1563,14 +1562,14 @@ Returns `{ok, no_change}` when the MST root has not moved since `LastRoot`, or
 `{ok, {CurrentRoot, Pairs}}` otherwise (a full fold when `LastRoot` is
 `undefined`, an incremental diff otherwise — see
 `bondy_oplog_applier:diff_pairs/3`).
-""").
+""".
 -spec replay_pairs(pid(), bondy_mst:hash() | undefined) ->
     {ok, no_change} | {ok, {bondy_mst:hash(), [{term(), term()}]}}.
 
 replay_pairs(Pid, LastRoot) when is_pid(Pid) ->
     gen_server:call(Pid, {replay_pairs, LastRoot}, infinity).
 
-?DOC("""
+-doc """
 Returns the distinct `{Bucket, Key}` cell keys named by this instance's MST.
 
 The fallback cell directory for a projection adapter that cannot enumerate
@@ -1582,13 +1581,13 @@ the same reason.
 
 Callers go through `bondy_oplog_cell_utils:mst_cell_directory/1`, which
 folds in place when it is already running in this process.
-""").
+""".
 -spec cell_directory(pid()) -> {ok, [{term(), term()}]}.
 
 cell_directory(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, cell_directory, infinity).
 
-?DOC("""
+-doc """
 Asks the per-instance applier to refresh its validator snapshot by
 calling `bondy_oplog_validator:refresh/1` on the current snapshot.
 
@@ -1603,20 +1602,20 @@ and the applier hasn't published its pid yet — operators / tests
 should retry.
 
 Equivalent to `refresh_validator(Target, validator_refresh)`.
-""").
+""".
 -spec refresh_validator(instance_id() | pid()) ->
     ok | {error, applier_unavailable}.
 
 refresh_validator(Target) ->
     refresh_validator(Target, validator_refresh).
 
-?DOC("""
+-doc """
 As `refresh_validator/1` but tags the refresh request with an
 operator-supplied `Reason` term. The reason is logged by the applier
 and emitted on the `[bondy_oplog, applier, validator_refresh]`
 telemetry event so operators can correlate the refresh with whatever
 upstream change triggered it (config push, key rotation, etc.).
-""").
+""".
 -spec refresh_validator(instance_id() | pid(), term()) ->
     ok | {error, applier_unavailable}.
 
@@ -1634,7 +1633,7 @@ refresh_validator(Target, Reason) ->
             end
     end.
 
-?DOC("""
+-doc """
 Reap the per-cell causal-context entries of permanently-retired origins
 from this shard's projection (the dead-origin GC). A tier_2
 CRDT carries one version-vector entry per origin that ever wrote a cell;
@@ -1660,7 +1659,7 @@ bounded-by-churn, not convergence bugs; see
 
 Returns `{ok, Report}` (see `bondy_oplog_applier:reap_report/0`) or
 `{error, applier_unavailable}` during a subtree restart.
-""").
+""".
 -spec reap_origins(instance_id() | pid(), [term()]) ->
     {ok, bondy_oplog_applier:reap_report()} | {error, term()}.
 
@@ -1742,14 +1741,14 @@ rebuild_indexes_sync(InstancePid, Key) when is_pid(InstancePid) ->
 %% PAGE-LEVEL API (sync protocol)
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns the subset of `Hashes` that this instance has, as a map of
 `hash => page`. Hashes the instance does not have are silently absent
 from the returned map.
 
 Used by the sync protocol on the *responder* side: a peer asks for a
 set of pages, this instance returns whichever it has.
-""").
+""".
 -spec get_pages(instance_id() | pid(), [bondy_mst:hash()]) ->
     #{bondy_mst:hash() => bondy_mst_page:t()}.
 
@@ -1761,14 +1760,14 @@ get_pages(Target, Hashes) when is_list(Hashes) ->
     %% instance process (see `do_handle_call({get_pages, _}, ...)`).
     gen_server:call(target(Target), {get_pages, Hashes}).
 
-?DOC("""
+-doc """
 Inserts a batch of pages received from a peer. Each page is verified
 by re-hashing on insert; a hash mismatch (peer using a different
 hash algorithm or malformed page) raises an error.
 
 Used by the sync protocol on the *initiator* side after pulling pages
 from a peer.
-""").
+""".
 -spec merge_pages(
     instance_id() | pid(),
     #{bondy_mst:hash() => bondy_mst_page:t()} | [bondy_mst_page:t()]
@@ -1779,11 +1778,11 @@ merge_pages(Target, Pages) when is_map(Pages) ->
 merge_pages(Target, Pages) when is_list(Pages) ->
     gen_server:call(target(Target), {merge_pages, Pages}, infinity).
 
-?DOC("""
+-doc """
 Returns the set of page hashes reachable from `Root` that this
 instance does not have locally. Used by the sync protocol's initiator
 to compute what to request from the peer.
-""").
+""".
 -spec missing_set(instance_id() | pid(), bondy_mst:hash()) ->
     [bondy_mst:hash()].
 
@@ -1795,7 +1794,7 @@ missing_set(Target, Root) when is_binary(Root) ->
     %% instance process (see `do_handle_call({missing_set, _}, ...)`).
     gen_server:call(target(Target), {missing_set, Root}).
 
-?DOC("""
+-doc """
 Integrates a peer's tree (identified by `PeerRoot`) into the local
 MST. Pre-condition: every page reachable from `PeerRoot` must already
 be present in the local store (caller's responsibility — typically
@@ -1812,7 +1811,7 @@ re-pulls and retries.
 
 After this call, all events that were in the peer's tree are visible
 to local queries, and the local root is the merged root of both trees.
-""").
+""".
 -spec integrate_peer_root(instance_id() | pid(), bondy_mst:hash()) ->
     ok | {error, {peer_pages_missing, non_neg_integer()}}.
 
@@ -1823,7 +1822,7 @@ integrate_peer_root(Target, PeerRoot) when is_binary(PeerRoot) ->
         infinity
     ).
 
-?DOC("""
+-doc """
 Pins `Root` (a peer root an in-flight sync session is pulling pages
 for) against this instance's ETS page GC. Pulled pages are unreachable
 from the LOCAL current root until `integrate_peer_root/2` merges them,
@@ -1833,7 +1832,7 @@ pages while later rounds are still fetching. The pin is consumed by a
 successful `integrate_peer_root/2` of the same root and expires after
 `?PEER_ROOT_PIN_TTL_MS` otherwise (a crashed session must not retain
 pages forever).
-""").
+""".
 -spec pin_peer_root(instance_id() | pid(), bondy_mst:hash()) -> ok.
 
 pin_peer_root(Target, Root) when is_binary(Root) ->
@@ -1843,11 +1842,11 @@ pin_peer_root(Target, Root) when is_binary(Root) ->
 %% GC / COMPACTION API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns the current compaction watermark — the highest event key that
 compaction has truncated from the MST. Events with keys ≤ watermark are
 no longer in the MST.
-""").
+""".
 -spec current_watermark(instance_id() | pid()) ->
     undefined | bondy_oplog_event:event_key().
 
@@ -1859,10 +1858,10 @@ current_watermark(Target) when is_binary(Target) ->
 current_watermark(Target) ->
     gen_server:call(target(Target), current_watermark).
 
-?DOC("""
+-doc """
 Returns `{ok, Watermark, Checkpoint}` for the latest persisted
 compaction checkpoint, or `not_found` if no compaction has run yet.
-""").
+""".
 -spec compaction_checkpoint(instance_id() | pid()) ->
     {ok, bondy_oplog_event:event_key(), term()} | not_found.
 
@@ -1875,7 +1874,7 @@ compaction_checkpoint(Target) when is_binary(Target) ->
 compaction_checkpoint(Target) ->
     gen_server:call(target(Target), get_compaction_checkpoint).
 
-?DOC("""
+-doc """
 Runs one compaction cycle inside the instance gen_server.
 
 `PeerWitnesses` is one durable frontier per peer (`durable_frontier/1`, as
@@ -1895,7 +1894,7 @@ instance:
 
 No witness confirms nothing. Returns `{ok, no_change}` if nothing was
 truncated, otherwise `{ok, {compacted, Watermark, EventCount}}`.
-""").
+""".
 -spec compact(
     instance_id() | pid(),
     [#{binary() => non_neg_integer()} | undefined]
@@ -1907,13 +1906,13 @@ truncated, otherwise `{ok, {compacted, Watermark, EventCount}}`.
 compact(Target, PeerWitnesses) when is_list(PeerWitnesses) ->
     gen_server:call(target(Target), {compact, PeerWitnesses}, infinity).
 
-?DOC("""
+-doc """
 Flips the instance bootstrap lifecycle to `live` (durably).
 
 Idempotent. Order matters: `mark_live/1` MUST be the **last** step in
 the bootstrap completion sequence — the durable flag file is the
 crash-recovery marker that "everything before me succeeded".
-""").
+""".
 -spec mark_live(instance_id() | pid()) -> ok.
 
 mark_live(InstanceId) when is_binary(InstanceId) ->
@@ -1953,12 +1952,12 @@ nudge_applier(InstanceId) ->
             ok
     end.
 
-?DOC("""
+-doc """
 Returns the current bootstrap lifecycle state of an instance.
 `pre_bootstrap` while the instance is waiting for a successful
 `bondy_oplog_sync_session:bootstrap_catalogue/3`; `live` once it can serve
 fold-driven reads. `undefined` when the instance is not registered.
-""").
+""".
 -spec lifecycle_state(instance_id() | pid()) ->
     bondy_oplog_bootstrap_lifecycle:state() | undefined.
 
@@ -2174,7 +2173,7 @@ durable_frontier(InstanceId) when is_binary(InstanceId) ->
         Pid -> gen_server:call(Pid, durable_frontier, infinity)
     end.
 
-?DOC("""
+-doc """
 Adds a table to a shard instance shared by several tables (the one-log-per-shard
 multiplexer). `Bucket` is the table's entity-type tag, `Target` its
 `{Namespace, primary, Shard}` core-registry triple, and `TableOpts` the
@@ -2184,7 +2183,7 @@ instance routes events carrying `Bucket` to `Target`'s projection. The founding
 table is registered when the instance starts (via `cell_apply_bucket`); this
 adds siblings at runtime. Dispatches to the fused instance gen_server or the
 applier depending on the instance's drain topology, so callers need not know it.
-""").
+""".
 -spec register_table(
     InstanceId :: instance_id(),
     Bucket :: binary(),
@@ -2218,12 +2217,12 @@ register_table(InstanceId, Bucket, Target, TableOpts) when
             end
     end.
 
-?DOC("""
+-doc """
 Removes a table previously added with `register_table/4` from a shared shard
 instance. Events carrying `Bucket` are then dropped (logged) until the bucket is
 re-registered. Dispatches to the fused instance gen_server or the applier
 depending on the instance's drain topology.
-""").
+""".
 -spec unregister_table(InstanceId :: instance_id(), Bucket :: binary()) ->
     ok | {error, term()}.
 
@@ -2247,7 +2246,7 @@ unregister_table(InstanceId, Bucket) when
             end
     end.
 
-?DOC("""
+-doc """
 Releases an instance founded with the WAL drain GATED (`drain_gated => true`):
 flips its per-boot drain gate `open` and kicks the deferred replay. The
 provisioning orchestrator calls this once per collapsed per-shard instance,
@@ -2260,7 +2259,7 @@ A release racing an applier restart still reaches the applier: this function
 records the gate before it reads the applier pid, and the applier publishes
 its pid before it reads the gate, so one of the two sees the other
 (`bondy_oplog_applier_multiplex_test`, one case holding each side).
-""").
+""".
 -spec open_drain_gate(InstanceId :: instance_id()) ->
     ok | {error, term()}.
 
@@ -2288,7 +2287,7 @@ open_drain_gate(InstanceId) when is_binary(InstanceId) ->
             end
     end.
 
-?DOC("""
+-doc """
 Finalises a catalogue-snapshot bootstrap session, after the rederive
 (`rederive_projection/2`) has installed the snapshot and set the applied
 frontier.
@@ -2306,7 +2305,7 @@ frontier carries the peer's compacted-prefix maxima, which no local MST event
 or WAL replay can restore, so without it an unclean restart would lose them. For a fresh
 replica (`WasLive = false`) the instance is then marked `live` durably; a
 recovering one (`WasLive = true`) is already live.
-""").
+""".
 -spec finalize_catalogue_bootstrap(
     instance_id() | pid(),
     Watermark :: non_neg_integer(),
@@ -2345,7 +2344,7 @@ finalize_catalogue_bootstrap(Pid, Watermark, MaxInstalledHlc, WasLive) when
             ok
     end.
 
-?DOC("""
+-doc """
 Durably persists this instance's current applied-frontier version vector into the
 compaction checkpoint (the same `{projection_managed, frontier, _}` payload
 `terminate/2` writes on a clean stop).
@@ -2358,13 +2357,13 @@ after the adoption makes those maxima survive an unclean restart. A no-op on an
 ephemeral backend (no checkpoint). Returns `{error, Reason}` when the checkpoint
 could not be made durable
 (`persist_frontier_does_not_confirm_an_unsynced_checkpoint_test`).
-""").
+""".
 -spec persist_frontier(instance_id() | pid()) -> ok | {error, term()}.
 
 persist_frontier(Target) ->
     gen_server:call(target(Target), persist_frontier, infinity).
 
-?DOC("""
+-doc """
 Tells the instance its WAL sibling is open at `WalPid` with `MaxSeq` as
 the retained WAL's own-origin maximum, and opens minting.
 
@@ -2384,7 +2383,7 @@ Steps 2 and 3 are what gate a reservation on step 1: neither minting path
 can reserve a seq before the counter has absorbed the WAL's maximum
 (`proofs/tla/SeqSeed_CkptEarlyMint.cfg` is the window this closes; pinned
 by `bondy_oplog_seq_seed_restart_test`).
-""").
+""".
 -spec wal_opened(instance_id() | pid(), pid(), non_neg_integer()) -> ok.
 
 wal_opened(Target, WalPid, MaxSeq) when
@@ -2392,7 +2391,7 @@ wal_opened(Target, WalPid, MaxSeq) when
 ->
     gen_server:call(target(Target), {wal_opened, WalPid, MaxSeq}, infinity).
 
-?DOC("""
+-doc """
 Where the applier must anchor its projection-replay cursor at boot, and
 whether a fold is owed: `{undefined, true}` to re-fold the live MST, or
 `{Root, false}` with the current root (`undefined` for an empty tree) to skip
@@ -2427,7 +2426,7 @@ when the scan found an unclaimed event: a replica that shut down with
 everything folded and checkpointed scans, finds nothing, and proceeds. The
 re-fold itself is idempotent — cells are keyed and the commutative kernels
 guard on a per-origin `MaxSeq` (`bondy_oplog_crdt_g_counter:apply_op/3`).
-""").
+""".
 -spec replay_anchor(instance_id() | pid()) ->
     {undefined | bondy_mst:hash(), Owed :: boolean()}.
 
@@ -2467,10 +2466,10 @@ maybe_advance_high_water(InstanceId, Watermark) ->
 %% REGISTRY
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns the pid of an instance owner gen_server, or `undefined` if no
 such instance is currently running.
-""").
+""".
 -spec whereis(instance_id()) -> pid() | undefined.
 
 whereis(InstanceId) when is_binary(InstanceId) ->

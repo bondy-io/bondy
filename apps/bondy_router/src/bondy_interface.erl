@@ -420,7 +420,7 @@ doc_keys(#{<<"entries">> := Entries}) when is_list(Entries) ->
                 is_binary(Realm) andalso is_binary(Uri) andalso
                     {true, {Realm, key(Kind, Policy, Uri)}}
             catch
-                _:_ -> false
+                throw:{invalid_kind, _} -> false
             end
         end,
         Entries

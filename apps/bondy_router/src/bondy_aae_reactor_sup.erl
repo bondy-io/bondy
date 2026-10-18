@@ -69,17 +69,18 @@ init([]) ->
 shards() ->
     PoolName = ?AAE_REACTOR_POOL,
     WorkerMod = bondy_aae_reactor_worker,
-    N = bondy_config:get(
+    Configured = bondy_config:get(
         [aae_reactor_pool, size], erlang:system_info(schedulers_online)
     ),
 
-    %% On a supervisor restart the pool already exists; `gproc_pool:new/3` raises
-    %% (the pool server is owned by the gproc supervisor), so we ignore it.
-    _ =
-        try
-            gproc_pool:new(PoolName, hash, [{size, N}])
+    %% The pool outlives a supervisor restart (gproc owns it), so a restart
+    %% keeps the existing size; a changed size applies at the next node start.
+    %% `worker_pool/1` lists one entry per slot, filled or not.
+    N =
+        try gproc_pool:new(PoolName, hash, [{size, Configured}]) of
+            ok -> Configured
         catch
-            _:_ -> ok
+            error:exists -> length(gproc_pool:worker_pool(PoolName))
         end,
 
     Shards = [
@@ -89,7 +90,7 @@ shards() ->
                 try
                     gproc_pool:add_worker(PoolName, WorkerName, Shard)
                 catch
-                    _:_ -> ok
+                    error:exists -> ok
                 end,
             Shard
         end

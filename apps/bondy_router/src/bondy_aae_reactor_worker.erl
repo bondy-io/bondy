@@ -98,19 +98,23 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 %% @private
-%% Run one reaction without ever raising — a malformed peer event must not take
-%% the worker (and its queued backlog) down.
+%% A malformed peer cell key must not take the worker (and its queued backlog)
+%% down; `bondy_aae_reactor` raises `{Tag, Key}` for one, `Tag` naming the table.
 safe_react(Sub, Key, Op, Old) ->
     try
         _ = bondy_aae_reactor:apply_reaction(Sub, Key, Op, Old),
         ok
     catch
-        Class:Reason:Stacktrace ->
+        error:{Tag, _} = Reason when
+            Tag =:= malformed_user_cell_key;
+            Tag =:= malformed_realm_cell_key;
+            Tag =:= malformed_grant_cell_key;
+            Tag =:= malformed_member_cell_key;
+            Tag =:= malformed_group_cell_key
+        ->
             ?LOG_ERROR(#{
                 description => "AAE merge reaction failed",
-                class => Class,
                 reason => Reason,
-                stacktrace => Stacktrace,
                 key => Key
             }),
             ok

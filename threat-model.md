@@ -359,7 +359,7 @@ Every row now carries a code locator. WAMP message types beyond those tabled (`C
 ### Size, shape, and rate assumptions
 
 - **Frames are capped uniformly at 4 MiB.** Every ingress carrier now agrees: WebSocket `max_frame_size`, MCP `max_body_size`, long-poll `max_body_size`, the bridge relay's `max_frame_size`, and the RawSocket handshake ceiling `?RAW_MAX_LEN_CODE` (code 13 = 2^22). Each is per-listener configurable. They were harmonised on 2026-08-30; before that RawSocket let the **client** choose up to 16 MiB, the bridge relay was `infinity`, and long-poll had no bound at all. *(documented, the five sources above)*
-- **Rate is bounded, but fail-open.** Rate limiting composes three scopes — node, listener, realm — as an AND, coarse-to-fine, with no refunds. Every scope **fails open**: if the limiter cannot answer, the request is admitted. *(documented, `_plans/2026-08-29-rate-limit-scopes-design.md` R1 and "Fail-open at every scope")*
+- **Rate is bounded, but fail-open.** Rate limiting composes three scopes — node, listener, realm — as an AND, coarse-to-fine, with no refunds. Every scope **fails open**: if the limiter cannot answer, the request is admitted. *(documented, `bondy_rate_limit` moduledoc: the limiter fails open)*
 - **Payloads are otherwise unbounded by the router** — Bondy does not impose a schema on call arguments or event payloads.
 
 ### Contract-dimension matrix
@@ -417,7 +417,7 @@ Status is `claimed`, `disclaimed`, `N/A — reason`, or `unresolved`.
 **Postcondition after a failed operation.** Authentication failure leaves no
 session. A decode failure aborts the message. A rate-limit refusal returns a
 transient signal (429 or a WAMP error) and is explicitly **not** a permission
-verdict. *(documented, `_plans/2026-08-29-rate-limit-scopes-design.md` R2)*
+verdict. *(documented, `bondy_rate_limit` moduledoc: a token-bucket admission decision, not authorization)*
 
 ---
 
@@ -843,7 +843,7 @@ match fires ahead of everything (rule 1), while the peer-plane report has no
 | --- | --- | --- | --- | --- | --- |
 | **D-PEER-PLANE** | Confidentiality, integrity, or peer authentication on the cluster peer plane. | Applies to Partisan node-to-node traffic **only** — not to client listeners and not to the cryptosign-authenticated bridge relay. Replicated credentials and realm signing keys transit in the clear by default. Rests on a **stated** limit, not on silence. Ruled a supported production posture **conditioned on network isolation**; a deployment that exposes the peer port is outside the condition and this disclaimer does not cover it. | security-critical | — | *(maintainer, 2026-08)* |
 | **D-AT-REST-PLAINTEXT** | Encryption of secret material at rest **by default**. | Covers exactly one claim: that the shipped default stores realm signing and encryption keys as plaintext JWKs. It does **not** cover a report that key material is plaintext *despite* `security.master_key` being configured, nor a report that no protection mechanism exists — both route `VALID` via P-KEYRING-FAIL-CLOSED. Public keys are never encrypted. Does not cover the WAL body, a separate not-yet-wired path. Rests on a **stated** limit. | security-critical | — | *(documented, `apps/bondy_router/src/bondy_keyring.erl` moduledoc)* |
-| **D-RATE-LIMIT-FAILOPEN** | A guaranteed request ceiling. Rate limiting **fails open** at every scope — if the limiter cannot answer, the request is admitted. | Covers the node, listener, and realm scopes of `bondy_rate_limit`. Does not cover the frame-size caps, which are hard limits. | security-critical | **yes** — a configured rate limit looks like an availability guarantee; it is a best-effort capacity control. | *(documented, `_plans/2026-08-29-rate-limit-scopes-design.md`, "Fail-open at every scope")* |
+| **D-RATE-LIMIT-FAILOPEN** | A guaranteed request ceiling. Rate limiting **fails open** at every scope — if the limiter cannot answer, the request is admitted. | Covers the node, listener, and realm scopes of `bondy_rate_limit`. Does not cover the frame-size caps, which are hard limits. | security-critical | **yes** — a configured rate limit looks like an availability guarantee; it is a best-effort capacity control. | *(documented, `bondy_rate_limit` moduledoc: the limiter fails open)* |
 | **D-RATE-LIMIT-NOT-AUTHZ** | Authorization via rate limiting. A refusal is a transient signal, never a permission verdict. | Covers all rate-limit classes. | correctness-only | **yes** — a 429 is not a "denied" decision. | *(documented, same design doc, R2)* |
 | **D-REALM-QUOTA-PER-NODE** | A cluster-wide realm quota. The realm `total` budget bounds **each node** separately. | Covers the realm `total` kind in v1. A 3-node cluster with a 1000/s realm total admits up to 3000/s cluster-wide. | correctness-only | **yes** — "total" reads as cluster-wide and is not. | *(documented, same design doc, R4)* |
 | **D-AUDIT-FAILOPEN** | Guaranteed audit capture. MCP audit emission is fail-open: a construction failure is logged and the response proceeds. | Covers `bondy_mcp_audit:record/2`. | correctness-only | **yes** — an audit trail with gaps is not a compliance control. | *(documented, `apps/bondy_mcp/src/bondy_mcp_audit.erl:43-45`)* |

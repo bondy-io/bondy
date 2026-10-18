@@ -132,10 +132,11 @@ that lives on the session — see `bondy_context:is_feature_enabled/3`.
 -spec is_feature_implemented(binary() | atom()) -> boolean().
 
 is_feature_implemented(F) when is_binary(F) ->
-    try
-        is_feature_implemented(binary_to_existing_atom(F))
+    try binary_to_existing_atom(F) of
+        Feature ->
+            is_feature_implemented(Feature)
     catch
-        _:_ ->
+        error:badarg ->
             false
     end;
 is_feature_implemented(F) when is_atom(F) ->
@@ -156,12 +157,10 @@ flush(RealmUri, Ref) ->
             subscription, RealmUri, SessionId, fun on_unsubscribe/1
         )
     catch
-        Class:Reason:Stacktrace ->
+        error:{badmatch, {error, _}} = Reason ->
             ?LOG_DEBUG(#{
                 description => "Error while flushing subscriptions",
-                class => Class,
                 reason => Reason,
-                stacktrace => Stacktrace,
                 realm_uri => RealmUri,
                 ref => Ref
             }),
@@ -203,20 +202,28 @@ publish(ReqId, Opts, TopicUri, Args, KWArgs, Ctxt) when
             {error, Reason};
         _:{no_such_realm, RealmUri} = Reason ->
             {error, Reason};
-        Class:Reason:Stacktrace ->
-            SessionId = bondy_context:session_id(Ctxt),
-            ExtId = bondy_router_utils:external_session_id(SessionId),
-            ?LOG_WARNING(#{
-                description => "Error while publishing",
-                class => Class,
-                reason => Reason,
-                protocol_session_id => ExtId,
-                session_id => SessionId,
-                topic => TopicUri,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
+        error:{invalid_uri, _} = Reason ->
+            publish_failed(Reason, TopicUri, Ctxt);
+        error:{invalid_id, _} = Reason ->
+            publish_failed(Reason, TopicUri, Ctxt);
+        error:{validation_failed, _} = Reason ->
+            publish_failed(Reason, TopicUri, Ctxt);
+        error:retained_messages_not_provisioned = Reason ->
+            publish_failed(Reason, TopicUri, Ctxt)
     end.
+
+%% @private
+publish_failed(Reason, TopicUri, Ctxt) ->
+    SessionId = bondy_context:session_id(Ctxt),
+    ExtId = bondy_router_utils:external_session_id(SessionId),
+    ?LOG_WARNING(#{
+        description => "Error while publishing",
+        reason => Reason,
+        protocol_session_id => ExtId,
+        session_id => SessionId,
+        topic => TopicUri
+    }),
+    {error, Reason}.
 
 -spec subscribe(RealmUri :: uri(), Opts :: map(), Topic :: uri()) ->
     {ok, id()} | {ok, {id(), pid()}} | {error, already_exists | any()}.
@@ -986,7 +993,12 @@ send_retained(Entry) ->
                 try
                     bondy_router_peer:send(RealmUri, Ref, Event)
                 catch
-                    _:_ -> ok
+                    %% A gone subscriber: `!` to an `undefined` pid raises
+                    %% `badarg`, and a gone HTTP transport fails its enqueue.
+                    error:badarg ->
+                        ok;
+                    error:{badmatch, {error, transport_not_found}} ->
+                        ok
                 end
         end,
         Matches

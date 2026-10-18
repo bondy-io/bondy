@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_index_key).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Order-preserving composite `(Term, PrimaryKey)` codec for the secondary
 index keyspace.
 
@@ -72,7 +70,7 @@ to the separator), correct construction.
 Both are half-open `[Low, High)` so callers map them onto
 `bondy_oplog_core:range/range_all` (exclusive upper bound) without an
 off-by-one.
-""").
+""".
 
 -export([encode/2]).
 -export([encode_term/1]).

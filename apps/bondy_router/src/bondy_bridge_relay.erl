@@ -430,7 +430,7 @@ name creates it afresh rather than reviving what was there.
                         try binary_to_existing_atom(Mod) of
                             Val -> {ok, Val}
                         catch
-                            _:_ -> false
+                            error:badarg -> false
                         end
                 end
             },

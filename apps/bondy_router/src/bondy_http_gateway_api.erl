@@ -7,7 +7,8 @@
 -moduledoc """
 Implements the `bondy_wamp_api` behaviour for the HTTP gateway, handling the
 WAMP administration calls to load, list, get and delete API gateway
-specifications.
+specifications, and to report which of them this node serves
+(`bondy.http_gateway.api.status`, see `bondy_http_gateway:status/0`).
 """.
 -behaviour(bondy_wamp_api).
 
@@ -47,6 +48,12 @@ handle_call(?BONDY_HTTP_GATEWAY_LIST, #call{} = M, Ctxt) ->
     [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
 
     Result = bondy_http_gateway:list(),
+    R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
+    {reply, R};
+handle_call(?BONDY_HTTP_GATEWAY_STATUS, #call{} = M, Ctxt) ->
+    [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
+
+    Result = bondy_http_gateway:status(),
     R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
     {reply, R};
 handle_call(?BONDY_HTTP_GATEWAY_GET, #call{} = M, Ctxt) ->

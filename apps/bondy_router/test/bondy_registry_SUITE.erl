@@ -20,7 +20,8 @@
 all() ->
     [
         {group, rpc},
-        {group, pubsub}
+        {group, pubsub},
+        {group, pagination}
     ].
 
 groups() ->
@@ -57,6 +58,10 @@ groups() ->
             sub_sessionless_refs,
             remove_all_runs_task_once_per_entry,
             partition_pick_recovers_after_crash
+        ]},
+        {pagination, [sequence], [
+            subscription_pages_reach_every_entry,
+            registration_pages_reach_every_entry
         ]}
     ].
 
@@ -1554,3 +1559,107 @@ add_subscription_test(Type, RealmUri, Uri, Opts, Ctxt) ->
         bondy_registry:add(Type, RealmUri, Uri, Opts, Ref),
         "The registry should not allow duplicates"
     ).
+
+%% =============================================================================
+%% PAGINATION
+%% =============================================================================
+
+-define(PAGED, 150).
+-define(PAGE, 100).
+-define(PAGE_CAP, 10).
+
+%% A match bounded by `limit` returns a first page and a continuation. Resuming
+%% the continuation, through either `find_matches/1` or `match/1`, must reach
+%% every entry exactly once and then answer end-of-table. Covers subscriptions
+%% (local exact entries) with more entries than one page.
+subscription_pages_reach_every_entry(_) ->
+    Realm = <<"com.foobar">>,
+    Topic = <<"com.foobar.paged.topic">>,
+    Keeper = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Ids = lists:sort([
+        begin
+            Ref = bondy_ref:new(internal, Keeper, bondy_session_id:new()),
+            {ok, {Entry, _}} = bondy_registry:add(
+                subscription, Realm, Topic, #{match => ?EXACT_MATCH}, Ref
+            ),
+            bondy_registry_entry:id(Entry)
+        end
+     || _ <- lists:seq(1, ?PAGED)
+    ]),
+    Opts = #{limit => ?PAGE},
+    Find = page_ids(
+        bondy_registry:find_matches(subscription, Realm, Topic, Opts),
+        fun bondy_registry:find_matches/1
+    ),
+    Match = page_ids(
+        bondy_registry:match(subscription, Realm, Topic, Opts),
+        fun bondy_registry:match/1
+    ),
+    Keeper ! stop,
+    ?assertEqual(Ids, lists:sort(Find)),
+    ?assertEqual(Ids, lists:sort(Match)).
+
+%% As above for shared registrations, whose exact matches page through the
+%% registration index rather than the subscription tables.
+registration_pages_reach_every_entry(_) ->
+    Realm = <<"com.foobar">>,
+    Uri = <<"com.foobar.paged.proc">>,
+    Keeper = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Opts0 = #{
+        match => ?EXACT_MATCH,
+        invoke => ?INVOKE_ROUND_ROBIN,
+        shared_registration => true
+    },
+    Ids = lists:sort([
+        begin
+            Ref = bondy_ref:new(internal, Keeper, bondy_session_id:new()),
+            {ok, {Entry, _}} = bondy_registry:add(
+                registration, Realm, Uri, Opts0, Ref
+            ),
+            bondy_registry_entry:id(Entry)
+        end
+     || _ <- lists:seq(1, ?PAGED)
+    ]),
+    Opts = #{limit => ?PAGE, match => '_'},
+    Find = page_ids(
+        bondy_registry:find_matches(registration, Realm, Uri, Opts),
+        fun bondy_registry:find_matches/1
+    ),
+    Match = page_ids(
+        bondy_registry:match(registration, Realm, Uri, Opts),
+        fun bondy_registry:match/1
+    ),
+    Keeper ! stop,
+    ?assertEqual(Ids, lists:sort(Find)),
+    ?assertEqual(Ids, lists:sort(Match)).
+
+%% @private
+%% Collects the entry ids of every page, resuming with `Next`. Fails after
+%% `?PAGE_CAP` pages, so a continuation that restarts instead of advancing is
+%% reported rather than looping.
+page_ids(Result, Next) ->
+    page_ids(Result, Next, 0, []).
+
+page_ids(_Result, _Next, ?PAGE_CAP, _Acc) ->
+    error(page_cap_reached);
+page_ids(?EOT, _Next, _N, Acc) ->
+    Acc;
+page_ids({{L, _Nodes}, Cont}, Next, N, Acc) when is_list(L) ->
+    page_ids(Next(Cont), Next, N + 1, ids(L) ++ Acc);
+page_ids({L, Cont}, Next, N, Acc) when is_list(L) ->
+    page_ids(Next(Cont), Next, N + 1, ids(L) ++ Acc);
+page_ids({L, _Nodes}, _Next, _N, Acc) when is_list(L) ->
+    ids(L) ++ Acc;
+page_ids(L, _Next, _N, Acc) when is_list(L) ->
+    ids(L) ++ Acc.
+
+ids(Entries) ->
+    [bondy_registry_entry:id(E) || E <- Entries].

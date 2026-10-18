@@ -197,16 +197,12 @@ whole (possibly paged) set of them.
 -export([delete_indices/2]).
 -export([remove/2]).
 -export([find/1]).
--export([find/2]).
 -export([find/3]).
 -export([find/4]).
 -export([find_session_entry/6]).
 -export([list_local/5]).
--export([fold/4]).
--export([fold/5]).
 -export([fold/6]).
 -export([foreach/5]).
--export([lookup/2]).
 -export([lookup/3]).
 -export([lookup/4]).
 -export([lookup/5]).
@@ -336,6 +332,11 @@ summaries.
 rib_members_tab(#bondy_registry_store{rib_members_tab = Tab}) ->
     Tab.
 
+-doc """
+Returns `size`, the rows in the store's ETS tables plus the node count of its
+ptries, and `memory`, the words held by its ETS tables. `memory` does not
+include the ptrie tables.
+""".
 -spec info(Store :: t()) -> #{size => integer(), memory => integer()}.
 
 info(#bondy_registry_store{} = Store) ->
@@ -351,11 +352,6 @@ info(#bondy_registry_store{} = Store) ->
 
     Ptries = ptrie_handles(Store),
 
-    %% Ptrie `info/1` returns a map with `node_count` and related keys.
-    %% Sum `node_count` and ETS memory for an overall size snapshot. The
-    %% memory estimate is approximate — it covers the node table of each
-    %% ptrie but not its auxiliary tables (root row, retire queue, epoch
-    %% slots), which are small.
     PtrieStats = [bondy_registry_ptrie:info(P) || P <- Ptries],
     NodeSum = lists:sum([maps:get(node_count, I, 0) || I <- PtrieStats]),
 
@@ -503,23 +499,19 @@ take(#bondy_registry_store{} = Store, Type, EntryKey) when ?IS_TYPE(Type) ->
             Error
     end.
 
--doc "".
--spec lookup(Store :: t(), IndexEntry :: index_entry()) ->
-    {ok, Entry :: entry()} | {error, not_found}.
+-doc """
+Returns the entry of `Type` stored under `EntryKey` in this store's
+node-local entry table.
 
-lookup(Store, #reg_idx{entry_key = EntryKey}) ->
-    lookup(Store, registration, EntryKey);
-lookup(Store, #sub_idx{entry_key = EntryKey}) ->
-    lookup(Store, subscription, EntryKey).
-
--doc "".
+Fails with `badarg` when `EntryKey` is not a `bondy_registry_entry:key()`.
+""".
 -spec lookup(Store :: t(), Type :: entry_type(), EntryKey :: entry_key()) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
 lookup(Store, Type, EntryKey) when ?IS_TYPE(Type) ->
     lookup(Store, Type, EntryKey, []).
 
--doc "".
+-doc "As `lookup/3`. `Opts` is ignored.".
 -spec lookup(
     Store :: t(),
     Type :: entry_type(),
@@ -535,7 +527,10 @@ lookup(#bondy_registry_store{} = Store, Type, EntryKey, _Opts0) when
     EntryId = bondy_registry_entry:id(EntryKey),
     entry_read(Store, Type, RealmUri, EntryId).
 
--doc "".
+-doc """
+Returns the entry of `Type` with id `EntryId` in `RealmUri`, read by primary
+key from this store's node-local entry table. `Opts` is ignored.
+""".
 -spec lookup(
     Store :: t(),
     Type :: entry_type(),
@@ -556,30 +551,28 @@ lookup(#bondy_registry_store{} = Store, Type, RealmUri, EntryId, _Opts0) when
     %% (see `bondy_registry_meta:get/3`).
     entry_read(Store, Type, RealmUri, EntryId).
 
--doc "".
+-doc """
+Continues a `find/4` call, and always returns `'$end_of_table'`: `find/4`
+returns its whole result in one call, so its continuation is exhausted.
+""".
 -spec find(continuation()) -> find_result().
 
 find(_Cont) ->
-    %% bondy_db reads materialise the whole (bounded) result set in one shot, so
-    %% `find` never hands back a live continuation — a resumed continuation is
-    %% always already exhausted.
-    ?EOT.
-
--doc "".
--spec find(continuation(), store_opts()) -> find_result().
-
-find(_Cont, _Opts) ->
     ?EOT.
 
 -doc """
-Finds entries in the registry using a key pattern.
+Finds the entries of `Type` that match the key pattern `Pattern`.
 
-This is used for entry maintenance, not routing — for URI routing use the
-`match_` functions instead. The bondy_db port serves the only patterns the
-registry actually uses: `entry_id` bound (a point read on the primary key)
-and/or `session_id` bound (a bounded `by_session` index lookup). A fully-wild
-`{'_', '_'}` pattern lists the realm (admin only). The return shape matches the
-plum_db contract, keyed on the `{limit, _}` option (see `find/4`).
+Use it for entry maintenance. Route by URI with the `match_` functions.
+The bound fields of `Pattern` choose the read:
+- `entry_id` bound: a point read on the primary key, filtered by session.
+- `session_id` bound: a prefix select on the session index.
+- `session_id` `undefined`: a realm scan kept to session-less entries.
+- both wild: every entry of the realm.
+
+With a `{limit, _}` option (`find/4`) the result is
+`{Pairs, '$end_of_table'}`, or `'$end_of_table'` when nothing matches.
+Without one it is the list of pairs.
 """.
 -spec find(t(), entry_type(), entry_key()) -> find_result().
 
@@ -595,11 +588,6 @@ find(Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
     Session = bondy_registry_entry:session_id(Pattern),
     EntryId = bondy_registry_entry:id(Pattern),
     Pairs = find_pairs(Store, Type, RealmUri, Session, EntryId),
-
-    %% The result shape is keyed on `{limit, _}`: a bounded request gets
-    %% the `{List, Cont}` form (`?EOT` for empty); an unbounded one a bare list.
-    %% bondy_db reads always materialise the whole (bounded) set, so the
-    %% continuation is always already exhausted (`?EOT`).
     case lists:keymember(limit, 1, Opts0) of
         true ->
             case Pairs of
@@ -611,13 +599,10 @@ find(Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
     end.
 
 -doc """
-The session's entry for `(Uri, MatchPolicy)`, when one exists — the
-idempotent-SUBSCRIBE duplicate check. A bounded prefix select on the
-session index (fully bound but for the entry id), so its cost is
-independent of how many entries the session holds — the previous
-implementation folded over ALL of the session's entries (materialising
-each one) on every subscribe, which is quadratic over a session's
-subscribe burst.
+The session's entry for `(Uri, MatchPolicy)`, when one exists: the
+idempotent-SUBSCRIBE duplicate check. It is a prefix select on the session
+index with every field bound but the entry id, so its cost does not grow
+with the number of entries the session holds.
 """.
 -spec find_session_entry(
     Store :: t(),
@@ -753,35 +738,11 @@ session_pairs(#bondy_registry_store{} = Store, Type, RealmUri, Session) ->
         EntryIds
     ).
 
--doc "".
--spec fold(
-    Store :: t(),
-    Fun :: store_fold_fun(),
-    Acc :: any(),
-    Cont :: continuation()
-) -> any() | partial(any()).
-
-fold(_Store, _Fun, Acc, _Cont) ->
-    %% Continuations are always exhausted (see `find/1`).
-    Acc.
-
--doc "".
--spec fold(
-    Store :: t(),
-    Fun :: store_fold_fun(),
-    Acc :: any(),
-    Cont :: continuation(),
-    Opts :: store_opts()
-) -> any().
-
-fold(_Store, _Fun, Acc, _Cont, _Opts) ->
-    Acc.
-
 -doc """
 Folds `Fun({EntryKey, Entry}, Acc)` over the entries of `(Type, RealmUri)`,
 optionally narrowed by a `{match, KeyPattern}` option (the registry uses it to
-scan one session's entries). Supports early exit via `throw({break, Acc})`,
-mirroring the old `plum_db:fold/4` shape.
+scan one session's entries). `Fun` ends the fold early by throwing
+`{break, Acc}`, and `Acc` is then the result.
 """.
 -spec fold(
     Store :: t(),
@@ -812,7 +773,10 @@ fold(Store, Type, RealmUri, Fun, Acc0, Opts0) when ?IS_TYPE(Type) ->
         throw:{break, Acc} -> Acc
     end.
 
--doc "".
+-doc """
+Applies `Fun` to each `{EntryKey, Entry}` pair of `Type` in `RealmUri`.
+`Opts` is ignored.
+""".
 -spec foreach(
     Store :: t(),
     Type :: entry_type(),
@@ -824,7 +788,7 @@ fold(Store, Type, RealmUri, Fun, Acc0, Opts0) when ?IS_TYPE(Type) ->
 foreach(Store, Type, RealmUri, Fun, _Opts0) when ?IS_TYPE(Type) ->
     lists:foreach(Fun, realm_pairs(Store, Type, RealmUri)).
 
--doc "".
+-doc "Returns the entry type and realm URI that `Cont` was created for.".
 -spec continuation_info(continuation()) ->
     #{type := entry_type(), realm_uri := uri()}.
 
@@ -950,11 +914,19 @@ match(Store, Type, RealmUri, Uri, Opts) ->
         {'_', N} when is_integer(N), N > 0 ->
             match_each(Store, Type, RealmUri, Uri, Opts, ?MATCH_POLICIES);
         {?EXACT_MATCH, _} ->
-            match_exact(Store, Type, RealmUri, Uri, Opts);
+            with_policies(
+                match_exact(Store, Type, RealmUri, Uri, Opts), [?EXACT_MATCH]
+            );
         {?PREFIX_MATCH, _} ->
-            match_prefix(Store, Type, RealmUri, Uri, Opts);
+            with_policies(
+                match_prefix(Store, Type, RealmUri, Uri, Opts), [?PREFIX_MATCH]
+            );
         {?WILDCARD_MATCH, _} ->
-            match_wildcard(Store, Type, RealmUri, Uri, Opts)
+            with_policies(
+                match_wildcard(Store, Type, RealmUri, Uri, Opts), [
+                    ?WILDCARD_MATCH
+                ]
+            )
     end.
 
 -doc """
@@ -967,8 +939,6 @@ Continues a match started with `match/5'. The next chunk of the size
 
 match(?EOT) ->
     ?EOT;
-match(#continuation{function = Name} = C) when Name =/= find ->
-    error(badarg, [C]);
 match(#continuation{policies = []}) ->
     ?EOT;
 match(#continuation{policies = [?EXACT_MATCH]} = C) ->
@@ -987,7 +957,7 @@ match(#continuation{policies = [H | T]} = C) ->
             Store = C#continuation.store,
             match_each(Store, Type, RealmUri, Uri, Opts, T);
         Result ->
-            Result
+            with_policies(Result, [H | T])
     end.
 
 -doc """
@@ -1002,28 +972,15 @@ match_exact(#continuation{type = registration} = C0) ->
 
     case ets:select(C0#continuation.original) of
         ?EOT ->
-            Type = C0#continuation.type,
-            RealmUri = C0#continuation.realm_uri,
-            Uri = C0#continuation.uri,
-            Opts = C0#continuation.opts,
-
-            case match_exact(Store, Type, RealmUri, Uri, Opts) of
-                ?EOT ->
-                    ?EOT;
-                {L, ?EOT} ->
-                    {project(Store, L), ?EOT};
-                {L, C1} ->
-                    C = C1#continuation{original = ?EOT},
-                    {project(Store, L), C}
-            end;
+            ?EOT;
         {L, Cont} ->
             C = C0#continuation{original = Cont},
             {project(Store, L), C}
     end;
 match_exact(#continuation{type = subscription} = C) ->
-    L = match_local_exact_subscription(C),
-    R = match_remote_exact_subscription(C),
-    zip_local_remote(L, R).
+    %% The continuation is the local cursor's. The first page returned the
+    %% remote nodes in full: `zip_local_remote/2` takes no remote cursor.
+    zip_local_remote(match_local_exact_subscription(C), ?EOT).
 
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri` and the `prefix` policy.
@@ -1168,11 +1125,23 @@ find_matches(Store, Type, RealmUri, Uri, Opts) ->
                 Store, Type, RealmUri, Uri, Opts, ?MATCH_POLICIES
             );
         {?EXACT_MATCH, _} ->
-            find_exact_matches(Store, Type, RealmUri, Uri, Opts);
+            with_policies(
+                find_exact_matches(Store, Type, RealmUri, Uri, Opts), [
+                    ?EXACT_MATCH
+                ]
+            );
         {?PREFIX_MATCH, _} ->
-            find_prefix_matches(Store, Type, RealmUri, Uri, Opts);
+            with_policies(
+                find_prefix_matches(Store, Type, RealmUri, Uri, Opts), [
+                    ?PREFIX_MATCH
+                ]
+            );
         {?WILDCARD_MATCH, _} ->
-            find_wildcard_matches(Store, Type, RealmUri, Uri, Opts)
+            with_policies(
+                find_wildcard_matches(Store, Type, RealmUri, Uri, Opts), [
+                    ?WILDCARD_MATCH
+                ]
+            )
     end.
 
 -doc """
@@ -1185,8 +1154,6 @@ When there are no more objects in the table, '$end_of_table' is returned.
 
 find_matches(?EOT) ->
     ?EOT;
-find_matches(#continuation{function = Name} = C) when Name =/= find ->
-    error(badarg, [C]);
 find_matches(#continuation{policies = []}) ->
     ?EOT;
 find_matches(#continuation{policies = [?EXACT_MATCH]} = C) ->
@@ -1205,7 +1172,7 @@ find_matches(#continuation{policies = [H | T]} = C) ->
             Store = C#continuation.store,
             find_matches_each(Store, Type, RealmUri, Uri, Opts, T);
         Result ->
-            Result
+            with_policies(Result, [H | T])
     end.
 
 -doc """
@@ -2038,15 +2005,18 @@ id_set_match(Id, Eligible, Exclude) ->
 %% =============================================================================
 
 %% @private
-continue(#continuation{} = C0) ->
-    case ets:select(C0#continuation.original) of
-        ?EOT ->
-            ?EOT;
-        {L, ETSCont} ->
-            C = C0#continuation{original = ETSCont},
-            Store = C#continuation.store,
-            {project(Store, L), C}
-    end.
+%% Records on a result's continuation the policies a resume still has to
+%% walk, the current one first.
+with_policies({Result, #continuation{} = C}, Policies) ->
+    {Result, C#continuation{policies = Policies}};
+with_policies({_, ?EOT} = Result, _Policies) ->
+    Result;
+with_policies({L, R} = Result, _Policies) when is_list(L), is_list(R) ->
+    Result;
+with_policies(L, _Policies) when is_list(L) ->
+    L;
+with_policies(?EOT, _Policies) ->
+    ?EOT.
 
 %% @private
 ets_select(Tab, MS, #{limit := N}) when is_integer(N), N > 0 ->
@@ -2202,7 +2172,7 @@ match_each(#bondy_registry_store{} = Store, Type, RealmUri, Uri, Opts, [H | T]) 
         ?EOT ->
             match_each(Store, Type, RealmUri, Uri, Opts, T);
         Result ->
-            Result
+            with_policies(Result, [H | T])
     end;
 match_each(#bondy_registry_store{} = Store, Type, RealmUri, Uri, Opts, [H | T]) when
     H == ?PREFIX_MATCH
@@ -2211,7 +2181,7 @@ match_each(#bondy_registry_store{} = Store, Type, RealmUri, Uri, Opts, [H | T]) 
         ?EOT ->
             match_each(Store, Type, RealmUri, Uri, Opts, T);
         Result ->
-            Result
+            with_policies(Result, [H | T])
     end;
 match_each(#bondy_registry_store{} = Store, Type, RealmUri, Uri, Opts, [H]) when
     H == ?WILDCARD_MATCH
@@ -2268,13 +2238,6 @@ match_local_exact_subscription(Store, RealmUri, Uri, Opts) ->
             },
             {project(Store, L), C}
     end.
-
-%% @private
--spec match_remote_exact_subscription(ets_continuation()) ->
-    sub_match_result().
-
-match_remote_exact_subscription(#continuation{} = C) ->
-    continue(C).
 
 %% @private
 -spec match_remote_exact_subscription(t(), uri(), uri(), map()) ->
@@ -2367,7 +2330,7 @@ find_matches_each(
         ?EOT ->
             find_matches_each(Store, Type, RealmUri, Uri, Opts, T);
         Result ->
-            Result
+            with_policies(Result, [H | T])
     end;
 find_matches_each(
     #bondy_registry_store{} = Store, Type, RealmUri, Uri, Opts, [H | T]
@@ -2376,7 +2339,7 @@ find_matches_each(
         ?EOT ->
             find_matches_each(Store, Type, RealmUri, Uri, Opts, T);
         Result ->
-            Result
+            with_policies(Result, [H | T])
     end;
 find_matches_each(
     #bondy_registry_store{} = Store, Type, RealmUri, Uri, Opts, [H]
@@ -2415,6 +2378,15 @@ ptrie_find_matches(Store, Type, RealmUri, Uri, Opts, Ptrie) ->
         {L, _} ->
             ptrie_match_result(Store, Type, Opts, {L, ?EOT})
     end.
+
+%% @private
+-spec lookup(Store :: t(), IndexEntry :: index_entry()) ->
+    {ok, Entry :: entry()} | {error, not_found}.
+
+lookup(Store, #reg_idx{entry_key = EntryKey}) ->
+    lookup(Store, registration, EntryKey);
+lookup(Store, #sub_idx{entry_key = EntryKey}) ->
+    lookup(Store, subscription, EntryKey).
 
 %% @private
 -spec project(t(), [index_entry()]) -> [entry() | node()].

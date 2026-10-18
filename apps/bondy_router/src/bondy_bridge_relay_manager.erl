@@ -96,7 +96,9 @@ add_bridge(Data, Opts0) ->
             Timeout = timer:seconds(10),
             gen_server:call(?MODULE, {add_bridge, Data, Opts}, Timeout)
     catch
-        _:Reason ->
+        error:#{code := _} = Reason ->
+            {error, Reason};
+        error:{badmap, _} = Reason ->
             {error, Reason}
     end.
 
@@ -122,7 +124,9 @@ check_bridge(Data, Opts0) ->
                 ?MODULE, {check_bridge, Data}, timer:seconds(10)
             )
     catch
-        _:Reason ->
+        error:#{code := _} = Reason ->
+            {error, Reason};
+        error:{badmap, _} = Reason ->
             {error, Reason}
     end.
 

@@ -165,7 +165,7 @@ try_decode(Term, Opts) ->
     try
         {ok, decode(Term, Opts)}
     catch
-        _:Reason ->
+        error:Reason ->
             {error, Reason}
     end.
 

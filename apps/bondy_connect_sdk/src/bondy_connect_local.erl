@@ -58,6 +58,7 @@ authorization still enforced). See `bondy_connect_local_handler`.
 
 -behaviour(bondy_connect_transport).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 %% Our own internal self-delivery tag (the synthesized WELCOME, keepalive pong).
@@ -284,12 +285,20 @@ peername(#state{}) ->
 close(#state{handler = undefined}) ->
     ok;
 close(#state{handler = Mod, session = Session}) ->
-    _ =
-        try
-            Mod:close(Session)
-        catch
-            _:_ -> ok
-        end,
+    %% `Mod` is the registered handler, code this module does not own. A
+    %% failure there is logged with its class and reason; the close completes.
+    try
+        Mod:close(Session)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description => "Local handler close failed",
+                handler => Mod,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end,
     ok.
 
 %% =============================================================================

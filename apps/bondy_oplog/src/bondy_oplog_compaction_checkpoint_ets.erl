@@ -6,11 +6,10 @@
 -module(bondy_oplog_compaction_checkpoint_ets).
 -behaviour(bondy_oplog_compaction_checkpoint).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 In-memory compaction checkpoint backed by a per-instance ETS table.
 
 Suitable for tests and ephemeral instances where rebuild cost on
@@ -18,7 +17,7 @@ restart is acceptable. For durable single-node deployments, use
 `bondy_oplog_compaction_checkpoint_file`. For other durability
 characteristics, implement the
 `bondy_oplog_compaction_checkpoint` behaviour directly.
-""").
+""".
 
 -record(state, {
     instance_id :: instance_id(),

@@ -253,24 +253,11 @@ log_shed(Shed) ->
 run(Name, {M, F, A}) ->
     Start = erlang:monotonic_time(millisecond),
 
-    try apply(M, F, A) of
-        Stats ->
-            ?LOG_INFO(#{
-                description => "Storage reclamation sweep finished",
-                sweep => Name,
-                duration_ms => erlang:monotonic_time(millisecond) - Start,
-                stats => Stats
-            })
-    catch
-        Class:Reason:Stacktrace ->
-            %% Logged and swallowed: the job pool must not be told a background
-            %% sweep is a fault, and the next round retries anyway.
-            ?LOG_ERROR(#{
-                description => "Storage reclamation sweep failed",
-                sweep => Name,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
-    end,
+    Stats = apply(M, F, A),
+    ?LOG_INFO(#{
+        description => "Storage reclamation sweep finished",
+        sweep => Name,
+        duration_ms => erlang:monotonic_time(millisecond) - Start,
+        stats => Stats
+    }),
     ok.

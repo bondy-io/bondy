@@ -66,13 +66,13 @@ partitions() ->
     WorkerMod = bondy_registry_partition,
     N = bondy_config:get([registry, partitions]),
 
-    %% If the supervisor restarts and we call groc_pool:new it will fail with
-    %% an exception
+    %% gproc owns the pool and its workers, so both outlive a restart of this
+    %% supervisor. `gproc_pool` then raises `exists` for each of them.
     _ =
         try
             gproc_pool:new(?REGISTRY_POOL, hash, [{size, N}])
         catch
-            _:_ -> ok
+            error:exists -> ok
         end,
 
     Indices = [
@@ -82,7 +82,7 @@ partitions() ->
                 try
                     gproc_pool:add_worker(?REGISTRY_POOL, WorkerName, Index)
                 catch
-                    _:_ -> ok
+                    error:exists -> ok
                 end,
             Index
         end

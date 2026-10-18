@@ -38,7 +38,9 @@ all() ->
         bridging_survives_a_busy_manager,
         resubscribe_after_restart_delivers,
         retry_result_is_retried_then_abandoned,
-        terminate_is_called_with_reason_and_context
+        terminate_is_called_with_reason_and_context,
+        unknown_bridge_name_is_rejected,
+        kafka_action_defaults_to_the_first_configured_client
     ].
 
 init_per_suite(Config) ->
@@ -312,6 +314,28 @@ terminate_is_called_with_reason_and_context(Config) ->
     %% what it acquired.
     ?assertEqual(#{<<"test">> => #{<<"tag">> => <<"from_init">>}}, Ctxt).
 
+-doc """
+A bridge name that is not an existing atom fails validation.
+
+`binary_to_existing_atom/2` raises `badarg` for such a name; the validator
+turns that into a rejected specification rather than a crash.
+""".
+unknown_bridge_name_is_rejected(Config) ->
+    Topic = ?config(topic, Config),
+    Sub = (subscription(Topic))#{
+        <<"bridge">> => <<"bondy_bridge_name_that_is_not_an_atom">>
+    },
+    ?assertMatch(
+        {error, _},
+        bondy_broker_bridge_manager:validate_spec(#{
+            <<"id">> => <<"test">>,
+            <<"kind">> => <<"broker_bridge">>,
+            <<"version">> => <<"v1.0">>,
+            <<"meta">> => #{},
+            <<"subscriptions">> => [Sub]
+        })
+    ).
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -442,3 +466,60 @@ add_realm(RealmUri) ->
     },
     _ = bondy_realm:create(Cfg),
     ok.
+
+%% A Kafka produce action that names no client, or names it as `undefined` or
+%% `null`, uses the first client the bridge was configured with. The manager is
+%% stubbed to answer the bridge record it stores (`#{config := Config}`, whose
+%% `clients` are `{Name, Opts}` pairs), so no Kafka broker is needed.
+kafka_action_defaults_to_the_first_configured_client(_Config) ->
+    ok = meck:new(bondy_broker_bridge_manager, [passthrough, no_link]),
+    try
+        ok = meck:expect(
+            bondy_broker_bridge_manager,
+            bridge,
+            fun(bondy_kafka_bridge) ->
+                #{
+                    config => [
+                        {enabled, true},
+                        {clients, [
+                            {first_client, [{endpoints, [{"localhost", 9092}]}]},
+                            {second_client, [
+                                {endpoints, [{"localhost", 9093}]}
+                            ]}
+                        ]}
+                    ]
+                }
+            end
+        ),
+        Options = #{
+            <<"partitioner">> => #{
+                <<"algorithm">> => <<"fnv32a">>, <<"value">> => null
+            },
+            <<"encoding">> => <<"json">>
+        },
+        Action = fun(Opts) ->
+            #{
+                <<"type">> => <<"produce_sync">>,
+                <<"topic">> => <<"t">>,
+                <<"key">> => <<"k">>,
+                <<"value">> => <<"v">>,
+                <<"options">> => Opts
+            }
+        end,
+        ClientOf = fun(Opts) ->
+            {ok, #{<<"options">> := #{<<"client_id">> := C}}} =
+                bondy_kafka_bridge:validate_action(Action(Opts)),
+            C
+        end,
+        ?assertEqual(first_client, ClientOf(Options)),
+        ?assertEqual(
+            first_client, ClientOf(Options#{<<"client_id">> => undefined})
+        ),
+        ?assertEqual(first_client, ClientOf(Options#{<<"client_id">> => null})),
+        ?assertEqual(
+            second_client,
+            ClientOf(Options#{<<"client_id">> => <<"second_client">>})
+        )
+    after
+        meck:unload(bondy_broker_bridge_manager)
+    end.

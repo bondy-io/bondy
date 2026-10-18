@@ -6,10 +6,8 @@
 -module(bondy_db_topology_memory).
 -behaviour(bondy_db_topology).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 In-memory `bondy_db` topology: one `bondy_oplog_projection_ets` table per
 `(EntityType, Shard)`, no leveled Bookie, no filesystem.
 
@@ -85,7 +83,7 @@ topology declare `instances_strategy/0 => per_shard`: one oplog instance
 the entity-type bucket. The per-`(EntityType, Shard)` ETS projections stay
 separate (each table routes to its own handle); only the replication log is
 shared per shard.
-""").
+""".
 
 -export([init/2]).
 -export([open_table/4]).

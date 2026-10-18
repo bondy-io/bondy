@@ -54,11 +54,13 @@ end#{
     <<"client_id">> => #{
         alias => client_id,
         required => true,
-        default => undefined,
+        %% An action that names no client uses the first configured one.
+        %% `maps_utils` evaluates a fun default and does not validate it.
+        default => fun default_client_id/0,
         allow_null => false,
         validator => fun
-            (undefined) ->
-                get_client();
+            (Val) when Val =:= undefined; Val =:= null ->
+                default_client();
             (Val) when is_atom(Val) ->
                 {ok, Val};
             (Val) when is_binary(Val) ->
@@ -353,7 +355,7 @@ init(Config) ->
 
     _ = application:ensure_all_started(hash),
 
-    try application:ensure_all_started(brod) of
+    case application:ensure_all_started(brod) of
         {ok, _} ->
             {ok, Clients} = application:get_env(brod, clients),
             [
@@ -372,11 +374,8 @@ init(Config) ->
             Topics = maps:from_list(proplists:get_value(topics, Config, [])),
             Ctxt = #{<<"kafka">> => #{<<"topics">> => Topics}},
             {ok, Ctxt};
-        Error ->
+        {error, _} = Error ->
             Error
-    catch
-        _:Reason ->
-            {error, Reason}
     end.
 
 -doc "Validate a Kafka produce action spec against `PRODUCE_ACTION_SPEC`.".
@@ -449,17 +448,28 @@ terminate(_Reason, _State) ->
 %% PRIVATE
 %% =============================================================================
 
-get_client() ->
+%% The bridge record the manager stores carries the configuration this bridge
+%% was initialised with; its `clients` are `{Name, Opts}` pairs.
+default_client() ->
     case bondy_broker_bridge_manager:bridge(?MODULE) of
         undefined ->
-            {error, not_found};
-        PL ->
-            case lists:keyfind(clients, 1, PL) of
-                {clients, [H | _]} ->
-                    {ok, H};
-                false ->
-                    {error, not_found}
+            false;
+        #{config := Config} ->
+            case key_value:get(clients, Config, []) of
+                [{Name, _Opts} | _] ->
+                    {ok, Name};
+                [] ->
+                    false
             end
+    end.
+
+%% @private
+default_client_id() ->
+    case default_client() of
+        {ok, Name} ->
+            Name;
+        false ->
+            error(no_kafka_client_configured)
     end.
 
 %% @private

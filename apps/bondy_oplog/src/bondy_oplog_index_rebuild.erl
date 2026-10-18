@@ -8,10 +8,9 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Serialised rebuild orchestrator for the secondary indexes.
 
 A secondary index is a deterministic function of the primary. It is
@@ -95,7 +94,7 @@ rebuild the handler drains any further pending requests for that index
 from its mailbox. Every trigger marks before it requests: a mark after the
 rebuild's wipe fails the run, which then runs again, and a mark before it is
 covered by the run.
-""").
+""".
 
 -export([child_spec/0]).
 -export([start_link/0]).

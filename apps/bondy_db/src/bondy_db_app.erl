@@ -7,10 +7,8 @@
 
 -behaviour(application).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Application entry point for the `bondy_db` consumer facade and its
 leveled-backed storage topologies.
 
@@ -26,7 +24,7 @@ not:
 The layer has no permanent processes of its own — leveled bookie supervisors
 and topology ETS owners are started on demand per table — so `bondy_db_sup`
 is a trivial root supervisor.
-""").
+""".
 
 -export([start/2, stop/1]).
 

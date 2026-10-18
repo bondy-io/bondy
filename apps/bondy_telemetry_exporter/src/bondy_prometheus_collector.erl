@@ -29,8 +29,9 @@ running:
   (e.g. `bondy_event_manager`, where one slow gen_event handler backs up
   all eventing).
 
-All reads are defensive: a failing source degrades to an absent metric
-family, never a scrape error.
+A source with nothing to report returns no rows and its family is absent
+from the scrape. Sources run only while `bondy_router` is running; a source
+that raises fails the scrape.
 """.
 -behaviour(prometheus_collector).
 
@@ -62,16 +63,10 @@ collect_mf(_Registry, CB) ->
         true ->
             lists:foreach(
                 fun({Name, Help, Type, Fun}) ->
-                    Metrics =
-                        try
-                            Fun()
-                        catch
-                            _:_ -> []
-                        end,
-                    case Metrics of
+                    case Fun() of
                         [] ->
                             ok;
-                        _ ->
+                        [_ | _] = Metrics ->
                             CB(
                                 prometheus_model_helpers:create_mf(
                                     Name, Help, Type, Metrics
@@ -95,23 +90,16 @@ deregister_cleanup(_) -> ok.
 %% Renders the `bondy_metrics` (BIF-counter) families declared via
 %% `bondy_metrics:declare/1`. All the deferred cost of the
 %% wait-free capture path lands here, on the scraper: one registry walk
-%% per declared family. Defensive like every other source in this
-%% collector — a missing registry table or a bad row skips the family,
-%% never fails the scrape.
+%% per declared family. The declared and the counter tables share one owner,
+%% so `declared/0` raising covers a missing registry.
 collect_bondy_metrics_families(CB) ->
     maps:foreach(
         fun(Name, Descriptor) ->
             Help = maps:get(help, Descriptor, <<>>),
-            Rows =
-                try
-                    bondy_metrics:family(Name)
-                catch
-                    _:_ -> []
-                end,
-            case Rows of
+            case bondy_metrics:family(Name) of
                 [] ->
                     ok;
-                _ ->
+                [_ | _] = Rows ->
                     emit_family(CB, Name, Help, Rows)
             end
         end,
@@ -164,7 +152,7 @@ cumulative_buckets(#{count := Total, buckets := Sparse}) ->
 
 %% @private
 %% Scrape-time families. Each fun returns `[{Labels, Value}]`; an empty
-%% list (or a crash, caught by the caller) skips the family.
+%% list skips the family.
 families() ->
     [
         {bondy_cluster_connections,
@@ -217,81 +205,33 @@ families() ->
     ].
 
 %% @private
+%% `partisan_config:init/0` runs at `bondy_cluster` start, before
+%% `bondy_router`. The Partisan connection reads answer `[]` or `0` while the
+%% peer-connections table is absent (clustering off).
 peer_connection_rows() ->
-    Nodes =
-        try partisan:nodes() of
-            L when is_list(L) -> L;
-            _ -> []
-        catch
-            _:_ -> []
-        end,
-    lists:filtermap(
-        fun(Node) ->
-            try partisan_peer_connections:count(Node) of
-                N when is_integer(N) ->
-                    {true, {[{peer, Node}], N}};
-                _ ->
-                    false
-            catch
-                _:_ -> false
-            end
-        end,
-        Nodes
-    ).
-
-%% @private
-channel_connection_rows() ->
-    Channels =
-        try partisan_config:channels() of
-            M when is_map(M) -> maps:keys(M);
-            _ -> []
-        catch
-            _:_ -> []
-        end,
-    Nodes =
-        try partisan:nodes() of
-            L when is_list(L) -> L;
-            _ -> []
-        catch
-            _:_ -> []
-        end,
     [
-        {[{peer, Node}, {channel, Channel}], N}
-     || Node <- Nodes,
-        Channel <- Channels,
-        N <- channel_count(Node, Channel)
+        {[{peer, Node}], partisan_peer_connections:count(Node)}
+     || Node <- partisan:nodes()
     ].
 
 %% @private
-channel_count(Node, Channel) ->
-    try partisan_peer_connections:count(Node, Channel) of
-        N when is_integer(N) -> [N];
-        _ -> []
-    catch
-        _:_ -> []
-    end.
+channel_connection_rows() ->
+    Channels = maps:keys(partisan_config:channels()),
+    [
+        {
+            [{peer, Node}, {channel, Channel}],
+            partisan_peer_connections:count(Node, Channel)
+        }
+     || Node <- partisan:nodes(),
+        Channel <- Channels
+    ].
 
 %% @private
+%% `bondy_router` starts `tuplespace` before it runs, and `tuplespace` never
+%% erases its ring. `ets:info/2` answers `undefined` for a dropped table.
 rpc_promises() ->
-    Tabs =
-        try tuplespace:tables(bondy_rpc_promise) of
-            L when is_list(L) -> L;
-            _ -> []
-        catch
-            _:_ -> []
-        end,
-    Sizes = [
-        S
-     || T <- Tabs,
-        S <- [
-            try
-                ets:info(T, size)
-            catch
-                _:_ -> undefined
-            end
-        ],
-        is_integer(S)
-    ],
+    Tabs = tuplespace:tables(bondy_rpc_promise),
+    Sizes = [S || T <- Tabs, S <- [ets:info(T, size)], is_integer(S)],
     case Tabs of
         [] -> [];
         _ -> [{[], lists:sum(Sizes)}]
@@ -299,30 +239,21 @@ rpc_promises() ->
 
 %% @private
 rpc_promises_by_procedure() ->
-    try bondy_rpc_promise:count_by_procedure() of
-        Counts when is_map(Counts) ->
-            [
-                {[{procedure_uri, Uri}], N}
-             || Uri := N <- Counts
-            ];
-        _ ->
-            []
-    catch
-        _:_ -> []
-    end.
+    [
+        {[{procedure_uri, Uri}], N}
+     || Uri := N <- bondy_rpc_promise:count_by_procedure()
+    ].
 
 %% @private
+%% `/metrics` stays up while the router tree stops. A stopping partition
+%% erases its store first (`function_clause` in `bondy_registry_store:info/1`),
+%% then its ptrie tables die with it (`badarg`).
 registry_info_rows(Key) ->
     try bondy_registry:info() of
-        #{} = Info ->
-            case maps:get(Key, Info, undefined) of
-                N when is_integer(N) -> [{[], N}];
-                _ -> []
-            end;
-        _ ->
-            []
+        #{Key := N} -> [{[], N}]
     catch
-        _:_ -> []
+        error:function_clause -> [];
+        error:badarg -> []
     end.
 
 %% @private
@@ -365,12 +296,19 @@ listener_metric_rows(Suffix) ->
     ).
 
 %% @private
+%% A listener that stops during `ranch:info/0` raises `badarg` from
+%% `ranch_server`, a call exit from its dead supervisor, or the `noproc`,
+%% `shutdown` or `timeout` exit of `ranch_conns_sup:active_connections/1`.
 listeners() ->
     try ranch:info() of
-        M when is_map(M) -> maps:to_list(M);
-        _ -> []
+        M -> maps:to_list(M)
     catch
-        _:_ -> []
+        error:badarg -> [];
+        exit:{noproc, {gen_server, call, _}} -> [];
+        exit:{shutdown, {gen_server, call, _}} -> [];
+        exit:noproc -> [];
+        exit:shutdown -> [];
+        exit:timeout -> []
     end.
 
 %% @private
@@ -386,18 +324,16 @@ jobs_queue_rows(Kind) ->
     lists:filtermap(
         fun(Index) ->
             Queue = {bondy_jobs_worker, Index, queue},
-            try jobs:queue_info(Queue) of
-                {queue, Props} when is_list(Props) ->
+            case jobs:queue_info(Queue) of
+                {queue, Props} ->
                     case jobs_queue_value(Kind, Props) of
                         N when is_integer(N) ->
                             {true, {[{shard, Index}], N}};
-                        _ ->
+                        undefined ->
                             false
                     end;
-                _ ->
+                undefined ->
                     false
-            catch
-                _:_ -> false
             end
         end,
         lists:seq(1, PoolSize)
@@ -405,44 +341,26 @@ jobs_queue_rows(Kind) ->
 
 %% @private
 jobs_queue_value(depth, Props) ->
-    case lists:keyfind(st, 1, Props) of
-        {st, {st, Tab}} ->
-            try
-                ets:info(Tab, size)
-            catch
-                _:_ -> undefined
-            end;
-        _ ->
-            undefined
-    end;
+    {st, {st, Tab}} = lists:keyfind(st, 1, Props),
+    ets:info(Tab, size);
 jobs_queue_value(enqueued, Props) ->
-    case lists:keyfind(queued, 1, Props) of
-        {queued, N} -> N;
-        _ -> undefined
-    end.
+    {queued, N} = lists:keyfind(queued, 1, Props),
+    N.
 
 %% @private
 rate_limiter_rows() ->
     [
         {[{table, Tab}], Size}
      || Tab <- [bondy_rate_limiter, bondy_regulator_rate_limit],
-        Size <- [
-            try
-                ets:info(Tab, size)
-            catch
-                _:_ -> undefined
-            end
-        ],
+        Size <- [ets:info(Tab, size)],
         is_integer(Size)
     ].
 
 %% @private
 oidc_inflight() ->
-    try ets:info(bondy_oidc_state, size) of
+    case ets:info(bondy_oidc_state, size) of
         N when is_integer(N) -> [{[], N}];
-        _ -> []
-    catch
-        _:_ -> []
+        undefined -> []
     end.
 
 %% @private

@@ -7,10 +7,8 @@
 
 -behaviour(supervisor).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Top-level library supervisor.
 
 Children, in start order:
@@ -42,7 +40,7 @@ instances down.
 The schedulers can be disabled via app env (`{sync_scheduler, false}`,
 `{gc_scheduler, false}`); when disabled the gen_servers still start
 but their tick timers are quiescent.
-""").
+""".
 
 -export([start_link/0]).
 -export([init/1]).

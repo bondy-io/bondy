@@ -10,7 +10,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("bondy_mst top level supervisor.").
+-moduledoc "bondy_mst top level supervisor.".
 
 -export([start_link/0]).
 

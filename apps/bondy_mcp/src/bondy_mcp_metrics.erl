@@ -16,10 +16,13 @@ handler sinks each event into wait-free `bondy_metrics` families,
 rendered at scrape time by `bondy_prometheus_collector` (which renders
 exactly the families declared here via `bondy_metrics:declare/1`).
 
-Emitters and sink clauses are both total: a telemetry handler that
-raises is detached permanently by `telemetry`, so every sink clause
-try/catches, and every emitter swallows its own failure — metrics are
-never allowed to take a request down.
+`telemetry:execute/3` runs each handler in the emitting process. A
+handler that raises is detached and logged at error level, and the
+emitter continues (`telemetry:do_execute/4`). The sink clauses do not
+catch: a `bondy_metrics` write fails only on a programming defect (one
+family touched with two types, a non-integer measurement) or when the
+`bondy_metrics` tables are gone, and the logged detach makes that
+visible.
 
 Cardinality: `realm`, `listener`, `status`, `reason`, `type`,
 `kind`, `trigger`, `surface` and `upstream` are bounded (operator
@@ -338,45 +341,35 @@ upstream_drift_blocked(Upstream, Count) ->
 %% =============================================================================
 
 handle_event([bondy, mcp, session, open], _Meas, Meta, _Config) ->
-    try
-        Label = #{
-            node => node_name(),
-            realm => maps:get(realm, Meta, undefined),
-            listener => maps:get(listener, Meta, undefined)
-        },
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_session_opened_total,
-            label => Label
-        }),
-        ok = bondy_metrics:gauge(#{
-            name => bondy_mcp_active_sessions,
-            label => Label,
-            delta => 1
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    Label = #{
+        node => node_name(),
+        realm => maps:get(realm, Meta, undefined),
+        listener => maps:get(listener, Meta, undefined)
+    },
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_session_opened_total,
+        label => Label
+    }),
+    ok = bondy_metrics:gauge(#{
+        name => bondy_mcp_active_sessions,
+        label => Label,
+        delta => 1
+    });
 handle_event([bondy, mcp, session, close], _Meas, Meta, _Config) ->
-    try
-        Label = #{
-            node => node_name(),
-            realm => maps:get(realm, Meta, undefined),
-            listener => maps:get(listener, Meta, undefined)
-        },
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_session_closed_total,
-            label => Label#{reason => maps:get(reason, Meta, undefined)}
-        }),
-        ok = bondy_metrics:gauge(#{
-            name => bondy_mcp_active_sessions,
-            label => Label,
-            delta => -1
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    Label = #{
+        node => node_name(),
+        realm => maps:get(realm, Meta, undefined),
+        listener => maps:get(listener, Meta, undefined)
+    },
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_session_closed_total,
+        label => Label#{reason => maps:get(reason, Meta, undefined)}
+    }),
+    ok = bondy_metrics:gauge(#{
+        name => bondy_mcp_active_sessions,
+        label => Label,
+        delta => -1
+    });
 handle_event([bondy, http_transport, session, closed], _Meas, Meta, _Config) ->
     %% The generic transport session's lifecycle event. Only a session
     %% this gateway registered lifecycle metadata for (bootstrap, AFTER
@@ -390,204 +383,144 @@ handle_event([bondy, http_transport, session, closed], _Meas, Meta, _Config) ->
             reason := Reason
         } ->
             session_closed(Realm, Listener, mcp_close_reason(Reason));
-        _ ->
+        #{metadata := undefined} ->
+            ok;
+        #{metadata := Metadata} when not is_map_key(mcp, Metadata) ->
             ok
     end;
 handle_event([bondy, mcp, tool, call, stop], Meas, Meta, _Config) ->
-    try
-        sink_dispatched(
-            bondy_mcp_tool_calls_total,
-            bondy_mcp_tool_call_duration_microseconds,
-            Meas,
-            Meta
-        )
-    catch
-        _:_ ->
-            ok
-    end;
+    sink_dispatched(
+        bondy_mcp_tool_calls_total,
+        bondy_mcp_tool_call_duration_microseconds,
+        Meas,
+        Meta
+    );
 handle_event([bondy, mcp, resource, read, stop], Meas, Meta, _Config) ->
-    try
-        sink_dispatched(
-            bondy_mcp_resource_reads_total,
-            bondy_mcp_resource_read_duration_microseconds,
-            Meas,
-            Meta
-        )
-    catch
-        _:_ ->
-            ok
-    end;
+    sink_dispatched(
+        bondy_mcp_resource_reads_total,
+        bondy_mcp_resource_read_duration_microseconds,
+        Meas,
+        Meta
+    );
 handle_event([bondy, mcp, resource, subscribe], _Meas, Meta, _Config) ->
-    try
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_resource_subscribes_total,
-            label => #{
-                node => node_name(),
-                realm => maps:get(realm, Meta, undefined),
-                name => maps:get(name, Meta, undefined)
-            }
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_resource_subscribes_total,
+        label => #{
+            node => node_name(),
+            realm => maps:get(realm, Meta, undefined),
+            name => maps:get(name, Meta, undefined)
+        }
+    });
 handle_event([bondy, mcp, notification, emit], Meas, Meta, _Config) ->
-    try
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_notifications_emitted_total,
-            label => #{
-                node => node_name(),
-                realm => maps:get(realm, Meta, undefined),
-                type => maps:get(type, Meta, undefined)
-            },
-            delta => maps:get(count, Meas, 1)
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_notifications_emitted_total,
+        label => #{
+            node => node_name(),
+            realm => maps:get(realm, Meta, undefined),
+            type => maps:get(type, Meta, undefined)
+        },
+        delta => maps:get(count, Meas, 1)
+    });
 handle_event([bondy, mcp, rbac, denied], Meas, Meta, _Config) ->
-    try
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_rbac_denied_total,
-            label => #{
-                node => node_name(),
-                realm => maps:get(realm, Meta, undefined),
-                surface => maps:get(surface, Meta, undefined)
-            },
-            delta => maps:get(count, Meas, 1)
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_rbac_denied_total,
+        label => #{
+            node => node_name(),
+            realm => maps:get(realm, Meta, undefined),
+            surface => maps:get(surface, Meta, undefined)
+        },
+        delta => maps:get(count, Meas, 1)
+    });
 handle_event([bondy, mcp, version, refused], _Meas, Meta, _Config) ->
-    try
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_version_refused_total,
-            label => #{
-                node => node_name(),
-                listener => maps:get(listener, Meta, undefined),
-                version => maps:get(version, Meta, undefined)
-            }
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_version_refused_total,
+        label => #{
+            node => node_name(),
+            listener => maps:get(listener, Meta, undefined),
+            version => maps:get(version, Meta, undefined)
+        }
+    });
 handle_event([bondy, mcp, request, stop], Meas, Meta, _Config) ->
-    try
-        ok = bondy_metrics:histogram(#{
-            name => bondy_mcp_request_duration_microseconds,
-            label => #{
-                node => node_name(),
-                realm => maps:get(realm, Meta, undefined),
-                method => maps:get(method, Meta, undefined)
-            },
-            value => maps:get(duration, Meas, 0)
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    ok = bondy_metrics:histogram(#{
+        name => bondy_mcp_request_duration_microseconds,
+        label => #{
+            node => node_name(),
+            realm => maps:get(realm, Meta, undefined),
+            method => maps:get(method, Meta, undefined)
+        },
+        value => maps:get(duration, Meas, 0)
+    });
 handle_event([bondy, mcp, call, inflight], Meas, Meta, _Config) ->
-    try
-        ok = bondy_metrics:gauge(#{
-            name => bondy_mcp_inflight_calls,
-            label => #{
-                node => node_name(),
-                realm => maps:get(realm, Meta, undefined),
-                listener => maps:get(listener, Meta, undefined)
-            },
-            delta => maps:get(delta, Meas, 0)
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    ok = bondy_metrics:gauge(#{
+        name => bondy_mcp_inflight_calls,
+        label => #{
+            node => node_name(),
+            realm => maps:get(realm, Meta, undefined),
+            listener => maps:get(listener, Meta, undefined)
+        },
+        delta => maps:get(delta, Meas, 0)
+    });
 handle_event([bondy, mcp, manifest, rebuild, stop], Meas, Meta, _Config) ->
-    try
-        Node = node_name(),
-        Realm = maps:get(realm, Meta, undefined),
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_manifest_rebuilds_total,
-            label => #{
-                node => Node,
-                realm => Realm,
-                trigger => maps:get(trigger, Meta, undefined)
-            }
-        }),
-        ok = bondy_metrics:histogram(#{
-            name => bondy_mcp_manifest_rebuild_duration_microseconds,
-            label => #{node => Node, realm => Realm},
-            value => maps:get(duration, Meas, 0)
-        }),
-        lists:foreach(
-            fun(Kind) ->
-                ok = bondy_metrics:gauge(#{
-                    name => bondy_mcp_manifest_entries,
-                    label => #{node => Node, realm => Realm, kind => Kind},
-                    value => maps:get(Kind, Meas, 0)
-                })
-            end,
-            [tool, resource, resource_template]
-        )
-    catch
-        _:_ ->
-            ok
-    end;
+    Node = node_name(),
+    Realm = maps:get(realm, Meta, undefined),
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_manifest_rebuilds_total,
+        label => #{
+            node => Node,
+            realm => Realm,
+            trigger => maps:get(trigger, Meta, undefined)
+        }
+    }),
+    ok = bondy_metrics:histogram(#{
+        name => bondy_mcp_manifest_rebuild_duration_microseconds,
+        label => #{node => Node, realm => Realm},
+        value => maps:get(duration, Meas, 0)
+    }),
+    lists:foreach(
+        fun(Kind) ->
+            ok = bondy_metrics:gauge(#{
+                name => bondy_mcp_manifest_entries,
+                label => #{node => Node, realm => Realm, kind => Kind},
+                value => maps:get(Kind, Meas, 0)
+            })
+        end,
+        [tool, resource, resource_template]
+    );
 handle_event([bondy, mcp, manifest, conflict], Meas, Meta, _Config) ->
-    try
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_manifest_collisions_total,
-            label => #{
-                node => node_name(),
-                realm => maps:get(realm, Meta, undefined),
-                kind => maps:get(kind, Meta, undefined)
-            },
-            delta => maps:get(count, Meas, 1)
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_manifest_collisions_total,
+        label => #{
+            node => node_name(),
+            realm => maps:get(realm, Meta, undefined),
+            kind => maps:get(kind, Meta, undefined)
+        },
+        delta => maps:get(count, Meas, 1)
+    });
 handle_event([bondy, mcp, upstream, call, stop], Meas, Meta, _Config) ->
-    try
-        Node = node_name(),
-        Upstream = maps:get(upstream, Meta, undefined),
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_upstream_calls_total,
-            label => #{
-                node => Node,
-                upstream => Upstream,
-                status => maps:get(status, Meta, undefined)
-            }
-        }),
-        ok = bondy_metrics:histogram(#{
-            name => bondy_mcp_upstream_call_duration_microseconds,
-            label => #{node => Node, upstream => Upstream},
-            value => maps:get(duration, Meas, 0)
-        })
-    catch
-        _:_ ->
-            ok
-    end;
+    Node = node_name(),
+    Upstream = maps:get(upstream, Meta, undefined),
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_upstream_calls_total,
+        label => #{
+            node => Node,
+            upstream => Upstream,
+            status => maps:get(status, Meta, undefined)
+        }
+    }),
+    ok = bondy_metrics:histogram(#{
+        name => bondy_mcp_upstream_call_duration_microseconds,
+        label => #{node => Node, upstream => Upstream},
+        value => maps:get(duration, Meas, 0)
+    });
 handle_event([bondy, mcp, upstream, drift_blocked], Meas, Meta, _Config) ->
-    try
-        ok = bondy_metrics:counter(#{
-            name => bondy_mcp_upstream_drift_blocked_total,
-            label => #{
-                node => node_name(),
-                upstream => maps:get(upstream, Meta, undefined)
-            },
-            delta => maps:get(count, Meas, 1)
-        })
-    catch
-        _:_ ->
-            ok
-    end;
-handle_event(_, _, _, _) ->
-    ok.
+    ok = bondy_metrics:counter(#{
+        name => bondy_mcp_upstream_drift_blocked_total,
+        label => #{
+            node => node_name(),
+            upstream => maps:get(upstream, Meta, undefined)
+        },
+        delta => maps:get(count, Meas, 1)
+    }).
 
 %% =============================================================================
 %% PRIVATE
@@ -643,21 +576,8 @@ node_name() ->
     bondy_config:node().
 
 %% @private
-%% Total: the metric plane must never fail the data plane. A failure
-%% here is logged at debug (it would repeat per request) and dropped.
 execute(Event, Meas, Meta) ->
-    try
-        telemetry:execute(Event, Meas, Meta)
-    catch
-        Class:Reason ->
-            ?LOG_DEBUG(#{
-                description => "MCP telemetry emission failed",
-                event => Event,
-                class => Class,
-                reason => Reason
-            }),
-            ok
-    end.
+    telemetry:execute(Event, Meas, Meta).
 
 %% @private
 declare_families() ->

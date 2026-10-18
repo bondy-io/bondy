@@ -7,11 +7,10 @@
 -behaviour(bondy_oplog_transport).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Distributed Erlang transport.
 
 `peer_id` is interpreted as a node atom (e.g. `'b@host'`). Sync
@@ -38,7 +37,7 @@ disterl link; the responder dispatches to the local instance.
 `bondy_oplog_transport_partisan` makes the same request with
 `partisan_gen_server:call/3`, and is the transport Bondy wires when
 clustering is enabled (`bondy_router_app`). This one needs only OTP.
-""").
+""".
 
 -export([request/4]).
 -export([self_id/1]).

@@ -267,7 +267,7 @@ claim(Request) ->
                 try
                     ets:insert(?TAB, Entry)
                 catch
-                    _:_ -> ok
+                    error:badarg -> ok
                 end,
             {ok, claimed};
         _Key ->
@@ -305,7 +305,7 @@ release(Request) ->
         try
             ets:select_delete(?TAB, MS)
         catch
-            _:_ -> ok
+            error:badarg -> ok
         end,
     ok.
 
@@ -477,12 +477,15 @@ encode(Bytes) ->
 %% where there is no cluster for the distinction to matter to -- and, because
 %% `cluster_nodes/1` falls back in step, a node without Partisan simply owns
 %% every key it is given.
+%%
+%% `partisan:node/0` reads a `persistent_term` and `partisan:nodes/0` reads
+%% Partisan's config and its connection table; each raises `error:badarg`
+%% only while Partisan is not configured or not started.
 this_node() ->
-    try partisan:node() of
-        Node when is_atom(Node) -> Node;
-        _ -> erlang:node()
+    try
+        partisan:node()
     catch
-        _:_ -> erlang:node()
+        error:badarg -> erlang:node()
     end.
 
 %% @private
@@ -490,7 +493,7 @@ cluster_nodes(Self) ->
     try
         [Self | partisan:nodes()]
     catch
-        _:_ -> [Self]
+        error:badarg -> [Self]
     end.
 
 %% @private
@@ -524,7 +527,7 @@ write(Id, Updates) ->
         try
             ets:update_element(?TAB, Id, All)
         catch
-            _:_ -> ok
+            error:badarg -> ok
         end,
     ok.
 
@@ -593,13 +596,10 @@ unknown(Id) ->
 %% `unknown` says.
 remote_get(Node, RealmUri, Id) ->
     Args = [RealmUri, Id],
-    try bondy_cluster:call(Node, ?MODULE, local_get, Args, ?NODE_TIMEOUT) of
+    case bondy_cluster:call(Node, ?MODULE, local_get, Args, ?NODE_TIMEOUT) of
         #{status := _} = Info ->
             Info;
-        _ ->
-            unknown(Id)
-    catch
-        _:_ ->
+        {badrpc, _} ->
             unknown(Id)
     end.
 

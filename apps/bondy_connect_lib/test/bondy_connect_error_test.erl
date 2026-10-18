@@ -191,6 +191,27 @@ from_term_redacts_an_unknown_term_test() ->
 
 %% A message we did not author cannot be vouched for, so an unknown tag is
 %% reported as an internal error rather than echoed back.
+from_term_accepts_improper_inconsistency_keys_test() ->
+    E = bondy_connect_error:from_term({inconsistency_error, [a | b]}),
+    ?assertEqual(inconsistency_error, maps:get(type, E)).
+
+from_term_accepts_improper_projection_causes_test() ->
+    Map = #{~"uri" => ~"bondy.error.not_found", ~"causes" => [x | y]},
+    E = bondy_connect_error:from_term(Map),
+    ?assertEqual(not_found, maps:get(type, E)),
+    ?assertEqual([], maps:get(causes, E)).
+
+from_term_ignores_non_map_projection_details_test_() ->
+    Map = #{~"uri" => ~"bondy.error.not_found", ~"details" => 5},
+    {timeout, 5, fun() ->
+        E = bondy_connect_error:from_term(Map),
+        ?assertEqual(#{}, maps:get(details, E))
+    end}.
+
+to_binary_renders_a_non_iolist_test() ->
+    ?assertEqual(~"[1,2|3]", bondy_connect_error:to_binary([1, 2 | 3])),
+    ?assertEqual(~"[1000]", bondy_connect_error:to_binary([1000])).
+
 from_term_does_not_echo_an_unknown_tag_test() ->
     E = bondy_connect_error:from_term({some_unknown_tag, ~"leaky message"}),
     ?assertEqual(internal_error, maps:get(type, E)),

@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Node-shared peer-state registry.
 
 A single ETS `set` table per node, keyed by `{peer_id, instance_id}`.
@@ -50,7 +49,7 @@ The owning gen_server only handles writes (record/forget) and
 diagnostic queries. Reads go directly to the ETS table — it is
 created with `read_concurrency` and `protected` access, so any
 process can read it without round-tripping the gen_server.
-""").
+""".
 
 %% Named ETS tables share the namespace with registered process names.
 %% The gen_server is registered as `?MODULE`; the table needs a distinct
@@ -141,7 +140,7 @@ child_spec(Opts) ->
 %% WRITES
 %% =============================================================================
 
-?DOC("""
+-doc """
 Records a completed anti-entropy round between the local replica and `Peer`
 for `Instance`, and `Frontier`, the durable frontier `Peer` reported.
 `undefined` (none reported) or an empty one refreshes recency and keeps the
@@ -152,7 +151,7 @@ ephemeral one that restarted, keeps confirming its old claims until it reports
 a non-empty frontier again.
 
 Updates `last_sync` and `last_seen` to `os:system_time(millisecond)`.
-""").
+""".
 -spec record_sync_complete(
     peer_id(), instance_id(), #{binary() => non_neg_integer()} | undefined
 ) -> ok.
@@ -174,29 +173,29 @@ record_sync_complete(Peer, Instance, Frontier, Now) ->
         ?MODULE, {record_sync_complete, Peer, Instance, Frontier, Now}
     ).
 
-?DOC("""
+-doc """
 Updates `last_seen` for `Peer` across all instances without recording a
 new frontier. Used when the peer was contacted but the sync round
 itself was a no-op.
-""").
+""".
 -spec touch_peer(peer_id()) -> ok.
 
 touch_peer(Peer) ->
     gen_server:cast(?MODULE, {touch_peer, Peer, os:system_time(millisecond)}).
 
-?DOC("""
+-doc """
 Removes all entries for the given peer across every instance.
 Idempotent.
-""").
+""".
 -spec forget_peer(peer_id()) -> ok.
 
 forget_peer(Peer) ->
     gen_server:cast(?MODULE, {forget_peer, Peer}).
 
-?DOC("""
+-doc """
 Removes all entries for the given instance across every peer.
 Called when an instance is stopped (the façade does this).
-""").
+""".
 -spec forget_instance(instance_id()) -> ok.
 
 forget_instance(InstanceId) ->
@@ -206,10 +205,10 @@ forget_instance(InstanceId) ->
 %% READS
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns the peers that have a record for `Instance` whose `last_seen` is at or
 after `Since` (ms since UNIX epoch).
-""").
+""".
 -spec get_known_peers(instance_id(), Since :: integer()) -> [peer_id()].
 
 get_known_peers(Instance, Since) ->
@@ -230,7 +229,7 @@ get_known_peers(Instance, Since) ->
     ],
     ets:select(?TABLE, MatchSpec).
 
-?DOC("""
+-doc """
 Strict reading of the peer states for `Instance`, for callers that drop
 history or reclaim irreversibly.
 
@@ -243,7 +242,7 @@ There is **no recency filter**: a silent member holds stability down rather
 than being dropped, which is what makes reclamation safe.
 `{unconfirmed, Peers}` names the members still missing, so a caller can log or
 expose why stability is not advancing.
-""").
+""".
 -spec confirmed_peer_states(instance_id(), Members :: [peer_id()]) ->
     {ok, [peer_state_entry()]} | {unconfirmed, [peer_id()]}.
 
@@ -269,11 +268,11 @@ confirmed_peer_states(Instance, Members) when is_list(Members) ->
             {unconfirmed, Missing}
     end.
 
-?DOC("""
+-doc """
 Returns the per-peer records for `Instance` whose `last_seen` is at or after
 `Since` (ms since UNIX epoch). Each entry is a map with `peer`, `instance`,
 `frontier`, `last_sync`, `last_seen`.
-""").
+""".
 -spec get_instance_peer_states(instance_id(), integer()) ->
     [peer_state_entry()].
 
@@ -304,9 +303,9 @@ get_instance_peer_states(Instance, Since) ->
      || {P, F, LS, LSeen} <- ets:select(?TABLE, MatchSpec)
     ].
 
-?DOC("""
+-doc """
 Returns operational diagnostics. Cheap.
-""").
+""".
 -spec info() -> map().
 
 info() ->
@@ -315,11 +314,11 @@ info() ->
         memory_words => ets:info(?TABLE, memory)
     }.
 
-?DOC("""
+-doc """
 Synchronous round-trip through the gen_server. Returns when every
 cast queued before this call has been processed. Useful in tests and
 in code that needs read-after-write consistency for casts.
-""").
+""".
 -spec sync() -> ok.
 
 sync() ->

@@ -8,7 +8,8 @@
 %% and `set_authid/2`. Each sets its key on a sessionless context, returns
 %% the context untouched when the session already carries the same value,
 %% and raises `badarg` when it carries a different one. A session needs a
-%% realm, hence CT.
+%% realm, hence CT. The suite also covers `local_context/1` over a missing realm
+%% and `close/1` over contexts with and without a peer.
 
 -module(bondy_context_SUITE).
 
@@ -23,7 +24,9 @@ all() ->
     [
         setters_set_the_key_without_a_session,
         setters_keep_a_context_whose_session_agrees,
-        setters_reject_a_value_the_session_contradicts
+        setters_reject_a_value_the_session_contradicts,
+        local_context_of_a_missing_realm_keeps_security_on,
+        close_flushes_a_peer_and_ignores_a_peerless_context
     ].
 
 init_per_suite(Config) ->
@@ -84,6 +87,18 @@ setters_reject_a_value_the_session_contradicts(Config) ->
     ?assertError(
         badarg, bondy_context:set_authid(Ctxt, <<"someone_else">>)
     ).
+
+%% `bondy_realm:fetch/1` raises `{not_found, Uri}` for this realm.
+local_context_of_a_missing_realm_keeps_security_on(_Config) ->
+    Ctxt = bondy_context:local_context(<<"bondy.context.suite.missing">>),
+    ?assertEqual(true, maps:get(security_enabled, Ctxt)).
+
+close_flushes_a_peer_and_ignores_a_peerless_context(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Peerless = bondy_context:local_context(RealmUri),
+    ?assertEqual(ok, bondy_context:close(Peerless)),
+    {_Session, Ctxt} = context_with_session(Config),
+    ?assertEqual(ok, bondy_context:close(Ctxt)).
 
 %% =============================================================================
 %% HELPERS

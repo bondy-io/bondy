@@ -193,6 +193,12 @@ decode_header_value_test() ->
     ?assertEqual(
         {error, badarg},
         bondy_mcp_wamp:decode_header_value(<<"=?base64?!!not-b64!!?=">>)
+    ),
+    %% A short tail raises `missing_padding`, a different shape from the
+    %% illegal-byte `badarg` above.
+    ?assertEqual(
+        {error, badarg},
+        bondy_mcp_wamp:decode_header_value(<<"=?base64?YQ?=">>)
     ).
 
 encode_header_value_test() ->
@@ -294,6 +300,19 @@ resolve_update_topic_test() ->
     ?assertEqual(
         nomatch,
         bondy_mcp_wamp:resolve_update_topic(WithTopic, <<"users:///abc">>)
+    ),
+    %% A `number` variable tries integer, then float; a value that is
+    %% neither fails both `badarg` paths and is silence too.
+    AsNumber = WithTopic#{
+        uri_vars_schema => #{<<"id">> => #{<<"type">> => <<"number">>}}
+    },
+    ?assertEqual(
+        {ok, <<"com.acme.users.42.changed">>},
+        bondy_mcp_wamp:resolve_update_topic(AsNumber, <<"users:///42">>)
+    ),
+    ?assertEqual(
+        nomatch,
+        bondy_mcp_wamp:resolve_update_topic(AsNumber, <<"users:///abc">>)
     ),
     %% A matching template with no update source is distinguishable from
     %% a non-match.

@@ -41,6 +41,8 @@ peer-shipped wire case that requires `[safe]`.
 %% refused at mint (the callee's state is oversized — a callee bug), and an
 %% inbound `requestState` larger than this is refused before any
 %% cryptography is attempted.
+-include_lib("kernel/include/logger.hrl").
+
 -define(DEFAULT_MAX_SIZE, 65536).
 %% The spec's "short expiry (TTL)" for replay bounding.
 -define(DEFAULT_TTL_MS, 300000).
@@ -151,12 +153,25 @@ requiring the payload unexpired at `Now` and its `principal`, `method`,
     {ok, #{continuation := binary(), state := any()}} | {error, invalid}.
 
 open(KeyFun, Compact, Expect, Now, MaxSize) ->
-    %% One uniform rejection for attacker-controlled input: any raise from
-    %% the parsing or cryptography below IS the invalid case.
+    %% `do_open/5` throws `invalid`; its matches raise `badmatch` and
+    %% `binary_to_term/1` raises `badarg`. jose's failures on a wrong key
+    %% are not established from its source, so the last clause logs them.
     try
         do_open(KeyFun, Compact, Expect, Now, MaxSize)
     catch
-        _:_ -> {error, invalid}
+        throw:invalid ->
+            {error, invalid};
+        error:{badmatch, _} ->
+            {error, invalid};
+        error:badarg ->
+            {error, invalid};
+        Class:Reason ->
+            ?LOG_DEBUG(#{
+                description => "MCP requestState rejected",
+                class => Class,
+                reason => Reason
+            }),
+            {error, invalid}
     end.
 
 %% =============================================================================

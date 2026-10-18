@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_crdt_rw_core).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Shared **remove-wins** machinery for the tier_2 remove-wins CRDTs: the
 remove-wins set (`bondy_oplog_crdt_rw_set`, one *cell* per element) and the
 disable-wins flag (`bondy_oplog_crdt_dw_flag`, a single cell over one
@@ -50,7 +48,7 @@ context half, never the payload — mirroring how
 `bondy_oplog_crdt_aw_core:drop_observed/2` is payload-agnostic on the
 add-wins side. `Adds` holds only currently-surviving adds (every stored
 add dominates `R`), so a cell is *present* iff `Adds` is non-empty.
-""").
+""".
 
 -export([add/4]).
 -export([adds/1]).

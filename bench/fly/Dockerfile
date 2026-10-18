@@ -16,9 +16,7 @@
 # without us tracking them. The "minimal OTP build" win from kerl
 # (no observer/wx/odbc) is irrelevant on a 4 GB bench VM.
 #
-# See `bench/fly/README.md` for the operator runbook and
-# `_design/latest/PACK_STORE_WRITE_PATH_FLOOR_BENCH_PLAN.md` §10
-# for the QA #14 execution context.
+# See `bench/fly/README.md` for the operator runbook.
 # =============================================================================
 
 # OTP 29 + Elixir 1.20.3 on Debian 12 (bookworm) slim. There is no

@@ -10,7 +10,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Configuration surface for the `bondy_mst` layer.
 
 **Placeholder.** An MST is configured per-tree through the opts map passed to
@@ -20,7 +20,7 @@ only wires the `app_config` subsystem for the app and reserves the public seam
 for future GLOBAL, env-backed MST tunables — it currently exposes no keys. When a
 genuine app-wide MST setting appears, add its accessor here, mirroring
 `bondy_oplog_config`.
-""").
+""".
 
 -define(APP, bondy_mst).
 
@@ -37,7 +37,7 @@ genuine app-wide MST setting appears, add its accessor here, mirroring
 %% API
 %% =============================================================================
 
-?DOC("Initialises bondy_mst configuration").
+-doc "Initialises bondy_mst configuration".
 init() ->
     ok = app_config:init(?APP, #{callback_mod => ?MODULE}),
     ?LOG_NOTICE(#{

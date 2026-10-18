@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Default sync scheduler.
 
 Periodic `gen_server` that, on each tick, asks
@@ -294,7 +293,7 @@ under `mst_retention` the retained window bounds this leg, which is that
 policy's documented residual trade. Finalizing the bootstrap does not
 truncate the MST, so unshared local-origin events survive for peers to
 pull.
-""").
+""".
 
 -record(state, {
     enabled :: boolean(),
@@ -427,34 +426,34 @@ child_spec(Opts) ->
 %% CONTROL
 %% =============================================================================
 
-?DOC("""
+-doc """
 Forces a tick now. Useful for tests and operational triggers.
-""").
+""".
 -spec trigger() -> ok.
 
 trigger() ->
     gen_server:cast(?MODULE, tick).
 
-?DOC("""
+-doc """
 Replaces the dispatch callback. Pass `undefined` to disable dispatch
 (ticks still run; nothing is invoked). Useful for runtime
 reconfiguration and tests.
-""").
+""".
 -spec set_dispatch(undefined | fun((instance_id(), [peer_id()]) -> any())) ->
     ok.
 
 set_dispatch(Fun) when is_function(Fun, 2); Fun =:= undefined ->
     gen_server:call(?MODULE, {set_dispatch, Fun}).
 
-?DOC("""
+-doc """
 Replaces the peer source module and options at runtime.
-""").
+""".
 -spec set_peer_source(module(), map()) -> ok.
 
 set_peer_source(Mod, Opts) when is_atom(Mod), is_map(Opts) ->
     gen_server:call(?MODULE, {set_peer_source, Mod, Opts}).
 
-?DOC("""
+-doc """
 Sets the periodic-tick interval (in milliseconds) at runtime. `0`
 disables periodic ticks entirely; explicit `trigger/0` still works.
 The currently-scheduled timer is cancelled and a new one armed with
@@ -462,21 +461,21 @@ the new interval (if non-zero).
 
 Useful for operator tuning and for tests that need to suppress
 periodic firing while asserting on explicit triggers.
-""").
+""".
 -spec set_interval_ms(non_neg_integer()) -> ok.
 
 set_interval_ms(Ms) when is_integer(Ms), Ms >= 0 ->
     gen_server:call(?MODULE, {set_interval_ms, Ms}).
 
-?DOC("""
+-doc """
 Returns the scheduler's current configuration. Cheap.
-""").
+""".
 -spec info() -> map().
 
 info() ->
     gen_server:call(?MODULE, info).
 
-?DOC("""
+-doc """
 Diagnostic aid: the in-flight sync sessions currently dispatched for
 `InstanceId` (bootstrap or live, against any peer), each with its age
 in milliseconds since dispatch. Reads the in-flight table directly, no
@@ -484,7 +483,7 @@ gen_server round trip. An entry whose age is large relative to normal
 round-trip expectations indicates a session that is not completing —
 useful to distinguish "never dispatched" from "dispatched but stuck"
 when diagnosing a convergence stall.
-""").
+""".
 -spec inflight_for(instance_id()) ->
     [
         {

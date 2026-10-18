@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Node-shared quarantine table for detected equivocations.
 
 When `bondy_oplog_instance:append_remote/2` receives a peer
@@ -39,7 +38,7 @@ typical operator workflow:
 
 Writes (`record/5`) flow through the gen_server (cast — fire-and-forget).
 Reads go directly to ETS.
-""").
+""".
 
 -define(TABLE, bondy_oplog_quarantine_tab).
 
@@ -109,13 +108,13 @@ child_spec() ->
 %% WRITES
 %% =============================================================================
 
-?DOC("""
+-doc """
 Records a detected equivocation. Idempotent on `(InstanceId, EventKey)` —
 re-recording overwrites `event_two` and `proof` while preserving the
 original `first_seen`.
 
 Cast; fire-and-forget. The instance gen_server does not block on this.
-""").
+""".
 -spec record(
     InstanceId :: instance_id(),
     EventKey :: bondy_oplog_event:event_key(),
@@ -133,10 +132,10 @@ record(InstanceId, EventKey, EventOne, EventTwo, Proof) when
             os:system_time(millisecond)}
     ).
 
-?DOC("""
+-doc """
 Removes all quarantine entries for the given instance. Used when an
 instance is destroyed.
-""").
+""".
 -spec forget_instance(InstanceId :: instance_id()) -> ok.
 
 forget_instance(InstanceId) when is_binary(InstanceId) ->
@@ -146,10 +145,10 @@ forget_instance(InstanceId) when is_binary(InstanceId) ->
 %% READS
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns the quarantine entry for `(InstanceId, EventKey)`, or
 `not_found`.
-""").
+""".
 -spec lookup(
     instance_id(), bondy_oplog_event:event_key()
 ) -> {ok, entry()} | not_found.
@@ -160,9 +159,9 @@ lookup(InstanceId, EventKey) when is_binary(InstanceId) ->
         [] -> not_found
     end.
 
-?DOC("""
+-doc """
 Returns all quarantine rows for `InstanceId`.
-""").
+""".
 -spec list_for_instance(instance_id()) -> [entry()].
 
 list_for_instance(InstanceId) when is_binary(InstanceId) ->
@@ -175,9 +174,9 @@ list_for_instance(InstanceId) when is_binary(InstanceId) ->
     ],
     [to_entry(R) || R <- ets:select(?TABLE, MatchSpec)].
 
-?DOC("""
+-doc """
 Returns all quarantine rows across all instances.
-""").
+""".
 -spec list_all() -> [entry()].
 
 list_all() ->

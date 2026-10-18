@@ -58,9 +58,10 @@ independent() ->
 
 %% The sink must stay total: a raising telemetry handler is DETACHED by
 %% telemetry, which would silently kill every metric sharing the handler id.
+%% The malformed input it can receive is a map missing keys: `telemetry:execute/3`
+%% accepts only a map (or a number it wraps in one), so no other term arrives.
 malformed() ->
-    ?assertEqual(ok, emit(#{})),
-    ?assertEqual(ok, emit(not_a_map)).
+    ?assertEqual(ok, emit(#{})).
 
 %% Relay-ingress tasks arrive from a peer with no local dispatch timestamp, so
 %% `bondy_router_flow_queue_microseconds` records nothing for them; depth is
@@ -133,8 +134,7 @@ egress_zero_depth() ->
     ?assertEqual(D0 + 1, count(bondy_wamp_egress_queue_depth)).
 
 egress_malformed() ->
-    ?assertEqual(ok, egress(#{})),
-    ?assertEqual(ok, egress(not_a_map)).
+    ?assertEqual(ok, egress(#{})).
 
 %% NOTE: these call `handle_net_event/4` directly, which proves the SINK and
 %% proves NOTHING about whether the event reaches it — a missing entry in

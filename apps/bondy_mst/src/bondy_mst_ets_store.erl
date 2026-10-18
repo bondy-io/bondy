@@ -11,7 +11,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Read-concurrent, MST backend using `ets`.
 
 `free/3` only tombstones a page: under structural sharing a freed hash may
@@ -19,7 +19,7 @@ still be referenced by an older root, a pinned peer root or a merge
 accumulator, and the table is `public` with `concurrent_writes => true`, so
 hard deletion is never sound here. `gc/2` reclaims by reachability from the
 keep-roots (`bondy_mst_free_reachable_test`).
-""").
+""".
 
 %%% 'public' unconditionally: the store's capabilities/1 advertises
 %%% concurrent_writes => true, which bondy_oplog_sync_session:merge_pages/2

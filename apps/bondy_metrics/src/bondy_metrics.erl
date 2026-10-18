@@ -7,10 +7,8 @@
 
 -behaviour(gen_server).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Counter / gauge primitive backed by the BIF `counters` and `atomics`
 modules.
 
@@ -83,7 +81,7 @@ A restart wipes the table; on first-touch every counter is re-allocated
 from zero. Counters are gauge-style observations of running totals, not
 durable accounting — if a consumer needs survival across restart they
 need a separate persistence layer.
-""").
+""".
 
 -define(SERVER, ?MODULE).
 -define(TAB, bondy_metrics_tab).
@@ -192,12 +190,12 @@ child_spec() ->
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-?DOC("""
+-doc """
 Add to a counter. Default `delta` is `1`. Allocates on first touch.
 
 Returns `ok` on success or `{error, {wrong_type, _}}` if the name is
 already in use by a metric of a different type.
-""").
+""".
 -spec counter(spec()) -> ok | {error, term()}.
 
 counter(#{name := Name} = M) ->
@@ -209,7 +207,7 @@ counter(#{name := Name} = M) ->
         fun(Ref) -> counters:add(Ref, ?POS, Delta) end
     ).
 
-?DOC("""
+-doc """
 Write to a gauge. Allocates on first touch.
 
 With `value` writes the absolute value (`counters:put/3`); with `delta`
@@ -219,7 +217,7 @@ increments. `value` wins when both are given.
 
 Returns `ok` on success or `{error, {wrong_type, _}}` if the name is
 already in use by a metric of a different type.
-""").
+""".
 -spec gauge(spec()) -> ok | {error, term()}.
 
 gauge(#{name := Name, value := V} = M) when is_integer(V) ->
@@ -237,7 +235,7 @@ gauge(#{name := Name, delta := D} = M) when is_integer(D) ->
         fun(Ref) -> counters:add(Ref, ?POS, D) end
     ).
 
-?DOC("""
+-doc """
 Record one observation into a histogram. `value` is clamped to
 non-negative. Wait-free: one `counters:add` to each of the count slot,
 the sum slot, and the observation's bucket. Allocates the bucket array
@@ -245,7 +243,7 @@ on first touch.
 
 Returns `ok` or `{error, {wrong_type, _}}` if the name is already a
 counter/gauge.
-""").
+""".
 -spec histogram(spec()) -> ok | {error, term()}.
 
 histogram(#{name := Name, value := V} = M) when is_integer(V) ->
@@ -263,7 +261,7 @@ histogram(#{name := Name, value := V} = M) when is_integer(V) ->
         end
     ).
 
-?DOC("""
+-doc """
 Declares a metric family for exposition, recording its help text.
 
 This is the single source of truth for *which* `bondy_metrics` families
@@ -287,7 +285,7 @@ Idempotent; redeclaring replaces the descriptor. Wait-free — a single
 any rate (though the intent is setup code). Like the counters,
 declarations do not survive a `bondy_metrics` restart — the registering
 setup runs again on a full restart.
-""").
+""".
 -spec declare(Declaration :: declaration()) -> ok.
 
 declare(#{name := Name, help := Help} = Spec) when
@@ -296,20 +294,20 @@ declare(#{name := Name, help := Help} = Spec) when
     true = ets:insert(?DECLARED_TAB, {Name, maps:remove(name, Spec)}),
     ok.
 
-?DOC("""
+-doc """
 Returns the declared exposition families as `#{Name => descriptor()}`,
 where each descriptor is an open map carrying at least `help` (plus any
 extra metadata passed to `declare/1`).
-""").
+""".
 -spec declared() -> #{name() => descriptor()}.
 
 declared() ->
     maps:from_list(ets:tab2list(?DECLARED_TAB)).
 
-?DOC("""
+-doc """
 Read the current value of one (Name, Label) pair. Returns `undefined`
 when the metric does not exist.
-""").
+""".
 -spec value(#{name := name(), label => label()}) ->
     integer() | undefined.
 
@@ -320,22 +318,22 @@ value(#{name := Name} = M) ->
         not_found -> undefined
     end.
 
-?DOC("""
+-doc """
 Return `[{Label, Value}]` for every metric registered under `Name`.
-""").
+""".
 -spec with_name(name()) -> [{label(), integer()}].
 
 with_name(Name) when is_atom(Name) ->
     MS = [{{{Name, '$1'}, '$2'}, [], [{{'$1', '$2'}}]}],
     [{L, read(Entry)} || {L, Entry} <- ets:select(?TAB, MS)].
 
-?DOC("""
+-doc """
 Return every metric registered under `Name` in exposition form: one
 `#{label, type, value}` row per label combination. For counters and
 gauges `value` is the integer reading; for histograms it is the full
 cumulative snapshot (`histogram()`), so exposition layers can render
 buckets without a second lookup per row.
-""").
+""".
 -spec family(name()) ->
     [
         #{
@@ -349,10 +347,10 @@ family(Name) when is_atom(Name) ->
     MS = [{{{Name, '$1'}, '$2'}, [], [{{'$1', '$2'}}]}],
     [family_row(L, Entry) || {L, Entry} <- ets:select(?TAB, MS)].
 
-?DOC("""
+-doc """
 Return every metric on the node, intended for exposition. Each row is
 `#{name, label, type, value}`.
-""").
+""".
 -spec all() ->
     [
         #{
@@ -369,22 +367,22 @@ all() ->
      || {{N, L}, #{type := T, ref := R}} <- ets:tab2list(?TAB)
     ].
 
-?DOC("""
+-doc """
 Metadata for one metric without reading the value. Useful when callers
 want to inspect type without paying for the counters read.
-""").
+""".
 -spec info(#{name := name(), label => label()}) ->
     {ok, entry()} | not_found.
 
 info(#{name := Name} = M) ->
     lookup_entry({Name, maps:get(label, M, #{})}).
 
-?DOC("""
+-doc """
 Cumulative snapshot of a histogram: `#{count, sum, buckets}` where
 `buckets` is the ascending `[{BucketIndex, Count}]` of occupied buckets.
 Returns `not_found` when the metric does not exist, or
 `{error, {wrong_type, _}}` when it is not a histogram.
-""").
+""".
 -spec histogram_snapshot(#{name := name(), label => label()}) ->
     {ok, histogram()} | not_found | {error, term()}.
 
@@ -403,12 +401,12 @@ histogram_snapshot(#{name := Name} = M) ->
             not_found
     end.
 
-?DOC("""
+-doc """
 Per-interval delta `Cur - Prev` of two histogram snapshots. Both must
 come from the same (cumulative) histogram; bucket counts only grow, so
 the delta is non-negative. Used by periodic emitters to report the last
 window rather than all-time totals.
-""").
+""".
 -spec histogram_delta(histogram(), histogram()) -> histogram().
 
 histogram_delta(
@@ -427,13 +425,13 @@ histogram_delta(
     ),
     #{count => C1 - C0, sum => S1 - S0, buckets => Delta}.
 
-?DOC("""
+-doc """
 Summary statistics over a histogram snapshot (or delta):
 `#{count, mean, p50, p95, p99, max}`. `mean` is exact (sum/count);
 percentiles and `max` are nearest-rank estimates recovered from the
 bucket bounds (conservative — rounded up to the bucket upper bound).
 All-zero when `count` is 0.
-""").
+""".
 -spec histogram_stats(histogram()) -> #{atom() => non_neg_integer()}.
 
 histogram_stats(#{count := 0}) ->
@@ -453,20 +451,20 @@ histogram_stats(#{count := Count, sum := Sum, buckets := Buckets}) ->
         max => Max
     }.
 
-?DOC("""
+-doc """
 The fixed number of histogram buckets. The bucket array reserves this
 many slots (after the count and sum slots).
-""").
+""".
 -spec hist_num_buckets() -> pos_integer().
 
 hist_num_buckets() ->
     hist_bucket_index(?HIST_MAX_VALUE) + 1.
 
-?DOC("""
+-doc """
 Map an observation to its bucket index in `0..hist_num_buckets()-1`.
 Non-positive clamps to bucket `0`; values above `?HIST_MAX_VALUE` clamp
 to the top bucket.
-""").
+""".
 -spec hist_bucket_index(integer()) -> non_neg_integer().
 
 hist_bucket_index(V) when not is_integer(V) ->
@@ -483,9 +481,9 @@ hist_bucket_index(V0) ->
     Sub = (V bsr Shift) - ?HIST_SUB_COUNT,
     (K - ?HIST_SUB_BITS) * ?HIST_SUB_COUNT + ?HIST_SUB_COUNT + Sub.
 
-?DOC("""
+-doc """
 Inclusive lower bound (smallest value) that maps to bucket `I`.
-""").
+""".
 -spec hist_bucket_low(non_neg_integer()) -> non_neg_integer().
 
 hist_bucket_low(I) when is_integer(I), I >= 0, I < ?HIST_SUB_COUNT ->
@@ -494,9 +492,9 @@ hist_bucket_low(I) when is_integer(I) ->
     {Sub, Shift} = hist_decode(I),
     (?HIST_SUB_COUNT + Sub) bsl Shift.
 
-?DOC("""
+-doc """
 Inclusive upper bound (largest value) that maps to bucket `I`.
-""").
+""".
 -spec hist_bucket_high(non_neg_integer()) -> non_neg_integer().
 
 hist_bucket_high(I) when is_integer(I), I >= 0, I < ?HIST_SUB_COUNT ->
@@ -505,11 +503,11 @@ hist_bucket_high(I) when is_integer(I) ->
     {Sub, Shift} = hist_decode(I),
     ((?HIST_SUB_COUNT + Sub + 1) bsl Shift) - 1.
 
-?DOC("""
+-doc """
 Nearest-rank percentile over an ascending `[{BucketIndex, Count}]` list
 with `Total` the sum of counts. Returns the bucket upper bound at
 percentile `P` (a float in `(0.0, 1.0]`), or `0` when `Total` is 0.
-""").
+""".
 -spec hist_percentile(
     [{non_neg_integer(), non_neg_integer()}], non_neg_integer(), float()
 ) -> non_neg_integer().
@@ -527,11 +525,11 @@ hist_percentile(Sorted, Total, P) when
     Threshold = max(1, ceil(Total * P)),
     hist_percentile_scan(Sorted, Threshold, 0).
 
-?DOC("""
+-doc """
 Drop a metric. The row is removed from the registry and the underlying
 counters reference is GC'd. Subsequent `value/1` on the same name
 returns `undefined` until the next write re-allocates.
-""").
+""".
 -spec delete(#{name := name(), label => label()}) -> ok.
 
 delete(#{name := Name} = M) ->

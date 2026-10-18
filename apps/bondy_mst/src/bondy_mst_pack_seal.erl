@@ -8,7 +8,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Sealed-pack write pipeline.
 
 Owns the `pack-NNNN.pack` + `.idx` write + rename + manifest-commit
@@ -69,7 +69,7 @@ A crash before step 4 leaves orphan `*.tmp` or `pack-NNNN.*` files
 that the writer's orphan scanner deletes on next open. A crash after
 step 4 leaves a stale `incoming.pack` that the writer also reconciles
 on next open.
-""").
+""".
 
 -export([create_sealed_pack/6]).
 -export([commit_manifest/3]).
@@ -93,7 +93,7 @@ on next open.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Streams a new sealed `pack-NNNN.pack` + `.idx` pair from `Hashes`
 (sorted ascending, no duplicates) and a `Reader` function that
 returns the body bytes for each hash on demand.
@@ -113,7 +113,7 @@ atomic swap).
 
 A `Reader` failure for any hash aborts the stream and surfaces as
 `{error, _}`; the tmp files are cleaned up.
-""").
+""".
 -spec create_sealed_pack(
     Dir :: file:filename_all(),
     InstanceHash :: non_neg_integer(),
@@ -153,7 +153,7 @@ create_sealed_pack(Dir, InstanceHash, HashAlgo, PackId, Hashes, Reader) ->
             {error, R}
     end.
 
-?DOC("""
+-doc """
 Atomic manifest swap that finalises a seal: adds `PackId` to
 `sealed_packs` and clears `incoming_pack`. Returns the updated
 manifest on success.
@@ -165,7 +165,7 @@ sealed pack is durable and the incoming pack is reclaimable.
 
 Note that the store's `gc/2` does NOT call this — GC retires old
 packs in the same swap and so writes its own composite manifest.
-""").
+""".
 -spec commit_manifest(
     file:filename_all(),
     bondy_mst_pack_manifest:t(),
@@ -183,11 +183,11 @@ commit_manifest(Dir, M, PackId) ->
         {error, R} -> {error, {manifest, R}}
     end.
 
-?DOC("""
+-doc """
 Deletes the on-disk `pack-NNNN.pack` and `pack-NNNN.idx` for a
 retired sealed pack. Missing files are tolerated (idempotent — safe
 to call on a half-rolled-back compaction).
-""").
+""".
 -spec delete_sealed_pack_files(file:filename_all(), non_neg_integer()) -> ok.
 
 delete_sealed_pack_files(Dir, PackId) ->

@@ -366,7 +366,7 @@ validate(Map) ->
     try
         {ok, maps_utils:validate(Map, ?SPEC)}
     catch
-        _:Reason ->
+        error:#{code := _} = Reason ->
             {error, {invalid_request, Reason}}
     end.
 
@@ -665,11 +665,14 @@ valid_content_type(Other) ->
     {error, {invalid_request, {content_type, Other}}}.
 
 %% @private
+%% `base64:decode/1` raises `error` with `badarg`, `missing_padding`,
+%% `function_clause`, `badarith` or `{case_clause, _}` on malformed text
+%% (OTP 29 stdlib).
 decode(Bin) when is_binary(Bin) ->
     try
         {ok, base64:decode(Bin)}
     catch
-        _:_ ->
+        error:_ ->
             {error, {invalid_request, attachment_not_base64}}
     end;
 decode(Other) ->

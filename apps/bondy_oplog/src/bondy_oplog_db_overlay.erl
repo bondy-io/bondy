@@ -5,11 +5,10 @@
 
 -module(bondy_oplog_db_overlay).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-shard overlay ETS structure for the read-side projection.
 
 The overlay holds events that have been accepted into the WAL but have
@@ -65,7 +64,7 @@ no projection — so the overlay is cheap to write and cheap to read.
 `evict_to/3` is called by the applier post-projection-commit: it deletes
 every overlay row whose `(EventHlc, EventKey)` pair is `=<` the applied
 watermark, preserving rows that arrived after the batch was assembled.
-""").
+""".
 
 -export([new/0]).
 -export([insert/4]).

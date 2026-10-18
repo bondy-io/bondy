@@ -9,7 +9,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Filename conventions for the MST page-store pack backend.
 
 See the pack-store design notes §2. Sealed packs are
@@ -20,7 +20,7 @@ in-memory `pending` map and rebuilds it on resume by scanning the
 incoming-pack file). Tmp-rename files share the `.tmp` suffix.
 
 Pure path arithmetic; no I/O.
-""").
+""".
 
 -export([sealed_pack_path/2]).
 -export([sealed_pack_tmp_path/2]).
@@ -39,13 +39,13 @@ Pure path arithmetic; no I/O.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 `Dir/pack-NNNN.pack` for sealed pack `PackId`. `PackId` is the
 integer id stored in the manifest; the filename pads it to 4
 digits for lexicographic-equals-numeric ordering up to 9999
 packs per instance. Beyond that, the format must widen and the
 recovery scanner adjust.
-""").
+""".
 -spec sealed_pack_path(file:filename_all(), non_neg_integer()) ->
     file:filename_all().
 
@@ -75,12 +75,12 @@ sealed_idx_tmp_path(Dir, PackId) ->
 incoming_pack_path(Dir) ->
     filename:join(Dir, ?BONDY_MST_PACK_INCOMING_PACK_FILENAME).
 
-?DOC("""
+-doc """
 `Dir/incoming-sealing-NNNN.pack` — a rolled incoming pack frozen for an
 asynchronous seal into `pack-NNNN`. Named with the same `PackId` the resulting
 sealed pack will carry so recovery can decide, per file, whether the seal
 committed (`pack-NNNN` live in the manifest) or must be re-scanned.
-""").
+""".
 -spec incoming_sealing_path(file:filename_all(), non_neg_integer()) ->
     file:filename_all().
 
@@ -92,11 +92,11 @@ incoming_sealing_path(Dir, PackId) ->
 incoming_sealing_basename(PackId) when is_integer(PackId), PackId >= 0 ->
     "incoming-sealing-" ++ pad(PackId) ++ ".pack".
 
-?DOC("""
+-doc """
 Lists every `incoming-sealing-NNNN.pack` in `Dir` as `{PackId, Path}` pairs,
 ascending by id. Used by the writer's reopen path to recover packs frozen by a
 crash mid asynchronous-seal.
-""").
+""".
 -spec list_incoming_sealing(file:filename_all()) ->
     [{non_neg_integer(), file:filename_all()}].
 
@@ -121,17 +121,17 @@ list_incoming_sealing(Dir) ->
     ),
     lists:keysort(1, Pairs).
 
-?DOC("""
+-doc """
 Returns the basename `pack-NNNN.pack` for a pack id.
-""").
+""".
 -spec sealed_pack_basename(non_neg_integer()) -> string().
 
 sealed_pack_basename(PackId) when is_integer(PackId), PackId >= 0 ->
     "pack-" ++ pad(PackId) ++ ".pack".
 
-?DOC("""
+-doc """
 Returns the basename `pack-NNNN.idx` for a pack id.
-""").
+""".
 -spec sealed_idx_basename(non_neg_integer()) -> string().
 
 sealed_idx_basename(PackId) when is_integer(PackId), PackId >= 0 ->

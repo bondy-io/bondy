@@ -78,6 +78,8 @@ that realm (currently a placeholder).
 %% provisioned yet. Same value as `bondy_aae_reactor`'s, for one cadence
 %% across the two subscribers of a `publish => true` table.
 -define(RESUBSCRIBE_AFTER, 500).
+%% This node's outcome of the last dispatch build, one row per stored spec id.
+-define(STATUS_TAB, bondy_http_gateway_spec_status).
 
 -record(state, {
     %% Use for WAMP subscriptions
@@ -95,6 +97,7 @@ that realm (currently a placeholder).
 -export([delete/1]).
 -export([dispatch_table/1]).
 -export([list/0]).
+-export([status/0]).
 -export([apply_config/0]).
 -export([load/1]).
 -export([lookup/1]).
@@ -244,6 +247,34 @@ lookup(Id) ->
             {error, not_found}
     end.
 
+-doc """
+Returns, for every stored API specification, whether this node serves it.
+
+Each entry carries the spec's `id` and a `status`:
+
+- `active`: the spec parsed and its routes are installed.
+- `pending_realm`: the spec parsed, but its realm (`realm_uri`) does not exist
+  on this node yet. Its routes are installed by the next rebuild after the
+  realm appears.
+- `rejected`: the spec failed to parse and is not loaded. `reason` describes
+  the failure. The spec stays stored until an operator deletes it.
+- `not_built`: no dispatch build has run since the spec was stored.
+
+Each node builds its own dispatch table, so the answer is this node's.
+""".
+-spec status() -> [map()].
+
+status() ->
+    Built =
+        case ets:whereis(?STATUS_TAB) of
+            undefined -> #{};
+            Tab -> maps:from_list(ets:tab2list(Tab))
+        end,
+    [
+        maps:merge(#{id => Id}, maps:get(Id, Built, #{status => not_built}))
+     || {Id, _Spec} <- stored_specs()
+    ].
+
 -doc "Returns the list of all stored API specification objects.".
 -spec list() -> [ParsedSpec :: map()].
 
@@ -282,7 +313,7 @@ handle_call({load, Map}, _From, State) ->
         ok = rebuild_dispatch_tables(),
         {reply, Res, State}
     catch
-        _:Reason ->
+        throw:Reason ->
             {reply, {error, Reason}, State}
     end;
 handle_call(Event, From, State) ->
@@ -501,46 +532,69 @@ do_apply_config() ->
     end.
 
 %% @private
+%% The declarative contract matches `bondy_realm:apply_config/0`: a missing
+%% file is a warning, an unparseable file or any invalid specification is an
+%% error. Every specification is validated before any is stored, so a file with
+%% one invalid specification changes nothing.
 do_apply_config(FName) ->
-    try
-        case bondy_router_utils:json_consult(FName) of
-            {ok, Spec} when is_map(Spec) ->
-                load_spec(Spec, #{declarative => true});
-            {ok, []} ->
-                ok;
-            {ok, Specs} when is_list(Specs) ->
-                ?LOG_INFO(#{
-                    description => "Loading configuration file found",
-                    filename => FName
-                }),
-                _ = [load_spec(Spec, #{declarative => true}) || Spec <- Specs],
-                ok;
-            {error, enoent} ->
-                ?LOG_WARNING(#{
-                    description => "No configuration file found",
-                    reason => enoent,
-                    filename => FName
-                }),
-                ok;
-            {error, Reason} ->
-                ?LOG_ERROR(#{
-                    description => "Error while loading API specification",
-                    reason => invalid_json_format,
-                    filename => FName
-                }),
-                error({invalid_json_format, Reason})
-        end
-    catch
-        Class:EReason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while loading API specification",
-                class => Class,
-                reason => EReason,
-                stacktrace => Stacktrace,
+    case bondy_router_utils:json_consult(FName) of
+        {ok, Spec} when is_map(Spec) ->
+            load_declared(FName, [Spec]);
+        {ok, Specs} when is_list(Specs) ->
+            load_declared(FName, Specs);
+        {error, enoent} ->
+            ?LOG_WARNING(#{
+                description => "No configuration file found",
+                reason => enoent,
                 filename => FName
             }),
-            ok
+            ok;
+        {error, Reason} ->
+            ?LOG_ERROR(#{
+                description =>
+                    "API Gateway configuration file is not valid JSON",
+                reason => Reason,
+                filename => FName
+            }),
+            {error, {invalid_json_format, Reason}}
     end.
+
+%% @private
+load_declared(FName, Specs) ->
+    Invalid = [
+        {spec_id(Spec), Reason}
+     || Spec <- Specs, {error, Reason} <- [validate_declared(Spec)]
+    ],
+    case Invalid of
+        [] ->
+            lists:foreach(
+                fun(Spec) -> ok = load_spec(Spec, #{declarative => true}) end,
+                Specs
+            );
+        _ ->
+            ?LOG_ERROR(#{
+                description =>
+                    "API Gateway configuration file holds invalid "
+                    "specifications; none was loaded",
+                filename => FName,
+                invalid => Invalid
+            }),
+            {error, {invalid_specifications, Invalid}}
+    end.
+
+%% @private
+validate_declared(Spec) when is_map(Spec) ->
+    validate_spec(Spec);
+validate_declared(Spec) ->
+    {error, {not_an_object, Spec}}.
+
+%% @private
+spec_id(#{~"id" := Id}) ->
+    Id;
+spec_id(Spec) when is_map(Spec) ->
+    undefined;
+spec_id(Spec) when not is_map(Spec) ->
+    undefined.
 
 %% @private
 load_spec(MapOrFName) ->
@@ -634,7 +688,29 @@ validate_spec(Map) ->
         [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
         {ok, Spec}
     catch
-        _:Reason:_ ->
+        error:#{code := _} = Reason ->
+            {error, Reason};
+        error:{badarg, _} = Reason ->
+            {error, Reason};
+        error:badarg ->
+            {error, badarg};
+        error:{badkey, _} = Reason ->
+            {error, Reason};
+        error:{badkeypath, _} = Reason ->
+            {error, Reason};
+        error:{invalid_expression, _} = Reason ->
+            {error, Reason};
+        error:{invalid_path, _} = Reason ->
+            {error, Reason};
+        error:{reserved_path, _} = Reason ->
+            {error, Reason};
+        error:{missing_required_key, _} = Reason ->
+            {error, Reason};
+        error:{unsupported_action_type, _} = Reason ->
+            {error, Reason};
+        error:action_type_missing ->
+            {error, action_type_missing};
+        throw:#{~"code" := _} = Reason ->
             {error, Reason}
     end.
 
@@ -648,34 +724,12 @@ load_dispatch_tables() ->
     %% we want at least try to process them in FIFO order.
     %% @TODO This does not work in a distributed env, since we are relying
     %% on wall clock, to be solve by using a CRDT?
+    Loaded = [{K, load_stored_spec(K, V)} || {K, V} <- stored_specs()],
     Specs = lists:sort([
-        begin
-            try
-                Parsed = bondy_http_gateway_api_spec_parser:parse(V),
-                Ts = maps:get(<<"ts">>, V),
-                ?LOG_INFO(#{
-                    description =>
-                        "Loading and parsing API Gateway specification "
-                        "from store",
-                    name => maps:get(~"name", V),
-                    id => maps:get(~"id", V),
-                    timestamp => Ts
-                }),
-                {K, Ts, Parsed}
-            catch
-                _:_:_ ->
-                    _ = delete(K),
-                    ?LOG_WARNING(#{
-                        description =>
-                            "Removed invalid API Gateway specification "
-                            "from store",
-                        key => K
-                    }),
-                    []
-            end
-        end
-     || {K, V} <- stored_specs()
+        {K, Ts, Parsed}
+     || {K, {parsed, Ts, Parsed}} <- Loaded
     ]),
+    ok = record_status(Loaded),
 
     %% No base routes: the paths a listener serves besides its
     %% specification-derived ones come from the services it declares, and
@@ -688,6 +742,70 @@ load_dispatch_tables() ->
         [] -> [{~"http", []}, {~"https", []}];
         _ -> Result
     end.
+
+%% @private
+%% A stored spec passed strict validation when it was loaded, and parsing
+%% depends on nothing but the spec, so a failure here is final for these bytes.
+%% The spec is not loaded and stays stored: deleting it would erase every
+%% node's copy because one node's parser refused it.
+load_stored_spec(K, V) ->
+    try
+        Parsed = bondy_http_gateway_api_spec_parser:parse(V),
+        Ts = maps:get(<<"ts">>, V),
+        ?LOG_INFO(#{
+            description =>
+                "Loading and parsing API Gateway specification from store",
+            name => maps:get(~"name", V),
+            id => maps:get(~"id", V),
+            timestamp => Ts
+        }),
+        {parsed, Ts, Parsed}
+    catch
+        %% The parser raises any error its validators and expression
+        %% evaluator produce on stored data, so no narrower set exists.
+        Class:Reason ->
+            ?LOG_ERROR(#{
+                description =>
+                    "API Gateway specification in store failed to parse; "
+                    "it is not loaded",
+                key => K,
+                class => Class,
+                reason => Reason
+            }),
+            {rejected, Reason}
+    end.
+
+%% @private
+%% Replaces this node's status table with the outcome of the build that just
+%% ran. Every listener's recompile runs the build, and the same stored specs
+%% always yield the same statuses, so concurrent writers agree.
+record_status(Loaded) ->
+    {ok, Tab} = bondy_connect_table_manager:get_or_create(
+        ?STATUS_TAB, [set, named_table, public, {read_concurrency, true}]
+    ),
+    Rows = [{K, spec_status(Outcome)} || {K, Outcome} <- Loaded],
+    true = ets:insert(Tab, Rows),
+    Keep = [K || {K, _} <- Rows],
+    _ = [
+        ets:delete(Tab, K)
+     || K <- ets:select(Tab, [{{'$1', '_'}, [], ['$1']}]),
+        not lists:member(K, Keep)
+    ],
+    ok.
+
+%% @private
+spec_status({parsed, _Ts, #{<<"realm_uri">> := Realm}}) ->
+    case bondy_http_gateway_api_spec_parser:is_realm_available(Realm) of
+        true ->
+            #{status => active};
+        false ->
+            #{status => pending_realm, realm_uri => Realm}
+    end;
+spec_status({rejected, Reason}) ->
+    #{
+        status => rejected,
+        reason => bondy_connect_error:format_term(Reason)
+    }.
 
 %% @private
 handle_spec_updates(#state{updated_specs = []}) ->

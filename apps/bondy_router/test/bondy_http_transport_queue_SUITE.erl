@@ -9,6 +9,7 @@
 -include_lib("stdlib/include/assert.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_security.hrl").
 
 -compile([nowarn_export_all, export_all]).
 
@@ -25,7 +26,8 @@ all() ->
         multiple_transports_isolation,
         init_is_idempotent,
         partition_tables_are_anonymous,
-        partitions_survive_manager_crash
+        partitions_survive_manager_crash,
+        send_after_transport_close_falls_through
     ].
 
 init_per_suite(Config) ->
@@ -476,3 +478,36 @@ wait_for_manager(Attempts, Every) ->
         Pid ->
             Pid
     end.
+
+%% A session can still name its HTTP transport after the transport closed.
+%% `bondy_router_peer:send/4` then finds no queue: it must fall through to
+%% the plain send rather than crash on the enqueue result.
+send_after_transport_close_falls_through(_Config) ->
+    RealmUri = <<"com.leapsight.bondy">>,
+    TransportId = make_transport_id(),
+    Session0 = bondy_session:new(RealmUri, #{
+        peer => {{127, 0, 0, 1}, 10999},
+        authid => <<"queue_test">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => false,
+        authroles => [<<"anonymous">>],
+        roles => #{subscriber => #{}},
+        transport_id => TransportId
+    }),
+    {ok, Session} = bondy_session:store(Session0),
+    SessionId = bondy_session:id(Session),
+    ok = bondy_http_transport_queue:init_transport(
+        TransportId, RealmUri, SessionId
+    ),
+    ok = bondy_http_transport_queue:delete_transport(TransportId),
+    Peer = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    To = bondy_ref:new(client, Peer, SessionId),
+    Event = bondy_wamp_message:event(1, 2, #{}),
+    ?assertEqual(ok, bondy_router_peer:send(RealmUri, To, Event, #{})),
+    Peer ! stop,
+    ok.

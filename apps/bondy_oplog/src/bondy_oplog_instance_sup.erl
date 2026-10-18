@@ -8,11 +8,10 @@
 -behaviour(supervisor).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance one_for_all supervisor.
 
 Holds the processes that together implement one running instance:
@@ -58,7 +57,7 @@ children in the order they were added, as it does for children declared
 in `init/1`: OTP `supervisor:save_child/2` prepends each to the list that
 `terminate_children/2` reverses, and `bondy_oplog_instance_sup_test` checks
 the order across a restart.
-""").
+""".
 
 -export([start_link/1]).
 -export([start_children/3]).
@@ -81,14 +80,14 @@ the order across a restart.
 start_link(InstanceId) when is_binary(InstanceId), byte_size(InstanceId) > 0 ->
     supervisor:start_link(?MODULE, InstanceId).
 
-?DOC("""
+-doc """
 Starts the instance's children under `SupPid`, a supervisor from
 `start_link/1` that has none yet. On failure the children already started
 stay under `SupPid`; the caller stops it. The error is
 `{origin, Path, Reason}` when the persisted origin cannot be loaded (see
 `bondy_oplog_origin:load_or_create/1`), and otherwise has the shape an
 `init/1` child failure has: `{shutdown, {failed_to_start_child, Id, Reason}}`.
-""").
+""".
 -spec start_children(pid(), instance_id(), bondy_oplog_instance:opts()) ->
     ok | {error, term()}.
 
@@ -99,40 +98,40 @@ start_children(SupPid, InstanceId, Opts0) when is_pid(SupPid), is_map(Opts0) ->
         start_children(SupPid, child_specs(InstanceId, Opts))
     end.
 
-?DOC("""
+-doc """
 Returns the pid of the per-instance `bondy_oplog_instance` child for
 the given subtree supervisor pid.
-""").
+""".
 -spec instance_pid(pid()) -> pid() | undefined.
 
 instance_pid(SupPid) when is_pid(SupPid) ->
     find_child(SupPid, bondy_oplog_instance).
 
-?DOC("""
+-doc """
 Returns the pid of the per-instance `bondy_oplog_wal` child.
-""").
+""".
 -spec wal_pid(pid()) -> pid() | undefined.
 
 wal_pid(SupPid) when is_pid(SupPid) ->
     find_child(SupPid, bondy_oplog_wal).
 
-?DOC("""
+-doc """
 Returns the pid of the per-instance `bondy_oplog_applier` child.
-""").
+""".
 -spec applier_pid(pid()) -> pid() | undefined.
 
 applier_pid(SupPid) when is_pid(SupPid) ->
     find_child(SupPid, bondy_oplog_applier).
 
-?DOC("""
+-doc """
 Returns the pid of the per-instance `bondy_log_scrubber` child.
-""").
+""".
 -spec scrubber_pid(pid()) -> pid() | undefined.
 
 scrubber_pid(SupPid) when is_pid(SupPid) ->
     find_child(SupPid, bondy_log_scrubber).
 
-?DOC("""
+-doc """
 Child start function for the WAL sibling. Opens the writer, then tells
 the instance (child 1, already running) the WAL pid and the retained
 WAL's own-origin `max_seq` via `bondy_oplog_instance:wal_opened/3`; the
@@ -143,7 +142,7 @@ exit
 from the instance call (it died between its start and this one) is
 caught by the supervisor as a failed child start; the one_for_all
 strategy then restarts the subtree.
-""").
+""".
 -spec start_wal(instance_id(), module(), bondy_oplog_wal:opts()) ->
     {ok, pid()} | {error, term()}.
 

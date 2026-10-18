@@ -21,7 +21,8 @@ all() ->
         legacy_user_membership_roundtrip,
         legacy_user_alias_roundtrip,
         legacy_poison_record_is_skipped,
-        legacy_token_refresh_roundtrip
+        legacy_token_refresh_roundtrip,
+        empty_file_is_refused_as_empty
     ].
 
 init_per_suite(Config) ->
@@ -389,6 +390,32 @@ ensure_user(Realm, Username) ->
 
 %% @private
 %% Polls the (async) export/import worker until it returns to idle.
+%% An export file holding no terms at all, not even the header, is refused as
+%% `empty_file`: the import reports what is wrong with the file instead of the
+%% clause that failed on it.
+empty_file_is_refused_as_empty(Config) ->
+    File = filename:join(?config(priv_dir, Config), "empty.bak"),
+    {ok, Log} = disk_log:open([
+        {name, empty_export_file}, {file, File}, {type, halt}
+    ]),
+    ok = disk_log:close(Log),
+    ok = meck:new(bondy_event_manager, [passthrough, no_link]),
+    try
+        {ok, _} = bondy_export:import(#{filename => File}),
+        ok = wait_idle(100),
+        Failures = [
+            Reason
+         || {_,
+                {bondy_event_manager, notify, [
+                    {[bondy, export, import, exception], #{reason := Reason}}
+                ]},
+                _} <- meck:history(bondy_event_manager)
+        ],
+        ?assertEqual([empty_file], Failures)
+    after
+        meck:unload(bondy_event_manager)
+    end.
+
 wait_idle(0) ->
     {error, timeout};
 wait_idle(N) ->

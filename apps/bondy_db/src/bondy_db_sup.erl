@@ -7,10 +7,8 @@
 
 -behaviour(supervisor).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 `bondy_db` top-level supervisor.
 
 The `bondy_db` layer has no permanent processes: leveled bookie supervisors
@@ -19,7 +17,7 @@ The `bondy_db` layer has no permanent processes: leveled bookie supervisors
 opened, linked to the opening process. This supervisor exists so the
 `bondy_db` application has a root to return from `start/2`, and to
 initialise `bondy_db_config` before anything can read it.
-""").
+""".
 
 -export([start_link/0]).
 

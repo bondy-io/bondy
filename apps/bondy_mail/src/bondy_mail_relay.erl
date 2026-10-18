@@ -188,15 +188,13 @@ handle_info(Info, State) ->
 terminate(_Reason, #state{relay = Relay}) ->
     %% A relay that is being removed cannot be down: leaving the alarm set
     %% would leave an operator paging about something that no longer exists.
-    _ =
-        try
-            alarm_handler:clear_alarm(
-                {mail_relay_down, Relay#bondy_mail_relay.name}
-            )
-        catch
-            _:_ -> ok
-        end,
-    ok.
+    try
+        alarm_handler:clear_alarm(
+            {mail_relay_down, Relay#bondy_mail_relay.name}
+        )
+    catch
+        error:badarg -> ok
+    end.
 
 -doc false.
 code_change(_OldVsn, State, _Extra) ->
@@ -274,19 +272,20 @@ fail(#state{relay = Relay} = State0) ->
 %% the two disagree. `alarm_handler:set_alarm/1` passes the 3-tuple through
 %% unchanged — it is `gen_event:notify(alarm_handler, {set_alarm, Alarm})` for
 %% any term (sasl-4.4 `alarm_handler.erl:103`) — so this stays an OTP call and
-%% `bondy_mail` gains no dependency on `bondy_router`.
+%% `bondy_mail` gains no dependency on `bondy_router`. The notify raises
+%% `badarg` only when no `alarm_handler` is registered (sasl not running); the
+%% alarm is then dropped. The same holds at every clear site in this module.
+%% Each call site stays a literal call so the catalogue test can resolve it.
 set_alarm(Name, Failures) ->
     Desc = <<"The mail relay is failing its health check.">>,
     Details = #{relay => Name, consecutive_failures => Failures},
-    _ =
-        try
-            alarm_handler:set_alarm(
-                {{mail_relay_down, Name}, Desc, #{details => Details}}
-            )
-        catch
-            _:_ -> ok
-        end,
-    ok.
+    try
+        alarm_handler:set_alarm(
+            {{mail_relay_down, Name}, Desc, #{details => Details}}
+        )
+    catch
+        error:badarg -> ok
+    end.
 
 %% @private
 %% Idempotent: clearing an alarm that is not set is a harmless no-op, so this
@@ -294,15 +293,13 @@ set_alarm(Name, Failures) ->
 maybe_clear_alarm(#state{relay = Relay, consec_successes = Successes}) ->
     case Successes >= Relay#bondy_mail_relay.health_success_threshold of
         true ->
-            _ =
-                try
-                    alarm_handler:clear_alarm(
-                        {mail_relay_down, Relay#bondy_mail_relay.name}
-                    )
-                catch
-                    _:_ -> ok
-                end,
-            ok;
+            try
+                alarm_handler:clear_alarm(
+                    {mail_relay_down, Relay#bondy_mail_relay.name}
+                )
+            catch
+                error:badarg -> ok
+            end;
         false ->
             ok
     end.

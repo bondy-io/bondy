@@ -65,6 +65,7 @@ all() ->
         same_key_in_another_realm_is_not_a_duplicate,
         refused_message_releases_its_claim,
         shed_message_gives_its_key_back,
+        tracking_is_best_effort_without_the_table,
         %% Sweep
         expired_status_is_forgotten
     ].
@@ -107,12 +108,15 @@ end_per_testcase(_Case, _Config) ->
 An id names the node holding the record, so any node can route a query from it.
 """.
 id_embeds_this_node(_) ->
+    %% The node's cluster identity is Partisan's name, which `bondy_cluster`
+    %% generates when it starts; it differs from `erlang:node()` here.
+    Self = partisan:node(),
     Id = bondy_mail_status:new_id(?REALM, undefined),
-    ?assertEqual({ok, erlang:node()}, bondy_mail_status:node_of(Id)),
+    ?assertEqual({ok, Self}, bondy_mail_status:node_of(Id)),
 
     %% `/` is the separator because it cannot occur in a node name, which is
     %% what makes the split unambiguous however the node is named.
-    ?assertEqual(nomatch, binary:match(atom_to_binary(erlang:node()), ~"/")).
+    ?assertEqual(nomatch, binary:match(atom_to_binary(Self), ~"/")).
 
 -doc """
 The same key in the same realm always names the same message.
@@ -529,6 +533,30 @@ shed_message_gives_its_key_back(_) ->
     %% permanently reusable, it makes one reusable while nothing has been sent.
     {ok, Again} = bondy_mail:send(?REALM, Req#{~"id" => Key}),
     ?assertMatch(#{duplicate := true, status := sent}, Again).
+
+-doc """
+With the status server down its table is gone and every ETS call raises
+`error:badarg`. An unkeyed claim, a release and an outcome report are best
+effort and still answer `ok`; a keyed claim is refused with a transient error.
+""".
+tracking_is_best_effort_without_the_table(_) ->
+    {ok, Unkeyed} = bondy_mail_request:new(?REALM, base()),
+    {ok, Keyed} = bondy_mail_request:new(?REALM, (base())#{~"id" => ~"k"}),
+    ok = application:stop(bondy_mail),
+    ?assertEqual(undefined, ets:info(bondy_mail_status, size)),
+
+    ?assertEqual({ok, claimed}, bondy_mail_status:claim(Unkeyed)),
+    ?assertMatch(
+        {error, {transient, status_unavailable, _}},
+        bondy_mail_status:claim(Keyed)
+    ),
+    ?assertEqual(ok, bondy_mail_status:release(Unkeyed)),
+    ?assertEqual(
+        ok,
+        bondy_mail_status:update(
+            bondy_mail_request:message_id(Unkeyed), {ok, #{attempts => 1}}
+        )
+    ).
 
 %% =============================================================================
 %% SWEEP

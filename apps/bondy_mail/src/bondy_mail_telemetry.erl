@@ -10,7 +10,8 @@ Telemetry events and metric families for `bondy_mail`.
 
 Follows `bondy_http_connector_telemetry`: flat three-segment event names with
 no `start`/`stop` suffix, scalar-only metadata, every emitter total, every sink
-write total, and families declared in the module that populates them. This
+write tolerant of an absent `bondy_metrics` table, and families declared in the
+module that populates them. This
 module owns both emission and sink, which the router deliberately splits --
 router events fire on every WAMP message, and these fire once per message
 handed to a relay.
@@ -133,13 +134,12 @@ declare_families() ->
     try
         do_declare_families()
     catch
-        Class:Reason ->
+        error:badarg ->
             ?LOG_WARNING(#{
                 description =>
                     "Could not declare mail metric families, continuing "
                     "without them. Mail delivery is unaffected.",
-                class => Class,
-                reason => Reason
+                reason => badarg
             }),
             ok
     end.
@@ -429,37 +429,25 @@ do_declare_families() ->
     ok.
 
 %% @private
-%% Total wrapper for sink writes: a raising `bondy_metrics` call must not
-%% detach this handler, which would silently kill every family it renders.
+%% A raise would detach this handler and stop every family it renders.
+%% On a well-formed spec `bondy_metrics` raises only `badarg`, from an absent
+%% table (`ets:lookup/2`, `ets:insert/2` in `bondy_metrics`).
 safe(Fun) ->
     try
         _ = Fun(),
         ok
     catch
-        Class:Reason:Stacktrace ->
+        error:badarg:Stacktrace ->
             ?LOG_DEBUG(#{
                 description => "Failed to record mail metric",
-                class => Class,
-                reason => Reason,
+                reason => badarg,
                 stacktrace => Stacktrace
             }),
             ok
     end.
 
 %% @private
-%% Total wrapper: an emitter must never affect the caller. A send does not fail
-%% because something went wrong counting it.
+%% A raising handler is detached by `telemetry:execute/3`, never propagated, so
+%% a send does not fail because counting it failed.
 execute(Event, Measurements, Meta) ->
-    try
-        telemetry:execute(Event, Measurements, Meta)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_DEBUG(#{
-                description => "Failed to emit telemetry event",
-                event => Event,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ok
-    end.
+    telemetry:execute(Event, Measurements, Meta).

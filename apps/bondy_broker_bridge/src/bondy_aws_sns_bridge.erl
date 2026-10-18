@@ -59,19 +59,11 @@ init(Config) ->
     %% TODO: check the proper configuration (using default at the moment)
     application:set_env([{erlcloud, Config}]),
 
-    try application:ensure_all_started(erlcloud) of
+    case application:ensure_all_started(erlcloud) of
         {ok, _} ->
             {ok, #{}};
-        Error ->
+        {error, _} = Error ->
             Error
-    catch
-        _:Reason ->
-            ?LOG_ERROR(#{
-                description => "Error while initialising bridge",
-                config => Config,
-                reason => Reason
-            }),
-            {error, Reason}
     end.
 
 -doc "Validate an SNS SMS action spec (`phone_number`, `text_message`).".
@@ -80,7 +72,7 @@ validate_action(Action0) ->
         Action1 ->
             {ok, Action1}
     catch
-        _:Reason ->
+        error:#{code := _} = Reason ->
             {error, Reason}
     end.
 

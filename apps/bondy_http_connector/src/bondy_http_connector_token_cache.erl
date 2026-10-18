@@ -164,13 +164,7 @@ invalidate(ServiceName) ->
             (noproc) ->
                 ok;
             (WorkerName) ->
-                _ =
-                    try
-                        gen_server:cast(WorkerName, {invalidate, ServiceName})
-                    catch
-                        _:_ -> ok
-                    end,
-                ok
+                gen_server:cast(WorkerName, {invalidate, ServiceName})
         end,
         ServiceName
     ).

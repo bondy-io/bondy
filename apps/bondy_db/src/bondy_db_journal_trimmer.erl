@@ -7,10 +7,9 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Periodically reclaims journal disk for the Bookies of one
 `bondy_db_leveled_sup`.
 
@@ -90,7 +89,7 @@ timer entirely and this process then idles.
 
 A Bookie mid-restart is not an error: the call is wrapped, a failure is
 counted and the next tick retries.
-""").
+""".
 
 -record(state, {
     sup :: pid(),
@@ -118,11 +117,11 @@ counted and the next tick retries.
 start_link(Sup) when is_pid(Sup) ->
     gen_server:start_link(?MODULE, [Sup], []).
 
-?DOC("""
+-doc """
 Runs a trim pass immediately and returns the number of Bookies trimmed.
 Synchronous, for operators and tests. Note that the disk is reclaimed a
 beat later — see the moduledoc on `delete_pending`.
-""").
+""".
 -spec trim_now(pid()) -> {ok, non_neg_integer()}.
 
 trim_now(Pid) when is_pid(Pid) ->
@@ -216,14 +215,13 @@ trim_one({Pid, Root}, Acc) ->
             }),
             Acc
     catch
-        Class:Reason ->
+        exit:{Reason, {gen_server, call, [Pid, trim, infinity]}} ->
             %% A Bookie mid-restart, or one that just exited. The next
             %% tick retries; there is nothing to repair here.
             ?LOG_DEBUG(#{
                 description =>
                     "Journal trim skipped for a Bookie that was unavailable",
                 bookie => Pid,
-                class => Class,
                 reason => Reason
             }),
             Acc

@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Remove-Wins observed-remove map (RWORMap) — tier_2 operation-based CRDT,
 with optional per-key nested tier_0 sub-CRDT values. The causal dual of
 `bondy_oplog_crdt_aw_map`: a key written concurrently with a remove that
@@ -59,7 +57,7 @@ ALSO empty, per `bondy_oplog_crdt_rw_core:is_empty/1`).
 MUST be `causal_tier() =:= tier_0`, and a key's `SubMod` is fixed by its
 first nested write (mixing flat and nested writes on the same live key
 raises `{badarg, _}`, per `bondy_oplog_crdt_rw_nested_core`).
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

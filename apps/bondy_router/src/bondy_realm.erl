@@ -2084,45 +2084,31 @@ resolve_master_admin_password() ->
 Idempotent one-shot hardening of an ALREADY-STORED master realm, for
 installations provisioned before the master-realm hardening. Fresh installs
 create the master realm already hardened, so this is a no-op for them. Called at
-boot (see `bondy_router_app`) after the master realm is guaranteed to exist. Guarded so
-a failure can never crash boot.
+boot (see `bondy_router_app`) after the master realm is guaranteed to exist. A
+failure raises.
 """.
 -spec harden_master_realm() -> ok.
 
 harden_master_realm() ->
-    try
-        Realm = fetch(?MASTER_REALM_URI),
-        %% Only remediate a LEGACY master realm — presence of the anonymous
-        %% authmethod is the marker. This keeps the migration a true no-op (no
-        %% writes, no log noise) on fresh / already-hardened installs.
-        case lists:member(?WAMP_ANON_AUTH, authmethods(Realm)) of
-            true ->
-                ok = remediate_legacy_anon(Realm);
-            false ->
-                ok
-        end,
-        %% The password warning runs every boot (until rotated), independently of
-        %% the anonymous remediation.
-        ok = maybe_warn_legacy_admin_password(Realm)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_WARNING(#{
-                description =>
-                    "Master realm hardening migration failed; continuing boot. "
-                    "Review the master realm's security configuration manually.",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
+    Realm = fetch(?MASTER_REALM_URI),
+    %% Only remediate a LEGACY master realm — presence of the anonymous
+    %% authmethod is the marker. This keeps the migration a true no-op (no
+    %% writes, no log noise) on fresh / already-hardened installs.
+    case lists:member(?WAMP_ANON_AUTH, authmethods(Realm)) of
+        true ->
+            ok = remediate_legacy_anon(Realm);
+        false ->
+            ok
     end,
-    ok.
+    %% The password warning runs every boot (until rotated), independently of
+    %% the anonymous remediation.
+    ok = maybe_warn_legacy_admin_password(Realm).
 
 %% @private
 %% Remediate a legacy (pre-hardening) master realm: remove the anonymous
 %% authmethod and revoke the anonymous wamp.* grant. Removing the authmethod alone
-%% already blocks anonymous sessions; the grant revoke is defence in depth and is
-%% guarded so an RBAC quirk (e.g. anonymous role handling) cannot fail the whole
-%% migration.
+%% already blocks anonymous sessions; the grant revoke is defence in depth, and a
+%% revoke that answers `{error, _}` is logged for manual removal.
 remediate_legacy_anon(#realm{uri = Uri} = Realm) ->
     NewMethods = authmethods(Realm) -- [?WAMP_ANON_AUTH],
     _ = update(Uri, #{<<"authmethods">> => NewMethods}),
@@ -2144,7 +2130,7 @@ remediate_legacy_anon(#realm{uri = Uri} = Realm) ->
         uri => <<"">>,
         match => <<"prefix">>
     },
-    try bondy_rbac:revoke(Uri, Request) of
+    case bondy_rbac:revoke(Uri, Request) of
         ok ->
             ?LOG_WARNING(#{
                 description =>
@@ -2159,15 +2145,6 @@ remediate_legacy_anon(#realm{uri = Uri} = Realm) ->
                     "anonymous master-realm grant; remove it manually.",
                 realm => Uri,
                 reason => Reason
-            })
-    catch
-        _:CatchReason ->
-            ?LOG_WARNING(#{
-                description =>
-                    "Master realm hardening (D-2): could not auto-revoke the "
-                    "anonymous master-realm grant; remove it manually.",
-                realm => Uri,
-                reason => CatchReason
             })
     end,
     ok.
@@ -2776,10 +2753,9 @@ split_for_import(#realm{} = R) ->
     {strip_keys(R), maps:to_list(keys_to_entries(R))};
 split_for_import(Term) ->
     try from_term(Term) of
-        #realm{} = R -> split_for_import(R);
-        _ -> {Term, []}
+        #realm{} = R -> split_for_import(R)
     catch
-        _:_ -> {Term, []}
+        throw:badarg -> {Term, []}
     end.
 
 -doc """
@@ -2970,23 +2946,30 @@ gen_encryption_keys() ->
 
 %% @private
 do_validate_keys(L) when is_list(L) ->
+    %% `jose_jwk:from_pem/1` raises `function_clause` for a term that is not
+    %% PEM, and `{badmatch, {error, {asn1, _}}}` for a PEM body that is not DER.
     try
-        Keys = lists:map(
-            fun
-                ({jose_jwk, _, _, _} = Key) ->
-                    Key;
-                (Pem) ->
-                    case jose_jwk:from_pem(Pem) of
-                        {jose_jwk, _, _, _} = Key -> Key;
-                        _ -> false
-                    end
-            end,
-            L
-        ),
-        {ok, Keys}
+        {ok, [to_jwk(Key) || Key <- L]}
     catch
-        _:_ ->
+        throw:invalid_key ->
+            false;
+        error:function_clause ->
+            false;
+        error:{badmatch, {error, {asn1, _}}} ->
             false
+    end.
+
+%% @private
+%% `jose_jwk:from_pem/1` returns the PEM entries it cannot convert: none, or
+%% more than one, as a list; an unsupported key type as `{error, _}`.
+to_jwk({jose_jwk, _, _, _} = Key) ->
+    Key;
+to_jwk(Pem) ->
+    case jose_jwk:from_pem(Pem) of
+        {jose_jwk, _, _, _} = Key -> Key;
+        [] -> throw(invalid_key);
+        [_ | _] -> throw(invalid_key);
+        {error, _} -> throw(invalid_key)
     end.
 
 group_topsort(Uri, Groups) ->

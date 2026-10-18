@@ -77,6 +77,8 @@ handle_info(evict, State) ->
         ProcUri = bondy_rpc_promise:procedure_uri(Promise),
 
         %% Eviction must never depend on the metrics subsystem being up.
+        %% `inc/3` raises `unknown_metric` before `bondy_prometheus` declares
+        %% the counter, and `badarg` without the prometheus tables.
         _ =
             try
                 prometheus_counter:inc(
@@ -85,7 +87,8 @@ handle_info(evict, State) ->
                     1
                 )
             catch
-                _:_ -> ok
+                error:{unknown_metric, _, _} -> ok;
+                error:badarg -> ok
             end,
 
         ?LOG_DEBUG(#{

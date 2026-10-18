@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Starts an instance again when its subtree stops without `stop_instance/1`.
 
 `bondy_oplog_instance_dyn_sup` never restarts a subtree, because a
@@ -51,7 +50,7 @@ Once `bondy_oplog_instance:open_drain_gate/1` releases an instance's WAL
 drain, its recorded options no longer gate it, so an applier that starts
 again within this boot, restarted here or by its own supervisor, starts
 with the drain open (`bondy_db_bookie_restart_test`).
-""").
+""".
 
 -define(TAB, ?MODULE).
 -define(BASE_DELAY_MS, 1000).
@@ -101,39 +100,39 @@ child_spec() ->
         modules => [?MODULE]
     }.
 
-?DOC("""
+-doc """
 Keeps `InstanceId`, running under `SupPid`, started with `Opts`. Called
 by `bondy_oplog_instance_dyn_sup:start_instance/2` after a start.
-""").
+""".
 -spec watch(instance_id(), pid(), bondy_oplog_instance:opts()) -> ok.
 
 watch(InstanceId, SupPid, Opts) ->
     gen_server:call(?MODULE, {watch, InstanceId, SupPid, Opts}, infinity).
 
-?DOC("""
+-doc """
 Stops keeping the instance named by its id or its subtree supervisor.
 Called by `bondy_oplog_instance_dyn_sup:stop_instance/1` before it stops
 the subtree.
-""").
+""".
 -spec forget(instance_id() | pid()) -> ok.
 
 forget(InstanceIdOrSupPid) ->
     gen_server:call(?MODULE, {forget, InstanceIdOrSupPid}, infinity).
 
-?DOC("""
+-doc """
 Whether `InstanceId` is kept here: started and not since stopped.
-""").
+""".
 -spec is_kept(instance_id()) -> boolean().
 
 is_kept(InstanceId) ->
     ets:member(?TAB, InstanceId).
 
-?DOC("""
+-doc """
 The kept instances with no running subtree: stopped and not yet started
 again, including those whose restarts keep failing. `[]` before this
 process first starts. Reads this process's table, not its state, so it
 answers while this process is restarting.
-""").
+""".
 -spec not_running() -> [instance_id()].
 
 not_running() ->
@@ -148,31 +147,31 @@ not_running() ->
             ]
     end.
 
-?DOC("""
+-doc """
 Starts kept `InstanceId` now, with its recorded options, unless a subtree
 for it is running; a pending restart is cancelled. `{error, not_kept}` if
 it has been forgotten meanwhile.
-""").
+""".
 -spec start_now(instance_id()) -> {ok, pid()} | {error, term()}.
 
 start_now(InstanceId) ->
     gen_server:call(?MODULE, {start_now, InstanceId}, infinity).
 
-?DOC("""
+-doc """
 Records that `InstanceId`'s WAL drain has been released, so its recorded
 start options no longer gate it. Called by
 `bondy_oplog_instance:open_drain_gate/1`.
-""").
+""".
 -spec release_drain_gate(instance_id()) -> ok.
 
 release_drain_gate(InstanceId) ->
     gen_server:call(?MODULE, {release_drain_gate, InstanceId}, infinity).
 
-?DOC("""
+-doc """
 Whether `InstanceId` is kept here with options that no longer gate its WAL
 drain. `false` for an instance that is not kept, which is the case during
 its first start: `watch/3` follows the start.
-""").
+""".
 -spec drain_released(instance_id()) -> boolean().
 
 drain_released(InstanceId) ->

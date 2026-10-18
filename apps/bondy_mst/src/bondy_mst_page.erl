@@ -8,10 +8,10 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Module that represents objects that are used as data pages in a
 pagestore and that may reference other data pages by their hash.
-""").
+""".
 
 -record(?MODULE, {
     level :: level(),
@@ -51,9 +51,9 @@ pagestore and that may reference other data pages by their hash.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Creates a new page
-""").
+""".
 -spec new(level(), hash() | undefined, [entry()]) -> t().
 
 new(Level, Low, List) when is_integer(Level), is_list(List) ->
@@ -64,9 +64,9 @@ new(Level, Low, List) when is_integer(Level), is_list(List) ->
         freed_at = undefined
     }.
 
-?DOC("""
+-doc """
 Creates a new page
-""").
+""".
 -spec pattern() -> t().
 
 pattern() ->
@@ -82,9 +82,9 @@ pattern() ->
         '_'
     }.
 
-?DOC("""
+-doc """
 Returns true if `Arg` is a page.
-""").
+""".
 -spec is_type(Arg :: any()) -> boolean().
 
 is_type(#?MODULE{}) -> true;
@@ -97,9 +97,9 @@ field_index(low) -> #?MODULE.low;
 field_index(list) -> #?MODULE.list;
 field_index(freed_at) -> #?MODULE.freed_at.
 
-?DOC("""
+-doc """
 Returns the level of this page in the tree i.e. the logical height.
-""").
+""".
 -spec level(t()) -> level().
 
 level(#?MODULE{level = Val}) -> Val.
@@ -108,26 +108,26 @@ level(#?MODULE{level = Val}) -> Val.
 
 low(#?MODULE{low = Val}) -> Val.
 
-?DOC("""
+-doc """
 Returns the epoch number at which this page has been freed or
 `undefined` if it hasn't i.e. it is still active.
-""").
+""".
 -spec freed_at(t()) -> epoch() | undefined.
 
 freed_at(#?MODULE{freed_at = Val}) -> Val.
 
-?DOC("""
+-doc """
 Sets the version number at which this page has been freed.
-""").
+""".
 -spec set_freed_at(t(), epoch()) -> t().
 
 set_freed_at(#?MODULE{} = T, Epoch) when is_integer(Epoch) ->
     T#?MODULE{freed_at = Epoch}.
 
-?DOC("""
+-doc """
 Returns `true` if the page is referenced at `Epoch`.
 Otherwise, returns `false`.
-""").
+""".
 -spec is_referenced_at(t(), epoch()) -> boolean().
 
 is_referenced_at(#?MODULE{freed_at = undefined}, _) ->
@@ -135,31 +135,31 @@ is_referenced_at(#?MODULE{freed_at = undefined}, _) ->
 is_referenced_at(#?MODULE{freed_at = LastEpoch}, Epoch) ->
     LastEpoch >= Epoch.
 
-?DOC("""
+-doc """
 Computes the hash of the page using algorithm `Algo`.
 This function must be used to obtain a hash as it ignores certain fields that
 will diverge between replicas and are used for operational and/or efficiency
 purposes.
-""").
+""".
 hash(#?MODULE{} = T, Algo) when is_atom(Algo) ->
     #?MODULE{level = Level, low = Low, list = List} = T,
     %% Notice we are not including any metadata which would be local to this
     %% tree replica.
     bondy_mst_utils:hash({Level, Low, List}, Algo).
 
-?DOC("""
+-doc """
 Returns the list of entries in this page.
-""").
+""".
 -spec list(t()) -> [entry()].
 
 list(#?MODULE{list = Val}) -> Val.
 
-?DOC("""
+-doc """
 Calls `Fun(Entry, AccIn)` on successive entries of the page, starting
 with `AccIn == Acc0`. `Fun/2` must return a new accumulator, which is passed
 to the next call. The function returns the final value of the accumulator.
 `Acc0` is returned if the tree is empty.
-""").
+""".
 -spec fold(t(), fun((entry(), any()) -> any()), any()) -> any().
 
 fold(#?MODULE{list = List}, Fun, Acc) ->
@@ -170,9 +170,9 @@ fold(#?MODULE{list = List}, Fun, Acc) ->
 foreach(#?MODULE{list = List}, Fun) ->
     lists:foreach(Fun, List).
 
-?DOC("""
+-doc """
 Returns the hashes of all pages referenced by this page.
-""").
+""".
 -spec refs(t()) -> [hash()].
 
 refs(#?MODULE{list = List, low = Low}) ->

@@ -10,7 +10,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Pack-store writer: owns the open `incoming.pack` fd, the in-memory
 pending hash index, and the seal flow that rotates the incoming
 pack into a numbered sealed pack with its companion `.idx`.
@@ -87,7 +87,7 @@ unsynced pages on recovery. Callers that need stricter durability
 - Recovery / truncation of partially-written records (deferred).
 - Compaction / GC across sealed packs (separate module).
 - Cross-pack read lookup (that's `bondy_mst_pack_reader`).
-""").
+""".
 
 -record(?MODULE, {
     dir :: file:filename_all(),
@@ -226,7 +226,7 @@ unsynced pages on recovery. Callers that need stricter durability
 %% API — lifecycle
 %% =============================================================================
 
-?DOC("""
+-doc """
 Opens (or creates) a pack-store instance at `Dir`.
 
 `Opts` must carry `instance_id` (a non-empty binary). `hash_algo`
@@ -239,7 +239,7 @@ exists, the writer scans it to rebuild the pending hash→offset
 map. Any decode error in the scan returns `{error, needs_recovery}`;
 the dedicated recovery path (next phase) is responsible for
 truncating partial records.
-""").
+""".
 -spec open(file:filename_all(), open_opts()) ->
     {ok, t()} | {error, open_error()}.
 
@@ -280,11 +280,11 @@ open(Dir, Opts) when is_list(Dir) orelse is_binary(Dir), is_map(Opts) ->
             {error, {missing_field, instance_id}}
     end.
 
-?DOC("""
+-doc """
 Closes the incoming.pack fd. The on-disk manifest and any sealed
 packs are untouched. Idempotent: calling `close/1` on an already-
 closed writer is a no-op.
-""").
+""".
 -spec close(t()) -> ok.
 
 close(#?MODULE{incoming_fd = undefined} = W) ->
@@ -299,7 +299,7 @@ close(#?MODULE{incoming_fd = Fd} = W) ->
 %% API — mutation
 %% =============================================================================
 
-?DOC("""
+-doc """
 Appends a page to the incoming pack. Returns `{ok, Hash, W1}`.
 
 The hash is derived from `Page` using the writer's configured
@@ -321,7 +321,7 @@ append); the in-memory pending map is not updated. The on-disk
 byte cursor may have moved if the failure occurred partway
 through; recovery on reopen will detect and truncate any partial
 trailing record.
-""").
+""".
 -spec append(t(), Page :: binary()) ->
     {ok, Hash :: binary(), t()} | {error, append_error()}.
 
@@ -339,7 +339,7 @@ append(#?MODULE{} = W, Page) when is_binary(Page) ->
             end
     end.
 
-?DOC("""
+-doc """
 Forces a `datasync` of the incoming pack fd if there are any unsynced
 records buffered, AND a manifest rewrite if a `set_root/2` is
 pending. Idempotent: returns `{ok, W}` without touching disk when
@@ -350,7 +350,7 @@ The batching policy normally takes care of durability automatically;
 this exists for callers that need an explicit boundary — e.g. before
 a snapshot, before close, or in response to an external durability
 request.
-""").
+""".
 -spec flush(t()) -> {ok, t()} | {error, term()}.
 
 flush(#?MODULE{} = W) ->
@@ -368,7 +368,7 @@ flush_incoming(#?MODULE{} = W) -> do_sync(W).
 flush_pending_root(#?MODULE{root_dirty = false} = W) -> {ok, W};
 flush_pending_root(#?MODULE{} = W) -> do_flush_root(W).
 
-?DOC("""
+-doc """
 Seals the incoming pack into a numbered sealed pack.
 
 If the pending set is empty, returns `{ok, no_op, W}` without
@@ -392,7 +392,7 @@ any step fails. Failure at step 1–3 leaves the manifest unchanged
 and any `.tmp` orphans visible for recovery. Failure at step 4
 (post-manifest-swap) leaves a stale `incoming.pack` on disk that
 the recovery scanner removes on next open.
-""").
+""".
 -spec seal(t()) ->
     {ok, no_op, t()}
     | {ok, PackId :: pos_integer(), t()}
@@ -429,7 +429,7 @@ seal(#?MODULE{pending = P} = W) when map_size(P) =:= 0 ->
 seal(#?MODULE{} = W) ->
     do_seal(W).
 
-?DOC("""
+-doc """
 Stages `Root` as the manifest's `current_root`. The in-memory
 manifest is always updated so subsequent `manifest/1` /
 `current_root/1` reads see the new root immediately.
@@ -456,7 +456,7 @@ debounced) or `{error, _}` if the debounced write was due *and*
 failed — in the latter case the writer's in-memory root still
 reflects the new value and the dirty bit stays set so the next
 flush attempt will retry.
-""").
+""".
 -spec set_root(t(), Root :: binary() | undefined) ->
     {ok, t()} | {error, term()}.
 
@@ -472,13 +472,13 @@ set_root(#?MODULE{} = W, Root) when is_binary(Root); Root =:= undefined ->
         false -> {ok, W1}
     end.
 
-?DOC("""
+-doc """
 Refreshes the writer's cached manifest and `next_pack_id` after an
 out-of-band manifest swap (e.g., compaction in `bondy_mst_pack_store:gc/2`).
 
 The caller is responsible for having already persisted `M` to disk; this
 just updates the in-memory copies.
-""").
+""".
 -spec set_manifest(t(), bondy_mst_pack_manifest:t()) -> t().
 
 set_manifest(#?MODULE{} = W, M) ->
@@ -494,7 +494,7 @@ set_manifest(#?MODULE{} = W, M) ->
 %% API — asynchronous seal
 %% =============================================================================
 
-?DOC("""
+-doc """
 Rolls the active `incoming.pack` aside so it can be sealed *off* the
 caller's critical path, and returns a self-contained `seal_job()` for a
 worker to execute.
@@ -525,7 +525,7 @@ Returns:
 - `{error, seal_in_flight}` — a previous seal has not yet completed (the
   in-flight=1 cap; the caller defers).
 - `{error, _}` — an I/O failure during the roll.
-""").
+""".
 -spec roll_incoming(t()) ->
     {ok, seal_job(), t()} | {no_op, t()} | {error, term()}.
 
@@ -539,7 +539,7 @@ roll_incoming(#?MODULE{} = W0) ->
         {error, _} = E -> E
     end.
 
-?DOC("""
+-doc """
 Executes a `seal_job()` produced by `roll_incoming/1`: writes the sorted,
 indexed `pack-<PackId>.pack` + `.idx` pair from the job's in-memory body
 snapshot, datasyncs, and renames them into place.
@@ -554,7 +554,7 @@ Returns `ok` or `{error, _}`; on error the instance does NOT
 `complete_seal/2` — the rolled snapshot stays in `sealing`, the frozen
 `incoming-sealing-<PackId>.pack` stays on disk, and recovery re-seals it
 on the next open.
-""").
+""".
 -spec run_seal_job(seal_job()) -> ok | {error, term()}.
 
 run_seal_job(#{
@@ -575,7 +575,7 @@ run_seal_job(#{
         {error, R} -> {error, {seal, R}}
     end.
 
-?DOC("""
+-doc """
 Finalises the asynchronous seal whose worker has just completed
 `run_seal_job/1`. Adds `PackId` to the manifest's `sealed_packs` and clears
 the in-flight `sealing` snapshot, then deletes the now-superseded
@@ -590,7 +590,7 @@ it as a sealed view.
 
 `PackId` must equal the in-flight seal's id (`sealing_pack_id/1`); a
 mismatch or a missing in-flight seal is an error.
-""").
+""".
 -spec complete_seal(t(), pos_integer()) -> {ok, t()} | {error, term()}.
 
 complete_seal(#?MODULE{sealing = undefined}, _PackId) ->
@@ -636,20 +636,20 @@ hash_algo(#?MODULE{hash_algo = A}) -> A.
 -spec pending_count(t()) -> non_neg_integer().
 pending_count(#?MODULE{pending = P}) -> map_size(P).
 
-?DOC("""
+-doc """
 Every hash resident in the writer: the active `pending` set unioned with
 any in-flight `sealing` snapshot (see `roll_incoming/1`). The union is
 load-bearing — while a seal is in flight the rolled pages live only in the
 `sealing` snapshot, and omitting them here would make `enumerate_hashes` /
 AAE diff see a store that is momentarily missing pages the root references.
-""").
+""".
 -spec pending_hashes(t()) -> [binary()].
 pending_hashes(#?MODULE{pending = P, sealing = undefined}) ->
     lists:sort(maps:keys(P));
 pending_hashes(#?MODULE{pending = P, sealing = {_Path, Bodies, _PackId}}) ->
     lists:sort(maps:keys(maps:merge(Bodies, P))).
 
-?DOC("""
+-doc """
 Returns the on-disk record offset of `Hash` in `incoming.pack`,
 or `not_found`. Used by an in-process reader (the gen_server)
 to resolve a recent put without opening a separate reader.
@@ -659,7 +659,7 @@ in-flight `sealing` snapshot (those pages no longer live in
 `incoming.pack`). Callers needing presence across the full resident set —
 active pending plus any in-flight seal — use `member/2`; callers needing
 the body use `pending_read/2`.
-""").
+""".
 -spec pending_lookup(t(), binary()) ->
     {ok, {non_neg_integer(), non_neg_integer()}} | not_found.
 
@@ -669,35 +669,35 @@ pending_lookup(#?MODULE{pending = P}, Hash) ->
         error -> not_found
     end.
 
-?DOC("""
+-doc """
 Whether `Hash` is resident in the writer — present in the active `pending`
 set OR in an in-flight `sealing` snapshot. This is the membership predicate
 the store's `has/2` uses so a page stays visible throughout an asynchronous
 seal.
-""").
+""".
 -spec member(t(), binary()) -> boolean().
 
 member(#?MODULE{pending = P, sealing = S}, Hash) ->
     maps:is_key(Hash, P) orelse sealing_has(S, Hash).
 
-?DOC("""
+-doc """
 The pack id of the seal currently in flight (set by `roll_incoming/1`,
 cleared by `complete_seal/2`), or `undefined` when no seal is in flight.
 The store reads this to enforce the in-flight=1 cap — it defers a roll
 while a seal is pending rather than starting a second concurrent rewrite.
-""").
+""".
 -spec sealing_pack_id(t()) -> non_neg_integer() | undefined.
 
 sealing_pack_id(#?MODULE{sealing = undefined}) -> undefined;
 sealing_pack_id(#?MODULE{sealing = {_Path, _Bodies, PackId}}) -> PackId.
 
-?DOC("""
+-doc """
 Reads the page body associated with `Hash` from `incoming.pack` via
 the writer's own fd. Returns `{ok, Body}` for a present hash, where
 `Body` is the bytes that were passed to `append/2` (so callers can
 deserialise back to their domain object), `not_found` for an absent
 hash, or `{error, _}` on I/O.
-""").
+""".
 -spec pending_read(t(), binary()) ->
     {ok, binary()} | not_found | {error, term()}.
 
@@ -734,11 +734,11 @@ incoming_offset(#?MODULE{incoming_offset = Off}) -> Off.
 -spec next_pack_id(t()) -> pos_integer().
 next_pack_id(#?MODULE{next_pack_id = N}) -> N.
 
-?DOC("""
+-doc """
 Number of records that have been written to `incoming.pack` but not
 yet `datasync`'d to disk. Decreases to 0 after each successful sync
 (either from the batching policy or an explicit `flush/1`).
-""").
+""".
 -spec unsynced_count(t()) -> non_neg_integer().
 unsynced_count(#?MODULE{unsynced_count = N}) -> N.
 
@@ -968,12 +968,12 @@ validate_manifest(M, InstanceId, HashAlgo) ->
             {error, {instance_id_mismatch, Other, InstanceId}}
     end.
 
-?DOC("""
+-doc """
 Computes the `instance_hash` carried in the pack header from the
 human-readable `InstanceId`. Centralised so the writer, the sealed-
 view opener, and any future tooling that needs to recognise a foreign
 pack all hash the same way.
-""").
+""".
 -spec derive_instance_hash(binary()) -> non_neg_integer().
 
 derive_instance_hash(InstanceId) when is_binary(InstanceId) ->

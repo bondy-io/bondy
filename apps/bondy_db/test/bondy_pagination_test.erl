@@ -51,7 +51,27 @@ decode_garbage_is_malformed_test() ->
     ?assertEqual(
         {error, malformed},
         bondy_pagination:decode_cursor(?FP, Bin)
-    ).
+    ),
+    %% Each `error` reason `base64:decode/1` raises on malformed text, and
+    %% valid base64 that is not an external term (`binary_to_term/2` badarg).
+    [
+        ?assertEqual(
+            {error, malformed}, bondy_pagination:decode_cursor(?FP, Garbage)
+        )
+     || Garbage <- [
+            %% badarg
+            <<"!!!!">>,
+            %% missing_padding
+            <<"AQ">>,
+            %% function_clause
+            <<"A">>,
+            %% badarith
+            <<"====">>,
+            %% {case_clause, _}
+            <<"AQ==AQ==">>,
+            base64:encode(<<1, 2, 3>>)
+        ]
+    ].
 
 to_external_final_page_omits_cursor_test() ->
     R = bondy_pagination:result([<<"a">>, <<"b">>], undefined),

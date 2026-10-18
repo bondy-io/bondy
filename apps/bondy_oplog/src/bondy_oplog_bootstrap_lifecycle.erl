@@ -6,11 +6,10 @@
 -module(bondy_oplog_bootstrap_lifecycle).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance bootstrap lifecycle.
 
 The applier MUST NOT apply WAL events onto the per-cell projection
@@ -71,7 +70,7 @@ A persistent instance whose flag file is absent and that was not
 seeded is presumed to be a fresh peer that must call
 `bondy_oplog_sync_session:bootstrap_catalogue/3` against a live peer before it
 can serve fold-driven reads.
-""").
+""".
 
 -define(FLAG_FILENAME, "lifecycle.live").
 -define(ATOMIC_SLOT, 1).
@@ -102,7 +101,7 @@ can serve fold-driven reads.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Opens a lifecycle handle for `InstanceId`.
 
 `Opts` is the same map passed to `bondy_oplog_instance:init/1`;
@@ -116,7 +115,7 @@ The function checks whether the flag file exists; when it does, it syncs the
 flag's directory before trusting it, and raises `{dir_fsync_failed, Dir,
 Reason}` if it cannot. When seeding a persistent instance it writes the flag
 with `bondy_mst_io:write_file_atomic/2`.
-""").
+""".
 -spec open(instance_id(), map()) -> handle().
 
 open(InstanceId, Opts) when is_binary(InstanceId), is_map(Opts) ->
@@ -145,19 +144,19 @@ open(InstanceId, Opts) when is_binary(InstanceId), is_map(Opts) ->
     end,
     Handle.
 
-?DOC("""
+-doc """
 Constant-time check used by the applier hot loop. Reads the boolean
 mirror from `atomics`; no syscall, no allocation.
-""").
+""".
 -spec is_live(handle()) -> boolean().
 
 is_live(#handle{atomic = Ref}) ->
     atomics:get(Ref, ?ATOMIC_SLOT) =:= ?ATOMIC_LIVE.
 
-?DOC("""
+-doc """
 Returns the current lifecycle state as an atom. Equivalent to
 `is_live/1` but useful in logs and tests.
-""").
+""".
 -spec state(handle()) -> state().
 
 state(#handle{} = H) ->
@@ -166,7 +165,7 @@ state(#handle{} = H) ->
         false -> pre_bootstrap
     end.
 
-?DOC("""
+-doc """
 Flips the lifecycle to `live` durably and idempotently.
 
 Order of effects (matters for crash recovery):
@@ -184,7 +183,7 @@ Re-marking an already-live instance does not rewrite the flag; it syncs the
 flag's directory, since the flag may have been left by a write whose directory
 sync failed (`mark_live_again_syncs_an_existing_flag_test`). The atomic-set
 is idempotent.
-""").
+""".
 -spec mark_live(handle()) -> ok.
 
 mark_live(#handle{atomic = Ref} = H) ->
@@ -197,16 +196,16 @@ mark_live(#handle{atomic = Ref} = H) ->
     ok = atomics:put(Ref, ?ATOMIC_SLOT, ?ATOMIC_LIVE),
     ok.
 
-?DOC("""
+-doc """
 Returns the on-disk path of the lifecycle flag file, or `undefined`
 for ephemeral instances. Test-facing.
-""").
+""".
 -spec flag_path(handle()) -> undefined | file:filename_all().
 
 flag_path(#handle{flag_path = P}) ->
     P.
 
-?DOC("Returns the instance_id this handle belongs to.").
+-doc "Returns the instance_id this handle belongs to.".
 -spec instance_id(handle()) -> instance_id().
 
 instance_id(#handle{instance_id = Id}) ->

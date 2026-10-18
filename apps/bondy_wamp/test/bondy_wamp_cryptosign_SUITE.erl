@@ -40,7 +40,8 @@ all() ->
         signer_env_var,
         signer_env_var_missing,
         signer_procedure_not_implemented,
-        signer_invalid_config
+        signer_invalid_config,
+        signer_exec_nonzero_exit_status
     ].
 
 init_per_suite(Config) ->
@@ -242,4 +243,17 @@ signer_invalid_config(_) ->
     ?assertError(
         {invalid_cryptosign_config, _},
         bondy_wamp_cryptosign:signer(undefined, #{bogus => true})
+    ).
+
+%% `signer/2` runs the executable eagerly; `false` exits with status 1 and
+%% its port is closed by the time `exit_status` is received. The reason is
+%% the exit status, wrapped as `exec_sign/3` wraps every executable failure,
+%% not a `badarg` from closing the already-closed port.
+signer_exec_nonzero_exit_status(_) ->
+    False = os:find_executable("false"),
+    ?assert(is_list(False)),
+    #{public := Pub} = bondy_wamp_cryptosign:generate_key(),
+    ?assertError(
+        {invalid_executable, {cryptosign_exit_status, 1}},
+        bondy_wamp_cryptosign:signer(Pub, #{exec => False})
     ).

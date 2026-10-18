@@ -8,10 +8,9 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Reference subscription dispatcher for `bondy_oplog_core:subscribe/2`.
 
 Subscriptions are local-only (do not cross nodes). The dispatcher owns
@@ -89,7 +88,7 @@ supervisor's `intensity` so the dispatcher effectively never restarts,
 or design subscribers to periodically validate liveness (e.g., a
 heartbeat publish that exercises the subscription). The substrate
 does not police this.
-""").
+""".
 
 -define(TABLE, bondy_oplog_core_dispatcher_tab).
 

@@ -2945,8 +2945,8 @@ end}.
 ]}.
 
 %% --------------------------------------------------------------------------
-%% Per-listener rate limiting (LISTENER scope of the three-scope model;
-%% design: _plans/2026-08-29-rate-limit-scopes-design.md). Composed AND
+%% Per-listener rate limiting (LISTENER scope of the three-scope model).
+%% Composed AND
 %% with the node scope (`security.rate_limit.*`) and, where the request
 %% addresses one, the realm's own budgets — a listener budget can only
 %% NARROW what the node admits. A class block's PRESENCE enables it

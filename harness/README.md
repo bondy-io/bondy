@@ -1,9 +1,7 @@
 # harness/ — Bondy router test harness (implementation)
 
-Implementation of the perf & correctness harness designed in
-[`_design/test-harness/`](../_design/test-harness/) (docs `00`–`06`). The design
-is the source of truth; this tree is where it gets built, milestone by milestone
-(`06`). **Pinned target: git tag `develop-perf.1`** — re-baseline on cadence
+Implementation of the perf & correctness harness, built milestone by
+milestone. **Pinned target: git tag `develop-perf.1`** — re-baseline on cadence
 (`05 R12`).
 
 ## Status

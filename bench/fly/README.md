@@ -1,9 +1,7 @@
 # bondy_mst — Linux bench substrate on Fly.io
 
-Long-lived SSH-only Debian 12 VM for executing pack-store QA #14
-(write-path floor) on Linux. See
-`_design/latest/PACK_STORE_WRITE_PATH_FLOOR_BENCH_PLAN.md` for the
-bench plan itself; this README is the operator runbook for the
+Long-lived SSH-only Debian 12 VM for running the pack-store write-path
+floor bench on Linux. This README is the operator runbook for the
 Fly.io substrate.
 
 > **Where lives what**:

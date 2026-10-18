@@ -479,10 +479,13 @@ decode_header_value(<<"=?base64?", Rest/binary>>) when byte_size(Rest) >= 2 ->
     Size = byte_size(Rest),
     case binary:part(Rest, Size - 2, 2) of
         <<"?=">> ->
+            %% `base64:decode/1` raises `badarg` on a byte outside the
+            %% alphabet and `missing_padding` on a short tail.
             try
                 {ok, base64:decode(binary:part(Rest, 0, Size - 2))}
             catch
-                _:_ -> {error, badarg}
+                error:badarg -> {error, badarg};
+                error:missing_padding -> {error, badarg}
             end;
         _ ->
             {error, badarg}
@@ -636,17 +639,17 @@ coerce(<<"integer">>, Name, V) ->
     try
         binary_to_integer(V)
     catch
-        _:_ -> throw({invalid_var, Name})
+        error:badarg -> throw({invalid_var, Name})
     end;
 coerce(<<"number">>, Name, V) ->
     try
         binary_to_integer(V)
     catch
-        _:_ ->
+        error:badarg ->
             try
                 binary_to_float(V)
             catch
-                _:_ -> throw({invalid_var, Name})
+                error:badarg -> throw({invalid_var, Name})
             end
     end;
 coerce(<<"boolean">>, _, <<"true">>) ->

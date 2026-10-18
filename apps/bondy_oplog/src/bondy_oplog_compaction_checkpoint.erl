@@ -5,11 +5,10 @@
 
 -module(bondy_oplog_compaction_checkpoint).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for the per-instance compaction checkpoint store.
 
 A compaction checkpoint is the output of one compaction cycle: the
@@ -52,7 +51,7 @@ state.
 Consumers that want versioned checkpoints build them on top of the
 behaviour (e.g. by writing each checkpoint with a separate id and
 keeping a roll-up).
-""").
+""".
 
 -type state() :: term().
 

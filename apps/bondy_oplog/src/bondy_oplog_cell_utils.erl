@@ -6,10 +6,9 @@
 -module(bondy_oplog_cell_utils).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Shared per-cell batch-admin primitives, extracted from `bondy_oplog_applier`
 so both the applier (a normal instance's separate per-cell fold process)
 and a fused instance (which folds in-process, no separate applier) run
@@ -37,7 +36,7 @@ below): each table's cells are enumerated through ITS OWN ctx (scope +
 handle) and decoded with ITS OWN kernel. Sweeping from a single founding
 ctx alone would both miss every other table's cells and misdecode them
 with the wrong kernel.
-""").
+""".
 
 -export([distinct_cell_keys/1]).
 -export([member_cells/5]).

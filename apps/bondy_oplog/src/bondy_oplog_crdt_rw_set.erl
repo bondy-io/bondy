@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Remove-Wins Set (RWSet) — tier_2 operation-based CRDT.
 
 The op-based equivalent of the pure `pure_rwset`. A set with `add` and
@@ -48,7 +46,7 @@ surviving add remains.
 
 `value_equals_state/0 -> false`: the value is the set of present elements,
 not the per-element cells.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

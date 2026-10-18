@@ -504,7 +504,7 @@ do_import_aux(Log) ->
             {head, disk_log:chunk(Log, start)}, undefined, Log, Counters0
         )
     catch
-        _:Reason ->
+        throw:{invalid_header, _} = Reason ->
             {error, Reason}
     after
         _ = disk_log:close(Log)
@@ -519,6 +519,11 @@ import_chunk(eof, Mode, Log, Counters0) ->
 import_chunk({error, _} = Error, _, Log, _) ->
     _ = disk_log:close(Log),
     Error;
+import_chunk({head, eof}, undefined, Log, _) ->
+    %% `disk_log:chunk/2` answers `eof` on a log holding no terms: the file
+    %% has no header to import from.
+    _ = disk_log:close(Log),
+    {error, empty_file};
 import_chunk({head, {Cont, [H | T]}}, undefined, Log, Counters) ->
     Mode = import_mode(H),
     import_chunk({Cont, T}, Mode, Log, Counters);
@@ -675,13 +680,21 @@ do_import_legacy({{{Prefix, Sub}, Key}, {object, _} = Object}, C) ->
                 end
         end
     catch
-        Class:Reason0 ->
+        error:Reason0 when
+            Reason0 == function_clause;
+            Reason0 == badarg;
+            Reason0 == badarith;
+            is_tuple(Reason0), element(1, Reason0) == badkey;
+            is_tuple(Reason0), element(1, Reason0) == badmap;
+            is_tuple(Reason0), element(1, Reason0) == bad_generator;
+            is_tuple(Reason0), element(1, Reason0) == badmatch
+        ->
             ?LOG_WARNING(#{
                 description =>
                     "Skipping a legacy record that could not be imported",
                 prefix => Prefix,
                 sub_prefix => Sub,
-                class => Class,
+                class => error,
                 reason => Reason0
             }),
             skip(import_error, C)
@@ -987,7 +1000,7 @@ do_read_head(Log, Acc0) ->
                 Error
         end
     catch
-        _:Reason ->
+        throw:{invalid_header, _} = Reason ->
             {error, Reason}
     after
         _ = disk_log:close(Log)

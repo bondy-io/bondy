@@ -20,6 +20,7 @@
 all() ->
     [
         missing_client_nonce,
+        malformed_client_nonce_is_rejected,
 
         test_1,
 
@@ -235,6 +236,29 @@ missing_client_nonce(Config) ->
     ?assertMatch(
         {error, missing_nonce},
         bondy_auth:challenge(?WAMP_SCRAM_AUTH, #{}, Ctxt1)
+    ).
+
+%% One nonce per reason `base64:decode/1` raises: `badarg`, `badarith`,
+%% `missing_padding`, `{case_clause, _}`, and `function_clause`.
+malformed_client_nonce_is_rejected(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    SessionId = bondy_session_id:new(),
+    {ok, Ctxt} = bondy_auth:init(
+        SessionId, RealmUri, ?U1, [], {127, 0, 0, 1}
+    ),
+    Nonces = [
+        <<"YW=j">>, <<"YWJjZ===">>, <<"YWJjZA=">>, <<"YQ==YQ==">>, 1
+    ],
+    lists:foreach(
+        fun(Nonce) ->
+            Details = #{authextra => #{<<"nonce">> => Nonce}},
+            ?assertEqual(
+                {error, invalid_base64_format},
+                bondy_auth:challenge(?WAMP_SCRAM_AUTH, Details, Ctxt),
+                Nonce
+            )
+        end,
+        Nonces
     ).
 
 %% =============================================================================

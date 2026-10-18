@@ -69,8 +69,9 @@ Returns `true` when a meta event for `TopicUri` should be produced in
 `RealmUri`, according to the `wamp.meta_events` config and — in
 `demand` mode — the registry's existence predicate.
 
-Fails open: an error in the predicate returns `true`, degrading to the
-publish path (which routes exactly), never losing a demanded event.
+Fails open while a registry partition is down: this function then returns
+`true`, degrading to the publish path (which routes exactly), never losing a
+demanded event. Any other error in the predicate raises.
 """.
 -spec demanded(RealmUri :: uri(), TopicUri :: uri()) -> boolean().
 
@@ -81,10 +82,17 @@ demanded(RealmUri, TopicUri) ->
         on ->
             true;
         demand ->
+            %% While a registry partition is down, `bondy_registry_partition`
+            %% has no pool (`badarg`), no connected worker (`function_clause`
+            %% on `false`), or no published store (`{badrecord, undefined}`).
             try
                 bondy_registry:has_matches(subscription, RealmUri, TopicUri)
             catch
-                _:_ ->
+                error:badarg ->
+                    true;
+                error:function_clause ->
+                    true;
+                error:{badrecord, undefined} ->
                     true
             end
     end.
@@ -95,7 +103,7 @@ lifecycle action, subject to demand.
 
 `Action` is the registry lifecycle action (`created | added | removed |
 deleted`); the meta topic is derived from it and the entry type. Each
-implied topic is demand-checked independently. Total: never throws.
+implied topic is demand-checked independently.
 """.
 -spec maybe_publish(
     Action :: created | added | removed | deleted,
@@ -103,25 +111,14 @@ implied topic is demand-checked independently. Total: never throws.
 ) -> ok.
 
 maybe_publish(Action, Entry) ->
-    try
-        Type = bondy_registry_entry:type(Entry),
-        RealmUri = bondy_registry_entry:realm_uri(Entry),
-        Topic = topic(Type, Action),
+    Type = bondy_registry_entry:type(Entry),
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Topic = topic(Type, Action),
 
-        case demanded(RealmUri, Topic) of
-            true ->
-                enqueue(Topic, Action, Entry);
-            false ->
-                ok
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_DEBUG(#{
-                description => "Failed to produce WAMP meta event",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
+    case demanded(RealmUri, Topic) of
+        true ->
+            enqueue(Topic, Action, Entry);
+        false ->
             ok
     end.
 

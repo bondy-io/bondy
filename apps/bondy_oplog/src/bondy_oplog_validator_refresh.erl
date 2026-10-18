@@ -6,10 +6,9 @@
 -module(bondy_oplog_validator_refresh).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Refreshes an instance's in-process validator snapshot, extracted from
 `bondy_oplog_applier` so both the applier (a normal instance's separate
 per-cell fold process) and a fused instance (which holds its own
@@ -23,7 +22,7 @@ only). Every outcome is logged and telemetered on
 `[bondy_oplog, applier, validator_refresh]` (the event name kept
 unqualified by caller, since a refresh means the same thing regardless of
 which process ran it).
-""").
+""".
 
 -export([refresh/4]).
 

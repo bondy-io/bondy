@@ -121,11 +121,7 @@ init({Ref, Transport, Opts}) ->
                 description => "TCP connection rejected (rate limit)",
                 source_ip => inet:ntoa(SourceIP)
             }),
-            try
-                Transport:close(Socket)
-            catch
-                _:_ -> ok
-            end,
+            _ = Transport:close(Socket),
             exit(normal);
         ok ->
             ok
@@ -744,11 +740,7 @@ socket_opened(_St) ->
 %% @private
 close_socket(Reason, St) ->
     Socket = St#state.socket,
-    try
-        (St#state.transport):close(Socket)
-    catch
-        _:_ -> ok
-    end,
+    _ = (St#state.transport):close(Socket),
 
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
 

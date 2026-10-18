@@ -32,6 +32,7 @@ proxy or load balancer, inspecting the `Forwarded`, `X-Real-IP` and
 -export([mode/1]).
 -export([proxy_info/1]).
 -export([source_ip/1]).
+-export([invalid_trusted_proxies/1]).
 
 -ifdef(TEST).
 -export([is_trusted_peer/2]).
@@ -297,25 +298,52 @@ do_rightmost_untrusted([Bin | Rest], TrustedProxies) ->
 do_rightmost_untrusted([], _TrustedProxies) ->
     {error, not_found}.
 
+-doc """
+Returns the configured trusted-proxy entries in `Opts` that are not a valid
+CIDR, in configuration order. Blank entries are not reported.
+
+`bondy_listener_config` refuses a listener for which this is not `[]`, so a
+typo fails the boot instead of leaving a proxy the operator meant to trust
+untrusted.
+""".
+-spec invalid_trusted_proxies(map()) -> [term()].
+
+invalid_trusted_proxies(Opts) ->
+    [
+        Item
+     || Item <- trusted_proxy_items(Opts),
+        not is_blank(Item),
+        to_cidr(Item) =:= false
+    ].
+
 %% @private
-%% Configured trusted-proxy CIDRs as `[bondy_cidr:t()]`. Accepts a pre-parsed
-%% list (schema) or a comma-separated string, skipping entries that do not parse.
+%% Configured trusted-proxy CIDRs as `[bondy_cidr:t()]`, skipping entries that
+%% do not parse.
 trusted_proxies(Opts) ->
+    parse_cidrs(trusted_proxy_items(Opts)).
+
+%% @private
+%% Accepts a pre-parsed list (schema) or a comma-separated string.
+trusted_proxy_items(Opts) ->
     case maps:get(trusted_proxies, Opts, []) of
         L when is_list(L) ->
             case is_string_list(L) of
                 true ->
-                    parse_cidrs(
-                        binary:split(iolist_to_binary(L), <<",">>, [global])
-                    );
+                    binary:split(iolist_to_binary(L), <<",">>, [global]);
                 false ->
-                    parse_cidrs(L)
+                    L
             end;
         Bin when is_binary(Bin) ->
-            parse_cidrs(binary:split(Bin, <<",">>, [global]));
+            binary:split(Bin, <<",">>, [global]);
         _ ->
             []
     end.
+
+%% @private
+is_blank(Item) when is_binary(Item) ->
+    string:trim(Item) =:= <<>>;
+is_blank(_) ->
+    false.
 
 %% @private
 %% A cuttlefish `string` datatype yields a flat char list; distinguish it from a
@@ -329,7 +357,7 @@ parse_cidrs(Items) ->
 
 %% @private
 to_cidr({Addr, Mask} = Cidr) when is_tuple(Addr) andalso is_integer(Mask) ->
-    {true, Cidr};
+    bondy_cidr:is_type(Cidr) andalso {true, Cidr};
 to_cidr(Item) when is_binary(Item) ->
     case string:trim(Item) of
         <<>> ->
@@ -338,7 +366,7 @@ to_cidr(Item) when is_binary(Item) ->
             try
                 {true, bondy_cidr:parse(Trimmed)}
             catch
-                _:_ -> false
+                error:badarg -> false
             end
     end;
 to_cidr(_) ->

@@ -77,7 +77,9 @@ handle_call(?BONDY_ROUTER_BRIDGE_CHECK_SPEC, #call{} = M, Ctxt) ->
                 Ext = bondy_bridge_relay:to_external(Bridge),
                 bondy_wamp_message:result(M#call.request_id, #{}, [Ext])
         catch
-            _:Reason ->
+            error:#{code := _} = Reason ->
+                bondy_wamp_api_utils:error(Reason, M);
+            error:{badmap, _} = Reason ->
                 bondy_wamp_api_utils:error(Reason, M)
         end,
     {reply, Reply};

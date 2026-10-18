@@ -383,11 +383,7 @@ mark_up(
     arm_liveness_timer(State1).
 
 do_mark_down(#state{name = Name, service_name = ServiceName} = State0) ->
-    try
-        hackney_pool:stop_pool(Name)
-    catch
-        _:_ -> ok
-    end,
+    _ = hackney_pool:stop_pool(Name),
     _ = cancel_liveness_timer(State0),
     State1 = State0#state{status = down, liveness_timer = undefined},
     ok = publish_status(State1),

@@ -134,26 +134,36 @@ init(Config) ->
         config => Config
     }),
 
-    try
-        application:set_env([{email, Config}]),
-
-        {ok, _} = application:ensure_all_started(email),
-
-        case lists:keyfind(email_sender, 1, Config) of
-            false ->
-                error({invalid_config, Config});
-            SenderTuple ->
-                Context = maps:from_list([SenderTuple]),
-                {ok, Context}
-        end
-    catch
-        _:Reason ->
+    Result =
+        try
+            application:set_env([{email, Config}]),
+            case application:ensure_all_started(email) of
+                {ok, _} ->
+                    case lists:keyfind(email_sender, 1, Config) of
+                        false ->
+                            {error, {invalid_config, Config}};
+                        SenderTuple ->
+                            Context = maps:from_list([SenderTuple]),
+                            {ok, Context}
+                    end;
+                {error, _} = Error ->
+                    Error
+            end
+        catch
+            %% `application:set_env/1` rejects malformed configuration data.
+            error:{badarg, _} = BadArg ->
+                {error, BadArg}
+        end,
+    case Result of
+        {ok, _} ->
+            Result;
+        {error, Reason} ->
             ?LOG_ERROR(#{
                 description => "Error while initialising bridge",
                 config => Config,
                 reason => Reason
             }),
-            {error, Reason}
+            Result
     end.
 
 -doc "Validate a SendGrid email action spec.".
@@ -162,8 +172,14 @@ validate_action(Action0) ->
         Action1 ->
             {ok, Action1}
     catch
-        _:Reason ->
-            {error, Reason}
+        error:#{code := _} = Reason ->
+            {error, Reason};
+        %% The `sender` validator: a value neither list nor binary, or a list
+        %% that is not an iolist.
+        error:function_clause ->
+            {error, function_clause};
+        error:badarg ->
+            {error, badarg}
     end.
 
 -doc "Send an email via SendGrid with up to 3 retries on timeout.".
@@ -282,17 +298,14 @@ formatted_body(_) ->
     {ok, binary()} | {error, Reason :: any()} | no_return().
 
 do_send_with_retry(Action, 1, _Backoff) ->
-    try send_email(Action) of
+    case send_email(Action) of
         {ok, _} = Success ->
             Success;
         {error, _Reason} ->
             error({error, <<"Max retries reached">>})
-    catch
-        _:_ ->
-            error({error, <<"Max retries reached">>})
     end;
 do_send_with_retry(Action, Times, Backoff) ->
-    try send_email(Action) of
+    case send_email(Action) of
         {ok, _} = Success ->
             Success;
         {error, timeout} ->
@@ -301,7 +314,4 @@ do_send_with_retry(Action, Times, Backoff) ->
             do_send_with_retry(Action, Times - 1, Backoff1);
         {error, _} = Error ->
             error(Error)
-    catch
-        _:Reason ->
-            error({error, Reason})
     end.

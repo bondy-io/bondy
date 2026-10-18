@@ -259,11 +259,7 @@ close(#state{} = St) ->
             undefined ->
                 ok;
             _ ->
-                try
-                    request(path(St, <<"/close">>), <<>>, St)
-                catch
-                    _:_ -> ok
-                end
+                request(path(St, <<"/close">>), <<>>, St)
         end,
     _ =
         St#state.stream_conn =/= undefined andalso
@@ -299,7 +295,12 @@ open_response(Body) ->
         #{<<"transport">> := Id} when is_binary(Id) -> {ok, Id};
         Other -> {error, {malformed_open_response, Other}}
     catch
-        Class:Reason -> {error, {malformed_open_response, Class, Reason}}
+        error:unexpected_end = Reason ->
+            {error, {malformed_open_response, error, Reason}};
+        error:{invalid_byte, _} = Reason ->
+            {error, {malformed_open_response, error, Reason}};
+        error:{unexpected_sequence, _} = Reason ->
+            {error, {malformed_open_response, error, Reason}}
     end.
 
 %% @private

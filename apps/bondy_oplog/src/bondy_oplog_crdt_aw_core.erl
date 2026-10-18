@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_crdt_aw_core).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Shared **add-wins / observed-remove** dot-store machinery for the tier_2
 add-wins CRDTs: the add-wins map (`bondy_oplog_crdt_aw_map`), the add-wins
 set (`bondy_oplog_crdt_aw_set`), and the enable-wins flag
@@ -33,7 +31,7 @@ lists, independent of how each type shapes its entries, so all three
 add-wins types share one correct implementation. Exactness under causal
 (per-origin FIFO) delivery is what makes `dot_observed/2` a simple
 `Ctx[O] >= S` test.
-""").
+""".
 
 -export([dot_of/1]).
 -export([normalise_context/1]).

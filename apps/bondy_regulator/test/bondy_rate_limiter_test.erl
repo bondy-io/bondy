@@ -73,7 +73,11 @@ forget_resets() ->
     K = key(forget),
     ?assert(?M:allow(K, ?OPTS(1))),
     ?assertNot(?M:allow(K, ?OPTS(1))),
+    ?assertMatch([_], regulator_rows(K)),
     ok = ?M:forget(K),
+    %% Both the registry row and the regulator bucket are gone.
+    ?assertEqual([], ets:lookup(bondy_rate_limiter, K)),
+    ?assertEqual([], regulator_rows(K)),
     %% A fresh bucket is minted after forget.
     ?assert(?M:allow(K, ?OPTS(1))).
 
@@ -85,7 +89,12 @@ gc_sweeps_idle() ->
     true = ets:update_element(bondy_rate_limiter, K, {3, 0}),
     bondy_rate_limiter ! sweep,
     ok = wait_gone(bondy_rate_limiter, K, 50),
-    ?assertEqual([], ets:lookup(bondy_rate_limiter, K)).
+    ?assertEqual([], ets:lookup(bondy_rate_limiter, K)),
+    ?assertEqual([], regulator_rows(K)).
+
+%% The regulator bucket is registered under `{bondy_rate_limiter, Key}`.
+regulator_rows(K) ->
+    ets:lookup(bondy_regulator_rate_limit, {bondy_rate_limiter, K}).
 
 wait_gone(_Tab, _K, 0) ->
     {error, still_present};

@@ -6,11 +6,10 @@
 -module(bondy_oplog_transport_inline).
 -behaviour(bondy_oplog_transport).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 In-VM transport for tests and single-node deployments.
 
 `peer_id` is interpreted as an `instance_id()` — the request is
@@ -21,7 +20,7 @@ same logical CRDT in a single VM for unit tests.
 For real distributed sync, replace with a network-aware transport
 (e.g. Distributed Erlang, Partisan, gRPC) implementing the same
 behaviour.
-""").
+""".
 
 -export([request/4]).
 -export([self_id/1]).

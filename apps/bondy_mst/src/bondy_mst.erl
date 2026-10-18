@@ -11,7 +11,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 This module implements a Merkle Search Tree (MST), a probabilistic
 data structure optimised for efficient storage and retrieval of
 key-value pairs.
@@ -59,7 +59,7 @@ the tree shape. Values stored in the MST are assigned a layer by computing
 their hash and writing that value in base `B`. The layer to which an item is
 assigned is the layer whose number is the length of the longest prefix of the
 hash.
-""").
+""".
 
 -record(bondy_mst, {
     store :: bondy_mst_store:t(),
@@ -266,16 +266,16 @@ hash.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Create a new Merkle Search Tree using the default store.
 The same as calling `new(#{})`.
-""").
+""".
 -spec new() -> t().
 
 new() ->
     new(#{}).
 
-?DOC("""
+-doc """
 Creates a new MST instance with configurable options.
 
 This structure can be used as a CRDT set with only true keys (default)
@@ -290,7 +290,7 @@ Defaults to the grow-only set merger function `merger/3`
 Defaults to `comparator/2`
 
 Returns a new MST instance.
-""").
+""".
 -spec new(Opts :: opts()) -> t().
 
 new(Opts) when is_list(Opts) ->
@@ -334,28 +334,28 @@ new(Opts) when is_map(Opts); is_list(Opts) ->
         hash_algorithm = Algo
     }.
 
-?DOC("""
+-doc """
 Returns the store capabilities.
-""").
+""".
 -spec capabilities(t()) -> map().
 
 capabilities(#?MODULE{store = Store}) ->
     bondy_mst_store:capabilities(Store).
 
-?DOC("""
+-doc """
 Gracefully closes the tree's backend store, preserving any persisted state so a
 later `new/1` against the same store options restores it. For a durable backend
 this flushes the current root and pending buffers and releases file descriptors;
 for an in-memory backend (`ets`/`map`) it is a no-op (the data is freed when the
 owning process exits). Use this — NOT `destroy/1` — when stopping a tree whose
 data must survive a restart.
-""").
+""".
 -spec close(t()) -> ok.
 
 close(#?MODULE{store = Val}) ->
     bondy_mst_store:close(Val).
 
-?DOC("""
+-doc """
 Forces the tree's staged state (the current root and any buffered pages)
 durable WITHOUT closing the backend. For a durable backend this is the
 per-commit durability barrier: the on-disk root advances so a later `new/1`
@@ -364,7 +364,7 @@ beginning. For an in-memory backend (`ets`/`map`) it is a no-op. Returns
 `{ok, Tree}` with the staged-state bookkeeping cleared, or `{error, Reason}`
 if the durable write failed (the in-memory root is unchanged and the next
 `flush/1`/`close/1` retries).
-""").
+""".
 -spec flush(t()) -> {ok, t()} | {error, term()}.
 
 flush(#?MODULE{store = Store0} = T) ->
@@ -375,7 +375,7 @@ flush(#?MODULE{store = Store0} = T) ->
             Error
     end.
 
-?DOC("""
+-doc """
 Rolls the backend's incoming buffer aside for an asynchronous seal when its
 threshold is crossed and no seal is in flight, returning a `seal_job()` for
 a worker to execute off the caller's process.
@@ -389,7 +389,7 @@ rather than starting a second rewrite). `{noop, Tree1}` means nothing to do.
 
 For an in-memory backend (`ets`/`map`) — which never seals — this is always
 `{noop, Tree}`.
-""").
+""".
 -spec maybe_roll_for_seal(t()) ->
     {rolled, seal_job(), t()} | {defer, t()} | {noop, t()}.
 
@@ -403,33 +403,33 @@ maybe_roll_for_seal(#?MODULE{store = Store0} = T) ->
             {noop, T#?MODULE{store = Store1}}
     end.
 
-?DOC("""
+-doc """
 Executes a `seal_job()` produced by `maybe_roll_for_seal/1`. Self-contained
 and stateless — it holds no tree or store reference and mutates no live
 state — so it is designed to run in a separate (linked) worker process while
 the owner keeps serving writes and reads. Returns `ok` or `{error, _}`; on
 error the owner must NOT `complete_seal/2`.
-""").
+""".
 -spec run_seal_job(seal_job()) -> ok | {error, term()}.
 
 run_seal_job({Mod, Job}) ->
     Mod:run_seal_job(Job).
 
-?DOC("""
+-doc """
 The target pack id of a `seal_job()` — the argument to `complete_seal/2`
 once the worker reports the job done.
-""").
+""".
 -spec seal_job_pack_id(seal_job()) -> pos_integer().
 
 seal_job_pack_id({Mod, Job}) ->
     Mod:seal_job_pack_id(Job).
 
-?DOC("""
+-doc """
 Finalises the asynchronous seal whose worker has completed `run_seal_job/1`
 for `PackId`: commits it and mounts the new sealed view so reads move from
 the in-flight snapshot to the durable pack. Returns the updated tree, or
 `{error, _}` (treat as fatal — a reopen re-mounts the durable pack).
-""").
+""".
 -spec complete_seal(t(), PackId :: pos_integer()) ->
     {ok, t()} | {error, term()}.
 
@@ -441,42 +441,42 @@ complete_seal(#?MODULE{store = Store0} = T, PackId) ->
             Error
     end.
 
-?DOC("""
+-doc """
 Whether the backend has an asynchronous seal in flight (rolled but not yet
 completed). Always `false` for in-memory backends.
-""").
+""".
 -spec seal_in_flight(t()) -> boolean().
 
 seal_in_flight(#?MODULE{store = Store}) ->
     bondy_mst_store:seal_in_flight(Store).
 
-?DOC("""
+-doc """
 Destroys the tree by destroying its backend store. Irreversible: a durable
 backend's on-disk data is DELETED. Distinct from `close/1`, which preserves
 persisted state, and from `delete/2`, which removes a single key from the tree.
-""").
+""".
 -spec destroy(t()) -> ok.
 
 destroy(#?MODULE{store = Val}) ->
     bondy_mst_store:destroy(Val).
 
-?DOC("""
+-doc """
 Returns the tree's root hash.
-""").
+""".
 -spec root(Tree :: t()) -> hash() | undefined.
 
 root(#?MODULE{store = Store}) ->
     bondy_mst_store:get_root(Store).
 
-?DOC("""
+-doc """
 Returns the tree's store.
-""").
+""".
 -spec store(t()) -> bondy_mst_store:t().
 
 store(#?MODULE{store = Val}) ->
     Val.
 
-?DOC("""
+-doc """
 Returns the tree with its store reference replaced by `Store`.
 
 This is the setter counterpart to `store/1`. It exists for tests
@@ -486,56 +486,56 @@ returned store back into the tree wrapper without rebuilding it.
 Callers must guarantee that `Store` is a valid store of the same
 backend module as the tree was opened with — no validation is
 done here.
-""").
+""".
 -spec set_store(t(), bondy_mst_store:t()) -> t().
 
 set_store(#?MODULE{} = T, Store) ->
     T#?MODULE{store = Store}.
 
-?DOC("""
+-doc """
 Returns the value associated with key `Key`.
-""").
+""".
 -spec get(T :: t(), Key :: key()) -> Value :: any().
 
 get(#?MODULE{} = T, Key) ->
     do_get(T, Key, root(T)).
 
-?DOC("""
+-doc """
 Returns the value associated with key `Key` starting at root `Root`.
 This allows to read from a previous version.
-""").
+""".
 -spec get(T :: t(), Key :: key(), Root :: binary()) -> Value :: any().
 
 get(#?MODULE{} = T, Key, Root) when is_binary(Root) ->
     do_get(T, Key, Root).
 
-?DOC("""
+-doc """
 Returns the first key-value pair in the MST or `undefined` if empty.
-""").
+""".
 -spec first(T :: t()) -> Value :: {key(), value()} | undefined.
 
 first(#?MODULE{} = T) ->
     first(T, root(T)).
 
-?DOC("""
+-doc """
 Returns the last key-value pair in the MST or `undefined` if empty.
-""").
+""".
 -spec last(T :: t()) -> Value :: {key(), value()} | undefined.
 
 last(#?MODULE{} = T) ->
     last(T, root(T)).
 
-?DOC("""
+-doc """
 List all items.
-""").
+""".
 -spec to_list(t()) -> [{key(), value()}].
 
 to_list(#?MODULE{} = T) ->
     to_list(T, root(T)).
 
-?DOC("""
+-doc """
 List all items.
-""").
+""".
 -spec to_list(t(), hash() | undefined) -> [{key(), value()}].
 
 to_list(#?MODULE{}, undefined) ->
@@ -545,43 +545,43 @@ to_list(#?MODULE{} = T, Root) when is_binary(Root) ->
         fold(T, fun(E, Acc) -> [E | Acc] end, [], [{root, Root}])
     ).
 
-?DOC("""
+-doc """
 Calls `Fun(Elem)` for each element `Elem` in the tree, starting from its
 current root.
 This function is used for its side effects and the evaluation order is
 defined to be the same as the order of the elements in the tree.
 
 The same as calling `foreach(T, root(T))`.
-""").
+""".
 -spec foreach(t(), fun(({key(), value()}) -> ok)) -> ok.
 
 foreach(#?MODULE{} = T, Fun) ->
     foreach(T, Fun, []).
 
-?DOC("""
+-doc """
 Calls `Fun(Elem)` for each element `Elem` in the tree, starting from
 `Root`.
 This function is used for its side effects and the evaluation order is
 defined to be the same as the order of the elements in the tree.
-""").
+""".
 -spec foreach(t(), fun(({key(), value()}) -> ok), Opts :: list()) -> ok.
 
 foreach(#?MODULE{store = Store} = T, Fun, Opts) ->
     Root = key_value:get_lazy(root, Opts, fun() -> root(T) end),
     do_foreach(Store, Fun, Opts, Root).
 
-?DOC("""
+-doc """
 Calls `Fun(Elem, AccIn)` on successive elements of tree `T`, starting
 from the current root with `AccIn == Acc0`. `Fun/2` must return a new
 accumulator, which is passed to the next call. The function returns the final
 value of the accumulator. `Acc0` is returned if the tree is empty.
-""").
+""".
 -spec fold(t(), Fun :: fold_fun(), AccIn :: any()) -> AccOut :: any().
 
 fold(T, Fun, AccIn) ->
     fold(T, Fun, AccIn, []).
 
-?DOC("""
+-doc """
 Calls `Fun(Elem, AccIn)` on successive elements of tree `T`, starting
 from the current root with `AccIn == Acc0`. `Fun/2` must return a new
 accumulator, which is passed to the next call. The function returns the final
@@ -592,7 +592,7 @@ option decides what the fold does when it reaches such a page:
 
 - `skip`, the default, folds past the page.
 - `throw` throws `{missing_page, Hash}`.
-""").
+""".
 -spec fold(t(), Fun :: fold_fun(), AccIn :: any(), Opts :: fold_opts()) ->
     AccOut :: any().
 
@@ -600,9 +600,14 @@ fold(#?MODULE{store = Store} = T, Fun, AccIn, Opts) ->
     Root = key_value:get_lazy(root, Opts, fun() -> root(T) end),
     do_fold(Store, Fun, AccIn, Opts, Root).
 
-?DOC("""
+-doc """
+Folds `Fun({Hash, Page}, Acc)` over the pages reachable from a root: the
+`root` option, or the tree's current root.
 
-""").
+The walk visits a page's low subtree, then the page, then the subtree under
+each of its entries. A page missing from the store is skipped
+together with its subtree. Options other than `root` are ignored.
+""".
 -spec fold_pages(
     t(), Fun :: fold_pages_fun(), AccIn :: any(), Opts :: fold_opts()
 ) ->
@@ -614,15 +619,13 @@ fold_pages(#?MODULE{store = Store} = T, Fun, AccIn, Opts) when
     Root = key_value:get_lazy(root, Opts, fun() -> root(T) end),
     do_fold_pages(Store, Fun, AccIn, Opts, Root).
 
-?DOC("""
-List all items.
-""").
--spec keys(t()) -> [{key(), value()}].
+-doc "Returns the tree's keys.".
+-spec keys(t()) -> [key()].
 
 keys(#?MODULE{} = T) ->
     lists:reverse(fold(T, fun({K, _}, Acc) -> [K | Acc] end, [])).
 
-?DOC("""
+-doc """
 Computes the difference between two MSTs (or between an MST and a
 previous root of the same store) and returns it as a list of
 `{Key, Value}` pairs.
@@ -637,7 +640,7 @@ A binary root that does not resolve in the store (typically because GC
 has pruned it) is treated as `undefined`, and the result is equivalent
 to `to_list(T1)`. Callers that need different fallback semantics
 should pre-check the page's reachability.
-""").
+""".
 -spec diff_to_list(t(), t() | hash() | undefined) -> [{key(), value()}].
 
 diff_to_list(#?MODULE{} = T1, #?MODULE{} = T2) ->
@@ -661,22 +664,22 @@ diff_to_list(#?MODULE{store = Store} = T, OtherRoot) when
             diff_to_list(T, Store, root(T), Store, OtherRoot)
     end.
 
-?DOC("""
+-doc """
 Get the last `N` items of the tree, or the last `N` items strictly
 before given upper bound `TopBound` if non `undefined`.
-""").
+""".
 last_n(#?MODULE{} = T, TopBound, N) ->
     last_n(T, TopBound, N, root(T)).
 
-?DOC("""
+-doc """
 Inserts a key in the tree. The same as calling `put(T, Key, true)`.
-""").
+""".
 -spec put(t(), key()) -> t().
 
 put(#?MODULE{} = T, Key) ->
     put(T, Key, true).
 
-?DOC("""
+-doc """
 Inserts a key-value pair into the MST.
 
 If key `Key` already exists in tree `Tree1`, the old associated value is
@@ -686,7 +689,7 @@ associations in `Tree1`.
 
 The call fails with an exception if the tree has not been initialised with a
 `merger` function supporting the type of `Value`.
-""").
+""".
 -spec put(Tree1 :: t(), Key :: key(), Value :: value()) -> Tree2 :: t().
 
 put(#?MODULE{store = Store0} = T, Key, Value) ->
@@ -698,7 +701,7 @@ put(#?MODULE{store = Store0} = T, Key, Value) ->
     end,
     bondy_mst_store:transaction(Store0, Fun).
 
-?DOC("""
+-doc """
 Inserts each `{Key, Value}` pair in `Items` into the tree.
 
 For batches of more than one entry the implementation builds a small
@@ -721,7 +724,7 @@ receiver's `merger` in batch order (earlier value as the merger's
 existing-value argument), exactly as sequential `put/3` calls would.
 Collisions between an entry's key and a key already in the receiver
 invoke the receiver's `merger` exactly as `put/3` would.
-""").
+""".
 -spec put_batch(Tree1 :: t(), Items :: [{key(), value()}]) -> Tree2 :: t().
 
 put_batch(#?MODULE{} = T, []) ->
@@ -739,7 +742,7 @@ put_batch(#?MODULE{} = T, Items) when is_list(Items) ->
     B = bulk_build(B0, Items),
     do_merge(T, B, root(B), put_batch).
 
-?DOC("""
+-doc """
 Structurally deletes a key from the MST.
 
 This performs a true structural deletion, removing the key-value pair from the
@@ -749,7 +752,7 @@ collection of tombstones.
 If the key is not found in the tree, the tree is returned unchanged.
 
 Returns a new tree with the key removed.
-""").
+""".
 -spec delete(Tree1 :: t(), Key :: key()) -> Tree2 :: t().
 
 delete(#?MODULE{store = Store0} = T, Key) ->
@@ -772,7 +775,7 @@ delete(#?MODULE{store = Store0} = T, Key) ->
     end,
     bondy_mst_store:transaction(Store0, Fun).
 
-?DOC("""
+-doc """
 Structurally removes every key `=< Watermark` from the tree, keeping
 only the suffix of keys strictly greater than `Watermark`. Returns a
 new tree whose root is the canonical MST of the remaining key set.
@@ -791,7 +794,7 @@ key set has a single canonical structure.
 Used by compaction to drop the stable prefix once it has been folded
 into the projection/checkpoint. Returns the tree unchanged when it is
 empty.
-""").
+""".
 -spec truncate(Tree1 :: t(), Watermark :: key()) -> Tree2 :: t().
 
 truncate(#?MODULE{store = Store0} = T, Watermark) ->
@@ -816,9 +819,13 @@ truncate(#?MODULE{store = Store0} = T, Watermark) ->
     end,
     bondy_mst_store:transaction(Store0, Fun).
 
-?DOC("""
+-doc """
+Writes `Page` to the tree's store and returns its hash. The tree's root does
+not change, so the page stays unreachable until a root references it.
 
-""").
+The hash is derived from the page's content: `bondy_mst_gc_guard_test`
+writes a page copied from another tree and gets back that tree's hash.
+""".
 -spec put_page(t(), bondy_mst_page:t()) -> {Hash :: hash(), t()}.
 
 put_page(#?MODULE{store = Store0} = T, Page) ->
@@ -828,17 +835,17 @@ put_page(#?MODULE{store = Store0} = T, Page) ->
     end,
     bondy_mst_store:transaction(Store0, Fun).
 
-?DOC("""
+-doc """
 Merges two MSTs into a single tree.
-""").
+""".
 -spec merge(T1 :: t(), T2 :: t()) -> NewT1 :: t().
 
 merge(#?MODULE{} = T1, #?MODULE{} = T2) ->
     do_merge(T1, T2, root(T2), merge).
 
-?DOC("""
+-doc """
 Merges two MSTs into a single tree.
-""").
+""".
 -spec merge(T1 :: t(), T2 :: t(), Root :: hash() | undefined) -> NewT1 :: t().
 
 merge(#?MODULE{} = T1, #?MODULE{} = T2, Root) when
@@ -867,10 +874,10 @@ do_merge(#?MODULE{store = Store0} = T1, #?MODULE{} = T2, Root, Op) ->
         end
     ).
 
-?DOC("""
+-doc """
 Returns the hashes of the pages identified by root hash that are missing
 from the store.
-""").
+""".
 -spec missing_set(t(), Root :: binary()) -> [hash()].
 
 missing_set(#?MODULE{store = Store}, Root) ->
@@ -882,23 +889,21 @@ missing_set(#?MODULE{store = Store}, Root) ->
         Set -> sets:to_list(Set)
     end.
 
-?DOC("""
+-doc """
 Dumps the structure of the MST for debugging purposes.
-""").
+""".
 -spec dump(t()) -> ok.
 
 dump(#?MODULE{store = Store} = T) ->
     dump(Store, root(T)).
 
-?DOC("""
-
-""").
+-doc "As `gc/2` with no keep-roots: only the current root is protected.".
 -spec gc(t()) -> t().
 
 gc(#?MODULE{} = T) ->
     gc(T, []).
 
-?DOC("""
+-doc """
 Reclaims pages by reachability from `KeepRoots` (plus the current root,
 which is always protected).
 
@@ -926,7 +931,7 @@ process, so the root marked from IS the only live root.
 The collector additionally refuses to sweep when the current root is
 already unservable — see the abort below; a hole would otherwise be amplified
 into subtree loss, because the mark walk skips missing pages silently.
-""").
+""".
 -spec gc(t(), KeepRoots :: [hash()]) -> t().
 
 gc(#?MODULE{store = Store0} = T, KeepRoots) when is_list(KeepRoots) ->
@@ -991,7 +996,7 @@ gc(#?MODULE{store = Store0} = T, KeepRoots) when is_list(KeepRoots) ->
         end
     ).
 
-?DOC("""
+-doc """
 The most recent GC-abort reports retained by this node, newest first.
 
 The abort is the own-root page-loss tripwire; this is the evidence it
@@ -1017,22 +1022,22 @@ per-hash state at abort time and again after a short delay, and the
 
 That distinction is the whole point: it says WHICH layer to investigate,
 which a hash list alone does not.
-""").
+""".
 -spec gc_aborts() -> [map()].
 
 gc_aborts() ->
     persistent_term:get(?GC_ABORTS_KEY, []).
 
-?DOC("""
+-doc """
 Discards the retained GC-abort reports (see `gc_aborts/0`).
-""").
+""".
 -spec forget_gc_aborts() -> ok.
 
 forget_gc_aborts() ->
     persistent_term:erase(?GC_ABORTS_KEY),
     ok.
 
-?DOC("""
+-doc """
 The page hashes most recently reclaimed by this node's collectors, newest
 first, when `bondy_mst.trace_swept` is enabled (otherwise empty).
 
@@ -1042,7 +1047,7 @@ here were reclaimed by a collector whose mark set did not include them, which
 means whoever published that root derived it from a base the collector had
 already moved past. Pages that are NOT here were never collected, so they were
 never stored.
-""").
+""".
 -spec verify_default() -> boolean().
 
 verify_default() ->
@@ -1051,10 +1056,10 @@ verify_default() ->
     %% none: the suite would report green while checking nothing.
     ?VERIFY_DEFAULT.
 
-?DOC("""
+-doc """
 The page hashes most recently reclaimed by this node's collectors, newest
 first, when `bondy_mst.trace_swept` is enabled (otherwise empty).
-""").
+""".
 -spec recent_swept() -> [hash()].
 
 recent_swept() ->
@@ -1077,7 +1082,7 @@ record_swept(#{swept := [_ | _] = Swept}) ->
 record_swept(_) ->
     ok.
 
-?DOC("""
+-doc """
 Discards the recorded sweep window (see `recent_swept/0`).
 
 The window is UNBOUNDED while `trace_swept` is on, because a bounded one is
@@ -1086,7 +1091,7 @@ also empties the window most of the time, and an empty window answers "these
 pages were never collected" for pages that were — the exact false negative
 this instrument exists to rule out. The consumer owns the lifetime and must
 clear it per observation window.
-""").
+""".
 -spec forget_swept() -> ok.
 
 forget_swept() ->

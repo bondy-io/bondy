@@ -1,6 +1,6 @@
 # =============================================================================
 # Perf cluster -- 3-node Bondy that accepts anonymous WAMP-over-WS clients.
-# Design: _design/test-harness (M2/M7). Reuses the proven M0 image
+# Reuses the proven M0 image
 # (harness/m0-fly-spike/Dockerfile). Pinned tag: develop-perf.1.
 #
 # Deploy from the REPO ROOT (build context = repo root for `COPY . /bondy/src`):

@@ -50,7 +50,9 @@ all() ->
         node_wildcard_outlives_its_sessions,
         realm_delete_purges_registry,
         oidc_refresh_entry_is_keyed_by_its_session,
-        oidc_refresh_entry_dropped_when_session_gone
+        oidc_refresh_entry_dropped_when_session_gone,
+        session_match_failure_reaches_the_caller,
+        failed_wildcard_registration_refuses_the_open
     ].
 
 init_per_suite(Config) ->
@@ -247,6 +249,59 @@ oidc_refresh_entry_dropped_when_session_gone(Config) ->
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
+
+%% A failure to enumerate the realm's sessions reaches the caller of
+%% `invalidate_rbac_all/1` and `close_all/2`, so a grant change is never
+%% reported as applied while sessions keep their cached context.
+session_match_failure_reaches_the_caller(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    ok = meck:new(bondy_session, [passthrough]),
+    try
+        ok = meck:expect(bondy_session, match, fun(_, _) -> error(badarg) end),
+        ?assertError(
+            badarg, bondy_session_manager:invalidate_rbac_all(RealmUri)
+        ),
+        ?assertError(
+            badarg,
+            bondy_session_manager:close_all(RealmUri, ?WAMP_CLOSE_NORMAL)
+        )
+    after
+        ok = meck:unload(bondy_session)
+    end.
+
+%% The first open in a realm registers the node's session wildcard. When the
+%% dealer refuses it, the open answers the dealer's reason, leaves no session,
+%% and the next open in the realm retries the registration.
+failed_wildcard_registration_refuses_the_open(_Config) ->
+    Realm = bondy_realm:create(<<"session.cleanup.wildcard.test">>),
+    RealmUri = bondy_realm:uri(Realm),
+    ok = bondy_realm:disable_security(Realm),
+    ok = meck:new(bondy_dealer, [passthrough]),
+    Id = bondy_session_id:new(),
+    try
+        ok = meck:expect(
+            bondy_dealer,
+            register,
+            fun
+                (<<"wamp.session.", _/binary>>, _, _, _) ->
+                    {error, refused_for_test};
+                (P, O, R, Ref) ->
+                    meck:passthrough([P, O, R, Ref])
+            end
+        ),
+        Owner = spawn_owner(fun() ->
+            bondy_session_manager:open(Id, RealmUri, session_opts())
+        end),
+        ?assertEqual({error, refused_for_test}, owner_result(Owner)),
+        ?assertEqual({error, not_found}, bondy_session:lookup(Id))
+    after
+        ok = meck:unload(bondy_dealer)
+    end,
+    ?assertEqual([], node_wildcards(RealmUri)),
+    {_Owner, _Session} = open_owned_session(
+        RealmUri, <<"com.cleanup.wildcard.add">>, <<"com.cleanup.wildcard">>
+    ),
+    ?assertMatch([_], node_wildcards(RealmUri)).
 
 %% @private
 %% Opens a session from a dedicated process and registers a procedure and a

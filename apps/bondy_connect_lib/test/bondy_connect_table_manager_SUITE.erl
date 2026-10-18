@@ -18,6 +18,7 @@ all() ->
         lookup_anonymous_returns_error_for_missing_key,
         delete_anonymous_removes_table_and_registry,
         delete_anonymous_returns_false_for_missing_key,
+        delete_anonymous_tolerates_an_already_deleted_table,
         get_or_create_named_is_idempotent,
         anonymous_table_has_no_registered_name,
         anonymous_table_strips_named_table_from_opts,
@@ -104,6 +105,13 @@ delete_anonymous_removes_table_and_registry(_Config) ->
 delete_anonymous_returns_false_for_missing_key(_Config) ->
     Key = {?MODULE, del_missing, erlang:unique_integer([positive])},
     ?assertEqual(false, bondy_connect_table_manager:delete_anonymous(Key)).
+
+delete_anonymous_tolerates_an_already_deleted_table(_Config) ->
+    Key = {?MODULE, del_gone, erlang:unique_integer([positive])},
+    {ok, Tab} = bondy_connect_table_manager:add_anonymous(Key, [set, public]),
+    true = ets:delete(Tab),
+    ?assert(bondy_connect_table_manager:delete_anonymous(Key)),
+    ?assertEqual(error, bondy_connect_table_manager:lookup_anonymous(Key)).
 
 get_or_create_named_is_idempotent(_Config) ->
     Name = list_to_atom(

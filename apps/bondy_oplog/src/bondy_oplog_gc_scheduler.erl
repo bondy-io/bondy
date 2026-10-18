@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Default GC scheduler.
 
 Periodic timer that, on each tick, spawns a short-lived worker
@@ -48,7 +47,7 @@ instance; the name-first arities address a named one. Telemetry events carry
 projection-cell reclamation run on its own cadence without duplicating this
 module or
 smuggling per-instance time checks into a shared trigger.
-""").
+""".
 
 -type trigger_fun() :: fun(
     (instance_id()) -> ok | {ok, term()} | {error, term()}
@@ -135,42 +134,42 @@ child_spec(Opts) ->
 %% CONTROL
 %% =============================================================================
 
-?DOC("Forces a tick now (across all running instances).").
+-doc "Forces a tick now (across all running instances).".
 -spec trigger() -> ok.
 
 trigger() ->
     trigger(?MODULE).
 
-?DOC("As `trigger/0`, on the named scheduler instance.").
+-doc "As `trigger/0`, on the named scheduler instance.".
 -spec trigger(Name :: atom()) -> ok.
 
 trigger(Name) when is_atom(Name) ->
     gen_server:cast(Name, tick).
 
-?DOC("""
+-doc """
 Triggers GC for a single instance immediately.
-""").
+""".
 -spec trigger_for(instance_id()) -> ok.
 
 trigger_for(InstanceId) ->
     trigger_for(?MODULE, InstanceId).
 
-?DOC("As `trigger_for/1`, on the named scheduler instance.").
+-doc "As `trigger_for/1`, on the named scheduler instance.".
 -spec trigger_for(Name :: atom(), instance_id()) -> ok.
 
 trigger_for(Name, InstanceId) when is_atom(Name) ->
     gen_server:cast(Name, {tick_for, InstanceId}).
 
-?DOC("""
+-doc """
 Replaces the trigger callback at runtime. Pass `undefined` to
 quiesce.
-""").
+""".
 -spec set_trigger(undefined | trigger_fun()) -> ok.
 
 set_trigger(Fun) ->
     set_trigger(?MODULE, Fun).
 
-?DOC("As `set_trigger/1`, on the named scheduler instance.").
+-doc "As `set_trigger/1`, on the named scheduler instance.".
 -spec set_trigger(
     Name :: atom(), undefined | fun((instance_id()) -> any())
 ) -> ok.
@@ -180,7 +179,7 @@ set_trigger(Name, Fun) when
 ->
     gen_server:call(Name, {set_trigger, Fun}).
 
-?DOC("""
+-doc """
 Sets the periodic-tick interval (in milliseconds) at runtime. `0`
 disables periodic ticks entirely; explicit `trigger/0` and
 `trigger_for/1` still work. The currently-scheduled timer is
@@ -188,13 +187,13 @@ cancelled and a new one armed with the new interval (if non-zero).
 
 Useful for operator tuning and for tests that need to suppress
 periodic firing while asserting on explicit triggers.
-""").
+""".
 -spec set_interval_ms(non_neg_integer()) -> ok.
 
 set_interval_ms(Ms) ->
     set_interval_ms(?MODULE, Ms).
 
-?DOC("As `set_interval_ms/1`, on the named scheduler instance.").
+-doc "As `set_interval_ms/1`, on the named scheduler instance.".
 -spec set_interval_ms(Name :: atom(), non_neg_integer()) -> ok.
 
 set_interval_ms(Name, Ms) when is_atom(Name), is_integer(Ms), Ms >= 0 ->
@@ -205,7 +204,7 @@ set_interval_ms(Name, Ms) when is_atom(Name), is_integer(Ms), Ms >= 0 ->
 info() ->
     info(?MODULE).
 
-?DOC("As `info/0`, on the named scheduler instance.").
+-doc "As `info/0`, on the named scheduler instance.".
 -spec info(Name :: atom()) -> map().
 
 info(Name) when is_atom(Name) ->

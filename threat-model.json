@@ -804,21 +804,21 @@
       "reason": "the node, listener, and realm scopes of bondy_rate_limit; does not cover the frame-size caps, which are hard limits. Rests on a STATED limit.",
       "false_friend": true,
       "provenance": "documented",
-      "source": "_plans/2026-08-29-rate-limit-scopes-design.md Fail-open at every scope"
+      "source": "apps/bondy_router/src/bondy_rate_limit.erl moduledoc: the limiter fails open"
     },
     {
       "property": "rate-limit-not-authz",
       "reason": "all rate-limit classes; a refusal is a transient signal, never a permission verdict",
       "false_friend": true,
       "provenance": "documented",
-      "source": "_plans/2026-08-29-rate-limit-scopes-design.md R2"
+      "source": "apps/bondy_router/src/bondy_rate_limit.erl moduledoc: a token-bucket admission decision, not authorization"
     },
     {
       "property": "realm-quota-per-node",
       "reason": "the realm total budget kind in v1; buckets are node-local",
       "false_friend": true,
       "provenance": "documented",
-      "source": "_plans/2026-08-29-rate-limit-scopes-design.md R4"
+      "source": "apps/bondy_router/src/bondy_rate_limit.erl: realm_total is one bucket per realm and class, per node"
     },
     {
       "property": "audit-failopen",

@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Fixed-schema record CRDT — the "ImmutableCRDT" of Bauwens/Gonzalez Boix,
 *Nested Pure Operation-Based CRDTs* (ECOOP 2023, Table 4): "a map with
 immutable keys, which behaves similarly to structs in C." Every field is
@@ -116,7 +114,7 @@ Every schema value MUST be `causal_tier() =:= tier_0`
 (`pn_counter`, `lww_register`, `max_register`, `min_register`, ...) —
 see `bondy_oplog_crdt_aw_map`'s moduledoc for why (the same reasoning
 applies here: a tier_0 sub-op needs only its own HLC to linearize).
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

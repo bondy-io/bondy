@@ -319,17 +319,17 @@ exec_receive(Port, Acc) ->
         {Port, {exit_status, 0}} ->
             string:trim(Acc);
         {Port, {exit_status, Status}} ->
-            try
-                erlang:port_close(Port)
-            catch
-                _:_ -> ok
-            end,
+            %% The port is already closed once `exit_status` arrives
+            %% (`erlang:port_info/1` answers `undefined`), so there is
+            %% nothing to close.
             error({cryptosign_exit_status, Status})
     after ?EXEC_TIMEOUT ->
+        %% The program can exit between the timeout and the close; then
+        %% `erlang:port_close/1` raises `badarg` on the closed port.
         try
             erlang:port_close(Port)
         catch
-            _:_ -> ok
+            error:badarg -> ok
         end,
         error(cryptosign_timeout)
     end.

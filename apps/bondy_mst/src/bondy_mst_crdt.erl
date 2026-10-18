@@ -9,7 +9,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 This module replicates one Merkle Search Tree between nodes, over networks
 that may be open or untrusted. A node learns a peer's root by gossip, fetches
 the pages it lacks, and merges the peer's tree into its own with the tree's
@@ -90,7 +90,7 @@ following callbacks:
 
 ## Options
 
-""").
+""".
 
 -record(?MODULE, {
     %% Normally node() but it can be a binary when testing
@@ -241,7 +241,7 @@ following callbacks:
 %% CALLBACKS
 %% =============================================================================
 
-?DOC("""
+-doc """
 Called when this module wants to send a message to a peer.
 
 ## Example Implementations
@@ -261,10 +261,10 @@ send(Peer, Msg) ->
 ```
 
 
-""").
+""".
 -callback send(Peer :: node_id(), message()) -> ok | {error, any()}.
 
-?DOC("""
+-doc """
 Whenever this module wants to send a gossip message it will call
 `Module:broadcast/1`.
 The callback `Module` is responsible for sending the gossip to some random
@@ -277,12 +277,12 @@ peers, either by implementing or using a peer sampling service e.g.
 broadcast(Gossip) ->
     partisan:broadcast(Gossip, CBMod).
 ```
-""").
+""".
 -callback broadcast(Gossip :: gossip()) -> ok | {error, any()}.
 
-?DOC("""
+-doc """
 Called when a merge exchange has finished.
-""").
+""".
 -callback on_merge(Peer :: node_id()) -> ok.
 
 %% Extended callbacks (when using callback_args)
@@ -298,7 +298,7 @@ Called when a merge exchange has finished.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Creates a replicated MST.
 
 # Options
@@ -327,7 +327,7 @@ version will not be eligible for garbage collection. Default is `10`
 which a version becomes eligible for garbage collection. Default is `60000`
 (1 minute).
 
-""").
+""".
 -spec new(node_id(), opts()) -> CRDT :: t() | no_return().
 
 new(NodeId, Opts) when is_list(Opts) ->
@@ -364,17 +364,17 @@ new(NodeId, Opts0) when
         bcast_backlog = bondy_mst_coalescing_queue:new()
     }.
 
-?DOC("""
+-doc """
 Returns the grove's local `node_id`.
-""").
+""".
 -spec node_id(t()) -> node_id().
 
 node_id(#?MODULE{node_id = Val}) ->
     Val.
 
-?DOC("""
+-doc """
 Returns the grove's local tree.
-""").
+""".
 -spec tree(t()) -> bondy_mst:t().
 
 tree(#?MODULE{tree = Tree}) ->
@@ -384,15 +384,15 @@ tree(#?MODULE{tree = Tree}) ->
 %% API: TREE API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns the root of the grove's local tree.
-""").
+""".
 -spec root(t()) -> hash() | undefined.
 
 root(#?MODULE{tree = Tree}) ->
     bondy_mst:root(Tree).
 
-?DOC("""
+-doc """
 Calls `bondy_mst:put/3` on the local tree.
 If the operation changed the tree (previous and new root differ), it broadcasts
 the change to the peers by calling the callback's `Module:broadcast/1` with a
@@ -401,13 +401,13 @@ the change to the peers by calling the callback's `Module:broadcast/1` with a
 When the gossip event is received by the peer it must handle it calling
 `handle/2` on its local grove instance which will merge the value locally and
 possibly trigger an exchange.
-""").
+""".
 -spec put(CRDT0 :: t(), Key :: any(), Value :: any()) -> CRDT1 :: t().
 
 put(CRDT, Key, Value) ->
     put(CRDT, Key, Value, #{}).
 
-?DOC("""
+-doc """
 Calls `bondy_mst:put/3` on the local tree and if the operation changed
 the tree (previous and new root differ), it broadcasts the change to the
 peers by calling the callback's `Module:broadcast/1` with a `gossip()`.
@@ -420,7 +420,7 @@ on its local grove instance.
 * `broadcast => boolean` - If `false` it doesn't broadcast the change to
 peers. This means you will rely on peers performing periodic anti-entropy
 sync exchanges to learn about this change. Default is `true`.
-""").
+""".
 -spec put(CRDT0 :: t(), Key :: any(), Value :: any(), Opts :: key_value:t()) ->
     CRDT1 :: t().
 
@@ -458,21 +458,21 @@ put(CRDT0, Key, Value, Opts) ->
     end,
     bondy_mst_store:transaction(Store, Fun).
 
-?DOC("""
+-doc """
 Triggers a garbage collection.
 Garbage collection removes all pages that are not descendants of either the
 current root or the roots of versions in the history whose TTL have not been
 reached.
-""").
+""".
 -spec gc(t()) -> t().
 gc(#?MODULE{} = CRDT) ->
     gc(CRDT, keep_roots(CRDT)).
 
-?DOC("""
+-doc """
 Triggers a garbage collection overriding the versions to keep.
 Garbage collection removes all pages that are not descendants of either the
 current root or the roots in `KeepRoots`.
-""").
+""".
 -spec gc(t(), KeepRoots :: [binary()]) -> t().
 
 gc(#?MODULE{} = CRDT, KeepRoots) when is_list(KeepRoots) ->
@@ -480,20 +480,20 @@ gc(#?MODULE{} = CRDT, KeepRoots) when is_list(KeepRoots) ->
     Tree = bondy_mst:gc(CRDT#?MODULE.tree, KeepRoots),
     CRDT#?MODULE{tree = Tree}.
 
-?DOC("""
+-doc """
 Returns the list of peers that have ongoing merges with this node.
-""").
+""".
 -spec merges(t()) -> [node()].
 
 merges(#?MODULE{exchange = Exchange}) ->
     bondy_mst_exchange:merges(Exchange).
 
-?DOC("""
+-doc """
 Cancels an ongoing merge (if it exists for peer `Peer`).
 
 You should use a fault detector to cancel merges when a peer crashes.
 Cancelled merge pages will be purged on the next garbage collection run.
-""").
+""".
 -spec cancel_merge(t(), node_id()) -> ok.
 
 cancel_merge(#?MODULE{exchange = Exchange} = CRDT, Peer) ->
@@ -503,9 +503,9 @@ cancel_merge(#?MODULE{exchange = Exchange} = CRDT, Peer) ->
 %% API: ANTI-ENTROPY EXCHANGE PROTOCOL
 %% =============================================================================
 
-?DOC("""
+-doc """
 Broadcasts all gossip messages in the backlog.
-""").
+""".
 -spec broadcast_pending(t()) -> t().
 
 broadcast_pending(#?MODULE{} = CRDT) ->
@@ -513,10 +513,10 @@ broadcast_pending(#?MODULE{} = CRDT) ->
     Pred = fun({_, Time}) -> LastTime < Time end,
     broadcast_pending(CRDT, Pred).
 
-?DOC("""
+-doc """
 Triggers a full merge by sending the local tree's root to `Peer`.
 The exchange might not occur if Peer has reached its `max_merges`.
-""").
+""".
 -spec trigger(t(), node_id()) -> ok.
 
 trigger(#?MODULE{node_id = Peer}, Peer) ->
@@ -530,9 +530,9 @@ trigger(#?MODULE{} = CRDT, Peer) when is_atom(Peer) ->
     },
     call_callback(CRDT, send, [Peer, Event]).
 
-?DOC("""
+-doc """
 Returns a map with the contents of a `gossip()` message.
-""").
+""".
 -spec gossip_data(gossip()) -> gossip_data().
 
 gossip_data(#gossip{} = Gossip) ->
@@ -543,17 +543,17 @@ gossip_data(#gossip{} = Gossip) ->
         value => Gossip#gossip.value
     }.
 
-?DOC("""
+-doc """
 Creates a gossip message.
-""").
+""".
 -spec gossip_message(node_id(), hash()) -> gossip().
 
 gossip_message(Peer, Root) ->
     gossip_message(Peer, Root, undefined, undefined).
 
-?DOC("""
+-doc """
 Creates a gossip message.
-""").
+""".
 -spec gossip_message(node_id(), hash(), any(), any()) -> gossip().
 
 gossip_message(Peer, Root, Key, Value) ->
@@ -564,18 +564,18 @@ gossip_message(Peer, Root, Key, Value) ->
         value = Value
     }.
 
-?DOC("""
+-doc """
 Returns `true` if `PeerRoot` is not contained in the tree.
-""").
+""".
 -spec is_stale(t(), hash()) -> boolean().
 
 is_stale(#?MODULE{tree = Tree}, PeerRoot) ->
     bondy_mst_exchange:is_stale(Tree, PeerRoot).
 
-?DOC("""
+-doc """
 Call this function when your node receives a message or broadcast from a
 peer.
-""").
+""".
 -spec handle(t(), message()) -> t().
 
 handle(CRDT0, #gossip{} = Gossip) ->

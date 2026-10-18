@@ -6,11 +6,10 @@
 -module(bondy_oplog_catalogue_snapshot).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Peer-side responder for the catalogue-snapshot bootstrap protocol.
 
 Two entry points:
@@ -57,7 +56,7 @@ installing while a session is open on it
 (`bondy_oplog_instance:begin_install/3`), and the sessions open on it expire
 when it restarts owing that replay
 (`bondy_oplog_catalogue_cursor:discard_instance/1`).
-""").
+""".
 
 -export([init/1]).
 -export([next/2]).
@@ -114,7 +113,7 @@ when it restarts owing that replay
     | {ok, no_snapshot}
     | {error, term()}.
 
-?DOC("""
+-doc """
 Opens a catalogue-snapshot session on the given instance, walking EVERY
 table on the shard. A collapsed per-shard instance carries several tables,
 each under its own entity-type bucket (and, on a memory topology, its own
@@ -133,7 +132,7 @@ cursor is minted before that check, so an install that starts after the check
 finds it open (`bondy_oplog_instance:begin_install/3`), and one that starts
 before it makes the check refuse (`bondy_oplog_bootstrap_rederive_test`,
 `cursor_open_before_the_serve_check_holds_the_install`).
-""").
+""".
 init(InstanceId) ->
     Opened = init_catalogue_multi(InstanceId),
     case {bondy_oplog_instance:serving(InstanceId), Opened} of
@@ -159,11 +158,11 @@ init(InstanceId) ->
     | {error, cursor_expired}
     | {error, term()}.
 
-?DOC("""
+-doc """
 Pulls the next batch from the given cursor. The cursor is opaque to
 the initiator and is returned unchanged on `batch` so the caller can
 chain calls without state.
-""").
+""".
 next(InstanceId, Cursor) when
     is_binary(InstanceId), is_binary(Cursor)
 ->
@@ -188,11 +187,11 @@ next(InstanceId, Cursor) when
             do_next(Cursor, CState)
     end.
 
-?DOC("""
+-doc """
 Ends a session whose initiator will not read it, so its cursor stops holding
 the instance's own install (`bondy_oplog_instance:begin_install/3`). A cursor
 on another instance, or one already gone, is left alone.
-""").
+""".
 -spec release(instance_id(), bondy_oplog_catalogue_cursor:cursor()) -> ok.
 
 release(InstanceId, Cursor) when is_binary(InstanceId), is_binary(Cursor) ->

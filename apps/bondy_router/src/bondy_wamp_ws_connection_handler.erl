@@ -206,12 +206,10 @@ init(Req0, RouteState) ->
             }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
-        Class:EReason:Stacktrace ->
+        exit:{request_error, _, _} = EReason ->
             ?LOG_ERROR(#{
                 description => "Closing connection.",
-                class => Class,
-                reason => EReason,
-                stacktrace => Stacktrace
+                reason => EReason
             }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined}

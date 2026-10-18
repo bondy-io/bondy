@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Origin retirement — the cleanup that follows a deliberate Partisan
 membership removal, and the replication of the operator's retirement set.
 
@@ -158,7 +157,7 @@ is idempotent and fail-closed). The transport is taken from the
 `sync_session_opts` env (same source as AAE); with the default inline
 transport a member query cannot address a remote node and the pass aborts —
 fail-closed, never fail-open.
-""").
+""".
 
 %% Lifecycle
 -export([start_link/0]).

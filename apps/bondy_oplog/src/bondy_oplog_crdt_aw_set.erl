@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Add-Wins Set (AWSet / Observed-Remove Set) — tier_2 operation-based CRDT.
 
 The op-based equivalent of the pure `pure_awset`. A set with `add` and
@@ -89,7 +87,7 @@ a live element, raises `{badarg, _}`
 
 `value_equals_state/0 -> false`: the value is derived from the dot-store,
 not the dot-store itself, so the substrate stores a value column.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

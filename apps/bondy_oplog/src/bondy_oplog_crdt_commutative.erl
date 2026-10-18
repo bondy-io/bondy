@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Helper + behaviour for **commutative** operation-based CRDTs.
 
 It carries the per-cell COG-Interpreter machinery (sort a cell's events by
@@ -84,7 +82,7 @@ therefore one atomic, mutually-concurrent causal unit. A module that can be
 safely packed this way (its ops are identified per sub-key/value, not by
 the event Seq/HLC) declares `batchable/0`; see `is_batchable/1` and
 `bondy_db:apply_batch/4`.
-""").
+""".
 
 -export([interpret_cog/3]).
 -export([apply_op/4]).

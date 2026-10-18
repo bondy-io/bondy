@@ -7,10 +7,8 @@
 
 -behaviour(gen_server).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance **write→readable latency** telemetry: the wall-clock time
 from a user write (`bondy_db:apply/4` and friends) until that value is
 committed and readable in the projection — for whichever backend the
@@ -79,7 +77,7 @@ suppresses the emit; existing histograms simply stop accumulating.
 `interval_ms => 0` (or `disabled`) keeps the server up but suppresses
 the periodic emit (samples still accumulate; force one with
 `snapshot_now/0`).
-""").
+""".
 
 -define(SERVER, ?MODULE).
 -define(METRIC, bondy_oplog_write_readable_latency_us).
@@ -145,13 +143,13 @@ start_link() ->
 start_link(Opts) when is_map(Opts) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Opts, []).
 
-?DOC("""
+-doc """
 Record one write→readable sample (microseconds) for an instance.
 Best-effort and wait-free: a single `bondy_metrics:histogram/1`
 observation. Never raises on the caller (telemetry must not crash the
 write path). Callers gate on `enabled/0` first so a disabled probe pays
 no `monotonic_time` reads.
-""").
+""".
 -spec record(binary(), integer()) -> ok.
 
 record(InstanceId, LatencyUs) when
@@ -164,59 +162,59 @@ record(InstanceId, LatencyUs) when
     }),
     ok.
 
-?DOC("""
+-doc """
 Whether write→readable sampling is enabled. A `persistent_term` read
 (free): set once at boot and only on an explicit `set_enabled/1`.
 Callers on the hot path gate on this before timing a write.
-""").
+""".
 -spec enabled() -> boolean().
 
 enabled() ->
     persistent_term:get(?PT_ENABLED, false).
 
-?DOC("""
+-doc """
 The `bondy_metrics` histogram name under which per-instance samples are
 stored (label `#{instance_id => Id}`). Exposed for exposition/tests.
-""").
+""".
 -spec metric_name() -> atom().
 
 metric_name() ->
     ?METRIC.
 
-?DOC("""
+-doc """
 Current configuration and the instances seen in the last snapshot.
-""").
+""".
 -spec info() -> map().
 
 info() ->
     gen_server:call(?SERVER, info).
 
-?DOC("""
+-doc """
 Force an immediate latency emit for every instance that saw writes
 since the last tick. Test/operator affordance.
-""").
+""".
 -spec snapshot_now() -> ok.
 
 snapshot_now() ->
     gen_server:call(?SERVER, snapshot_now).
 
-?DOC("""
+-doc """
 Enable or disable sampling at runtime. Disabling makes `record/2` a
 no-op on the hot path and cancels the periodic emit; accumulated
 histograms are left in place.
-""").
+""".
 -spec set_enabled(boolean()) -> ok.
 
 set_enabled(Enabled) when is_boolean(Enabled) ->
     gen_server:call(?SERVER, {set_enabled, Enabled}).
 
-?DOC("""
+-doc """
 Enable or disable the **idle probe** at runtime. When on, the periodic
 tick writes one benign reserved-cell op (`bondy_db:probe_write/1`) to
 each instance that saw no writes in the window, so idle instances still
 report a heartbeat latency. Opt-in — it is a real replicated write.
 Requires sampling (`set_enabled(true)`) to be on to record anything.
-""").
+""".
 -spec set_probe_enabled(boolean()) -> ok.
 
 set_probe_enabled(Enabled) when is_boolean(Enabled) ->

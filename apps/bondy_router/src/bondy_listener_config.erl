@@ -691,6 +691,8 @@ resolve_one(Name, Spec, GetFun) ->
 
     ok = assert_listener_ping(Name, Protocol, GetFun),
 
+    ok = assert_trusted_proxies(Name, GetFun),
+
     maps:merge(
         #{
             name => Name,
@@ -1268,6 +1270,23 @@ required(Name, Key, Spec) ->
     case maps:find(Key, Spec) of
         {ok, Value} -> Value;
         error -> invalid(Name, {missing, Key})
+    end.
+
+%% @private
+%% Request handling skips an entry that is not a valid CIDR, so a typo there
+%% would leave a proxy the operator meant to trust untrusted. Boot refuses it.
+assert_trusted_proxies(Name, GetFun) ->
+    case GetFun([Name, proxy_protocol], undefined) of
+        undefined ->
+            ok;
+        Block ->
+            Opts = key_value:to_map(Block),
+            case bondy_http_proxy_protocol:invalid_trusted_proxies(Opts) of
+                [] ->
+                    ok;
+                Invalid ->
+                    invalid(Name, {invalid_trusted_proxies, Invalid})
+            end
     end.
 
 %% @private

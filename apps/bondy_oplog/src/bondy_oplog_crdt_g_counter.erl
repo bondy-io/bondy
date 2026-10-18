@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Grow-only counter (G-Counter) — native operation-based CRDT.
 
 The op-based twin of the deprecated `bondy_oplog_fold_g_counter`, with
@@ -57,7 +55,7 @@ this type is order-independent in exactly the sense the kernel needs (eager
 
 Byte-identical to the deprecated fold (counter entries sorted by Origin),
 so a table can switch from the fold to this module with no data migration.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

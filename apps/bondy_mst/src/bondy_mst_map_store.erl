@@ -11,7 +11,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 This module implements the `bondy_mst_store` behaviour using an in-process
 `map`.
 
@@ -22,7 +22,7 @@ read concurrency, and as a result:
 the map; and
 * All calls to `free/3` are made effective immediately by removing the pages
 from the map.
-""").
+""".
 
 -record(?MODULE, {
     root :: hash() | undefined,

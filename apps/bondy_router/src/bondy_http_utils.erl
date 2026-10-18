@@ -355,7 +355,11 @@ safe_parse_cookies(Req) ->
     try
         parse_cookies(Req)
     catch
-        _:_ ->
+        %% `cowboy_req:parse_cookies/2` converts every parser failure into one
+        %% of these two exits.
+        exit:{request_error, limit_reached, _} ->
+            [];
+        exit:{request_error, {header, <<"cookie">>}, _} ->
             []
     end.
 
@@ -372,10 +376,16 @@ safe_bearer_token(Req) ->
     try cowboy_req:parse_header(<<"authorization">>, Req) of
         {bearer, Token} when is_binary(Token), Token =/= <<>> ->
             Token;
-        _ ->
+        {basic, _, _} ->
+            undefined;
+        {digest, _} ->
+            undefined;
+        undefined ->
             undefined
     catch
-        _:_ ->
+        %% `cowboy_req:parse_header/3` converts every parser failure into this
+        %% exit.
+        exit:{request_error, {header, <<"authorization">>}, _} ->
             undefined
     end.
 

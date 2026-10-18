@@ -1745,3 +1745,35 @@ mcp_service_raises_the_held_stream_floor_test() ->
             services => [mcp]
         })
     ).
+
+%% A trusted-proxy entry that is not a valid CIDR refuses the listener, naming
+%% the entry. Blank entries and valid ones pass.
+malformed_trusted_proxy_is_rejected_test() ->
+    Inventory = [
+        {pub, #{
+            transport => tcp,
+            protocol => http,
+            port => 18080,
+            services => [wamp_ws]
+        }}
+    ],
+    Get = fun(Proxies) ->
+        fun
+            ([pub, proxy_protocol], _) -> [{trusted_proxies, Proxies}];
+            (_, Default) -> Default
+        end
+    end,
+    ?assertMatch(
+        {error,
+            {invalid_listener, pub,
+                {invalid_trusted_proxies, [<<"10.0.0.0/x">>, <<"10/8">>]}}},
+        bondy_listener_config:resolve(
+            Inventory, Get("10.0.0.0/x, 192.168.0.0/16,10/8")
+        )
+    ),
+    ?assertMatch(
+        {ok, [_]},
+        bondy_listener_config:resolve(
+            Inventory, Get("10.0.0.0/8, ,192.168.0.0/16")
+        )
+    ).

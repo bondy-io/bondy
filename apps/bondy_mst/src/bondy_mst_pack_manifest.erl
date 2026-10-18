@@ -9,7 +9,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance pack-store manifest with atomic rename semantics.
 
 See the pack-store design notes §5 and §10. The
@@ -69,7 +69,7 @@ has its error contract.
 This module performs file I/O (read, write, rename, fsync). The
 encode / decode of terms is pure and exposed for testing; the
 read / write functions touch the filesystem.
-""").
+""".
 
 -record(?MODULE, {
     manifest_version = ?BONDY_MST_PACK_MANIFEST_VERSION :: pos_integer(),
@@ -133,7 +133,7 @@ read / write functions touch the filesystem.
 %% API — lifecycle
 %% =============================================================================
 
-?DOC("""
+-doc """
 Constructs a fresh manifest for a new pack-store instance.
 
 `InstanceId` is the user-supplied identifier (the same one
@@ -142,7 +142,7 @@ supported by `bondy_mst_pack_codec` (currently only `sha256`).
 
 The fresh manifest carries no sealed packs, no current root,
 and `incoming_pack = absent`.
-""").
+""".
 -spec new(InstanceId :: binary(), HashAlgo :: atom()) -> t().
 
 new(InstanceId, HashAlgo) when
@@ -162,13 +162,13 @@ new(InstanceId, HashAlgo) when
         last_compacted_at = Now
     }.
 
-?DOC("""
+-doc """
 Reads and parses the manifest at `Dir`. Returns `{ok, T}` or
 `{error, Reason}`.
 
 `Reason` is either an I/O error from `file:consult/1` (missing
 file, permission, etc.) or a parse error from `decode/1`.
-""").
+""".
 -spec read(Dir :: file:filename_all()) ->
     {ok, t()} | {error, term()}.
 
@@ -205,7 +205,7 @@ read(Dir) ->
 unreadable(Path, Reason) ->
     {error, {unreadable, Path, Reason}}.
 
-?DOC("Replaces the manifest in `Dir` with `Manifest`; see the moduledoc.").
+-doc "Replaces the manifest in `Dir` with `Manifest`; see the moduledoc.".
 -spec write(Dir :: file:filename_all(), t()) ->
     ok | {error, term()}.
 
@@ -216,11 +216,11 @@ write(Dir, #?MODULE{} = Manifest) ->
 %% API — pure codec
 %% =============================================================================
 
-?DOC("""
+-doc """
 Encodes a manifest to its on-disk binary representation. Pure;
 useful for tests and for callers that want to inspect the
 proposed bytes before committing them.
-""").
+""".
 -spec encode(t()) -> binary().
 
 encode(#?MODULE{} = M) ->
@@ -269,11 +269,11 @@ encode(#?MODULE{} = M) ->
 consult_encode(Terms) ->
     unicode:characters_to_binary([io_lib:format("~tw.~n", [T]) || T <- Terms]).
 
-?DOC("""
+-doc """
 Decodes a list of `file:consult/1`-style terms into a manifest
 record. Validates required fields, type-checks each known field,
 tolerates unknown fields for forward compatibility.
-""").
+""".
 -spec decode(list()) -> {ok, t()} | {error, parse_error()}.
 
 decode(Terms) when is_list(Terms) ->
@@ -351,10 +351,10 @@ last_compacted_at(#?MODULE{last_compacted_at = V}) -> V.
 %% API — setters
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns a manifest with `current_root` set to `Root` (a 32-byte
 binary or `undefined`).
-""").
+""".
 -spec with_current_root(t(), hash() | undefined) -> t().
 
 with_current_root(#?MODULE{} = M, undefined) ->
@@ -362,12 +362,12 @@ with_current_root(#?MODULE{} = M, undefined) ->
 with_current_root(#?MODULE{} = M, Root) when is_binary(Root) ->
     M#?MODULE{current_root = Root}.
 
-?DOC("""
+-doc """
 Adds a sealed pack id to `sealed_packs`. The pack id must be
 strictly greater than every existing entry (sealed packs are
 created monotonically). Returns the manifest with the new pack
 appended.
-""").
+""".
 -spec add_sealed_pack(t(), non_neg_integer()) -> t().
 
 add_sealed_pack(#?MODULE{sealed_packs = []} = M, PackId) when
@@ -385,14 +385,14 @@ add_sealed_pack(#?MODULE{sealed_packs = Packs} = M, PackId) when
             error({non_monotone_pack_id, PackId, Last})
     end.
 
-?DOC("""
+-doc """
 Removes the given pack ids from `sealed_packs` and advances
 `deleted_through` to `max(deleted_through, max(Retired))`.
 
 Pack ids that aren't currently in `sealed_packs` are ignored
 (idempotent — the caller may pass a closed-set of retired ids
 without filtering).
-""").
+""".
 -spec remove_sealed_packs(t(), [non_neg_integer()]) -> t().
 
 remove_sealed_packs(#?MODULE{} = M, []) ->

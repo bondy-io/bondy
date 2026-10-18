@@ -9,7 +9,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Anti-entropy exchange orchestration for Merkle Search Trees.
 
 This module owns the bookkeeping for pairwise anti-entropy exchanges and
@@ -68,7 +68,7 @@ to a bootstrap/snapshot transfer.
 
 The embedder supplies a callback module implementing `send/2` (or `send/3`
 when `callback_args` is used).
-""").
+""".
 
 -record(?MODULE, {
     %% Normally node() but it can be a binary when testing

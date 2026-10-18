@@ -623,12 +623,9 @@ do_decrypt_aes_gcm(Key, KeyId, IV, Tag, Ciphertext, Opts) ->
     end.
 
 %% @private
-%% Resolves a `KeyId` to a `Key` via the caller-supplied registry.
-%% Missing-key surfaces as a typed `{missing_key, KeyId}` rather
-%% than a crash; a missing `body_encryption` opt on the decode path
-%% (e.g. a reader configured before the operator enabled encryption
-%% on the writer) is treated the same way — the codec cannot
-%% manufacture a key, so missing is the only honest answer.
+%% `Registry` is caller-supplied code, so its failure space is unknown
+%% here: a raise or a return outside `m:bondy_log_key_registry`'s
+%% contract is logged with class and reason and reported as missing.
 resolve_key(KeyId, Opts) ->
     case maps:get(body_encryption, Opts, disabled) of
         {enabled, Registry} ->
@@ -637,15 +634,36 @@ resolve_key(KeyId, Opts) ->
                     {ok, Key};
                 {error, missing} ->
                     {error, {missing_key, KeyId}};
-                _Other ->
+                Other ->
+                    ?LOG_ERROR(#{
+                        description =>
+                            "Key registry return outside its contract",
+                        registry => Registry,
+                        key_id => KeyId,
+                        shape => return_shape(Other)
+                    }),
                     {error, {missing_key, KeyId}}
             catch
-                _:_ ->
+                Class:Reason ->
+                    ?LOG_ERROR(#{
+                        description => "Key registry raised",
+                        registry => Registry,
+                        key_id => KeyId,
+                        class => Class,
+                        reason => Reason
+                    }),
                     {error, {missing_key, KeyId}}
             end;
         disabled ->
             {error, {missing_key, KeyId}}
     end.
+
+%% @private
+%% A wrong-length `{ok, Key}` is still key material; log its shape only.
+return_shape({ok, Key}) when is_binary(Key) ->
+    {ok, {key_bytes, byte_size(Key)}};
+return_shape(Other) ->
+    Other.
 
 %% @private
 cipher_atom(?CIPHER_AES_256_GCM) -> {ok, aes_256_gcm};

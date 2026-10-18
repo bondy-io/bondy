@@ -82,17 +82,7 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 handle_info(evict, State) ->
-    try
-        ok = bondy_http_transport_queue:evict_expired_all()
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error during transport queue eviction sweep",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
-    end,
+    ok = bondy_http_transport_queue:evict_expired_all(),
     ok = schedule_eviction(State),
     {noreply, State};
 handle_info(Info, State) ->

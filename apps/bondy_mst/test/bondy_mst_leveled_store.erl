@@ -24,7 +24,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("Non-concurrent, MST backend using `leveled`.").
+-moduledoc "Non-concurrent, MST backend using `leveled`.".
 
 -record(?MODULE, {
     pid :: pid(),

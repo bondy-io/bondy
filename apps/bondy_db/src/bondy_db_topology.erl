@@ -5,10 +5,8 @@
 
 -module(bondy_db_topology).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for `bondy_db` **physical topologies**.
 
 A topology maps logical addresses `(EntityType, Shard, Realm)` onto
@@ -78,7 +76,7 @@ facade folds `Realm` into the storage key with a NUL separator
   realms it is asked about; coordinating which realms exist is the
   caller's concern.
 - Telemetry or metrics — left to the adapter.
-""").
+""".
 
 -export_type([
     state/0,

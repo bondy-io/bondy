@@ -1388,19 +1388,19 @@ properties_disclaimed:
     conditions: "the node, listener, and realm scopes of bondy_rate_limit; does not cover the frame-size caps, which are hard limits. Rests on a STATED limit."
     tier: security-critical
     false_friend: true
-    provenance: {kind: documented, source: "_plans/2026-08-29-rate-limit-scopes-design.md Fail-open at every scope"}
+    provenance: {kind: documented, source: "apps/bondy_router/src/bondy_rate_limit.erl moduledoc: the limiter fails open"}
   - id: rate-limit-not-authz
     components: [f1-session-protocol, f4-authentication, f6-http-gateway]
     conditions: "all rate-limit classes; a refusal is a transient signal, never a permission verdict"
     tier: correctness-only
     false_friend: true
-    provenance: {kind: documented, source: "_plans/2026-08-29-rate-limit-scopes-design.md R2"}
+    provenance: {kind: documented, source: "apps/bondy_router/src/bondy_rate_limit.erl moduledoc: a token-bucket admission decision, not authorization"}
   - id: realm-quota-per-node
     components: [f1-session-protocol, f5-authorization]
     conditions: "the realm total budget kind in v1; buckets are node-local"
     tier: correctness-only
     false_friend: true
-    provenance: {kind: documented, source: "_plans/2026-08-29-rate-limit-scopes-design.md R4"}
+    provenance: {kind: documented, source: "apps/bondy_router/src/bondy_rate_limit.erl: realm_total is one bucket per realm and class, per node"}
   - id: audit-failopen
     components: [f9-egress-connectors]
     conditions: "bondy_mcp_audit:record/2 only"
@@ -1513,12 +1513,12 @@ downstream_responsibilities:
     component: f1-session-protocol
     statement: "put a hard limiter in front of Bondy if a real request ceiling is required; the built-in limiter fails open"
     enforces: [rate-limit-failopen]
-    provenance: {kind: documented, source: "_plans/2026-08-29-rate-limit-scopes-design.md Fail-open at every scope"}
+    provenance: {kind: documented, source: "apps/bondy_router/src/bondy_rate_limit.erl moduledoc: the limiter fails open"}
   - id: size-realm-quota-per-node
     component: f5-authorization
     statement: "multiply a realm total budget by node count to get the cluster-wide ceiling"
     enforces: [realm-quota-per-node]
-    provenance: {kind: documented, source: "_plans/2026-08-29-rate-limit-scopes-design.md R4"}
+    provenance: {kind: documented, source: "apps/bondy_router/src/bondy_rate_limit.erl: realm_total is one bucket per realm and class, per node"}
   - id: validate-callee-arguments
     component: f1-session-protocol
     statement: "validate call arguments in the callee; Bondy does not inspect payloads"
@@ -1575,12 +1575,12 @@ known_misuses:
     components: [f5-authorization]
     pattern: "setting a realm total rate limit expecting it to bound the whole cluster"
     safer_alternative: "divide the intended cluster ceiling by node count, and enforce hard ceilings upstream"
-    provenance: {kind: documented, source: "_plans/2026-08-29-rate-limit-scopes-design.md R4"}
+    provenance: {kind: documented, source: "apps/bondy_router/src/bondy_rate_limit.erl: realm_total is one bucket per realm and class, per node"}
   - id: treat-429-as-authorization
     components: [f1-session-protocol, f6-http-gateway]
     pattern: "branching or alerting on rate-limit refusals as though they were permission denials"
     safer_alternative: "branch on the WAMP not_authorized error for permission; treat 429 as transient backpressure"
-    provenance: {kind: documented, source: "_plans/2026-08-29-rate-limit-scopes-design.md R2"}
+    provenance: {kind: documented, source: "apps/bondy_router/src/bondy_rate_limit.erl moduledoc: a token-bucket admission decision, not authorization"}
   - id: prototype-realm-across-trust-domains
     components: [f5-authorization]
     pattern: "one prototype realm supplying groups and grants to realms belonging to different tenants"

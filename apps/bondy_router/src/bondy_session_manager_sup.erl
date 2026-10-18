@@ -63,13 +63,13 @@ init_pool() ->
         algorithm := Algorithm
     } = bondy_session_manager:pool(),
 
-    %% If the supervisor restarts and we call groc_pool:new it will fail with
-    %% an exception
+    %% gproc owns the pool and its workers, so both outlive a restart of this
+    %% supervisor. `gproc_pool` then raises `exists` for each of them.
     _ =
         try
             gproc_pool:new(PoolName, Algorithm, [{size, Size}])
         catch
-            _:_ -> ok
+            error:exists -> ok
         end,
 
     WorkerNames = [
@@ -79,7 +79,7 @@ init_pool() ->
                 try
                     gproc_pool:add_worker(PoolName, WorkerName)
                 catch
-                    _:_ -> ok
+                    error:exists -> ok
                 end,
             WorkerName
         end

@@ -189,20 +189,20 @@ cell(Content, Width, Colour) ->
 
 %% @private
 instances() ->
+    %% `ets:select/2` raises `badarg` while bondy_oplog's registry table is absent.
     try bondy_oplog:list_instances() of
-        L when is_list(L) -> lists:sort(L);
-        _ -> []
+        L -> lists:sort(L)
     catch
-        _:_ -> []
+        error:badarg -> []
     end.
 
 %% @private
 peers() ->
-    try partisan:nodes() of
-        N when is_list(N) -> N;
-        _ -> []
+    %% Partisan raises `badarg` before its config and peer tables exist.
+    try
+        partisan:nodes()
     catch
-        _:_ -> []
+        error:badarg -> []
     end.
 
 %% @private
@@ -210,23 +210,11 @@ peers() ->
 %% `Frontier` is the applied-frontier version vector (`#{Origin => max Seq}`), a
 %% lock-free registry read; the topology fingerprint gates cross-node comparison.
 local_sig(Id) ->
-    Frontier =
-        try bondy_oplog_instance:frontier(Id) of
-            F when is_map(F) -> F;
-            _ -> #{}
-        catch
-            _:_ -> #{}
-        end,
-    {Frontier, local_fingerprint(Id)}.
+    {bondy_oplog_instance:frontier(Id), local_fingerprint(Id)}.
 
 %% @private
 local_fingerprint(Id) ->
-    try bondy_oplog:topology_fingerprint(bondy_oplog:db_of(Id)) of
-        FP when is_binary(FP) -> FP;
-        _ -> undefined
-    catch
-        _:_ -> undefined
-    end.
+    bondy_oplog:topology_fingerprint(bondy_oplog:db_of(Id)).
 
 %% @private
 %% The peer's LIVE frontier signature, fetched fresh over the AAE channel:
@@ -236,22 +224,15 @@ local_fingerprint(Id) ->
 %% would serve right now.
 peer_sig(Peer, Id) ->
     Opts = #{timeout => 2000, channel => aae_channel()},
-    try bondy_oplog_transport_partisan:request(Peer, Id, get_frontier, Opts) of
+    case bondy_oplog_transport_partisan:request(Peer, Id, get_frontier, Opts) of
         {ok, Map, Fp, _Durable} when is_map(Map) -> {frontier, Map, Fp};
         {ok, Map} when is_map(Map) -> {frontier, Map, undefined};
-        _ -> not_found
-    catch
-        _:_ -> not_found
+        {error, _} -> not_found
     end.
 
 %% @private
 aae_channel() ->
-    try bondy_config:get(aae_channel) of
-        Ch when is_atom(Ch) -> Ch;
-        _ -> bondy_aae
-    catch
-        _:_ -> bondy_aae
-    end.
+    bondy_config:get(aae_channel, bondy_aae).
 
 %% @private
 %% Classify an `(instance, peer)` pair from the local frontier signature
@@ -300,16 +281,10 @@ status_label(unknown) -> "?".
 
 %% @private
 %% The instance's bootstrap lifecycle (`pre_bootstrap` until its initial
-%% snapshot lands, then `live`). Any error / unknown maps to `undefined`
-%% (rendered `starting`).
+%% snapshot lands, then `live`), or `undefined` for an instance that is not
+%% registered (rendered `starting`).
 lifecycle(Id) ->
-    try bondy_oplog_instance:lifecycle_state(Id) of
-        live -> live;
-        pre_bootstrap -> pre_bootstrap;
-        _ -> undefined
-    catch
-        _:_ -> undefined
-    end.
+    bondy_oplog_instance:lifecycle_state(Id).
 
 %% @private
 %% In-sync tally over the (instance, peer) pairs. A live pair with equal

@@ -273,8 +273,8 @@ scope_opts(Class, Dims) ->
 %% The realm's budgets for `Class`, from its `rate_limit` property —
 %% up to two entries (`realm` = per_caller, `realm_total` = total), only
 %% the configured, un-parked ones. Fails open like every other resolver:
-%% an unknown realm, or the realm store not being up yet, is "no realm
-%% budgets", never a raise.
+%% an unknown realm, or a realm table not yet provisioned
+%% (`bondy_realm_table_unavailable`), is "no realm budgets".
 realm_scope_opts(Uri, Class) ->
     try bondy_realm:lookup(Uri) of
         {ok, Realm} ->
@@ -288,7 +288,7 @@ realm_scope_opts(Uri, Class) ->
         {error, not_found} ->
             []
     catch
-        _:_ ->
+        error:bondy_realm_table_unavailable ->
             []
     end.
 
@@ -336,11 +336,11 @@ make_session_chain([{Scope, Opts} | Rest], Dims, Acc) ->
             log_limiter_unavailable(Reason),
             make_session_chain(Rest, Dims, Acc)
     catch
-        %% e.g. the regulator's ETS table is not up yet; degrade to "no
-        %% message limit for this scope" rather than failing session
+        %% `new/2` raises `badarg` for a rate or capacity it rejects; degrade
+        %% to "no message limit for this scope" rather than failing session
         %% open.
-        Class:EReason ->
-            log_limiter_unavailable({Class, EReason}),
+        error:badarg ->
+            log_limiter_unavailable({error, badarg}),
             make_session_chain(Rest, Dims, Acc)
     end.
 
@@ -355,7 +355,8 @@ log_limiter_unavailable(Reason) ->
 
 %% @private
 %% The throttling verdict must never depend on the metrics subsystem
-%% being up (e.g. before `bondy_prometheus` setup, or in embedded tests).
+%% being up. `inc/3` raises `unknown_metric` before `bondy_prometheus` declares
+%% the counter, and `badarg` without the prometheus tables.
 count_denial(Class, Scope) ->
     _ =
         try
@@ -363,7 +364,8 @@ count_denial(Class, Scope) ->
                 bondy_rate_limited_total, [Class, Scope], 1
             )
         catch
-            _:_ -> ok
+            error:{unknown_metric, _, _} -> ok;
+            error:badarg -> ok
         end,
     ok.
 

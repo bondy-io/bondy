@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_crdt_nested_core).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Shared **two-level add-wins-with-nesting** engine, used by
 `bondy_oplog_crdt_aw_map` and `bondy_oplog_crdt_aw_set` to let a
 dynamic-key entry's *value* itself be another CRDT's converged state,
@@ -114,7 +112,7 @@ retiring (that node's oplog identity rotating away, e.g. after a crash)
 bookkeeping. Getting `RetiredOrigins` wrong here is a permanent data
 loss, not a bookkeeping-bloat nuisance — heed `reap_origins/2`'s own
 "operator's obligation" caution more strictly still.
-""").
+""".
 
 -export([force_reap/2]).
 -export([nested_value/2]).

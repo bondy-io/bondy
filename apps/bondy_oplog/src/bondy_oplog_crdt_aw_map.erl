@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Add-wins observed-remove map (AWORMap) — a **tier_2** native CRDT.
 
 A dynamic-key map whose presence semantics are add-wins: a key written
@@ -230,7 +228,7 @@ it exact (a superseding `{O, S'}` with `S' >= S` means `O` observed
 `{O, S}`). A peer's dots live on a disjoint `{Origin, _}` axis and are
 never subsumed by `O`'s counter — which is precisely why a concurrent
 peer add survives a remove (add-wins).
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

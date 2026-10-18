@@ -528,26 +528,18 @@ do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
     ),
 
     %% Find the realm-prefixed ticket cookie and try to revoke it.
-    %% The realm may not exist on this node (e.g. after reconfiguration),
-    %% so we catch errors to ensure cookies are always cleared.
+    %% `bondy_ticket:verify/1` returns `{error, _}` for any ticket it cannot
+    %% verify, including one whose realm does not exist on this node.
     TicketCookieName = bondy_http_utils:ticket_cookie_name(RealmUri),
     OidcClaims =
         case lists:keyfind(TicketCookieName, 1, Cookies) of
             {_, JWT} ->
-                try bondy_ticket:verify(JWT) of
+                case bondy_ticket:verify(JWT) of
                     {ok, Claims} ->
                         _ = bondy_ticket:revoke(Claims),
                         Claims;
                     {error, _} ->
-                        _ =
-                            try
-                                bondy_ticket:revoke(JWT)
-                            catch
-                                _:_ -> ok
-                            end,
-                        #{}
-                catch
-                    _:_ ->
+                        _ = bondy_ticket:revoke(JWT),
                         #{}
                 end;
             false ->
@@ -745,11 +737,26 @@ refresh_token_ttl_secs(_) ->
 
 %% @private
 decode_jwt_claims(JWT) when is_binary(JWT) ->
+    %% jose raises `{badarg, _}` (not a JWS), `{case_clause, _}` (not base64url)
+    %% or `function_clause` (not a JSON object). JSON errors depend on the
+    %% configured jose backend.
     try
         {jose_jwt, Claims} = jose_jwt:peek(JWT),
         {ok, Claims}
     catch
-        _:_ -> error
+        error:{badarg, _} ->
+            error;
+        error:{case_clause, _} ->
+            error;
+        error:function_clause ->
+            error;
+        Class:Reason ->
+            ?LOG_DEBUG(#{
+                description => "Refresh token payload is not a JWT claim set",
+                class => Class,
+                reason => Reason
+            }),
+            error
     end.
 
 %% @private
@@ -961,3 +968,23 @@ reply_json_error(StatusCode, ErrorBin, Req) ->
         ReplyBody,
         Req
     ).
+
+%% =============================================================================
+%% EUNIT
+%% =============================================================================
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+decode_jwt_claims_rejects_an_opaque_token_test() ->
+    ?assertEqual(error, decode_jwt_claims(~"opaque-refresh-token")).
+
+decode_jwt_claims_rejects_a_payload_that_is_not_base64url_test() ->
+    ?assertEqual(error, decode_jwt_claims(~"aGVhZGVy.!!.c2ln")).
+
+decode_jwt_claims_rejects_a_payload_that_is_not_an_object_test() ->
+    %% The payload is the JSON number `123`.
+    ?assertEqual(error, decode_jwt_claims(~"aGVhZGVy.MTIz.c2ln")).
+
+-endif.

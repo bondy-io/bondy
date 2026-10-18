@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Enable-Wins Flag (EWFlag) — tier_2 operation-based CRDT.
 
 The op-based equivalent of the pure `pure_ewflag`. A boolean flag with
@@ -45,7 +43,7 @@ enable | disable
 `enable` mints a fresh dot. `disable` drops every dot the writer's context
 observed; a concurrent enable (un-observed dot) survives — enable-wins.
 The value is `true` iff any enable dot is live.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

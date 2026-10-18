@@ -391,22 +391,11 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 %% @private
-%% Wrap a peer-side read as the `{ok, _}` a coordinator expects; a raised error
-%% becomes `{error, _}` so the coordinator sees a definite failure (→ empty page
-%% for `page`, `unavailable` for `get`) rather than waiting out its timeout.
+%% Wrap a peer-side read as the `{ok, _}` a coordinator expects. A read that
+%% raises crashes the spawned replier; the coordinator then waits out its
+%% `?NODE_TIMEOUT` and counts the peer as an empty page or `unavailable`.
 peer_reply(Fun) ->
-    try
-        {ok, Fun()}
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_WARNING(#{
-                description => "registry meta peer read raised",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
-    end.
+    {ok, Fun()}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.

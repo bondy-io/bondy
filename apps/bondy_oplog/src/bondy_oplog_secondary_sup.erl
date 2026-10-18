@@ -7,10 +7,8 @@
 
 -behaviour(supervisor).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Supervisor of the `bondy_oplog_secondary_writer` workers, one child per
 `writer_key` (the set of index shards a single writer drives), with the
 `writer_key` as the child id. Sibling of `bondy_oplog_instance_dyn_sup` under
@@ -30,7 +28,7 @@ recovers the ops dispatched while it was down
 (`bondy_db_shared_writer_test:secondary_sup_restart_keeps_writers/1`).
 Writers that keep crashing exhaust this supervisor's intensity, and each of its
 restarts counts against `bondy_oplog_sup`'s.
-""").
+""".
 
 -export([start_link/0]).
 -export([start_writer/1]).

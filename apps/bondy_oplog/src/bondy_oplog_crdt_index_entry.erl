@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Native operation-based CRDT backing one cell of the secondary-index
 keyspace.
 
@@ -81,7 +79,7 @@ state {P, Cols, V} -> <<Rank:8, V:64, ColsSize:32, Cols/binary>>
 ```
 
 `Rank` is `1` for `live`, `0` for `dead`.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

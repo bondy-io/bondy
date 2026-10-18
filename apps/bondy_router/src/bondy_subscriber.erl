@@ -229,14 +229,26 @@ apply_callback(Event0, Retry, State) ->
         {error, Reason} ->
             {error, Reason, State}
     catch
-        _:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while evaluating action",
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason, State}
+        throw:{invalid_action, _} = Reason ->
+            action_failed(throw, Reason, State);
+        error:{badarg, _} = Reason ->
+            action_failed(error, Reason, State);
+        error:{badkey, _} = Reason ->
+            action_failed(error, Reason, State);
+        error:{badkeypath, _} = Reason ->
+            action_failed(error, Reason, State);
+        error:{invalid_expression, _} = Reason ->
+            action_failed(error, Reason, State)
     end.
+
+%% @private
+action_failed(Class, Reason, State) ->
+    ?LOG_ERROR(#{
+        description => "Error while evaluating action",
+        class => Class,
+        reason => Reason
+    }),
+    {error, Reason, State}.
 
 %% @private
 %% A retry goes back through the mailbox instead of being slept on.

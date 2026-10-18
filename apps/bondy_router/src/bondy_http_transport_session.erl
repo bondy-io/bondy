@@ -537,7 +537,7 @@ handle_call({client_message, Data}, _From, State) ->
             Claims ->
                 bondy_wamp_protocol:set_auth_claims(Claims, ProtoState0)
         end,
-    try bondy_wamp_protocol:handle_inbound(Data, ProtoState) of
+    case bondy_wamp_protocol:handle_inbound(Data, ProtoState) of
         {reply, Bins, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
             S2 = enqueue_replies(Bins, S1),
@@ -558,16 +558,6 @@ handle_call({client_message, Data}, _From, State) ->
             S2 = enqueue_replies(Bins, S1),
             signal_sse_stop(Bins, S2),
             {stop, normal, ok, deliver_to_poller(S2)}
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error handling client message",
-                transport_id => State#state.transport_id,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {reply, {error, Reason}, State}
     end;
 handle_call({register_sse_stream, StreamPid, Mode}, _From, State) ->
     Prev = State#state.sse_pid,
@@ -684,7 +674,7 @@ handle_info(queue_ready, State) ->
     {noreply, State};
 handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
     #state{protocol_state = ProtoState} = State,
-    try bondy_wamp_protocol:handle_outbound(M, ProtoState) of
+    case bondy_wamp_protocol:handle_outbound(M, ProtoState) of
         {ok, Bin, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
             S2 = enqueue_replies([Bin], S1),
@@ -705,16 +695,6 @@ handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
         {error, _Reason, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
             {noreply, S1}
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error handling outbound message",
-                transport_id => State#state.transport_id,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {noreply, State}
     end;
 handle_info(
     {poll_timeout, {async, ReplyTo} = From},
@@ -809,18 +789,7 @@ terminate(Reason, #state{transport_id = TransportId} = State) ->
         undefined ->
             ok;
         ProtoState ->
-            try
-                bondy_wamp_protocol:terminate(ProtoState)
-            catch
-                Class:Reason:Stacktrace ->
-                    ?LOG_ERROR(#{
-                        description => "Error terminating protocol state",
-                        transport_id => TransportId,
-                        class => Class,
-                        reason => Reason,
-                        stacktrace => Stacktrace
-                    })
-            end
+            bondy_wamp_protocol:terminate(ProtoState)
     end,
 
     case State#state.sse_pid of
@@ -937,25 +906,21 @@ signal_sse_stop(_FinalBins, _State) ->
     ok.
 
 %% @private
-%% Total: the lifecycle event must never fail `terminate/2`.
+%% `telemetry:execute/3` detaches a crashing handler and reads a missing
+%% handler table as no handlers, so this does not fail `terminate/2`.
 emit_closed(Reason, State) ->
-    try
-        Now = erlang:system_time(millisecond),
-        telemetry:execute(
-            [bondy, http_transport, session, closed],
-            #{count => 1, duration => Now - State#state.created_at},
-            #{
-                transport_id => State#state.transport_id,
-                realm => State#state.realm_uri,
-                session_id => State#state.session_id,
-                reason => close_reason(Reason),
-                metadata => State#state.telemetry_metadata
-            }
-        )
-    catch
-        _:_ ->
-            ok
-    end.
+    Now = erlang:system_time(millisecond),
+    telemetry:execute(
+        [bondy, http_transport, session, closed],
+        #{count => 1, duration => Now - State#state.created_at},
+        #{
+            transport_id => State#state.transport_id,
+            realm => State#state.realm_uri,
+            session_id => State#state.session_id,
+            reason => close_reason(Reason),
+            metadata => State#state.telemetry_metadata
+        }
+    ).
 
 %% @private
 %% A `{shutdown, Tag}` stop names its close reason; plain graceful stops

@@ -5,11 +5,10 @@
 
 -module(bondy_oplog_event).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Event identity and event record helpers for the MST event-store
 replication layer.
 
@@ -37,7 +36,7 @@ tier-specific causal metadata.
 
 The `key/1` and `event/3` constructors hide the record internals. Modules
 that import the header may pattern-match on the records directly.
-""").
+""".
 
 -type event_key() :: #bondy_oplog_event_key{}.
 -type t() :: #bondy_oplog_event{}.
@@ -72,11 +71,11 @@ that import the header may pattern-match on the records directly.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Constructs an event key. The caller is responsible for ensuring the
 `{HLC, Origin, Seq}` triple is fresh — typically this is done by
 `bondy_oplog_instance` rather than the application.
-""").
+""".
 -spec key(bondy_connect_hlc:hlc(), bondy_oplog_origin:t(), non_neg_integer()) ->
     event_key().
 
@@ -98,10 +97,10 @@ key_origin(#bondy_oplog_event_key{origin = O}) -> O.
 -spec key_seq(event_key()) -> non_neg_integer().
 key_seq(#bondy_oplog_event_key{seq = S}) -> S.
 
-?DOC("""
+-doc """
 Three-way compare. Records compare element-wise in Erlang's term order;
 this helper is provided so callers do not need to import the header.
-""").
+""".
 -spec compare_keys(event_key(), event_key()) -> lt | eq | gt.
 
 compare_keys(A, B) when A =:= B -> eq;
@@ -112,11 +111,11 @@ compare_keys(_, _) -> gt.
 is_key(#bondy_oplog_event_key{}) -> true;
 is_key(_) -> false.
 
-?DOC("""
+-doc """
 Whether the version vector `VV` covers `Key`: an event key whose seq is at or
 below `VV`'s entry for its origin. A missing entry is seq 0; a non-event key
 and an `undefined` vector cover nothing.
-""").
+""".
 -spec covered(term(), #{binary() => non_neg_integer()} | undefined) ->
     boolean().
 
@@ -125,18 +124,18 @@ covered(#bondy_oplog_event_key{origin = Origin, seq = Seq}, #{} = VV) ->
 covered(_Key, _VV) ->
     false.
 
-?DOC("""
+-doc """
 Constructs an event.
-""").
+""".
 -spec new(event_key(), op(), meta()) -> t().
 
 new(#bondy_oplog_event_key{} = K, Op, Meta) ->
     #bondy_oplog_event{key = K, op = Op, meta = Meta}.
 
-?DOC("""
+-doc """
 Constructs an event with explicit `prev_hash` and `signature`.
 Used by the crypto validator after signing.
-""").
+""".
 -spec new(
     event_key(),
     op(),
@@ -177,16 +176,16 @@ set_prev_hash(#bondy_oplog_event{} = E, P) ->
 set_signature(#bondy_oplog_event{} = E, S) ->
     E#bondy_oplog_event{signature = S}.
 
-?DOC("""
+-doc """
 Returns the smallest possible event key. Useful as the lower bound for
 range scans before any compaction watermark has been established.
-""").
+""".
 -spec min_key() -> event_key().
 
 min_key() ->
     #bondy_oplog_event_key{hlc = 0, origin = <<>>, seq = 0}.
 
-?DOC("""
+-doc """
 Returns a sentinel key that is greater than every event key with the
 given HLC. Useful as an exclusive upper bound for range scans.
 
@@ -194,7 +193,7 @@ Since the term order on tuples falls back to element-wise comparison
 and `<<255, ...>>` of any length is larger than any practical Origin,
 this sentinel is correct for any Origin shorter than 256 bytes — which
 covers every documented Origin format (16-byte UUID, 32-byte SHA-256).
-""").
+""".
 -spec max_key_for_hlc(bondy_connect_hlc:hlc()) -> event_key().
 
 max_key_for_hlc(HLC) when is_integer(HLC), HLC >= 0 ->

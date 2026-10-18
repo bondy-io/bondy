@@ -95,14 +95,12 @@ get_client_context(RealmUri, ProviderName) when
                     Pid, ClientId, ClientSecret
                 )
             catch
-                Class:Reason:Stacktrace ->
+                exit:{_, {gen_server, call, _}} = Reason ->
                     ?LOG_ERROR(#{
                         description => "Failed to create OIDC client context",
                         realm_uri => RealmUri,
                         provider => ProviderName,
-                        class => Class,
-                        reason => Reason,
-                        stacktrace => Stacktrace
+                        reason => Reason
                     }),
                     {error, Reason}
             end;

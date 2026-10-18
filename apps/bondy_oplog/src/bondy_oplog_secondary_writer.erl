@@ -8,10 +8,9 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Asynchronous writer for the secondary indexes on one shard. One lightweight
 gen_server per `writer_key`, supervised by `bondy_oplog_secondary_sup`.
 
@@ -117,7 +116,7 @@ A stream provisioned **after** the writer started (a sibling index joining an
 already-running writer) is stamped by the facade with the writer's known pid.
 The stamp does **not** transfer the registry monitor — the projection-handle
 owner keeps it.
-""").
+""".
 
 -export([start_link/1]).
 -export([enqueue/4]).

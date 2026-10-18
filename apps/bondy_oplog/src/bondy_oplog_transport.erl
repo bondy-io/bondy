@@ -5,11 +5,10 @@
 
 -module(bondy_oplog_transport).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for the wire transport used by the sync protocol.
 
 The library defines the protocol; the transport plugs in the actual
@@ -85,7 +84,7 @@ recovering catalogue-mode replicas.
 
 The transport itself is stateless. Per-call options are passed through
 the `Opts` argument.
-""").
+""".
 
 -type cell() ::
     {Bucket :: binary(), Key :: binary(), Frame :: binary()}.

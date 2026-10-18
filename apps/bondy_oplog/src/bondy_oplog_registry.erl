@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Node-shared per-instance read-snapshot registry.
 
 A single ETS `set` table per node, keyed by `instance_id()`, holding
@@ -55,7 +54,7 @@ writes its row**. Other processes are read-only.
 This module's gen_server exists only to own the table (so the table
 survives any single instance gen_server crash) and to keep the
 table's lifecycle tied to a supervisor child.
-""").
+""".
 
 -define(TABLE, bondy_oplog_registry_tab).
 
@@ -325,29 +324,29 @@ child_spec() ->
 %% INSTANCE-FACING WRITES
 %% =============================================================================
 
-?DOC("""
+-doc """
 Inserts (or replaces) the row for an instance. Called by the instance
 gen_server in `init/1` once the initial MST handle and snapshot state
 are computed. Direct ETS write — no roundtrip through this module's
 gen_server.
-""").
+""".
 -spec register(entry()) -> ok.
 
 register(Entry) when is_map(Entry) ->
     true = ets:insert(?TABLE, to_record(Entry)),
     ok.
 
-?DOC("""
+-doc """
 Removes the row for an instance. Called by the instance gen_server in
 `terminate/2`.
-""").
+""".
 -spec unregister(instance_id()) -> ok.
 
 unregister(InstanceId) when is_binary(InstanceId) ->
     true = ets:delete(?TABLE, InstanceId),
     ok.
 
-?DOC("""
+-doc """
 Updates the mutable per-instance fields in place (`instance_pid`,
 `origin`, `mst`, `watermark`, `snapshot`, `live_size`). Called
 by the instance gen_server after every state-mutating handle_call.
@@ -361,7 +360,7 @@ falls back to `register/1` so the row is created from this snapshot.
 `instance_pid` IS published here (it's the field this gen_server
 owns); `wal_pid`, `applier_pid`, and `sup_pid` are not — those are
 owned by other processes and updated via their dedicated setters.
-""").
+""".
 -spec publish(entry()) -> ok.
 
 publish(#{instance_id := Id} = Entry) ->
@@ -382,10 +381,10 @@ publish(#{instance_id := Id} = Entry) ->
 %% READS
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns the full registry row for an instance, or `not_found`.
 A single ETS lookup; safe to call from any process.
-""").
+""".
 -spec lookup(instance_id()) -> {ok, entry()} | not_found.
 
 lookup(InstanceId) when is_binary(InstanceId) ->
@@ -394,7 +393,7 @@ lookup(InstanceId) when is_binary(InstanceId) ->
         [] -> not_found
     end.
 
-?DOC("""
+-doc """
 Every LIVE instance id.
 
 A row is removed by the instance gen_server's `terminate/2`, which does not
@@ -419,7 +418,7 @@ this usable from a periodic sweep.
 scheduler and wrong for `bondy_oplog_origin_retirement:local_origins/0`,
 where an unadvertised origin can be retired by a peer's reap-by-complement
 and a live replica banned permanently. That caller reads `origins/0`.
-""").
+""".
 -spec list() -> [instance_id()].
 
 list() ->
@@ -432,7 +431,7 @@ list() ->
     ]),
     [Id || {Id, Pid} <- Rows, Pid =:= undefined orelse is_process_alive(Pid)].
 
-?DOC("""
+-doc """
 The registered instances whose process is NOT alive — the complement of
 `list/0` over the same rows.
 
@@ -442,7 +441,7 @@ not yet republished. `bondy_oplog_origin_retirement:retire_dead/0` refuses
 while this is non-empty: an instance in that state is not serving, and an
 operator retiring origins wants a node that is whole
 (`bondy_oplog_frontier_reap_test:retire_dead_refuses_while_an_instance_is_down/0`).
-""").
+""".
 -spec down() -> [instance_id()].
 
 down() ->
@@ -455,7 +454,7 @@ down() ->
     ]),
     [Id || {Id, Pid} <- Rows, not is_process_alive(Pid)].
 
-?DOC("""
+-doc """
 Every registered instance's origin, INCLUDING rows whose process is not
 currently alive.
 
@@ -469,7 +468,7 @@ liveness the way `list/0` does.
 `origin` is written by every `publish/1`, so a restarted instance replaces
 the origin of the incarnation before it
 (`bondy_oplog_instance_sup_origin_test`).
-""").
+""".
 -spec origins() -> [bondy_oplog_origin:t()].
 
 origins() ->
@@ -534,82 +533,82 @@ sup_pid(InstanceId) ->
 overlay_tab(InstanceId) ->
     field(InstanceId, #entry.overlay_tab).
 
-?DOC("""
+-doc """
 Returns the demand-based flow-control counter for the applier→instance
 `install_local_batch` channel, or `undefined` when the entry has not
 yet been published. The applier reads this once at `init/1` and caches
 the ref; both processes update it via `atomics:add_get/3` and
 `atomics:sub/3`.
-""").
+""".
 -spec install_in_flight(instance_id()) ->
     atomics:atomics_ref() | undefined.
 
 install_in_flight(InstanceId) ->
     field(InstanceId, #entry.install_in_flight).
 
-?DOC("""
+-doc """
 Returns the remote-delivery generation counter ref for `InstanceId`, or
 `undefined` when the entry has not yet been published (nothing can have
 been integrated before the instance's `init/1`, so callers treat the
 absence as generation 0). See the `remote_gen` field note.
-""").
+""".
 -spec remote_gen(instance_id()) -> atomics:atomics_ref() | undefined.
 
 remote_gen(InstanceId) ->
     field(InstanceId, #entry.remote_gen).
 
-?DOC("""
+-doc """
 Returns the configured cap on the applier's in-flight
 `install_local_batch` casts to the instance, or `undefined` when the
 entry has not yet been published. Read by the applier when computing
 its dispatch budget.
-""").
+""".
 -spec max_install_in_flight(instance_id()) -> pos_integer() | undefined.
 
 max_install_in_flight(InstanceId) ->
     field(InstanceId, #entry.max_install_in_flight).
 
-?DOC("""
+-doc """
 Returns the bootstrap lifecycle handle for `InstanceId`, or `undefined`
 when the entry has not yet been published. The applier reads this once
 at `init/1` and caches the handle; the gate check then collapses to a
 single `atomics:get/2`.
-""").
+""".
 -spec lifecycle(instance_id()) ->
     bondy_oplog_bootstrap_lifecycle:handle() | undefined.
 
 lifecycle(InstanceId) ->
     field(InstanceId, #entry.lifecycle).
 
-?DOC("""
+-doc """
 Returns the cached fast-path bundle for an instance, or `undefined`
 when none is published (callers must route through the instance
 gen_server).
-""").
+""".
 -spec fast_path(instance_id()) -> undefined | fast_path().
 
 fast_path(InstanceId) ->
     field(InstanceId, #entry.fast_path).
 
-?DOC("""
+-doc """
 Returns the AE-target list stored for `InstanceId`, or `[]` when the
 row exists but the consumer has not configured targets, or
 `undefined` when no row exists. Used by `bondy_oplog_applier` (commit
 boundary) and `bondy_oplog_sync_session` (round completion) to know
 which substrate shards to bump via
 `bondy_oplog_core_registry:bump_ae_targets/2`.
-""").
+""".
 -spec ae_targets(instance_id()) ->
     [{atom(), atom(), non_neg_integer()}] | undefined.
 
 ae_targets(InstanceId) ->
     field(InstanceId, #entry.ae_targets).
 
-?DOC("""
+-doc """
 Returns the instance's applied-frontier version vector `#{Origin => max Seq}`,
 or `#{}` if the instance has no published row yet. Read lock-free by the AAE
 responder / observer to compare against a peer's frontier (equal ⇒ converged).
-""").
+""".
 -spec frontier(instance_id()) -> #{binary() => non_neg_integer()}.
 
 frontier(InstanceId) ->
@@ -618,10 +617,10 @@ frontier(InstanceId) ->
         _ -> #{}
     end.
 
-?DOC("""
+-doc """
 Whether the instance's applied frontier claims every entry of `VV` but a
 retired origin's, which `merge_frontier/2` never raises.
-""").
+""".
 -spec claims(instance_id(), #{binary() => non_neg_integer()}) -> boolean().
 
 claims(InstanceId, VV) when is_map(VV) ->
@@ -634,7 +633,7 @@ claims(InstanceId, VV) when is_map(VV) ->
         drop_retired(VV)
     ).
 
-?DOC("""
+-doc """
 Returns the instance's PENDING applied seqs: `#{Origin => interval set}` of
 seqs this instance has folded that sit ABOVE the origin's prefix bound, because
 an earlier seq is still missing.
@@ -643,7 +642,7 @@ Empty for every origin whose delivery had no hole, which is the healthy case —
 so this is `#{}` on a well behaved replica, and its size is a direct measure of
 how many holes the instance is carrying. Local and volatile: never shipped to a
 peer, never checkpointed. See the `pending` field note.
-""").
+""".
 -spec pending(instance_id()) -> #{binary() => bondy_connect_interval_set:t()}.
 
 pending(InstanceId) ->
@@ -652,7 +651,7 @@ pending(InstanceId) ->
         _ -> #{}
     end.
 
-?DOC("""
+-doc """
 Returns BOTH components of the applied frontier in one read: the prefix bound
 `#{Origin => Seq}` and the pending seqs above it.
 
@@ -665,7 +664,7 @@ reports a folded seq as missing. One `ets:lookup/2` cannot tear.
 
 Returns `{#{}, #{}}` for an unknown instance, as `frontier/1` and `pending/1`
 do individually.
-""").
+""".
 -spec frontier_and_pending(instance_id()) ->
     {
         #{binary() => non_neg_integer()},
@@ -682,47 +681,47 @@ frontier_and_pending(InstanceId) when is_binary(InstanceId) ->
         error:badarg -> {#{}, #{}}
     end.
 
-?DOC("""
+-doc """
 Returns the instance's ephemeral fused-writer flag. `true` only for
 ephemeral (ets projection) instances that opted into the fused
 single-process write path; `false` for every other instance, and when
 the row is absent (a stopped or never-started instance).
-""").
+""".
 -spec fused(instance_id()) -> boolean().
 
 fused(InstanceId) ->
     field(InstanceId, #entry.fused) =:= true.
 
-?DOC("""
+-doc """
 Whether every table this shard instance declares has registered its
 cell-apply bucket. `false` means the instance cannot route every cell it may
 receive, so it must neither install a peer catalogue snapshot nor serve one.
-""").
+""".
 -spec tables_registered(instance_id()) -> boolean().
 
 tables_registered(InstanceId) ->
     field(InstanceId, #entry.tables_registered) =/= false.
 
-?DOC("""
+-doc """
 Returns the `bondy_db` DB the instance belongs to, or `undefined` when the
 row is absent or the instance was not started by `bondy_db`.
 
 Recorded once at instance `init/1` from the `db` instance opt. Read by
 `bondy_oplog:db_of/1` on the anti-entropy path.
-""").
+""".
 -spec db(instance_id()) -> atom() | undefined.
 
 db(InstanceId) ->
     field(InstanceId, #entry.db).
 
-?DOC("""
+-doc """
 Returns `{OverlayTab, MST}` for an instance in **one** ETS lookup,
 or `undefined` when the row is absent. Used by the hot lock-free
 read paths (`get/2`, `fold_range/5`, `first_key/1`,
 `latest_key/1`) which would otherwise issue two consecutive
 `lookup_element/3` calls — each one a separate ETS access serialised
 on the per-key slot lock.
-""").
+""".
 -spec read_overlay_and_mst(instance_id()) ->
     undefined | {ets:tid() | undefined, bondy_mst:t()}.
 
@@ -734,12 +733,12 @@ read_overlay_and_mst(InstanceId) when is_binary(InstanceId) ->
         error:badarg -> undefined
     end.
 
-?DOC("""
+-doc """
 Reverse lookup: returns the `instance_id()` whose registry row has
 the given `sup_pid`, or `undefined`. Used by the dyn supervisor's
 `stop_instance(Pid)` path to drop the row alongside the supervisor
 child.
-""").
+""".
 -spec instance_id_by_sup_pid(pid()) -> instance_id() | undefined.
 
 instance_id_by_sup_pid(SupPid) when is_pid(SupPid) ->
@@ -752,12 +751,12 @@ instance_id_by_sup_pid(SupPid) when is_pid(SupPid) ->
         _ -> undefined
     end.
 
-?DOC("""
+-doc """
 Records the per-instance WAL writer pid. Called by the WAL writer's
 `init/1` after the row has been created by the instance gen_server.
 Silently returns `ok` if the row is absent (e.g. the subtree is
 shutting down) so the WAL doesn't crash on a benign race.
-""").
+""".
 -spec set_wal_pid(instance_id(), pid()) -> ok.
 
 set_wal_pid(InstanceId, Pid) when is_binary(InstanceId), is_pid(Pid) ->
@@ -772,59 +771,59 @@ set_wal_handle(InstanceId, Handle) when
     _ = update_field(InstanceId, #entry.wal_handle, Handle),
     ok.
 
-?DOC("""
+-doc """
 Records the per-instance applier pid. Same contract as
 `set_wal_pid/2`.
-""").
+""".
 -spec set_applier_pid(instance_id(), pid()) -> ok.
 
 set_applier_pid(InstanceId, Pid) when is_binary(InstanceId), is_pid(Pid) ->
     _ = update_field(InstanceId, #entry.applier_pid, Pid),
     ok.
 
-?DOC("""
+-doc """
 Records the per-instance subtree supervisor pid. Called by
 `bondy_oplog_instance_dyn_sup:start_instance/2` after the supervisor
 returns. Same tolerance as the sibling setters — a missing row is a
 benign no-op.
-""").
+""".
 -spec set_sup_pid(instance_id(), pid()) -> ok.
 
 set_sup_pid(InstanceId, Pid) when is_binary(InstanceId), is_pid(Pid) ->
     _ = update_field(InstanceId, #entry.sup_pid, Pid),
     ok.
 
-?DOC("""
+-doc """
 Records the per-instance overlay ETS table id. Called by the instance
 gen_server's `init/1` once, immediately after the table is created and
 before the registry row is published, so the applier (which starts
 later in the one_for_all subtree) finds the tid already in place.
 Same tolerance as the sibling setters — a missing row is a benign
 no-op so a one_for_all restart race does not crash either process.
-""").
+""".
 -spec set_overlay_tab(instance_id(), ets:tid()) -> ok.
 
 set_overlay_tab(InstanceId, Tab) when is_binary(InstanceId) ->
     _ = update_field(InstanceId, #entry.overlay_tab, Tab),
     ok.
 
-?DOC("""
+-doc """
 Publishes the lock-free `append_fast` bundle for an instance, or
 clears it when the validator is not stateless. Set once by the
 instance gen_server's `init/1`. Same benign-race tolerance as
 `set_overlay_tab/2`.
-""").
+""".
 -spec set_fast_path(instance_id(), undefined | fast_path()) -> ok.
 
 set_fast_path(InstanceId, FastPath) when is_binary(InstanceId) ->
     _ = update_field(InstanceId, #entry.fast_path, FastPath),
     ok.
 
-?DOC("""
+-doc """
 Stores the substrate read-side AE targets for `InstanceId`. Symmetric
 with `set_overlay_tab/2`; published once at instance init and never
 updated for the instance's lifetime.
-""").
+""".
 -spec set_ae_targets(
     instance_id(), [{atom(), atom(), non_neg_integer()}]
 ) -> ok.
@@ -836,7 +835,7 @@ set_ae_targets(InstanceId, Targets) when
     _ = update_field(InstanceId, #entry.ae_targets, Targets),
     ok.
 
-?DOC("""
+-doc """
 Max-merges a partial applied-frontier `#{Origin => Seq}` into the instance's
 stored frontier (`#{Origin => max Seq}`). Called by the applier at the commit
 barrier with the batch's per-origin maxima. An empty partial is a no-op.
@@ -887,7 +886,7 @@ received and skipped, and because `watermark_door/2` and
 `capped_truncation_point/2` judge "never applied" against this same frontier,
 the over-claim also disarms the repair. Boot re-folds instead
 (`bondy_oplog_instance:replay_anchor/1`).
-""").
+""".
 -spec merge_frontier(instance_id(), #{binary() => non_neg_integer()}) -> ok.
 
 merge_frontier(_InstanceId, Partial) when Partial =:= #{} ->
@@ -924,7 +923,7 @@ merge_filtered(InstanceId, Partial) ->
         not_found -> ok
     end.
 
-?DOC("""
+-doc """
 Records what a batch MATERIALISED into the projection: `#{Origin => [Seq]}`.
 
 This is the applied frontier's only incremental writer, and it takes what was
@@ -955,7 +954,7 @@ applier and the instance process write the same origin concurrently, and they
 do: the mux front-ends are called from both.
 
 Retired origins are dropped, as in `merge_frontier/2` and for the same reason.
-""").
+""".
 -spec merge_applied(instance_id(), #{binary() => [non_neg_integer()]}) -> ok.
 
 merge_applied(_InstanceId, Applied) when Applied =:= #{} ->
@@ -1044,7 +1043,7 @@ new_prefix(Prefix, [{Min, Max} | _]) when Min =:= Prefix + 1 ->
 new_prefix(Prefix, _) ->
     Prefix.
 
-?DOC("""
+-doc """
 Removes `Origins` from `InstanceId`'s applied-frontier VV.
 
 One of the two operations that move the frontier down, and the only one that
@@ -1066,7 +1065,7 @@ paid for, and `reap_is_atomic_against_a_concurrent_merge/0` exercises it.
 
 Returns the origins actually removed — `[]` when none of them was in the
 frontier, or when the instance has no registry row.
-""").
+""".
 -spec reap_frontier(instance_id(), [binary()]) -> [binary()].
 
 reap_frontier(_InstanceId, []) ->
@@ -1095,7 +1094,7 @@ reap_frontier(InstanceId, Origins) when is_binary(InstanceId) ->
         not_found -> []
     end.
 
-?DOC("""
+-doc """
 Replaces `InstanceId`'s applied frontier with `Frontier`, nothing pending, so
 that a re-fold claims on top of it only what materialises. Called when a
 catalogue install replaced cells: by `bondy_oplog_applier:commit_stage/4`, with
@@ -1113,7 +1112,7 @@ floor, a crash under the re-fold mark loses a truncated event
 
 The retired-origin ceiling applies as in `merge_frontier/2`: a retired origin's
 entry is dropped. A no-op when the instance has no registry row.
-""").
+""".
 -spec replace_frontier(instance_id(), #{binary() => non_neg_integer()}) -> ok.
 
 replace_frontier(InstanceId, Frontier) when
@@ -1125,11 +1124,11 @@ replace_frontier(InstanceId, Frontier) when
         not_found -> ok
     end.
 
-?DOC("""
+-doc """
 Returns the instance's truncation record: per origin, a bound on every event
 its truncations removed while its applied frontier claimed it. `#{}` when the
 instance has truncated nothing, or has no registry row.
-""").
+""".
 -spec truncated(instance_id()) -> #{binary() => non_neg_integer()}.
 
 truncated(InstanceId) ->
@@ -1138,14 +1137,14 @@ truncated(InstanceId) ->
         _ -> #{}
     end.
 
-?DOC("""
+-doc """
 Raises the truncation record to the pointwise maximum of itself and `VV`.
 
 `bondy_oplog_instance` raises it before every truncation, and restores it from
 its checkpoint at boot. It is the only writer, which a grep confirms today and
 nothing enforces, so a plain read-modify-write is safe. The record lives in the
 row, as the frontier does, so a restart that keeps the row keeps both.
-""").
+""".
 -spec raise_truncated(instance_id(), #{binary() => non_neg_integer()}) -> ok.
 
 raise_truncated(InstanceId, VV) when is_binary(InstanceId), is_map(VV) ->
@@ -1158,11 +1157,11 @@ raise_truncated(InstanceId, VV) when is_binary(InstanceId), is_map(VV) ->
             ok
     end.
 
-?DOC("""
+-doc """
 The entries of the instance's truncation record (`truncated/1`) that `VV` does
 not cover, retired origins dropped as in `claims/2`: `#{}` when `VV` covers
 the record.
-""").
+""".
 -spec uncovered_truncation(instance_id(), #{binary() => non_neg_integer()}) ->
     #{binary() => non_neg_integer()}.
 
@@ -1257,12 +1256,12 @@ swap(InstanceId, #entry{frontier = Cur, pending = CurP} = E, New, Result, Fun) -
         0 -> cas_frontier(InstanceId, Fun)
     end.
 
-?DOC("""
+-doc """
 Publishes the per-instance flow-control handle used by the applier to
 gate its `install_local_batch` dispatch. Set once by the instance's
 `init/1`; both fields are read by the applier and updated by both
 sides via the same atomic ref.
-""").
+""".
 -spec set_install_in_flight(
     instance_id(), atomics:atomics_ref(), pos_integer()
 ) -> ok.
@@ -1281,11 +1280,11 @@ set_install_in_flight(InstanceId, Ref, Cap) when
             ok
     end.
 
-?DOC("""
+-doc """
 Publishes the per-instance bootstrap lifecycle handle. Set once by
 the instance's `init/1`; read by the applier at its own `init/1` to
 gate the WAL drain.
-""").
+""".
 -spec set_lifecycle(
     instance_id(), bondy_oplog_bootstrap_lifecycle:handle()
 ) -> ok.
@@ -1294,12 +1293,12 @@ set_lifecycle(InstanceId, Handle) when is_binary(InstanceId) ->
     _ = update_field(InstanceId, #entry.lifecycle, Handle),
     ok.
 
-?DOC("""
+-doc """
 Publishes the routing-directory readiness (see the `tables_registered` field
 note). Written by the applier at `init/1` from its `drain_gated` opt, and set
 `true` by `bondy_oplog_instance:open_drain_gate/1` and again by the applier
 when it handles that release.
-""").
+""".
 -spec set_tables_registered(instance_id(), boolean()) -> ok.
 
 set_tables_registered(InstanceId, Bool) when
@@ -1308,12 +1307,12 @@ set_tables_registered(InstanceId, Bool) when
     _ = update_field(InstanceId, #entry.tables_registered, Bool),
     ok.
 
-?DOC("""
+-doc """
 Publishes the per-instance remote-delivery generation counter (see the
 `remote_gen` field note). Set once by the instance's `init/1`; bumped by
 the instance's `integrate_peer_root` handler; read by the applier's
 prepare fence.
-""").
+""".
 -spec set_remote_gen(instance_id(), atomics:atomics_ref()) -> ok.
 
 set_remote_gen(InstanceId, Ref) when is_binary(InstanceId) ->

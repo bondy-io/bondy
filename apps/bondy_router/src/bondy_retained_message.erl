@@ -269,7 +269,7 @@ to `put/5` with a TTL of `0`.
     Topic :: uri(),
     Event :: wamp_event(),
     MatchOpts :: match_opts()
-) -> ok.
+) -> ok | {error, Reason :: term()}.
 
 put(Realm, Topic, Event, MatchOpts) ->
     put(Realm, Topic, Event, MatchOpts, 0).
@@ -293,7 +293,7 @@ on one topic can leave them approximate.
     Event :: wamp_event(),
     MatchOpts :: match_opts(),
     TTL :: non_neg_integer()
-) -> ok.
+) -> ok | {error, Reason :: term()}.
 
 put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
     Retained = new(Event, MatchOpts, TTL),

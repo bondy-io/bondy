@@ -9,7 +9,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Read-only view of a pack-store instance.
 
 Reads the manifest at `Dir`, opens each sealed `pack-NNNN.pack`
@@ -52,7 +52,7 @@ gets large.
 
 `close/1` closes every fd; the parsed `.idx` handles drop with
 the surrounding state.
-""").
+""".
 
 -record(?MODULE, {
     dir :: file:filename_all(),
@@ -95,7 +95,7 @@ the surrounding state.
 %% API — lifecycle
 %% =============================================================================
 
-?DOC("""
+-doc """
 Opens a read-only view of the instance at `Dir`.
 
 Reads the manifest, then opens each sealed pack listed in the
@@ -103,7 +103,7 @@ manifest along with its `.idx` companion. Returns
 `{ok, R}` or a typed `{error, _}`. On any partial failure (e.g.,
 a single pack's `.idx` is missing), all fds opened so far are
 closed before the error is returned.
-""").
+""".
 -spec open(file:filename_all()) -> {ok, t()} | {error, open_error()}.
 
 open(Dir) ->
@@ -128,9 +128,9 @@ open(Dir) ->
             {error, {manifest, R}}
     end.
 
-?DOC("""
+-doc """
 Closes every open pack fd. Idempotent.
-""").
+""".
 -spec close(t()) -> ok.
 
 close(#?MODULE{sealed = Views}) ->
@@ -144,11 +144,11 @@ close(#?MODULE{sealed = Views}) ->
 %% API — lookups
 %% =============================================================================
 
-?DOC("""
+-doc """
 Resolves `Hash` to its page bytes. Iterates sealed packs newest-
 first; returns `{ok, Page}` on the first hit, `not_found` if every
 pack rejects, or `{error, _}` on an I/O / corruption error.
-""").
+""".
 -spec get(t(), Hash :: binary()) ->
     {ok, binary()} | not_found | {error, get_error()}.
 
@@ -174,7 +174,7 @@ get_loop([V | Rest], Hash) ->
             end
     end.
 
-?DOC("""
+-doc """
 Probabilistic membership probe across all sealed packs.
 
 Returns `true` iff at least one sealed pack's `.idx` claims the
@@ -186,7 +186,7 @@ A `true` result is conclusive (the index says the hash is at a
 known offset); a `false` result is conclusive too (every pack
 rejects). Unlike `get/2`, this does NOT pread the record body
 to verify the CRC — that's deferred to `get/2`.
-""").
+""".
 -spec has(t(), Hash :: binary()) -> boolean().
 
 has(#?MODULE{sealed = Views}, Hash) when is_binary(Hash) ->
@@ -197,11 +197,11 @@ has(#?MODULE{sealed = Views}, Hash) when is_binary(Hash) ->
         Views
     ).
 
-?DOC("""
+-doc """
 Enumerates every distinct hash across all sealed packs in
 descending pack-id, then sorted-hash order. Used for snapshots
 and tests; the hot lookup path uses `get/2`.
-""").
+""".
 -spec list(t()) -> [binary()].
 
 list(#?MODULE{sealed = Views}) ->

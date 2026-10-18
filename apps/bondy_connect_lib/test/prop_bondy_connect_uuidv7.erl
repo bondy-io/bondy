@@ -22,6 +22,8 @@ These properties check the implementation against RFC 9562.
     prop_from_timestamp_preserves_timestamp/0,
     prop_format_produces_valid_output/0,
     prop_is_valid_rejects_invalid/0,
+    prop_parse_hex_roundtrip/0,
+    prop_parse_rejects_non_hex/0,
     prop_monotonic_ordering/0,
     prop_uniqueness/0
 ]).
@@ -188,6 +190,34 @@ prop_is_valid_rejects_invalid() ->
         Invalid,
         invalid_uuid(),
         not bondy_connect_uuidv7:is_valid(Invalid)
+    ).
+
+prop_parse_hex_roundtrip() ->
+    ?FORALL(
+        Ts,
+        timestamp(),
+        begin
+            UUID = bondy_connect_uuidv7:from_timestamp(Ts),
+            Hex = bondy_connect_uuidv7:format(UUID, #{mode => hex}),
+            UUID =:= bondy_connect_uuidv7:parse(Hex)
+        end
+    ).
+
+%% `binary:decode_hex/1` raises `badarg` on a non-hex character.
+prop_parse_rejects_non_hex() ->
+    ?FORALL(
+        {Pos, Char},
+        {range(0, 31), oneof([$g, $z, $\s, $+, $/])},
+        begin
+            Hex = binary:copy(<<"0">>, 32),
+            <<Pre:Pos/binary, _, Post/binary>> = Hex,
+            Bad = <<Pre/binary, Char, Post/binary>>,
+            try bondy_connect_uuidv7:parse(Bad) of
+                _ -> false
+            catch
+                error:badarg -> true
+            end
+        end
     ).
 
 %% =============================================================================

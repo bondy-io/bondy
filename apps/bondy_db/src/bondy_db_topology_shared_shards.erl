@@ -6,10 +6,8 @@
 -module(bondy_db_topology_shared_shards).
 -behaviour(bondy_db_topology).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Topology where **N Bookies are shared across every table**.
 
 ```
@@ -89,7 +87,7 @@ Bookie is transparently followed by every handle already in circulation
 
 Bucket is the UTF-8 binary form of the entity type atom — same as
 per_entity, since the Bookie already partitions by shard.
-""").
+""".
 
 -export([init/2]).
 -export([open_table/4]).

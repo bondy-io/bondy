@@ -107,12 +107,7 @@ Safe to call at runtime — new outbound connections will use the updated certs.
 -spec reload_cacerts() -> ok.
 
 reload_cacerts() ->
-    OldCount =
-        try
-            length(cacerts())
-        catch
-            _:_ -> 0
-        end,
+    OldCount = length(cacerts()),
     ok = do_load_cacerts(),
     NewCount = length(cacerts()),
     ?LOG_NOTICE(#{
@@ -374,18 +369,20 @@ load_user_cacerts() ->
 
 %% @private
 load_os_cacerts() ->
-    try
-        ok = public_key:cacerts_load(),
-        Certs = public_key:cacerts_get(),
-        ?LOG_INFO(#{
-            description => "Loaded OS trust store CA certificates",
-            count => length(Certs)
-        }),
-        Certs
-    catch
-        _:_ ->
+    %% `public_key:cacerts_get/0` reads the store that a successful
+    %% `cacerts_load/0` caches, so it cannot fail after `ok`.
+    case public_key:cacerts_load() of
+        ok ->
+            Certs = public_key:cacerts_get(),
+            ?LOG_INFO(#{
+                description => "Loaded OS trust store CA certificates",
+                count => length(Certs)
+            }),
+            Certs;
+        {error, Reason} ->
             ?LOG_DEBUG(#{
-                description => "OS trust store not available, skipping"
+                description => "OS trust store not available, skipping",
+                reason => Reason
             }),
             []
     end.
@@ -528,7 +525,8 @@ log_cert_info(ListenerRef, #{cert := DerCert}) ->
             not_after => maps:get(not_after, Meta, undefined)
         })
     catch
-        _:_ ->
+        %% `public_key:pkix_decode_cert/2` raises this shape for invalid DER.
+        error:{badmatch, {error, _}} ->
             ?LOG_INFO(#{
                 description => "Loaded server certificate",
                 listener => ListenerRef

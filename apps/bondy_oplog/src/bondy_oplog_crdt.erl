@@ -5,11 +5,10 @@
 
 -module(bondy_oplog_crdt).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for consumer-defined CRDTs.
 
 A *CRDT module* binds an oplog instance to a domain semantics. The
@@ -186,7 +185,7 @@ as the sole convergence kernel.
 implementation will break convergence: replicas that received the
 same events will produce different snapshots and the system will
 silently diverge.
-""").
+""".
 
 -type tier() :: tier_0 | tier_1 | tier_2.
 

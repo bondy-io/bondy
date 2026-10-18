@@ -54,13 +54,13 @@ shards() ->
     WorkerMod = bondy_jobs_worker,
     N = bondy_config:get([job_manager_pool, size], 32),
 
-    %% If the supervisor restarts and we call groc_pool:new it will fail with
-    %% an exception, as the pool server is managed by the gproc supervisor
+    %% gproc owns the pool and its workers, so both outlive a restart of this
+    %% supervisor. `gproc_pool` then raises `exists` for each of them.
     _ =
         try
             gproc_pool:new(PoolName, hash, [{size, N}])
         catch
-            _:_ -> ok
+            error:exists -> ok
         end,
 
     Shards = [
@@ -70,7 +70,7 @@ shards() ->
                 try
                     gproc_pool:add_worker(PoolName, WorkerName, Shard)
                 catch
-                    _:_ -> ok
+                    error:exists -> ok
                 end,
             Shard
         end

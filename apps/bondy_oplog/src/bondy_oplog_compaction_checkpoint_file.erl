@@ -6,11 +6,10 @@
 -module(bondy_oplog_compaction_checkpoint_file).
 -behaviour(bondy_oplog_compaction_checkpoint).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 File-backed compaction checkpoint store: one file per instance, holding the
 latest `{Watermark, Checkpoint}` as an Erlang External Term Format binary.
 
@@ -50,7 +49,7 @@ requires atom-named tables (an atom-table footgun with many
 instances), and runs a slow repair pass on dirty restart.
 `file:rename/2` is atomic on POSIX by specification, which is all this
 store needs.
-""").
+""".
 
 -record(state, {
     instance_id :: instance_id(),

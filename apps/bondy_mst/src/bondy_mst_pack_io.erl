@@ -9,7 +9,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Low-level I/O helpers for sealed-pack files, shared by
 `bondy_mst_pack_reader` (read-only view) and `bondy_mst_pack_store`
 (read-write backend) so they do not drift apart.
@@ -18,7 +18,7 @@ The module owns one read primitive — `read_record/3` — and the
 private bytes-and-CRC machinery it needs. It is **not** the
 abstract sealed-pack reader: it neither tracks fds nor manages
 indexes; callers thread an already-opened `#sealed_view{}` in.
-""").
+""".
 
 -export([read_record/3]).
 
@@ -33,7 +33,7 @@ indexes; callers thread an already-opened `#sealed_view{}` in.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Reads the record at `Offset` from the given sealed view's `.pack`
 fd, verifying both the per-record CRC and that the stored hash
 matches `Hash`.
@@ -48,7 +48,7 @@ Returns:
   through to the next sealed pack.
 - `{error, read_error()}` for any underlying I/O or decode failure,
   surfaced verbatim from the codec.
-""").
+""".
 -spec read_record(
     SealedView :: #sealed_view{},
     Hash :: binary(),

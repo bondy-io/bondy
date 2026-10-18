@@ -6,10 +6,9 @@
 -module(bondy_db).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Consumer-facing **cell-mechanics facade**, substrate-backed.
 
 `bondy_db` decouples the user-visible model (DB → tables → cells keyed
@@ -134,7 +133,7 @@ shards from `bondy_oplog_core_registry`, deletes the per-shard caches,
 and asks the topology to release its physical resources for the table.
 `close/1` closes every table still open on the DB the same way, then
 shuts down the topology (and any Bookies still owned by it).
-""").
+""".
 
 -export([apply/4]).
 -export([apply_async/4]).
@@ -1357,14 +1356,20 @@ cell_apply_target_for(InstanceId) ->
 
 %% @private
 safe_cell_apply_target(Mod, Pid) ->
+    %% `Pid` comes from the registry and may have stopped since: the call
+    %% exits `noproc`, or `normal`/`shutdown` when it stops mid-call.
     try Mod:cell_apply_target(Pid) of
         {ok, _} = OK -> OK;
-        _ -> undefined
+        undefined -> undefined
     catch
-        _:_ -> undefined
+        exit:{noproc, _} -> undefined;
+        exit:{normal, _} -> undefined;
+        exit:{shutdown, _} -> undefined
     end.
 
 %% @private
+%% `from_modules/2` raises `{unknown_cell_module, _}` for a fold module with
+%% no CRDT twin: such a shard is not probeable.
 probe_module_from_entry(NS, Index, Shard) ->
     case bondy_oplog_core_registry:lookup(NS, Index, Shard) of
         {ok, Entry} ->
@@ -1375,9 +1380,9 @@ probe_module_from_entry(NS, Index, Shard) ->
                 ),
                 Mod
             catch
-                _:_ -> undefined
+                error:{unknown_cell_module, _} -> undefined
             end;
-        _ ->
+        not_found ->
             undefined
     end.
 
@@ -3498,21 +3503,31 @@ cold_start_indexes(NS, InstanceIds, IndexMap) ->
 await_primary_shards(InstanceIds) ->
     maps:foreach(
         fun(_Shard, InstanceId) ->
-            _ =
-                try
-                    bondy_oplog:await_drain(InstanceId)
-                catch
-                    _:_ -> ok
-                end,
-            _ =
-                try
-                    bondy_oplog:await_apply(InstanceId)
-                catch
-                    _:_ -> ok
-                end
+            ok = await_drain(InstanceId),
+            ok = await_apply(InstanceId)
         end,
         InstanceIds
     ).
+
+%% @private
+%% A missing applier is `{error, no_applier}`; one that stopped between the
+%% registry read and the call exits `noproc`. Both mean "nothing to drain".
+await_drain(InstanceId) ->
+    try bondy_oplog:await_drain(InstanceId) of
+        ok -> ok;
+        {error, no_applier} -> ok
+    catch
+        exit:{noproc, _} -> ok
+    end.
+
+%% @private
+%% `bondy_oplog_instance:await_apply/2` answers `ok` for a stopped instance
+%% and `{error, timeout}` after its own timeout; the overlay drains later.
+await_apply(InstanceId) ->
+    case bondy_oplog:await_apply(InstanceId) of
+        ok -> ok;
+        {error, timeout} -> ok
+    end.
 
 %% @private
 %% Decide trust-vs-rebuild for the whole index: it is trusted only if every

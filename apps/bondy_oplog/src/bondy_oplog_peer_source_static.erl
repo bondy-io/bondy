@@ -6,11 +6,10 @@
 -module(bondy_oplog_peer_source_static).
 -behaviour(bondy_oplog_peer_source).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Static peer-list peer source for closed-cluster deployments.
 
 `Opts` may contain a `peers` key whose value is the static list of
@@ -20,7 +19,7 @@ peer ids to return. If no list is configured, returns `[]`.
 peers_for(_InstanceId, #{peers => [Peer1, Peer2, Peer3]}) ->
     [Peer1, Peer2, Peer3].
 ```
-""").
+""".
 
 -export([peers_for/2]).
 

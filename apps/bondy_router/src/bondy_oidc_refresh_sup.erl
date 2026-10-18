@@ -71,11 +71,13 @@ shards() ->
         [oidc, refresh_pool_size], erlang:system_info(schedulers)
     ),
 
+    %% gproc owns the pool and its workers, so both outlive a restart of this
+    %% supervisor. `gproc_pool` then raises `exists` for each of them.
     _ =
         try
             gproc_pool:new(PoolName, hash, [{size, N}])
         catch
-            _:_ -> ok
+            error:exists -> ok
         end,
 
     Shards = [
@@ -85,7 +87,7 @@ shards() ->
                 try
                     gproc_pool:add_worker(PoolName, WorkerName, Shard)
                 catch
-                    _:_ -> ok
+                    error:exists -> ok
                 end,
             Shard
         end

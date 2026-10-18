@@ -122,16 +122,19 @@ put(Realm, Topic, Event, MatchOpts, TTL) ->
         true ->
             case exceeded(Realm) of
                 [] ->
-                    try
+                    case
                         bondy_retained_message:put(
                             Realm, Topic, Event, MatchOpts, TTL
                         )
-                    catch
-                        Class:Reason:Stacktrace ->
+                    of
+                        ok ->
+                            ok;
+                        {error, Reason} ->
                             ?LOG_WARNING(#{
-                                class => Class,
-                                reason => Reason,
-                                stacktrace => Stacktrace
+                                description => "Cannot retain message",
+                                realm_uri => Realm,
+                                topic => Topic,
+                                reason => Reason
                             }),
                             ok
                     end;
@@ -411,18 +414,15 @@ init_evictor() ->
                     description => "Evicted retained messages",
                     count => N
                 });
-            _ ->
+            0 ->
                 ok
         catch
-            Class:Reason:Stacktrace ->
-                ?LOG_ERROR(#{
-                    description =>
-                        "Error while evicting expired retained messages; "
-                        "skipping this cycle",
-                    class => Class,
-                    reason => Reason,
-                    stacktrace => Stacktrace
-                })
+            error:retained_messages_not_provisioned = Reason ->
+                log_evict_skipped(Reason);
+            error:bondy_realm_table_unavailable = Reason ->
+                log_evict_skipped(Reason);
+            error:{badmatch, {error, _}} = Reason ->
+                log_evict_skipped(Reason)
         end,
         %% AFTER the sweep, so the counters it decremented are the ones the
         %% ceilings are re-evaluated against. Guarded separately for the reason
@@ -431,15 +431,10 @@ init_evictor() ->
         try
             reconcile_limit_alarms()
         catch
-            RClass:RReason:RStacktrace ->
-                ?LOG_ERROR(#{
-                    description =>
-                        "Error while reconciling retention limit alarms; "
-                        "skipping this cycle",
-                    class => RClass,
-                    reason => RReason,
-                    stacktrace => RStacktrace
-                })
+            exit:{_, {gen_event, call, [alarm_handler | _]}} = RReason ->
+                log_reconcile_skipped(RReason);
+            error:{bad_generator, {error, _}} = RReason ->
+                log_reconcile_skipped(RReason)
         end,
         %% We sleep for 60 secs (jobs standard min rate is 1/sec)
         timer:sleep(timer:seconds(60))
@@ -460,6 +455,24 @@ init_evictor() ->
 
     ?LOG_NOTICE(#{description => "Retained message evictor initialised"}),
     ok.
+
+%% @private
+log_evict_skipped(Reason) ->
+    ?LOG_ERROR(#{
+        description =>
+            "Error while evicting expired retained messages; "
+            "skipping this cycle",
+        reason => Reason
+    }).
+
+%% @private
+log_reconcile_skipped(Reason) ->
+    ?LOG_ERROR(#{
+        description =>
+            "Error while reconciling retention limit alarms; "
+            "skipping this cycle",
+        reason => Reason
+    }).
 
 %% @private
 maybe_decr_counters(Realm, Msg) when is_tuple(Msg) ->

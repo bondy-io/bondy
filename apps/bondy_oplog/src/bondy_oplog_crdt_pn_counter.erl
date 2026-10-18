@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Positive-Negative counter (PN-Counter) — native operation-based CRDT.
 
 The op-based twin of the deprecated `bondy_oplog_fold_pn_counter`, with
@@ -41,7 +39,7 @@ Origin, Seq and HLC come from the event key. See
 causal delivery (the per-Origin `MaxSeq` dedup) rather than over all
 permutations. Encoding is byte-identical to the fold, so a table can
 switch with no data migration.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

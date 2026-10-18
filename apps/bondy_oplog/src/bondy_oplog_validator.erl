@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_validator).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for the pluggable event validator.
 
 The library wires `sign_event/2` on local appends and `verify_event/2`
@@ -75,7 +73,7 @@ KMS, etc.), do the fetch outside `refresh/1` and have `refresh/1`
 read from a cached snapshot maintained by a separate process —
 typically the same process that fires the
 `bondy_oplog_instance:refresh_validator/1` cast on config-change.
-""").
+""".
 
 -callback init(InstanceId :: binary(), Opts :: map()) ->
     {ok, State :: term()} | {error, Reason :: term()}.

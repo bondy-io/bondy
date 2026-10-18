@@ -39,8 +39,10 @@ the applied-frontier version vector, so an instance is converged
 cluster-wide when every node reports the same hash
 (`count(count_values(...)) == 1`).
 
-All runtime reads are defensive: a failing source degrades to an absent
-metric family, never a scrape error.
+The collector reads runtime state only while `bondy_oplog` is running. A
+source with nothing to report returns no rows and its family is absent. A
+source catches only the failures its callee raises in a restart or close
+window; any other failure fails the scrape.
 """.
 
 -behaviour(prometheus_collector).
@@ -124,9 +126,11 @@ teardown() ->
 
 -doc """
 Maps a storage-stack telemetry event onto the Prometheus families declared
-in `declare_metrics/0`. Never raises: `telemetry` silently detaches a
-handler whose callback fails, which would turn one malformed event into a
-permanent loss of all storage metrics.
+in `declare_metrics/0`. A family missing from the registry
+(`{unknown_metric, _, _}`) and absent `prometheus` tables (`badarg`) are
+logged and dropped: `telemetry` detaches a handler whose callback fails,
+which would turn either condition into a permanent loss of all storage
+metrics. Any other failure is a defect and detaches the handler.
 """.
 -spec handle_event(
     Event :: telemetry:event_name(),
@@ -139,11 +143,14 @@ handle_event(Event, Meas, Meta, _Config) ->
     try
         do_handle_event(Event, Meas, Meta)
     catch
-        Class:Reason ->
+        error:Reason when
+            Reason =:= badarg;
+            is_tuple(Reason), element(1, Reason) =:= unknown_metric
+        ->
             ?LOG_DEBUG(#{
                 description => "Failed to record storage telemetry event",
                 event => Event,
-                class => Class,
+                class => error,
                 reason => Reason
             }),
             ok
@@ -162,16 +169,10 @@ collect_mf(_Registry, CB) ->
         true ->
             lists:foreach(
                 fun({Name, Help, Type, Fun}) ->
-                    Metrics =
-                        try
-                            Fun()
-                        catch
-                            _:_ -> []
-                        end,
-                    case Metrics of
+                    case Fun() of
                         [] ->
                             ok;
-                        _ ->
+                        [_ | _] = Metrics ->
                             CB(
                                 prometheus_model_helpers:create_mf(
                                     Name, Help, Type, Metrics
@@ -1185,12 +1186,14 @@ alarm_rows() ->
     [{[{alarm_id, label(Id)}], 1} || {Id, _Desc} <- alarms()].
 
 %% @private
+%% `gen_event:call/3` answers `{error, bad_module}` while the handler is not
+%% installed, and exits on its 5 s default timeout.
 alarms() ->
     try bondy_alarm_handler:get_alarms() of
         L when is_list(L) -> [A || {_, _} = A <- L];
-        _ -> []
+        {error, bad_module} -> []
     catch
-        _:_ -> []
+        exit:{timeout, {gen_event, call, _}} -> []
     end.
 
 %% @private
@@ -1199,12 +1202,7 @@ alarms() ->
 %% that oracle's first condition: a node whose durable `main` DB fails to open
 %% would export `bondy_node_ready 1` while `/ready` answers 503.
 node_ready() ->
-    try bondy_router_app:is_ready() of
-        true -> [{[], 1}];
-        false -> [{[], 0}]
-    catch
-        _:_ -> []
-    end.
+    [{[], bool_to_int(bondy_router_app:is_ready())}].
 
 %% @private
 cluster_members() ->
@@ -1265,13 +1263,11 @@ instance_lifecycle_rows() ->
 instance_live_size_rows() ->
     lists:filtermap(
         fun(Id) ->
-            try bondy_oplog_registry:live_size(Id) of
+            case bondy_oplog_registry:live_size(Id) of
                 N when is_integer(N) ->
                     {true, {[{instance_id, Id}], N}};
-                _ ->
+                undefined ->
                     false
-            catch
-                _:_ -> false
             end
         end,
         instances()
@@ -1323,12 +1319,7 @@ pending_rows(F) ->
 %% Emits the per-instance WAL writer gauges from ONE parallel gather of
 %% `bondy_oplog_wal:info/1` snapshots per scrape.
 collect_wal(CB) ->
-    Infos =
-        try
-            wal_infos()
-        catch
-            _:_ -> []
-        end,
+    Infos = wal_infos(),
     Families = [
         {bondy_oplog_wal_size_bytes, "Total bytes across live WAL segments.",
             bytes_total},
@@ -1375,14 +1366,15 @@ collect_wal(CB) ->
     ).
 
 %% @private
-%% Emits the sync-scheduler gauges from ONE `info/0` call per scrape.
+%% Emits the sync-scheduler gauges from ONE `info/0` call per scrape. The
+%% call exits `noproc` while the scheduler restarts, or on its 5 s timeout.
 collect_sync_scheduler(CB) ->
     Info =
         try bondy_oplog_sync_scheduler:info() of
-            #{} = M -> M;
-            _ -> #{}
+            #{} = M -> M
         catch
-            _:_ -> #{}
+            exit:{noproc, {gen_server, call, _}} -> #{};
+            exit:{timeout, {gen_server, call, _}} -> #{}
         end,
     Scalars = [
         {bondy_oplog_sync_scheduler_enabled,
@@ -1431,12 +1423,7 @@ collect_sync_scheduler(CB) ->
 %% gather per scrape (see `bookie_statuses/0`). Labels are the
 %% representative (namespace, shard) of the Bookie.
 collect_leveled(CB) ->
-    Statuses =
-        try
-            bookie_statuses()
-        catch
-            _:_ -> []
-        end,
+    Statuses = bookie_statuses(),
     Scalars = [
         {bondy_leveled_ledger_cache_size,
             "Leveled ledger (write) cache entries.", ledger_cache_size},
@@ -1598,11 +1585,12 @@ peer_age_rows(Key) ->
     lists:flatmap(
         fun(Id) ->
             Entries =
-                try bondy_oplog_peer_state:get_instance_peer_states(Id, 0) of
-                    L when is_list(L) -> L;
-                    _ -> []
+                try
+                    bondy_oplog_peer_state:get_instance_peer_states(Id, 0)
                 catch
-                    _:_ -> []
+                    %% `bondy_oplog_peer_state` owns its table; the table is
+                    %% absent while that process restarts.
+                    error:badarg -> []
                 end,
             [
                 {
@@ -1617,54 +1605,26 @@ peer_age_rows(Key) ->
 
 %% @private
 peer_state_size() ->
-    try bondy_oplog_peer_state:info() of
+    case bondy_oplog_peer_state:info() of
         #{table_size := N} when is_integer(N) -> [{[], N}];
-        _ -> []
-    catch
-        _:_ -> []
+        #{table_size := undefined} -> []
     end.
 
 %% @private
 ae_lag_rows() ->
-    Namespaces =
-        try bondy_oplog_core_registry:namespaces() of
-            L when is_list(L) -> L;
-            _ -> []
-        catch
-            _:_ -> []
-        end,
-    lists:flatmap(
-        fun(NS) ->
-            try bondy_oplog_core:freshness(NS) of
-                Map when is_map(Map) ->
-                    [
-                        {
-                            [
-                                {namespace, NS},
-                                {index, Index},
-                                {shard, Shard}
-                            ],
-                            max(0, Lag)
-                        }
-                     || {{Index, Shard}, Lag} <- maps:to_list(Map),
-                        is_integer(Lag)
-                    ];
-                _ ->
-                    []
-            catch
-                _:_ -> []
-            end
-        end,
-        Namespaces
-    ).
+    [
+        {[{namespace, NS}, {index, Index}, {shard, Shard}], max(0, Lag)}
+     || NS <- bondy_oplog_core_registry:namespaces(),
+        {Index, Shard} := Lag <- bondy_oplog_core:freshness(NS)
+    ].
 
 %% @private
 gc_scheduler_inflight() ->
     try bondy_oplog_gc_scheduler:info() of
-        #{in_flight := N} when is_integer(N) -> [{[], N}];
-        _ -> []
+        #{in_flight := N} -> [{[], N}]
     catch
-        _:_ -> []
+        exit:{noproc, {gen_server, call, _}} -> [];
+        exit:{timeout, {gen_server, call, _}} -> []
     end.
 
 %% =============================================================================
@@ -1672,40 +1632,25 @@ gc_scheduler_inflight() ->
 %% =============================================================================
 
 %% @private
+%% The registry table is borrowed from `bondy_connect_table_manager`, so it
+%% outlives a registry restart.
 instances() ->
-    try bondy_oplog:list_instances() of
-        L when is_list(L) -> lists:sort(L);
-        _ -> []
-    catch
-        _:_ -> []
-    end.
+    lists:sort(bondy_oplog:list_instances()).
 
 %% @private
 frontier(Id) ->
-    try bondy_oplog_registry:frontier(Id) of
-        F when is_map(F) -> F;
-        _ -> #{}
-    catch
-        _:_ -> #{}
-    end.
+    bondy_oplog_registry:frontier(Id).
 
 %% @private
 pending(Id) ->
-    try bondy_oplog_registry:pending(Id) of
-        P when is_map(P) -> P;
-        _ -> #{}
-    catch
-        _:_ -> #{}
-    end.
+    bondy_oplog_registry:pending(Id).
 
 %% @private
 lifecycle(Id) ->
-    try bondy_oplog_instance:lifecycle_state(Id) of
+    case bondy_oplog_instance:lifecycle_state(Id) of
         live -> live;
         pre_bootstrap -> pre_bootstrap;
-        _ -> starting
-    catch
-        _:_ -> starting
+        undefined -> starting
     end.
 
 %% @private
@@ -1714,29 +1659,24 @@ lifecycle_code(pre_bootstrap) -> 1;
 lifecycle_code(live) -> 2.
 
 %% @private
+%% `bondy_cluster` runs `partisan_config:init/0` at its start, before
+%% `bondy_oplog`, so the Partisan configuration reads succeed.
 self_node() ->
-    try
-        partisan:node()
-    catch
-        _:_ -> node()
-    end.
+    partisan:node().
 
 %% @private
+%% `bondy_cluster:members/0` raises `membership_unavailable` until Partisan
+%% publishes the first membership.
 members() ->
     try
         bondy_cluster:members()
     catch
-        _:_ -> []
+        error:membership_unavailable -> []
     end.
 
 %% @private
 connected() ->
-    try partisan:nodes() of
-        N when is_list(N) -> N;
-        _ -> []
-    catch
-        _:_ -> []
-    end.
+    partisan:nodes().
 
 %% @private
 %% Gathers `bondy_oplog_wal:info/1` snapshots for every instance with a WAL
@@ -1745,11 +1685,9 @@ connected() ->
 wal_infos() ->
     Pairs = lists:filtermap(
         fun(Id) ->
-            try bondy_oplog_registry:wal_pid(Id) of
+            case bondy_oplog_registry:wal_pid(Id) of
                 Pid when is_pid(Pid) -> {true, {Id, Pid}};
-                _ -> false
-            catch
-                _:_ -> false
+                undefined -> false
             end
         end,
         instances()
@@ -1765,31 +1703,24 @@ wal_infos() ->
 %% gather's deadline is what keeps a wedged Bookie from stalling the
 %% scrape.
 bookie_statuses() ->
-    Entries =
-        try bondy_oplog_core_registry:list() of
-            L when is_list(L) -> L;
-            _ -> []
-        catch
-            _:_ -> []
-        end,
+    Entries = [
+        E
+     || E <- bondy_oplog_core_registry:list(),
+        bondy_oplog_core_registry:entry_projection_adapter(E) =:=
+            bondy_db_projection_leveled
+    ],
     ByPid = lists:foldl(
         fun(Entry, Acc) ->
-            try
-                bondy_db_projection_leveled =
-                    bondy_oplog_core_registry:entry_projection_adapter(
-                        Entry
-                    ),
-                Handle =
-                    bondy_oplog_core_registry:entry_projection_handle(
-                        Entry
-                    ),
-                #{bookie := Pid} = bondy_db_projection_leveled:info(Handle),
-                true = is_pid(Pid),
-                {NS, _Index, Shard} =
-                    bondy_oplog_core_registry:entry_key(Entry),
-                maps:put(Pid, {NS, Shard}, Acc)
+            Handle = bondy_oplog_core_registry:entry_projection_handle(Entry),
+            try bondy_db_projection_leveled:info(Handle) of
+                #{bookie := Pid} ->
+                    {NS, _Index, Shard} =
+                        bondy_oplog_core_registry:entry_key(Entry),
+                    maps:put(Pid, {NS, Shard}, Acc)
             catch
-                _:_ -> Acc
+                %% A closing keyed Bookie erases its `{pt, _}` routing term
+                %% before its registry entry goes.
+                error:badarg -> Acc
             end
         end,
         #{},
@@ -1803,7 +1734,8 @@ bookie_statuses() ->
 %% the `{Key, Result}` pairs whose result is a map, under a global
 %% deadline. Replies are addressed to an alias so stragglers arriving
 %% after `unalias/1` are dropped instead of leaking into the scraping
-%% process's mailbox.
+%% process's mailbox. `Fun` wraps `gen_server:call/2,3`; its server can stop
+%% with its instance or table during the call.
 pgather(Pairs, Fun, DeadlineMs) ->
     Alias = alias(),
     lists:foreach(
@@ -1813,7 +1745,7 @@ pgather(Pairs, Fun, DeadlineMs) ->
                     try
                         Fun(Arg)
                     catch
-                        _:_ -> undefined
+                        exit:{_, {gen_server, call, _}} -> undefined
                     end,
                 Alias ! {Alias, Key, Result}
             end)

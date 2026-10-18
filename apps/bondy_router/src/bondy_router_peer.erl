@@ -555,9 +555,15 @@ maybe_enqueue(SessionId, M, _Opts) ->
         undefined ->
             false;
         TransportId ->
-            ok = bondy_http_transport_queue:enqueue(TransportId, M, #{}),
-            bondy_http_transport_session:notify_enqueue(TransportId),
-            true
+            %% The transport can close between the session read and the
+            %% enqueue; the plain send that follows is then a no-op.
+            case bondy_http_transport_queue:enqueue(TransportId, M, #{}) of
+                ok ->
+                    bondy_http_transport_session:notify_enqueue(TransportId),
+                    true;
+                {error, transport_not_found} ->
+                    false
+            end
     catch
         error:badarg ->
             %% Session already gone; the plain send below is a no-op on a

@@ -24,6 +24,8 @@ all() ->
         delete_master_realm,
         invalid_uri,
         invalid_description,
+        invalid_encryption_keys,
+        split_for_import_keeps_an_unknown_term,
 
         sso_inconsistency_error,
         sso_uri_not_found_error,
@@ -130,6 +132,29 @@ invalid_description(_) ->
         },
         bondy_realm:create(#{uri => <<"foo">>, description => TooLong})
     ).
+
+%% Each value is rejected by a distinct path of `jose_jwk:from_pem/1`: no PEM
+%% entry, a PEM body that is not DER, and a term that is not PEM.
+invalid_encryption_keys(_) ->
+    NotDer = <<
+        "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"
+    >>,
+    lists:foreach(
+        fun(Key) ->
+            ?assertError(
+                #{code := invalid_value},
+                bondy_realm:create(#{
+                    uri => <<"com.example.invalid_encryption_keys">>,
+                    encryption_keys => [Key]
+                })
+            )
+        end,
+        [<<"not a pem">>, NotDer, 42]
+    ).
+
+split_for_import_keeps_an_unknown_term(_) ->
+    Term = {not_a_realm, 1},
+    ?assertEqual({Term, []}, bondy_realm:split_for_import(Term)).
 
 sso_inconsistency_error(_) ->
     ?assertError(

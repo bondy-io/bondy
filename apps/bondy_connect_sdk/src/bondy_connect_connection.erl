@@ -308,10 +308,14 @@ publish_ack(Pid, Topic, Args, KWArgs, Opts) ->
 -spec status(pid()) ->
     connecting | establishing | established | reconnecting | down.
 status(Pid) ->
+    %% A connection process that is gone, or stopping, is `down`.
     try
         gen_statem:call(Pid, status, 5000)
     catch
-        _:_ -> down
+        exit:{noproc, _} -> down;
+        exit:{normal, _} -> down;
+        exit:{shutdown, _} -> down;
+        exit:{{shutdown, _}, _} -> down
     end.
 
 %% @private
@@ -1788,10 +1792,11 @@ enable_net_monitor() ->
     _ = code:ensure_loaded(partisan_inet),
     case erlang:function_exported(partisan_inet, monitor, 1) of
         true ->
+            %% `partisan_inet` loaded but not running: the call exits `noproc`.
             try
                 partisan_inet:monitor(true) =:= ok
             catch
-                _:_ -> false
+                exit:{noproc, _} -> false
             end;
         false ->
             false
@@ -1799,11 +1804,13 @@ enable_net_monitor() ->
 
 %% @private
 disable_net_monitor(true) ->
+    %% At teardown `partisan_inet` may already be gone or stopping.
     _ =
         try
             partisan_inet:monitor(false)
         catch
-            _:_ -> ok
+            exit:{noproc, _} -> ok;
+            exit:{shutdown, _} -> ok
         end,
     ok;
 disable_net_monitor(false) ->
@@ -1983,11 +1990,7 @@ maybe_goodbye(_StateName, _Data) ->
 close_transport(#data{transport = undefined}) ->
     ok;
 close_transport(#data{transport_mod = Mod, transport = T}) ->
-    try
-        Mod:close(T)
-    catch
-        _:_ -> ok
-    end,
+    _ = Mod:close(T),
     ok.
 
 %% @private

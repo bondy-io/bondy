@@ -303,11 +303,13 @@ handle_call({delete_anonymous, Key}, _From, St) ->
     Reply =
         case ets:lookup(?MODULE, Key) of
             [{Key, Tab}] ->
+                %% A public table may already be deleted by another process;
+                %% `ets:delete/1` then raises `badarg`.
                 _ =
                     try
                         ets:delete(Tab)
                     catch
-                        _:_ -> ok
+                        error:badarg -> ok
                     end,
                 true = ets:delete(?MODULE, Key),
                 true;
@@ -359,12 +361,14 @@ handle_info(_Info, St) ->
     {noreply, St}.
 
 terminate(_Reason, _State) ->
+    %% A table given away is owned by another process, and a table whose
+    %% owner died is gone; `ets:delete/1` raises `badarg` in both cases.
     ets:foldl(
         fun({_, Tab}, ok) ->
             try
                 ets:delete(Tab)
             catch
-                _:_ -> ok
+                error:badarg -> ok
             end,
             ok
         end,

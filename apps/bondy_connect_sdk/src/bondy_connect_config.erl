@@ -184,11 +184,9 @@ validate(_) ->
 
 %% @private
 validate_realm(#{realm := Realm}) when is_binary(Realm) ->
-    try
-        bondy_wamp_uri:validate(Realm)
-    catch
-        _:_ ->
-            throw({invalid_realm, Realm})
+    case bondy_wamp_uri:is_valid(Realm) of
+        true -> Realm;
+        false -> throw({invalid_realm, Realm})
     end;
 validate_realm(_) ->
     throw(missing_realm).

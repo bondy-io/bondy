@@ -120,6 +120,7 @@ frame boundary.
 
 -ifdef(TEST).
 -export([seek_byte_offset/2]).
+-export([parse_segment_id/2]).
 -endif.
 
 %% =============================================================================
@@ -486,11 +487,10 @@ parse_segment_id(Name, Suffix) when is_list(Name) ->
             not_a_match;
         true ->
             Prefix = lists:sublist(Name, length(Name) - length(Suffix)),
-            try list_to_integer(Prefix) of
-                Id when Id >= 0 -> {ok, Id};
-                _ -> not_a_match
-            catch
-                _:_ -> not_a_match
+            case string:to_integer(Prefix) of
+                {Id, []} when Id >= 0 -> {ok, Id};
+                {Id, _Rest} when is_integer(Id) -> not_a_match;
+                {error, no_integer} -> not_a_match
             end
     end.
 

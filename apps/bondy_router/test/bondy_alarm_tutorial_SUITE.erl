@@ -91,7 +91,7 @@ end_per_testcase(_Case, _Config) ->
 %% point." Then `bondy.alarm.list` shows ONE alarm, and the tutorial prints its
 %% every field.
 step_2_and_3_the_failing_relay_raises_one_alarm(_) ->
-    ?assertMatch(#error{}, mail_test()),
+    ?assertMatch(#error{}, send_test_mail()),
     ok = await_alarm(),
 
     #{~"alarms" := Alarms, ~"nodes" := Nodes} = call(?BONDY_ALARM_LIST, []),
@@ -128,12 +128,12 @@ step_2_and_3_the_failing_relay_raises_one_alarm(_) ->
 %% Asserting the count is UNCHANGED is the falsifier for a producer that
 %% restated on every failure and so flooded `bondy.alarm.updated`.
 step_3_further_failures_neither_add_nor_restate_an_alarm(_) ->
-    ?assertMatch(#error{}, mail_test()),
+    ?assertMatch(#error{}, send_test_mail()),
     ok = await_alarm(),
     First = failures(),
 
-    ?assertMatch(#error{}, mail_test()),
-    ?assertMatch(#error{}, mail_test()),
+    ?assertMatch(#error{}, send_test_mail()),
+    ?assertMatch(#error{}, send_test_mail()),
     %% No barrier to wait on here — the point is that NOTHING further is
     %% published — so the two sends are given the same window the raise needed.
     timer:sleep(500),
@@ -219,12 +219,12 @@ step_4_the_task_describe_reply_grades_the_remedy(_) ->
 %% Step 5. "It succeeds... The alarm is gone. You did not clear it — there is
 %% no procedure that can. It cleared because the condition stopped being true."
 step_5_fixing_the_condition_clears_the_alarm(Config) ->
-    ?assertMatch(#error{}, mail_test()),
+    ?assertMatch(#error{}, send_test_mail()),
     ok = await_alarm(),
     ?assertEqual(1, length(relay_alarms())),
 
     {ok, _} = mock_smtp_server:start(?config(port, Config)),
-    ?assertMatch({reply, #result{}}, mail_test_raw()),
+    ?assertMatch({reply, #result{}}, send_test_mail_raw()),
 
     %% `success_threshold` is 1, so one success is the whole recovery.
     ok = await_no_alarm(),
@@ -241,11 +241,11 @@ step_5_fixing_the_condition_clears_the_alarm(Config) ->
 %% Step 6. "Newest first. Notice what is NOT there: ... the history holds one
 %% `raised` and one `updated`, not three entries."
 step_6_the_history_holds_the_transitions(Config) ->
-    ?assertMatch(#error{}, mail_test()),
+    ?assertMatch(#error{}, send_test_mail()),
     ok = await_alarm(),
-    ?assertMatch(#error{}, mail_test()),
+    ?assertMatch(#error{}, send_test_mail()),
     {ok, _} = mock_smtp_server:start(?config(port, Config)),
-    ?assertMatch({reply, #result{}}, mail_test_raw()),
+    ?assertMatch({reply, #result{}}, send_test_mail_raw()),
     ok = await_no_alarm(),
 
     %% A PAGE, in the shape every paginated `bondy.*` procedure answers.
@@ -329,14 +329,14 @@ stop_mock() ->
     ok.
 
 %% @private
-mail_test() ->
-    case mail_test_raw() of
+send_test_mail() ->
+    case send_test_mail_raw() of
         {reply, R} -> R;
         Other -> Other
     end.
 
 %% @private
-mail_test_raw() ->
+send_test_mail_raw() ->
     dispatch(?BONDY_MAIL_TEST, [?MASTER_REALM_URI, ?TO]).
 
 %% @private

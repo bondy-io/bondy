@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_projection_adapter).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for **projection backings** — the persistent KV layer that
 materialises folded cell values.
 
@@ -100,7 +98,7 @@ internally and release resources on owner death. The substrate does
 not do it for them.
 
 See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
-""").
+""".
 
 -export_type([
     handle/0,

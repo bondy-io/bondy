@@ -6,11 +6,10 @@
 -module(bondy_oplog_compaction).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance compaction.
 
 This module is a thin orchestrator: it collects one witness (the durable
@@ -43,11 +42,11 @@ Called by:
 - `bondy_oplog_gc_scheduler`'s default trigger (one
   invocation per running instance per tick).
 - Manual operator triggers via `bondy_oplog:compact/1`.
-""").
+""".
 
 -export([compact/1]).
 
-?DOC("""
+-doc """
 Runs one compaction cycle for `InstanceId`. Returns:
 
 - `{ok, no_change}` if no progress is possible (no intersecting prefix,
@@ -59,7 +58,7 @@ Runs one compaction cycle for `InstanceId`. Returns:
   Each is returned after the instance's cycle has run with no witness, whose
   own outcome is then visible only through `[bondy_oplog, compaction, ok]`.
 - `{error, Reason}` on failure.
-""").
+""".
 -spec compact(instance_id()) ->
     {ok, no_change}
     | {ok, {compacted, bondy_oplog_event:event_key(), non_neg_integer()}}

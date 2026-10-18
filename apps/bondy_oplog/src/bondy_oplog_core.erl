@@ -5,11 +5,10 @@
 
 -module(bondy_oplog_core).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Read-side substrate primitive.
 
 Composes a projection adapter (any persistent KV implementing
@@ -55,7 +54,7 @@ See `bondy_oplog_core_registry` for how shard handles are published. The
 substrate does not own shard lifecycles — owners (writers, applier,
 test setups) register the four-tuple `{cache_handle, projection_handle,
 overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
-""").
+""".
 
 -export([read/3]).
 -export([read/4]).

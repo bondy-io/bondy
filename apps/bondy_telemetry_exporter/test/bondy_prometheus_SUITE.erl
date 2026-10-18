@@ -24,6 +24,7 @@ must all render on a real scrape without error.
 -export([inflight_by_procedure/1]).
 -export([egress_metrics_via_telemetry/1]).
 -export([dropped_and_http_metrics_via_telemetry/1]).
+-export([http_request_after_listener_stop/1]).
 
 all() ->
     [
@@ -33,7 +34,8 @@ all() ->
         net_session_metrics_via_telemetry,
         inflight_by_procedure,
         egress_metrics_via_telemetry,
-        dropped_and_http_metrics_via_telemetry
+        dropped_and_http_metrics_via_telemetry,
+        http_request_after_listener_stop
     ].
 
 init_per_suite(Config) ->
@@ -328,6 +330,21 @@ dropped_and_http_metrics_via_telemetry(_) ->
         get, {"http://127.0.0.1:18081/metrics", []}, [], []
     ),
     ok = wait_for_http_requests_above(H0, 100).
+
+%% A request that ends after its listener stopped names a ref with no
+%% `ranch_server` row. The handler absorbs that `badarg` and stays attached.
+http_request_after_listener_stop(_) ->
+    Event = [bondy, http, request],
+    Gone = #{ref => bondy_prometheus_SUITE_no_such_listener},
+    ok = bondy_prometheus:handle_http_request(Event, #{}, Gone, undefined),
+    ok = telemetry:execute(Event, #{count => 1}, Gone),
+    true = lists:any(
+        fun(#{function := F}) ->
+            F == fun bondy_prometheus:handle_http_request/4
+        end,
+        telemetry:list_handlers(Event)
+    ),
+    ok.
 
 %% @private
 %% Prometheus counter value for a labelset, zero when untouched.

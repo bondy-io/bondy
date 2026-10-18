@@ -20,10 +20,9 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
-?MODULEDOC("""
+-moduledoc """
 In-memory (ETS) write-ahead log backend for **ephemeral fused** instances.
 
 The disk WAL (`bondy_oplog_wal`) welds the drain's *visibility* of an event to
@@ -88,7 +87,7 @@ ephemeral instances and covered by anti-entropy in normal operation.
 
 - Crash recovery: the table dies with this gen_server (node/process death →
   re-sync from peers). An `heir`-owned table is deferred.
-""").
+""".
 
 %% A mem WAL has a single logical segment; `Seq` plays the byte-offset role in
 %% the `{Segment, Offset}` position shape the consumer-offset machinery expects.
@@ -139,17 +138,17 @@ ephemeral instances and covered by anti-entropy in normal operation.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Starts the per-instance in-memory WAL writer. Same start contract as
 `bondy_oplog_wal:start_link/2` so `bondy_oplog_instance_sup` can swap the child
 module on `wal_backend => mem`.
-""").
+""".
 -spec start_link(binary(), map()) -> {ok, pid()} | {error, term()}.
 
 start_link(InstanceId, Opts) when is_binary(InstanceId), is_map(Opts) ->
     gen_server:start_link(?MODULE, {InstanceId, Opts}, []).
 
-?DOC("""
+-doc """
 Lock-free caller-side append. Reserves a contiguous `Seq` range via the atomics
 head, inserts each `{Seq, Event}` directly into the public ETS table, and wakes
 a parked drain iff one is parked. Runs entirely in the calling process — no
@@ -158,7 +157,7 @@ whole batch, matching the disk WAL's all-or-nothing `check_backpressure`.
 
 Returns `{ok, Entries}` with `Entries :: [{Hlc, {?MEM_SEG, Seq}}]` in input
 order, or `{error, wal_full}`.
-""").
+""".
 -spec append_local(Handle :: map(), Events :: [bondy_oplog_event:t()]) ->
     {ok, [{term(), {non_neg_integer(), pos_integer()}}]} | {error, wal_full}.
 
@@ -185,12 +184,12 @@ append_local(#{backend := mem} = Handle, Events) when is_list(Events) ->
             Err
     end.
 
-?DOC("""
+-doc """
 Returns the read-side view the mem reader needs: the ETS tid, the logical
 segment id, and the atomics ref (so the reader can tell an in-flight `Seq` gap
 from the end of the log). The table is `public`, so any process may read it
 lock-free.
-""").
+""".
 -spec reader_view(pid()) ->
     #{
         tab => ets:tid(),
@@ -201,31 +200,29 @@ lock-free.
 reader_view(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, reader_view, infinity).
 
-?DOC(
-    "The head: the max `Seq` handed out. Read lock-free from the atomics ref."
-).
+-doc "The head: the max `Seq` handed out. Read lock-free from the atomics ref.".
 -spec reserved(atomics:atomics_ref()) -> non_neg_integer().
 
 reserved(ARef) ->
     atomics:get(ARef, ?A_RESERVED).
 
-?DOC("The GC watermark: the last `Seq` the drain has installed + committed.").
+-doc "The GC watermark: the last `Seq` the drain has installed + committed.".
 -spec committed(atomics:atomics_ref()) -> non_neg_integer().
 
 committed(ARef) ->
     atomics:get(ARef, ?A_COMMITTED).
 
-?DOC("""
+-doc """
 Marks every event with `Seq =< CommittedSeq` as consumed by the drain and GCs
 them from the table. Cast (best-effort, non-blocking): the drain calls this at
 each commit boundary with its reader cursor.
-""").
+""".
 -spec set_committed_seq(pid(), non_neg_integer()) -> ok.
 
 set_committed_seq(Pid, Seq) when is_pid(Pid), is_integer(Seq), Seq >= 0 ->
     gen_server:cast(Pid, {set_committed_seq, Seq}).
 
-?DOC("Diagnostic snapshot of the mem WAL writer state.").
+-doc "Diagnostic snapshot of the mem WAL writer state.".
 -spec info(pid()) -> map().
 
 info(Pid) when is_pid(Pid) ->

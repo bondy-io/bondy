@@ -5,11 +5,10 @@
 
 -module(bondy_oplog_projection_ets).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 In-memory `bondy_oplog_projection_adapter` backed by a single
 `ordered_set` ETS table per `(NS, Index, Shard)`.
 
@@ -60,7 +59,7 @@ fast-path. The HEAD path exists to skip a journal hop on durable backends;
 for an in-RAM `ordered_set` `get/3` already returns the full frame with no
 I/O, so a separate HEAD read buys nothing. The substrate falls back to
 `get/3 + bondy_oplog_cell_frame:extract_head/1`.
-""").
+""".
 
 -behaviour(bondy_oplog_projection_adapter).
 

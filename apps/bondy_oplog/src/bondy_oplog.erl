@@ -5,11 +5,10 @@
 
 -module(bondy_oplog).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Public façade for the operation-log replication framework.
 
 Each replicated value is an **instance**: an append-only operation log
@@ -65,7 +64,7 @@ Per-instance event operations pass through to
   row is staged in a single `ets:insert/2`. Remote-event delivery
   (`append_remote/2`) still routes through the applier+instance
   gen_server because the verify+conflict path is stateful.
-""").
+""".
 
 %% Lifecycle
 -export([start_instance/2]).
@@ -160,7 +159,7 @@ Per-instance event operations pass through to
 %% LIFECYCLE
 %% =============================================================================
 
-?DOC("""
+-doc """
 Starts an instance. Returns the pid of the per-instance supervisor.
 Idempotent: re-starting a running instance returns its existing
 supervisor pid.
@@ -168,7 +167,7 @@ supervisor pid.
 `Opts` must carry `applier.cell_apply_target`, the projection shard that
 materialises the instance's state; without it the start returns
 `{error, {missing_required_opt, cell_apply_target}}`.
-""").
+""".
 -spec start_instance(
     instance_id(),
     bondy_oplog_instance:opts()
@@ -184,11 +183,11 @@ start_instance(InstanceId, Opts) when
 stop_instance(InstanceId) ->
     stop_instance(InstanceId, #{}).
 
-?DOC("""
+-doc """
 Stops an instance. The `Opts` map is currently unused; a future
 `destroy => true` option to also delete the instance's on-disk state
 is reserved.
-""").
+""".
 -spec stop_instance(instance_id(), map()) -> ok | {error, not_found}.
 
 stop_instance(InstanceId, _Opts) when is_binary(InstanceId) ->
@@ -201,7 +200,7 @@ stop_instance(InstanceId, _Opts) when is_binary(InstanceId) ->
             Other
     end.
 
-?DOC("""
+-doc """
 Lists currently-running instances on this node. Order unspecified.
 
 Answered from the registry's key-only select, so it wakes no process and
@@ -217,7 +216,7 @@ round trips that made all N instances runnable at the same instant.
 A row exists from instance start until its `terminate/2`, so the set is
 the same one the tree reports, minus instances that have started but not
 yet registered. Sweeps pick those up on their next pass.
-""").
+""".
 -spec list_instances() -> [instance_id()].
 
 list_instances() ->
@@ -503,7 +502,7 @@ fold_range(InstanceId, From, To, Fun, Acc0) ->
 range(InstanceId, From, To) ->
     bondy_oplog_instance:range(InstanceId, From, To).
 
-?DOC("""
+-doc """
 Operator-driven removal of every event with key `=< Watermark` from
 the live MST.
 
@@ -522,7 +521,7 @@ truncation record (`bondy_oplog_registry:truncated/1`) to its applied frontier.
 
 Returns the number of MST rows removed, or `{error, {refold_owed, Id}}` while
 a catalogue install holds the instance's re-fold mark.
-""").
+""".
 -spec truncate_prefix(instance_id(), bondy_oplog_event:event_key()) ->
     non_neg_integer() | {error, {refold_owed, instance_id()}}.
 
@@ -617,7 +616,7 @@ topology_fingerprint(Db) when is_atom(Db) ->
 %% SYNC
 %% =============================================================================
 
-?DOC("""
+-doc """
 Synchronously pulls events from `Peer` into `InstanceId`.
 
 A successful pull merges the peer's tree into ours; a converse pull
@@ -627,7 +626,7 @@ convergence call sync in both directions or rely on the default
 schedulers running on both replicas.
 
 Returns `{ok, FinalRoot}` on success.
-""").
+""".
 -spec sync(instance_id(), peer_id()) ->
     {ok, bondy_mst:hash() | undefined} | {error, term()}.
 
@@ -652,10 +651,10 @@ sync(InstanceId, Peer, Opts) ->
 %% GC
 %% =============================================================================
 
-?DOC("""
+-doc """
 Runs one compaction cycle on `InstanceId`. See
 `bondy_oplog_compaction:compact/1`.
-""").
+""".
 -spec compact(instance_id()) ->
     {ok, no_change}
     | {ok, {compacted, bondy_oplog_event:event_key(), non_neg_integer()}}
@@ -689,7 +688,7 @@ compaction_checkpoint(InstanceId) ->
 %% with comfortable headroom on either dimension is left alone.
 -define(LOW_PRESSURE_THRESHOLD, 0.5).
 
-?DOC("""
+-doc """
 Surfaces a recommended retention action for `InstanceId` based on
 current state: write/segment pressure ratios, snapshot existence,
 outstanding scrubber alerts, and the number of in-flight bootstrap
@@ -727,20 +726,20 @@ Decision tree:
        to the watermark).
      - no snapshot ⇒ `truncate_prefix` (no compaction lever
        available; operator picks a watermark).
-""").
+""".
 -spec retention_advice(instance_id()) ->
     {ok, retention_advice()} | {error, instance_not_running}.
 
 retention_advice(InstanceId) ->
     retention_advice(InstanceId, #{}).
 
-?DOC("""
+-doc """
 As `retention_advice/1` but accepts a map of caller-supplied inputs:
 
 - `bootstrap_consumers :: non_neg_integer()` (default `0`) — number
   of peers currently mid-bootstrap from this instance. Drives the
   bootstrap-aware branch of the decision tree.
-""").
+""".
 -spec retention_advice(instance_id(), map()) ->
     {ok, retention_advice()} | {error, instance_not_running}.
 
@@ -758,12 +757,12 @@ retention_advice(InstanceId, Opts) when
             {ok, retention_decision(Inputs)}
     end.
 
-?DOC("""
+-doc """
 Pure decision function — given a fully-populated `retention_inputs()`
 map, returns the recommended action and rationale. Exposed primarily
 for unit testing and for callers that have already gathered the
 inputs by other means.
-""").
+""".
 -spec retention_decision(retention_inputs()) -> retention_advice().
 
 retention_decision(#{scrubber_alerts := [_ | _] = Alerts} = Inputs) ->

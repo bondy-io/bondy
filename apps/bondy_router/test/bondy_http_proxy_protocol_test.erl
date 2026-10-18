@@ -47,6 +47,13 @@ invalid_entries_skipped_test() ->
     ?assert(?M:is_trusted_peer({10, 0, 0, 1}, Opts)),
     ?assertNot(?M:is_trusted_peer({8, 8, 8, 8}, Opts)).
 
+%% `bondy_cidr:parse/1` raises `badarg` for an entry with no `/` and a
+%% `{badmatch, {error, einval}}` for an unparseable address.
+unparseable_address_entry_skipped_test() ->
+    Opts = #{trusted_proxies => "foo/8, 10.0.0.0/8"},
+    ?assert(?M:is_trusted_peer({10, 0, 0, 1}, Opts)),
+    ?assertNot(?M:is_trusted_peer({8, 8, 8, 8}, Opts)).
+
 proxies() ->
     ?M:trusted_proxies(#{trusted_proxies => "10.0.0.0/8"}).
 

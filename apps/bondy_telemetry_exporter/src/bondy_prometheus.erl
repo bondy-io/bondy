@@ -7,6 +7,10 @@
 -moduledoc """
 We follow the Prometheus metric and label naming practices described at
 <https://prometheus.io/docs/practices/naming/>.
+
+The telemetry handlers that write `bondy_metrics` catch `error:badarg` only.
+`bondy_metrics` raises it while its registry process restarts and its tables
+are absent. Any other failure detaches the handler, and `telemetry` logs it.
 """.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("prometheus/include/prometheus.hrl").
@@ -628,7 +632,7 @@ declare_net_session_families() ->
             "concurrent writer's root CAS and retried. All pattern writes "
             "of a realm contend on one root per (type, policy), so a "
             "sustained rate here is the trigger for pattern-broadcast "
-            "sharding (see _design/REGISTRY_PARTITION_GRAIN.md). Zero on "
+            "sharding. Zero on "
             "the uncontended fast path."
         >>
     }),
@@ -644,7 +648,7 @@ declare_net_session_families() ->
 %% @private
 %% Telemetry sink for the socket and session events emitted by
 %% `bondy_telemetry`. Same discipline as `handle_wamp_message/4`:
-%% wait-free `bondy_metrics` writes only, total.
+%% wait-free `bondy_metrics` writes only.
 handle_net_event([bondy, registry, ptrie, Outcome], Meas, _Meta, _Config) when
     Outcome == cas_retry orelse Outcome == cas_exhausted
 ->
@@ -660,7 +664,7 @@ handle_net_event([bondy, registry, ptrie, Outcome], Meas, _Meta, _Config) when
             delta => maps:get(count, Meas, 1)
         })
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, socket, ping_rtt], Meas, Meta, _Config) ->
@@ -676,7 +680,7 @@ handle_net_event([bondy, socket, ping_rtt], Meas, Meta, _Config) ->
         }),
         ok
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, socket, Action], Meas, Meta, _Config) ->
@@ -716,7 +720,7 @@ handle_net_event([bondy, socket, Action], Meas, Meta, _Config) ->
                 })
         end
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, session, Action], Meas, Meta, _Config) ->
@@ -750,7 +754,7 @@ handle_net_event([bondy, session, Action], Meas, Meta, _Config) ->
                 })
         end
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, wamp, hello], Meas, _Meta, _Config) ->
@@ -762,7 +766,7 @@ handle_net_event([bondy, wamp, hello], Meas, _Meta, _Config) ->
         }),
         ok
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, session_manager, open], Meas, _Meta, _Config) ->
@@ -779,7 +783,7 @@ handle_net_event([bondy, session_manager, open], Meas, _Meta, _Config) ->
             value => maps:get(service, Meas, 0)
         })
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, router, flow], Meas, Meta, _Config) ->
@@ -799,7 +803,7 @@ handle_net_event([bondy, router, flow], Meas, Meta, _Config) ->
                         label => Labels,
                         value => Queue
                     });
-                _ ->
+                #{} ->
                     ok
             end,
         ok = bondy_metrics:histogram(#{
@@ -819,11 +823,11 @@ handle_net_event([bondy, router, flow], Meas, Meta, _Config) ->
                         label => Labels,
                         value => Depth
                     });
-                _ ->
+                #{} ->
                     ok
             end
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, wamp, egress], Meas, Meta, _Config) ->
@@ -843,7 +847,7 @@ handle_net_event([bondy, wamp, egress], Meas, Meta, _Config) ->
             value => maps:get(depth, Meas, 0)
         })
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, broker, publish], Meas, _Meta, _Config) ->
@@ -860,7 +864,7 @@ handle_net_event([bondy, broker, publish], Meas, _Meta, _Config) ->
             value => maps:get(fanout, Meas, 0)
         })
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event([bondy, session_manager, cleanup], Meas, Meta, _Config) ->
@@ -875,7 +879,7 @@ handle_net_event([bondy, session_manager, cleanup], Meas, Meta, _Config) ->
         }),
         ok
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_net_event(_, _, _, _) ->
@@ -885,8 +889,7 @@ handle_net_event(_, _, _, _) ->
 %% Telemetry sink for `[bondy, realm, event]` and `[bondy, user, event]`
 %% (emitted by `bondy_telemetry:realm_event/2` and
 %% `bondy_telemetry:user_event/3`). Same
-%% discipline as the other sinks: wait-free `bondy_metrics` writes only,
-%% total.
+%% discipline as the other sinks: wait-free `bondy_metrics` writes only.
 handle_lifecycle_event([bondy, Subject, event], _Meas, Meta, _Config) ->
     try
         Name =
@@ -904,7 +907,7 @@ handle_lifecycle_event([bondy, Subject, event], _Meas, Meta, _Config) ->
         }),
         ok
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end;
 handle_lifecycle_event(_, _, _, _) ->
@@ -1020,13 +1023,13 @@ pint(_) -> 0.
 %% `bondy_telemetry:rpc_latency/6` at the dealer's promise-settlement
 %% sites). `kind` selects the family: `call` = full round trip,
 %% `invocation` = INVOCATION→YIELD leg. Same discipline as the other
-%% sinks: wait-free `bondy_metrics` writes only, total.
+%% sinks: wait-free `bondy_metrics` writes only.
 handle_rpc_latency(_EventName, Meas, Meta, _Config) ->
     try
         Name =
             case maps:get(kind, Meta, call) of
                 invocation -> bondy_wamp_invocation_latency_milliseconds;
-                _ -> bondy_wamp_call_latency_milliseconds
+                call -> bondy_wamp_call_latency_milliseconds
             end,
         bondy_metrics:histogram(#{
             name => Name,
@@ -1038,7 +1041,7 @@ handle_rpc_latency(_EventName, Meas, Meta, _Config) ->
         }),
         ok
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end.
 
@@ -1047,7 +1050,7 @@ handle_rpc_latency(_EventName, Meas, Meta, _Config) ->
 %% `bondy_telemetry:registry_event/3`) — the unconditional aggregate of
 %% registration/subscription lifecycle actions, counted whether or not
 %% the corresponding WAMP meta event was demanded. Same discipline as
-%% the other sinks: wait-free `bondy_metrics` writes only, total.
+%% the other sinks: wait-free `bondy_metrics` writes only.
 handle_registry_event(_EventName, _Meas, Meta, _Config) ->
     try
         bondy_metrics:counter(#{
@@ -1061,16 +1064,16 @@ handle_registry_event(_EventName, _Meas, Meta, _Config) ->
         }),
         ok
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end.
 
 %% @private
 %% Telemetry sink for `[bondy, wamp, message]` (emitted by
 %% `bondy_telemetry:wamp_message/2`). Runs inline in the emitting
-%% process, so it only performs wait-free `bondy_metrics` writes and is
-%% total — a failure here must never affect routing (and would otherwise
-%% permanently detach the handler).
+%% process, so it only performs wait-free `bondy_metrics` writes.
+%% `telemetry:execute/3` catches a handler failure, so a failure here does
+%% not reach the router.
 handle_wamp_message(_EventName, Measurements, Meta, _Config) ->
     try
         Labels = #{
@@ -1095,7 +1098,7 @@ handle_wamp_message(_EventName, Measurements, Meta, _Config) ->
                         label => Labels,
                         value => Size
                     });
-                _ ->
+                #{} ->
                     ok
             end,
         case message_type_family(maps:get(type, Meta, undefined)) of
@@ -1110,34 +1113,30 @@ handle_wamp_message(_EventName, Measurements, Meta, _Config) ->
                 })
         end
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end.
 
 %% @private
 %% Telemetry sink for `[bondy, wamp, dropped]` (emitted by
 %% `bondy_telemetry:wamp_dropped/2`): bumps
-%% `bondy_wamp_dropped_total{reason, family}`. Total — a failure here
-%% would permanently detach the handler.
+%% `bondy_wamp_dropped_total{reason, family}`, which `setup/0` declares
+%% before it attaches this handler.
 handle_wamp_dropped(_EventName, _Meas, Meta, _Config) ->
-    try
-        #{reason := Reason, family := Family} = Meta,
-        prometheus_counter:inc(bondy_wamp_dropped_total, [Reason, Family])
-    catch
-        _:_ ->
-            ok
-    end.
+    #{reason := Reason, family := Family} = Meta,
+    prometheus_counter:inc(bondy_wamp_dropped_total, [Reason, Family]).
 
 %% @private
 %% Telemetry sink for `[bondy, http, request]` (emitted by
 %% `bondy_telemetry:http_request/1`, the Cowboy `metrics_callback`):
-%% forwards the Cowboy metrics map to the collector. Total — a failure
-%% here would permanently detach the handler.
+%% forwards the Cowboy metrics map to the collector. A request that ends
+%% after its listener stopped finds no `ranch_server` row:
+%% `ranch:get_addr/1` raises `badarg`.
 handle_http_request(_EventName, _Meas, Metrics, _Config) ->
     try
         bondy_prometheus_cowboy_collector:observe(Metrics)
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end.
 

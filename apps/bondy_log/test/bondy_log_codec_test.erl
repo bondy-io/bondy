@@ -35,6 +35,8 @@ current_key() ->
 
 lookup_key(1) -> {ok, static_key(1)};
 lookup_key(7) -> {ok, static_key(7)};
+lookup_key(98) -> {ok, <<"not 32 bytes">>};
+lookup_key(99) -> error(registry_unavailable);
 lookup_key(_) -> {error, missing}.
 
 static_key(Salt) ->
@@ -263,6 +265,8 @@ encryption_test_() ->
             {timeout, 5, fun unknown_cipher_id_returns_typed_error/0},
             {timeout, 5, fun truncated_encryption_envelope/0},
             {timeout, 5, fun decrypt_without_registry_returns_missing_key/0},
+            {timeout, 5, fun raising_registry_returns_missing_key/0},
+            {timeout, 5, fun out_of_contract_registry_returns_missing_key/0},
             {timeout, 5, fun validate_encryption_paths/0},
             {timeout, 5, fun encrypt_telemetry_emits/0},
             {timeout, 5, fun decrypt_tag_failure_emits_telemetry/0}
@@ -354,6 +358,36 @@ missing_key_returns_missing_key() ->
         {error, {missing_key, 42}},
         bondy_log_codec:decode_body(Forged, ?EFLAG, Opts)
     ).
+
+raising_registry_returns_missing_key() ->
+    %% KeyId 99 makes the stub registry raise; the codec reports the
+    %% key as missing instead of letting the raise reach the reader.
+    ?assertEqual(
+        {error, {missing_key, 99}},
+        bondy_log_codec:decode_body(
+            forged_envelope(99),
+            ?EFLAG,
+            #{body_encryption => {enabled, ?MODULE}}
+        )
+    ).
+
+out_of_contract_registry_returns_missing_key() ->
+    %% KeyId 98 makes the stub registry answer `{ok, Key}` with a key
+    %% of the wrong length, which is outside the behaviour contract.
+    ?assertEqual(
+        {error, {missing_key, 98}},
+        bondy_log_codec:decode_body(
+            forged_envelope(98),
+            ?EFLAG,
+            #{body_encryption => {enabled, ?MODULE}}
+        )
+    ).
+
+forged_envelope(KeyId) ->
+    IV = crypto:strong_rand_bytes(12),
+    Tag = <<0:128>>,
+    <<?BONDY_LOG_CODEC_CIPHER_AES_256_GCM:8, KeyId:16/big-unsigned, IV/binary,
+        Tag/binary, "unreachable">>.
 
 unknown_cipher_id_returns_typed_error() ->
     Forged = <<99:8, 0:16, 0:96, 0:128, "data">>,

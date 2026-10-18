@@ -233,7 +233,9 @@ terminate(Reason, StateName, #state{} = State0) ->
     try
         Transport:close(Socket)
     catch
-        _:_ -> ok
+        %% `gen_tcp:close/1` does not raise. `ssl:close/1` absorbs a gone TLS
+        %% connection process, and exits only when it crashes during the call.
+        exit:{_, {gen_statem, call, _}} -> ok
     end,
 
     State1 = State0#state{socket = undefined},
@@ -657,12 +659,12 @@ handle_event(info, {Tag, Socket, Data}, _, #state{socket = Socket} = State) when
         ],
         {keep_state, State, Actions}
     catch
-        _:Reason ->
+        error:badarg ->
             ?LOG_ERROR(#{
                 description => "Received invalid data from server",
                 data => Data
             }),
-            {stop, Reason}
+            {stop, badarg}
     end;
 handle_event(info, {Tag, _Socket}, _, State0) when ?CLOSED_TAG(Tag) ->
     ?LOG_INFO(#{

@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_index_spec).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Declarative secondary-index spec: validation, term extraction, and
 column projection.
 
@@ -66,7 +64,7 @@ canonical and identical across replicas — required because the index
 entry fold declares `value_equals_state/0 -> true` (its state bytes are
 the value bytes, which must converge byte-for-byte). `decode_projection/1`
 inverts it.
-""").
+""".
 
 -export([validate/1]).
 -export([name/1]).

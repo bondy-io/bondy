@@ -8,12 +8,11 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 -include("bondy_oplog_wal.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance applier loop.
 
 Sits between the per-instance WAL writer and the per-instance
@@ -163,7 +162,7 @@ applied, before preparing) every such event for the cell; the prepared context
 is `context_of/1` over that state, which contains their dots. This recovers
 TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
 §7.2) in an anti-entropy architecture with no causal broadcast layer.
-""").
+""".
 
 -record(state, {
     instance_id :: instance_id(),

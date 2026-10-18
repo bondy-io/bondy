@@ -347,10 +347,11 @@ that lives on the session — see `bondy_context:is_feature_enabled/3`.
 -spec is_feature_implemented(binary() | atom()) -> boolean().
 
 is_feature_implemented(F) when is_binary(F) ->
-    try
-        is_feature_implemented(binary_to_existing_atom(F))
+    try binary_to_existing_atom(F) of
+        Feature ->
+            is_feature_implemented(Feature)
     catch
-        _:_ ->
+        error:badarg ->
             false
     end;
 is_feature_implemented(F) when is_atom(F) ->
@@ -387,14 +388,12 @@ flush(RealmUri, Ref) ->
             }
         )
     catch
-        Class:Reason:Stacktrace ->
+        error:{badmatch, {error, _}} = Reason ->
             ?LOG_WARNING(#{
                 description =>
                     "Error while flushing registration and RPC promise "
                     "queue items",
-                class => Class,
                 reason => Reason,
-                stacktrace => Stacktrace,
                 realm_uri => RealmUri,
                 ref => Ref
             }),
@@ -414,23 +413,9 @@ caller is expected to have already removed them.
 -spec flush_callee_promises(RealmUri :: uri(), Ref :: bondy_ref:t()) -> ok.
 
 flush_callee_promises(RealmUri, Ref) ->
-    try
-        bondy_rpc_promise:flush(
-            RealmUri, Ref, #{on_callee_flush => fun send_no_eligible_callee/1}
-        )
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_WARNING(#{
-                description =>
-                    "Error while flushing RPC promise queue items",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace,
-                realm_uri => RealmUri,
-                ref => Ref
-            }),
-            ok
-    end.
+    bondy_rpc_promise:flush(
+        RealmUri, Ref, #{on_callee_flush => fun send_no_eligible_callee/1}
+    ).
 
 -doc """
 Creates a local registration.
@@ -1606,10 +1591,11 @@ session_feature(SessionId, Role, Feature) when is_binary(SessionId) ->
     try bondy_session:roles(SessionId) of
         Roles when is_map(Roles) ->
             key_value:get([Role, features, Feature], Roles, false);
-        _ ->
+        undefined ->
             false
     catch
-        _:_ ->
+        %% `ets:lookup_element/3` raises `badarg` when the session row is gone.
+        error:badarg ->
             false
     end;
 session_feature(_, _, _) ->
@@ -2718,15 +2704,16 @@ is_reachable(Nodestring) when is_binary(Nodestring) ->
     end.
 
 %% @private
-%% Fail OPEN when Partisan cannot answer (not started, table gone): "unknown"
-%% must never remove a candidate, or a probe failure would look exactly like
-%% a cluster-wide outage.
+%% Fail OPEN when Partisan cannot answer: "unknown" must never remove a
+%% candidate, or a probe failure would look exactly like a cluster-wide outage.
+%% `partisan_sup` sets Partisan's config before its manager creates the
+%% connections table, so the table's presence implies a node name.
 is_connected(Node) ->
-    try
-        partisan_peer_connections:is_connected(Node)
-    catch
-        _:_ ->
-            true
+    case ets:whereis(partisan_peer_connections) of
+        undefined ->
+            true;
+        _ ->
+            partisan_peer_connections:is_connected(Node)
     end.
 
 %% @private
@@ -2867,7 +2854,8 @@ rib_count(Name, Label) ->
     try
         bondy_metrics:counter(#{name => Name, label => Label})
     catch
-        _:_ ->
+        %% `bondy_metrics` raises `badarg` only when its ETS table is gone.
+        error:badarg ->
             ok
     end.
 

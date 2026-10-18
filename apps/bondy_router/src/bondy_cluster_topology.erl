@@ -152,21 +152,25 @@ add_rtt(Peer, Channel, Side, {Sum, Count}) ->
     },
     try bondy_metrics:histogram_snapshot(Q) of
         {ok, #{count := C, sum := S}} -> {Sum + S, Count + C};
-        _ -> {Sum, Count}
+        not_found -> {Sum, Count};
+        {error, {wrong_type, _}} -> {Sum, Count}
     catch
-        _:_ -> {Sum, Count}
+        error:badarg -> {Sum, Count}
     end.
 
 %% =============================================================================
 %% PRIVATE — sources (all read-only, defensive)
 %% =============================================================================
 
+%% Partisan keeps its configuration in `persistent_term` and its state in ETS.
+%% Before Partisan starts, those reads raise `badarg`.
+
 %% @private
 self_node() ->
     try
         partisan:node()
     catch
-        _:_ -> node()
+        error:badarg -> node()
     end.
 
 %% @private
@@ -174,43 +178,37 @@ members() ->
     try
         bondy_cluster:members()
     catch
-        _:_ -> []
+        error:badarg -> [];
+        error:membership_unavailable -> []
     end.
 
 %% @private
 connected() ->
-    try partisan:nodes() of
-        N when is_list(N) -> N;
-        _ -> []
+    try
+        partisan:nodes()
     catch
-        _:_ -> []
+        error:badarg -> []
     end.
 
 %% @private
 channels() ->
-    try partisan_config:channels() of
-        M when is_map(M) -> M;
-        _ -> #{}
+    try
+        partisan_config:channels()
     catch
-        _:_ -> #{}
+        error:badarg -> #{}
     end.
 
 %% @private
-conn_count(Peer) ->
-    try partisan_peer_connections:count(Peer) of
-        N when is_integer(N) -> N;
-        _ -> 0
-    catch
-        _:_ -> 0
-    end.
+conn_count(Peer) when is_atom(Peer) ->
+    partisan_peer_connections:count(Peer).
 
 %% @private
 alarm_count() ->
     try bondy_alarm_handler:get_alarms() of
         L when is_list(L) -> length(L);
-        _ -> 0
+        {error, bad_module} -> 0
     catch
-        _:_ -> 0
+        exit:{noproc, {gen_event, call, _}} -> 0
     end.
 
 %% @private

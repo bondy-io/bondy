@@ -155,10 +155,16 @@ ensure_loaded(Module) ->
 maybe_decode({ok, Bin}, raw, _Ref) ->
     {ok, Bin};
 maybe_decode({ok, Bin}, base64, #{provider := Provider}) ->
+    %% `base64:decode/1` raises `badarg` on a character outside the alphabet,
+    %% `badarith` on a misplaced `=` and `missing_padding` on a short tail.
     try
         {ok, base64:decode(Bin)}
     catch
-        _:_ ->
+        error:badarg ->
+            {error, {invalid_base64, Provider}};
+        error:badarith ->
+            {error, {invalid_base64, Provider}};
+        error:missing_padding ->
             {error, {invalid_base64, Provider}}
     end;
 maybe_decode({error, _} = Error, _Encoding, _Ref) ->

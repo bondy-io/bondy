@@ -6,10 +6,9 @@
 -module(bondy_db_manifest).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 On-disk **topology manifest** for a durable `bondy_db` database.
 
 The keying configuration of a durable DB — partition strategy, shard count,
@@ -50,7 +49,7 @@ written with `bondy_mst_io:write_file_atomic/2`. Ephemeral databases (the
 `registry`, wiped on restart) have no manifest.
 
 Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
-""").
+""".
 
 %% The manifest schema version. Bump when the manifest *envelope* shape changes
 %% (not when a frozen value changes — that is a topology divergence, not a

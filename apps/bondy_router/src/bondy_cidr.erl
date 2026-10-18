@@ -33,17 +33,23 @@ Examples:
 Parses a binary string representation of a CIDR notation and returns its
 erlang representation as a tuple `t()`.
 
-Fails with a badarg exception if the binary `Bin` is not a valid input.
+`Bin` must be `Address/Maskbits`. `Address` is a full dotted-quad IPv4 or a
+full IPv6 address, as `inet:parse_strict_address/1` accepts it, so a shorthand
+such as `10/8` is refused rather than read as `0.0.0.10/8`. `Maskbits` is a
+decimal integer within the family's range: 0 to 32 for IPv4, 0 to 128 for IPv6.
+
+Fails with a badarg exception for any other input.
 """.
 -spec parse(binary()) -> t() | no_return().
 
 parse(Bin) when is_binary(Bin) ->
-    case re:split(Bin, "/", [{return, list}, {parts, 2}]) of
-        [Prefix, LenStr] ->
-            {ok, Addr} = inet:parse_address(Prefix),
-            {Maskbits, _} = string:to_integer(LenStr),
+    case binary:split(Bin, <<"/">>) of
+        [Prefix, Len] ->
+            Addr = parse_address(Prefix),
+            Maskbits = parse_maskbits(Len),
+            Maskbits =< max_maskbits(Addr) orelse error(badarg),
             {Addr, Maskbits};
-        _ ->
+        [_] ->
             error(badarg)
     end;
 parse(_) ->
@@ -117,3 +123,32 @@ anchor_mask({Addr, Maskbits} = CIDR) when tuple_size(Addr) == 8 ->
     {{A, B, C, D, E, F, G, H}, Maskbits};
 anchor_mask(_) ->
     error(badarg).
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+parse_address(Prefix) ->
+    case inet:parse_strict_address(binary_to_list(Prefix)) of
+        {ok, Addr} ->
+            Addr;
+        {error, einval} ->
+            error(badarg)
+    end.
+
+%% @private
+%% Digits only: `binary_to_integer/1` would also accept a sign.
+parse_maskbits(Len) ->
+    case re:run(Len, "^[0-9]{1,3}$", [dollar_endonly, {capture, none}]) of
+        match ->
+            binary_to_integer(Len);
+        nomatch ->
+            error(badarg)
+    end.
+
+%% @private
+max_maskbits(Addr) when tuple_size(Addr) =:= 4 ->
+    32;
+max_maskbits(Addr) when tuple_size(Addr) =:= 8 ->
+    128.

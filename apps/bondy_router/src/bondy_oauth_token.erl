@@ -322,7 +322,9 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
         ok = store(Key, T),
         {ok, T}
     catch
-        throw:not_found ->
+        %% `bondy_realm:fetch/1` raises this for an authentication realm that
+        %% does not exist.
+        error:{not_found, AuthRealmUri} ->
             {error, {no_such_realm, AuthRealmUri}};
         throw:Reason ->
             {error, Reason};
@@ -396,7 +398,7 @@ import_legacy(#{
             ok = write_legacy_pointer(AuthRealmUri, RefreshToken, Key, TokenId),
             ok
     catch
-        throw:not_found ->
+        error:{not_found, AuthRealmUri} ->
             {error, no_such_realm};
         Class:Reason ->
             {error, {Class, Reason}}
@@ -599,7 +601,7 @@ revoke_all(RealmUri) when is_binary(RealmUri) ->
         _ = [revoke_all_in(Table, Bucket, RealmUri) || Bucket <- Buckets],
         ok
     catch
-        _:Reason ->
+        error:{badmatch, {error, _}} = Reason ->
             Job = {?MODULE, revoke_all, [RealmUri]},
             enqueue(Job, #{
                 description => "Failed to revoke tokens. Enqueued for retry.",
@@ -636,7 +638,7 @@ revoke_all(RealmUri, AuthId) ->
                 ok
         end
     catch
-        _:Reason ->
+        error:{badmatch, {error, _}} = Reason ->
             Job = {?MODULE, revoke_all, [RealmUri, AuthId]},
             enqueue(Job, #{
                 description => "Failed to revoke tokens. Enqueued for retry.",
@@ -957,7 +959,7 @@ write(Table, RealmUri, Key, Op) ->
 %% logged and counted as nothing evicted (the caller's write already stands).
 enforce_bound(Table, AuthRealmUri, AuthId, Max) ->
     Collect = fun(Row, Acc) -> [Row | Acc] end,
-    try fold_user(Table, AuthRealmUri, AuthId, Collect, []) of
+    case fold_user(Table, AuthRealmUri, AuthId, Collect, []) of
         {ok, Cells} ->
             Victims = over_bound(Cells, Max),
             _ = [
@@ -971,18 +973,6 @@ enforce_bound(Table, AuthRealmUri, AuthId, Max) ->
                     "Could not read the user's token band to enforce the "
                     "bound; leaving it to the next reclamation sweep",
                 reason => Reason,
-                realm_uri => AuthRealmUri
-            }),
-            0
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_WARNING(#{
-                description =>
-                    "Could not trim the user's token band; leaving it to the "
-                    "next reclamation sweep",
-                class => Class,
-                reason => Reason,
-                stacktrace => frames(Stacktrace),
                 realm_uri => AuthRealmUri
             }),
             0
@@ -1089,14 +1079,20 @@ do_refresh(#{type := ?MODULE} = T0) ->
         ok = write(table(), AuthRealmUri, Key, {set, T}),
         {ok, T}
     catch
-        throw:not_found ->
-            {error, {no_such_realm, AuthRealmUri}};
         throw:Reason ->
             {error, Reason};
-        Class:Reason:Stacktrace ->
+        error:oauth_token_table_unavailable = Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description => "Error while preparing token for the store",
-                class => Class,
+                class => error,
+                reason => Reason,
+                stacktrace => frames(Stacktrace)
+            }),
+            throw(database_error);
+        error:low_entropy = Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while preparing token for the store",
+                class => error,
                 reason => Reason,
                 stacktrace => frames(Stacktrace)
             }),
@@ -1112,10 +1108,10 @@ do_revoke(#{type := ?MODULE, authrealm := AuthRealmUri} = T) ->
     catch
         throw:Reason ->
             {error, Reason};
-        Class:Reason:Stacktrace ->
+        error:oauth_token_table_unavailable = Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description => "Error while preparing token for the store",
-                class => Class,
+                class => error,
                 reason => Reason,
                 stacktrace => frames(Stacktrace)
             }),
@@ -1284,11 +1280,11 @@ cleanup_realm(AuthRealmUri, Now, Stats0) ->
         {error, Reason} ->
             add_error(Stats0, AuthRealmUri, Reason)
     catch
-        Class:Reason:Stacktrace ->
+        error:{badmatch, {error, _}} = Reason:Stacktrace ->
             ?LOG_WARNING(#{
                 description => "Error while cleaning up OAuth2 tokens",
                 realm_uri => AuthRealmUri,
-                class => Class,
+                class => error,
                 reason => Reason,
                 stacktrace => frames(Stacktrace)
             }),

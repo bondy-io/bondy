@@ -7,10 +7,8 @@
 
 -behaviour(application).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Application entry point for the `bondy_oplog` write/replication layer.
 
 It boots the oplog supervision tree (`bondy_oplog_sup`) and initialises the
@@ -22,7 +20,7 @@ call here is a defensive no-op.
 This layer has no leveled concern of its own — leveled storage (bookies,
 topologies, the projection adapter) belongs to `bondy_db`, which depends on
 this application.
-""").
+""".
 
 -export([start/2, stop/1]).
 

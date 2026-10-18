@@ -565,15 +565,13 @@ node_history(Node, After, Limit, Timeout) ->
         true ->
             {ok, element(2, local_history(After, Limit))};
         false ->
-            try
+            case
                 bondy_cluster:call(
                     Node, ?MODULE, local_history, [After, Limit], Timeout
                 )
             of
                 {_, Events} when is_list(Events) -> {ok, Events};
                 Other -> {error, Other}
-            catch
-                Class:Reason -> {error, {Class, Reason}}
             end
     end.
 
@@ -667,7 +665,9 @@ peer_answers(Peers, Timeout) ->
         ),
         Replies
     catch
-        _:_ -> []
+        %% `partisan_erpc:multicall/5` raises this when a request cannot be
+        %% sent; per-node failures arrive as `BadNodes` instead.
+        error:{partisan_erpc, badarg} -> []
     end.
 
 %% @private

@@ -546,24 +546,27 @@ retry_with_fresh_token(
 %% ===================================================================
 
 http_to_wamp(Status, RespBody) when Status >= 200, Status < 300 ->
-    DecodedBody =
-        try
-            json:decode(RespBody)
-        catch
-            _:_ -> RespBody
-        end,
+    DecodedBody = decode_body(RespBody),
     {ok, #{}, [], #{<<"status">> => Status, <<"body">> => DecodedBody}};
 http_to_wamp(Status, RespBody) ->
     ErrorUri = status_to_error_uri(Status),
-    DecodedBody =
-        try
-            json:decode(RespBody)
-        catch
-            _:_ -> RespBody
-        end,
+    DecodedBody = decode_body(RespBody),
     {error, ErrorUri, #{}, [], #{
         <<"status">> => Status, <<"body">> => DecodedBody
     }}.
+
+%% @private
+%% A body that is not JSON is passed through as received. `json:decode/1`
+%% raises `unexpected_end`, `{invalid_byte, _}` or `{unexpected_sequence, _}`
+%% on such a body (OTP `json.erl`).
+decode_body(RespBody) ->
+    try
+        json:decode(RespBody)
+    catch
+        error:unexpected_end -> RespBody;
+        error:{invalid_byte, _} -> RespBody;
+        error:{unexpected_sequence, _} -> RespBody
+    end.
 
 %% @private
 %% Resolved through the catalogue rather than written out, so that an upstream

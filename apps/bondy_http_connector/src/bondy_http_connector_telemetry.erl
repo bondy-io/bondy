@@ -9,7 +9,8 @@ Telemetry conventions for `bondy_http_connector` instrumentation.
 
 Mirrors `bondy_telemetry` (`apps/bondy_router/src`): events are emitted
 with `telemetry:execute/3`, carrying extracted scalars only, and every
-emission function is total (wrapped in try/catch, never throws).
+emission function is total: `telemetry:execute/3` catches a raising
+handler and detaches it rather than propagating (telemetry `execute/3`).
 
 Unlike the router, this module also owns the sink — it declares the
 `bondy_metrics` families and attaches its own handler
@@ -424,36 +425,22 @@ up_value(up) -> 1;
 up_value(down) -> 0.
 
 %% @private
-%% Total wrapper for sink writes: a raising `bondy_metrics` call (e.g. a
-%% metric name reused with the wrong type) must not detach this handler,
-%% which would silently kill every family it renders.
+%% A raise would detach this handler and stop every family it renders.
+%% On a well-formed spec `bondy_metrics` raises only `badarg`, from an absent
+%% table (`ets:lookup/2`, `ets:insert/2` in `bondy_metrics`).
 safe(Fun) ->
     try
         Fun()
     catch
-        Class:Reason:Stacktrace ->
+        error:badarg:Stacktrace ->
             ?LOG_DEBUG(#{
                 description => "Failed to record http_connector metric",
-                class => Class,
-                reason => Reason,
+                reason => badarg,
                 stacktrace => Stacktrace
             }),
             ok
     end.
 
 %% @private
-%% Total wrapper: an emitter must never affect the caller.
 execute(Event, Measurements, Meta) ->
-    try
-        telemetry:execute(Event, Measurements, Meta)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_DEBUG(#{
-                description => "Failed to emit telemetry event",
-                event => Event,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ok
-    end.
+    telemetry:execute(Event, Measurements, Meta).

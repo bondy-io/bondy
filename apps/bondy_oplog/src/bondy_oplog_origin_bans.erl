@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Node-shared origin ban list.
 
 A single ETS `set` table per node, keyed by `Origin :: binary()`. All
@@ -63,7 +62,7 @@ Writes (ban / unban) flow through the gen_server. Reads
 (`is_banned/1`, `list/0`) go directly to ETS — created with
 `read_concurrency` and `protected` access, so the hot path on every
 `append_remote` is a single ETS lookup, no gen_server round-trip.
-""").
+""".
 
 -define(TABLE, bondy_oplog_origin_bans_tab).
 %% Raised while a CONFIGURED retirement path cannot be written. Frontier
@@ -160,7 +159,7 @@ child_spec() ->
 %% WRITES
 %% =============================================================================
 
-?DOC("""
+-doc """
 Bans `Origin`. Subsequent `append_remote/2` calls for events from this
 origin will be rejected with `{error, banned_origin}` without invoking
 the validator.
@@ -168,7 +167,7 @@ the validator.
 `Reason` is opaque; useful values are e.g.
 `{equivocation, ProofTerm}` or operator-supplied tags. Synchronous —
 the ban is effective on return.
-""").
+""".
 -spec ban(Origin :: binary(), Reason :: term()) -> ok.
 
 ban(Origin, Reason) ->
@@ -180,20 +179,20 @@ ban(Origin, Reason) ->
 ban(Origin, Reason, Proof) when is_binary(Origin) ->
     gen_server:call(?MODULE, {ban, Origin, Reason, Proof}).
 
-?DOC("""
+-doc """
 Removes `Origin` from the ban list. Idempotent. Synchronous.
 
 Returns `{error, retired}` for a RETIRED origin: retirement is monotone
 by contract, because frontier reaping skips a retired origin's deficit
 and un-retiring it would resurrect a deficit every peer has stopped
 reporting. Lifting one is an operator error, not an operation.
-""").
+""".
 -spec unban(Origin :: binary()) -> ok | {error, retired}.
 
 unban(Origin) when is_binary(Origin) ->
     gen_server:call(?MODULE, {unban, Origin}).
 
-?DOC("""
+-doc """
 Retires `Origin`: records that the replica it identifies is permanently
 gone, bans it, and persists the decision.
 
@@ -205,7 +204,7 @@ forget on restart is worse than no retirement at all: it licenses a reap
 whose absence then reads as a deficit.
 
 Idempotent. Retiring an origin that is already merely BANNED promotes it.
-""").
+""".
 -spec retire(Origin :: binary()) -> ok | {error, not_persistent}.
 
 retire(Origin) ->
@@ -217,14 +216,14 @@ retire(Origin) ->
 retire(Origin, Reason) when is_binary(Origin) ->
     gen_server:call(?MODULE, {retire, Origin, Reason}).
 
-?DOC("""
+-doc """
 Unions `Origins` into the retirement set — the replication half of the
 grow-only set. Monotone, so it needs no ordering and cannot conflict:
 applying peers' sets in any order any number of times converges.
 
 Returns `{error, not_persistent}` when no `retirement_path` is
 configured, for the same reason as `retire/2`.
-""").
+""".
 -spec merge_retired(Origins :: [binary()]) -> ok | {error, not_persistent}.
 
 merge_retired(Origins) when is_list(Origins) ->
@@ -234,16 +233,16 @@ merge_retired(Origins) when is_list(Origins) ->
 %% READS
 %% =============================================================================
 
-?DOC("""
+-doc """
 Returns `true` if `Origin` is currently banned, `false` otherwise.
 Direct ETS read, no gen_server round-trip.
-""").
+""".
 -spec is_banned(Origin :: binary()) -> boolean().
 
 is_banned(Origin) when is_binary(Origin) ->
     ets:member(?TABLE, Origin).
 
-?DOC("""
+-doc """
 Returns `true` if `Origin` has been RETIRED, `false` for an unbanned
 origin and for one that is merely banned. Direct ETS read.
 
@@ -254,7 +253,7 @@ Single-origin form, for deciding about one origin. To decide about MANY —
 every pair in an apply batch, every origin in a peer frontier — take
 `retired_set/0` once instead, so the match-spec compilation is paid per
 batch rather than per element.
-""").
+""".
 -spec is_retired(Origin :: binary()) -> boolean().
 
 is_retired(Origin) when is_binary(Origin) ->
@@ -268,7 +267,7 @@ is_retired(Origin) when is_binary(Origin) ->
             end
     end.
 
-?DOC("""
+-doc """
 The retired origins as a map keyed by origin, for membership tests.
 
 This is the form the per-element paths take — the applier's fold
@@ -295,7 +294,7 @@ The check is a table lookup rather than a caught exception, so a malformed
 match spec still fails loudly instead of reading as "nothing retired". Until
 anything is retired the answer is one `persistent_term` read
 (`has_retired/0`).
-""").
+""".
 -spec retired_set() -> #{binary() => []}.
 
 retired_set() ->
@@ -324,9 +323,9 @@ table_retired() ->
             )
     end.
 
-?DOC("""
+-doc """
 Returns all current bans as a list of maps.
-""").
+""".
 -spec list() -> [ban_entry()].
 
 list() ->
@@ -348,16 +347,16 @@ list() ->
             ets:tab2list(?TABLE)
     ].
 
-?DOC("""
+-doc """
 The retired origins, as a sorted list. This is the value replicated to
 peers and unioned by `merge_retired/1`.
-""").
+""".
 -spec retired() -> [binary()].
 
 retired() ->
     lists:sort(maps:keys(table_retired())).
 
-?DOC("""
+-doc """
 Whether ANY origin is retired on this node, as a single
 `persistent_term` read.
 
@@ -373,18 +372,18 @@ would still say `true` while the table it describes is gone — and every
 caller guards a table read with this
 (`bondy_oplog_frontier_reap_test:retired_set_is_total_without_the_table/0`
 stages exactly that stale flag).
-""").
+""".
 -spec has_retired() -> boolean().
 
 has_retired() ->
     persistent_term:get({?MODULE, any_retired}, false) andalso
         ets:whereis(?TABLE) =/= undefined.
 
-?DOC("""
+-doc """
 Whether retirements survive a restart on this node — i.e. whether a
 `retirement_path` is configured. Frontier reaping MUST refuse to run when
 this is `false`.
-""").
+""".
 -spec is_persistent() -> boolean().
 
 is_persistent() ->

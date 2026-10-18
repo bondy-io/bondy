@@ -7,11 +7,10 @@
 
 -behaviour(supervisor).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Dynamic supervisor that hosts one `bondy_oplog_instance_sup` subtree
 per running instance.
 
@@ -27,7 +26,7 @@ so instances recover concurrently rather than one at a time inside this
 process (`bondy_oplog_instance_sup_test`). The subtree is `temporary`:
 restarted here it would come back empty. `bondy_oplog_instance_keeper`
 starts a stopped instance again instead.
-""").
+""".
 
 -export([start_link/0]).
 -export([start_instance/2]).
@@ -46,7 +45,7 @@ starts a stopped instance again instead.
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-?DOC("""
+-doc """
 Spawns a per-instance subtree. Idempotent: if a subtree for
 `InstanceId` is already running, returns its existing supervisor pid
 without starting a duplicate. Otherwise returns
@@ -60,7 +59,7 @@ makes the id well-formed for every directory the subtree will derive from
 it — the WAL's `filename:join(BaseDir, InstanceId)` included, which with an
 explicit `wal_dir` or the `/tmp` default never goes through
 `bondy_oplog_path:storage_path/3`.
-""").
+""".
 -spec start_instance(instance_id(), bondy_oplog_instance:opts()) ->
     {ok, pid()} | {error, term()}.
 
@@ -78,10 +77,10 @@ start_instance(InstanceId, Opts) when
             end
     end.
 
-?DOC("""
+-doc """
 `start_instance/2` for `bondy_oplog_instance_keeper`, which already keeps
 `InstanceId`: starts it unless a subtree for it is running.
-""").
+""".
 -spec restart_instance(instance_id(), bondy_oplog_instance:opts()) ->
     {ok, pid()} | {error, term()}.
 

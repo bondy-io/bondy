@@ -10,7 +10,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance tombstone file for the MST pack-store backend.
 
 A tombstone is a hash whose page bytes still exist on disk in a
@@ -56,7 +56,7 @@ the sha256 trailer. Any structural error is reported as a typed
 `{error, _}`; the caller decides whether to surface (e.g.,
 recovery) or fall back to an empty set (e.g., open in lenient
 mode).
-""").
+""".
 
 -export([path/1]).
 -export([read/1]).
@@ -96,7 +96,7 @@ path(Dir) ->
 %% API — read / write
 %% =============================================================================
 
-?DOC("""
+-doc """
 Reads and decodes the tombstones file at `Dir`.
 
 Returns:
@@ -104,7 +104,7 @@ Returns:
 - `{ok, Set}` — `sets:set/0` (v2) of binary hashes.
 - `{error, enoent}` — file does not exist; treat as empty set.
 - `{error, Reason}` — structural decode error.
-""").
+""".
 -spec read(Dir :: file:filename_all()) ->
     {ok, sets:set(binary())} | {error, read_error()}.
 
@@ -117,17 +117,17 @@ read(Dir) ->
             E
     end.
 
-?DOC("Replaces the tombstones in `Dir` with `Set`; see the moduledoc.").
+-doc "Replaces the tombstones in `Dir` with `Set`; see the moduledoc.".
 -spec write(Dir :: file:filename_all(), sets:set(binary())) ->
     ok | {error, term()}.
 
 write(Dir, Set) ->
     bondy_mst_io:write_file_atomic(path(Dir), encode(Set)).
 
-?DOC("""
+-doc """
 Removes the tombstones file from `Dir`. Idempotent — a missing
 file is not an error.
-""").
+""".
 -spec delete(file:filename_all()) -> ok | {error, term()}.
 
 delete(Dir) ->
@@ -141,11 +141,11 @@ delete(Dir) ->
 %% API — pure codec
 %% =============================================================================
 
-?DOC("""
+-doc """
 Encodes a tombstone set to its on-disk binary form. Pure;
 useful for tests and for callers that want to inspect the
 proposed bytes before committing.
-""").
+""".
 -spec encode(sets:set(binary())) -> binary().
 
 encode(Set) ->
@@ -163,10 +163,10 @@ encode(Set) ->
     Trailer = crypto:hash(sha256, HeaderAndBody),
     <<HeaderAndBody/binary, Trailer/binary>>.
 
-?DOC("""
+-doc """
 Decodes a binary into a tombstone set. Returns the decoded
 `sets:set/0` or a typed `{error, _}`.
-""").
+""".
 -spec decode(binary()) -> {ok, sets:set(binary())} | {error, read_error()}.
 
 decode(Bin) when byte_size(Bin) < ?HEADER_BYTES + ?TRAILER_BYTES ->

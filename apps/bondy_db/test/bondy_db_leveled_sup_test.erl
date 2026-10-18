@@ -29,6 +29,7 @@ leveled_sup_test_() ->
         gen("every shard opens at once", fun shard_opens_overlap/1),
         gen("a crash-looping keyed Bookie fells the pool", fun crash_loop/1),
         gen("stop_bookie leaves the pool running", fun stop_bookie/1),
+        gen("stop_bookie of a never-started key is ok", fun stop_unknown/1),
         gen("a failed shard open leaves the pool empty", fun failed_open/1),
         gen("bookies/1 lists keyed and anonymous", fun bookies/1),
         gen("stop/1 closes every Bookie", fun stop_closes/1),
@@ -109,6 +110,14 @@ stop_bookie({Sup, Dir}) ->
     {ok, _} = start_keyed(Sup, Dir, {shard, 0}),
     {ok, Kept} = start_keyed(Sup, Dir, {shard, 1}),
     ok = bondy_db_leveled_sup:stop_bookie(Sup, {shard, 0}),
+    ?assert(is_process_alive(Sup)),
+    ?assertEqual([Kept], bondy_db_leveled_sup:bookies(Sup)).
+
+%% Both `supervisor:terminate_child/2` and `supervisor:delete_child/2` answer
+%% `{error, not_found}` for a key the pool never started.
+stop_unknown({Sup, Dir}) ->
+    {ok, Kept} = start_keyed(Sup, Dir, {shard, 1}),
+    ?assertEqual(ok, bondy_db_leveled_sup:stop_bookie(Sup, {shard, 7})),
     ?assert(is_process_alive(Sup)),
     ?assertEqual([Kept], bondy_db_leveled_sup:bookies(Sup)).
 

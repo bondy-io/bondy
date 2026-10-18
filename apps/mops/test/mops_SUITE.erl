@@ -410,3 +410,17 @@ map_test(_) ->
         <<"a">> := 1,
         <<"content-type">> := <<"image/png">>
     } = mops:eval(Expr, Ctxt).
+
+%% A path that does not resolve raises `{badkeypath, Path}`, whether a key is
+%% absent from a map or the path continues through a value that is not a map.
+unresolvable_path_absent_key_test(_) ->
+    ?assertError(
+        {badkeypath, [<<"a">>, <<"b">>]},
+        mops:eval(<<"{{a.b}}">>, #{<<"a">> => #{}})
+    ).
+
+unresolvable_path_through_non_map_test(_) ->
+    ?assertError(
+        {badkeypath, [<<"a">>, <<"b">>]},
+        mops:eval(<<"{{a.b}}">>, #{<<"a">> => undefined})
+    ).

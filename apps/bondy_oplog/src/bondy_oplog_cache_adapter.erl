@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_cache_adapter).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for **read caches** — the hot-cell layer in front of the
 projection.
 
@@ -70,7 +68,7 @@ release resources on owner death. The substrate does not do it for
 them.
 
 See `bondy_oplog_projection_adapter` for the persistent-state surface.
-""").
+""".
 
 -export_type([
     handle/0,

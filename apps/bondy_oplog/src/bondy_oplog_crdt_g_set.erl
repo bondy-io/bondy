@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Grow-Only Set (G-Set) — native operation-based CRDT.
 
 The op-based twin of the deprecated `bondy_oplog_fold_g_set`, with
@@ -40,7 +38,7 @@ The HLC is read from the event key. `value_equals_state/0 -> true`: the
 substrate omits the value column and treats the state bytes as the value
 bytes on HEAD reads. Encoding is byte-identical to the fold, so a table
 can switch with no data migration.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

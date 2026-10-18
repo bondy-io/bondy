@@ -192,7 +192,9 @@ lookup_key(KeyId) ->
             try
                 {ok, resolve_key(KeyId)}
             catch
-                _:_ ->
+                error:master_key_not_configured ->
+                    {error, missing};
+                error:{master_key_unavailable, _} ->
                     {error, missing}
             end;
         false ->

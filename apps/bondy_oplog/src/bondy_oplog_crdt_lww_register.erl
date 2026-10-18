@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Last-writer-wins (LWW) register — native operation-based CRDT.
 
 The first production fold reimplemented as a native `bondy_oplog_crdt`
@@ -75,7 +73,7 @@ undefined    -> <<0>>
 {set, V, H}  -> <<1, H:64/big-unsigned, (term_to_binary(V))/binary>>
 {cleared, H} -> <<2, H:64/big-unsigned>>
 ```
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

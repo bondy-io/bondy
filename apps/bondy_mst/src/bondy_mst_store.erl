@@ -9,11 +9,11 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour to be implemented for page stores to allow their manipulation.
 This behaviour may also be implemented by store proxies that track operations
 and implement different synchronization or caching mechanisms.
-""").
+""".
 
 -define(DEFAULT_CAPABILITIES, #{
     read_concurrency => false,
@@ -114,7 +114,7 @@ and implement different synchronization or caching mechanisms.
 
 -callback copy(backend(), OtherStore :: t(), Hash :: hash()) -> backend().
 
-?DOC("""
+-doc """
 Releases the caller's claim on a page hash.
 
 Called by every path-copying operation on the pages of the spine it just
@@ -141,7 +141,7 @@ root is retained.
 
 Getting this wrong produces a root that references an absent page — a fault
 that surfaces far from its cause, as an unservable root.
-""").
+""".
 -callback free(backend(), hash(), page()) -> backend().
 
 -callback gc(backend(), KeepRoots :: [hash()]) ->
@@ -218,14 +218,14 @@ open(Mod, HashAlgo, Opts) when
 close(#?MODULE{mod = Mod, state = State}) ->
     Mod:close(State).
 
-?DOC("""
+-doc """
 Forces any in-memory durable state (the current root, buffered pages) to disk
 without releasing the backend. For a durable backend this is the per-commit
 durability barrier — it advances the on-disk root in lockstep with the WAL
 consumer offset so crash replay is bounded to one commit window. For an
 in-memory backend (`ets`/`map`) it is a no-op. Returns the updated store so the
 caller threads the cleared dirty state forward.
-""").
+""".
 -spec flush(Store :: t()) -> {ok, t()} | {error, term()}.
 
 flush(#?MODULE{mod = Mod, state = State0} = T) ->
@@ -237,7 +237,7 @@ flush(#?MODULE{mod = Mod, state = State0} = T) ->
             Error
     end.
 
-?DOC("""
+-doc """
 Rolls the backend's incoming buffer aside for an asynchronous seal, if its
 threshold is crossed and no seal is in flight. Returns
 `{rolled, {Mod, Job}, T1}` — a self-contained token the caller runs
@@ -249,7 +249,7 @@ The token carries the backend module so a worker process can execute it
 without holding the store. Backends that do not implement the
 asynchronous-seal callbacks (in-memory stores, which never seal) always
 answer `{noop, T}`.
-""").
+""".
 -spec maybe_roll_for_seal(t()) ->
     {rolled, {module(), term()}, t()} | {defer, t()} | {noop, t()}.
 
@@ -268,11 +268,11 @@ maybe_roll_for_seal(#?MODULE{mod = Mod, state = State0} = T) ->
             {noop, T#?MODULE{state = State1}}
     end.
 
-?DOC("""
+-doc """
 Finalises the asynchronous seal whose worker has completed the job for
 `PackId`: commits it and mounts the new sealed view. Returns the updated
 store. A backend without the callback treats it as a no-op.
-""").
+""".
 -spec complete_seal(t(), PackId :: pos_integer()) ->
     {ok, t()} | {error, term()}.
 
@@ -289,10 +289,10 @@ complete_seal(#?MODULE{mod = Mod, state = State0} = T, PackId) ->
             Error
     end.
 
-?DOC("""
+-doc """
 Whether the backend has an asynchronous seal in flight. Backends without the
 callback always answer `false`.
-""").
+""".
 -spec seal_in_flight(t()) -> boolean().
 
 seal_in_flight(#?MODULE{mod = Mod, state = State}) ->
@@ -304,30 +304,30 @@ seal_in_flight(#?MODULE{mod = Mod, state = State}) ->
 is_type(#?MODULE{}) -> true;
 is_type(_) -> false.
 
-?DOC("""
+-doc """
 Get the root hash.
 Returns hash or `undefined`.
-""").
+""".
 -spec get_root(Store :: t()) -> Root :: hash() | undefined.
 
 get_root(#?MODULE{mod = Mod, state = State}) ->
     Mod:get_root(State).
 
-?DOC("""
+-doc """
 Get the root hash.
 Returns hash or `undefined`.
 > #### [.warn}
 > WARNING: You should never call this function. It is used internally.
-""").
+""".
 -spec set_root(Store :: t(), Hash :: hash()) -> t().
 
 set_root(#?MODULE{} = T, Hash) when is_binary(Hash) ->
     do_set_root(T, Hash).
 
-?DOC("""
+-doc """
 Get a page referenced by its hash.
 Returns page or `undefined`.
-""").
+""".
 -spec get(Store :: t(), Hash :: hash()) -> Page :: page() | undefined.
 
 get(#?MODULE{mod = Mod, state = State}, Hash) ->
@@ -338,17 +338,17 @@ get(#?MODULE{mod = Mod, state = State}, Hash) ->
 has(#?MODULE{mod = Mod, state = State}, Hash) ->
     Mod:has(State, Hash).
 
-?DOC("""
+-doc """
 Returns the list of all the pages in the store.
-""").
+""".
 -spec list(Store :: t()) -> [page()].
 
 list(#?MODULE{mod = Mod, state = State}) ->
     Mod:list(State).
 
-?DOC("""
+-doc """
 Returns the list of pages which have root `Root`.
-""").
+""".
 -spec list(Store :: t(), Root :: hash()) -> [page()].
 
 list(#?MODULE{} = Store, Root) when is_binary(Root) ->
@@ -359,19 +359,19 @@ list(#?MODULE{} = Store, Root) when is_binary(Root) ->
         []
     ).
 
-?DOC("""
+-doc """
 Put a page. Argument is the content of the page, returns the
 hash that the store has associated to it.
-""").
+""".
 -spec put(Store :: t(), Page :: page()) -> {Hash :: hash(), Store :: t()}.
 
 put(#?MODULE{mod = Mod, state = State0} = T, Page) ->
     {Hash, State} = Mod:put(State0, Page),
     {Hash, T#?MODULE{state = State}}.
 
-?DOC("""
+-doc """
 Deletes a page.
-""").
+""".
 -spec delete(Store :: t(), Hash :: hash()) -> Store :: t().
 
 delete(#?MODULE{mod = Mod, state = State} = T, Page) ->
@@ -405,20 +405,20 @@ gc(#?MODULE{mod = Mod, state = State0} = T, KeepRoots) ->
 page_refs(#?MODULE{mod = Mod}, Page) ->
     Mod:page_refs(Page).
 
-?DOC("""
+-doc """
 Returns the hashes of the pages identified by root hash that are missing
 from the store.
-""").
+""".
 -spec missing_set(Store :: t(), Root :: binary()) -> [hash()].
 
 missing_set(#?MODULE{mod = Mod, state = State}, Root) ->
     Mod:missing_set(State, Root).
 
-?DOC("""
+-doc """
 Destroys the backing store entirely (filesystem directory wipe / ETS
 table teardown / etc.). Irreversible. Distinct from `delete/2`, which
 tombstones a single page hash.
-""").
+""".
 -spec destroy(Store :: t()) -> ok.
 
 destroy(#?MODULE{mod = Mod, state = State}) ->
@@ -432,12 +432,12 @@ transaction(#?MODULE{transactions = true, mod = Mod, state = State}, Fun) ->
 transaction(#?MODULE{transactions = false}, Fun) ->
     Fun().
 
-?DOC("""
+-doc """
 The backend's configured name, or `undefined` when the backend has none
 (or does not implement the optional callback). For the trees `bondy_oplog`
 opens, the name is the instance id — which is what makes telemetry emitted
 at this layer attributable to a shard.
-""").
+""".
 -spec name(Store :: t()) -> binary() | undefined.
 
 name(#?MODULE{mod = Mod, state = State}) ->
@@ -445,10 +445,10 @@ name(#?MODULE{mod = Mod, state = State}) ->
         Mod, name, 1, [State], fun() -> undefined end
     ).
 
-?DOC("""
+-doc """
 See the `page_state/2` callback. Returns `unknown` when the backend does not
 implement it.
-""").
+""".
 -spec page_state(Store :: t(), Hash :: hash()) ->
     live | {tombstoned, integer()} | absent | unknown.
 

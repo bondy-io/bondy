@@ -8,11 +8,10 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Node-shared cursor table for catalogue-snapshot bootstrap sessions.
 
 The bootstrap protocol pulls a peer's catalogue projection in batches.
@@ -53,7 +52,7 @@ Cursors live only in memory. If the peer crashes mid-bootstrap the
 initiator's next request finds `not_found` and must retry from
 `get_catalogue_snapshot_init`. This is the correct semantics — the
 snapshot is a moving target across peer restarts.
-""").
+""".
 
 %% Public ETS table; rows are direct-write from the responder so
 %% multiple in-flight sessions do not serialise on the gen_server.
@@ -179,12 +178,12 @@ child_spec(Opts) ->
 %% CURSOR API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Mints a new cursor for a catalogue-snapshot session against the given
 shard and bucket. Returns the opaque cursor token, which the caller
 returns to the peer in subsequent `get_catalogue_snapshot_next`
 requests.
-""").
+""".
 -spec mint(
     instance_id(),
     NS :: atom(),
@@ -197,13 +196,13 @@ requests.
 mint(InstanceId, NS, Index, Shard, Bucket, Watermark) ->
     mint(InstanceId, NS, Index, Shard, Bucket, Watermark, []).
 
-?DOC("""
+-doc """
 As `mint/6`, but seeds the cursor with `Remaining` additional `(NS, Bucket)`
 targets to walk after the current one — the multi-target walk a collapsed
 per-shard instance uses to stream every table on the shard through one
 session. `next_target/1` pops the head of `Remaining` into the current
 `ns`/`bucket` when the current target's keyspace is exhausted.
-""").
+""".
 -spec mint(
     instance_id(),
     NS :: atom(),
@@ -241,14 +240,14 @@ mint(InstanceId, NS, Index, Shard, Bucket, Watermark, Remaining) when
     true = ets:insert(?TABLE, Row),
     Cursor.
 
-?DOC("""
+-doc """
 Advance the cursor to its next `(NS, Bucket)` target: pops the head of
 `remaining` into the current `ns`/`bucket`, resets `last_key` to start the new
 target from its lowest key, and refreshes the expiry deadline. Returns the new
 cursor state, `done` when no targets remain (the whole shard has been walked),
 or `not_found` if the cursor was reaped. Keeps the same opaque cursor token —
 only its server-side state moves — so the initiator chains requests unchanged.
-""").
+""".
 -spec next_target(cursor()) -> {ok, cursor_state()} | done | not_found.
 
 next_target(Cursor) when is_binary(Cursor) ->
@@ -275,11 +274,11 @@ next_target(Cursor) when is_binary(Cursor) ->
             {ok, row_to_map(NewRow)}
     end.
 
-?DOC("""
+-doc """
 Resolves a cursor. Expired rows are eagerly deleted and reported as
 `expired`; unknown cursors return `not_found`. A successful lookup
 returns the cursor's current state as a map.
-""").
+""".
 -spec lookup(cursor()) -> {ok, cursor_state()} | expired | not_found.
 
 lookup(Cursor) when is_binary(Cursor) ->
@@ -297,10 +296,10 @@ lookup(Cursor) when is_binary(Cursor) ->
             end
     end.
 
-?DOC("""
+-doc """
 Advances `last_key` for the cursor and refreshes its expiry deadline.
 Returns `not_found` if the cursor was reaped or never existed.
-""").
+""".
 -spec advance(cursor(), NewLastKey :: binary()) -> ok | not_found.
 
 advance(Cursor, NewLastKey) when
@@ -323,11 +322,11 @@ advance(Cursor, NewLastKey) when
         error:badarg -> not_found
     end.
 
-?DOC("""
+-doc """
 Records the mid-cell resume point for a cell being shipped in parts, and
 refreshes the expiry deadline. `last_key` is deliberately NOT advanced: the
 walk has not passed this key until its final part has been emitted.
-""").
+""".
 -spec set_pending(
     cursor(), {binary(), binary(), pos_integer(), pos_integer()}
 ) -> ok | not_found.
@@ -353,16 +352,16 @@ set_pending(Cursor, {Key, Frame, PartBytes, NextIdx} = Pending) when
         error:badarg -> not_found
     end.
 
-?DOC("""
+-doc """
 Drops the cursor immediately. Idempotent.
-""").
+""".
 -spec discard(cursor()) -> ok.
 
 discard(Cursor) when is_binary(Cursor) ->
     true = ets:delete(?TABLE, Cursor),
     ok.
 
-?DOC("""
+-doc """
 Drops every cursor open on `InstanceId`, so each session reading a snapshot
 of it gets `cursor_expired` on its next request and restarts from
 `get_catalogue_snapshot_init`. Called when the instance starts installing a
@@ -370,7 +369,7 @@ snapshot of its own or restarts owing the replay of events its frontier does
 not claim, after which the cells those sessions are reading may no longer
 reflect the frontier they read at init (`bondy_oplog_instance:serving/1`).
 Idempotent.
-""").
+""".
 -spec discard_instance(instance_id()) -> ok.
 
 discard_instance(InstanceId) when is_binary(InstanceId) ->
@@ -379,12 +378,12 @@ discard_instance(InstanceId) when is_binary(InstanceId) ->
     ]),
     ok.
 
-?DOC("""
+-doc """
 Whether a cursor on `InstanceId` has not yet expired, so a session may still
 read it. An expired row still in the table is not counted, though `advance/2`
 would renew it; `bondy_oplog_instance:begin_install/3` deletes such rows with
 `discard_instance/1`.
-""").
+""".
 -spec any_open(instance_id()) -> boolean().
 
 any_open(InstanceId) when is_binary(InstanceId) ->
@@ -398,9 +397,9 @@ any_open(InstanceId) when is_binary(InstanceId) ->
     ],
     ets:select(?TABLE, MS, 1) =/= '$end_of_table'.
 
-?DOC("""
+-doc """
 Returns operational diagnostics. Cheap.
-""").
+""".
 -spec info() -> map().
 
 info() ->

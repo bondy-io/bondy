@@ -3494,7 +3494,7 @@
         "uid": "bondy-prometheus"
       },
       "title": "Registry pattern-index CAS contention",
-      "description": "Ptrie write rounds lost to a concurrent writer (retried) and writes that exhausted the retry budget (an incident). All pattern writes of a realm CAS on one root per (type, policy) \u2014 a sustained retry rate here is the trigger for pattern-broadcast sharding (_design/REGISTRY_PARTITION_GRAIN.md). Zero when uncontended.",
+      "description": "Ptrie write rounds lost to a concurrent writer (retried) and writes that exhausted the retry budget (an incident). All pattern writes of a realm CAS on one root per (type, policy) \u2014 a sustained retry rate here is the trigger for pattern-broadcast sharding. Zero when uncontended.",
       "gridPos": {
         "h": 8,
         "w": 12,

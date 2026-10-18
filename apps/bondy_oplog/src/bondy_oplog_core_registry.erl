@@ -8,10 +8,9 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Node-shared registry of per-`(namespace, index, shard)` triples for
 `bondy_oplog_core`.
 
@@ -70,7 +69,7 @@ the node. With many shards doing many config refreshes (e.g., a
 secondary's lag bound changing), that's a non-starter. ETS `insert` is
 constant-time, no global side effects, and `read_concurrency: true`
 keeps reads parallel.
-""").
+""".
 
 -define(TABLE, bondy_oplog_core_registry_tab).
 

@@ -12,11 +12,10 @@
 
 -module(bondy_oplog_peer_source).
 
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Behaviour for peer discovery used by the sync scheduler.
 
 The default sync scheduler invokes `peers_for/2` once per tick per
@@ -32,7 +31,7 @@ The library ships three built-ins:
 - `bondy_oplog_peer_source_static`
 - `bondy_oplog_peer_source_sample`
 - `bondy_oplog_peer_source_partisan`
-""").
+""".
 
 -callback peers_for(InstanceId :: instance_id(), Opts :: map()) ->
     [peer_id()].

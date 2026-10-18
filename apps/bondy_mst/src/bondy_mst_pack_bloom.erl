@@ -9,7 +9,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Partitioned Bloom filter for the MST pack-store `.idx` files.
 
 Implements the same partitioned-bloom math as
@@ -103,7 +103,7 @@ This module performs no I/O and holds no process state. The
 build path returns an opaque `builder()` you fold updates into;
 the read path returns a `t()` you query. Both are plain
 immutable records and safe to pass across processes.
-""").
+""".
 
 -record(builder, {
     slice_count :: pos_integer(),
@@ -186,13 +186,13 @@ header_bytes() -> ?HEADER_BYTES.
 %% API — build
 %% =============================================================================
 
-?DOC("""
+-doc """
 Starts a new partitioned-bloom builder sized for `Capacity`
 items at false-positive rate `p` (default `0.01`).
 
 Sizing follows the bloomfi formula (see module docstring); the
 returned builder has all bits cleared and `item_count = 0`.
-""").
+""".
 -spec new(build_opts()) -> builder().
 
 new(#{capacity := Capacity} = Opts) when
@@ -216,11 +216,11 @@ new(#{capacity := Capacity} = Opts) when
         slices = [EmptySlice || _ <- lists:seq(1, SliceCount)]
     }.
 
-?DOC("""
+-doc """
 Adds `Element` (a binary — typically a 32-byte page hash) to the
 builder. Returns a new builder. Idempotent on duplicates: if all
 target bits are already set, `item_count` is unchanged.
-""").
+""".
 -spec add(binary(), builder()) -> builder().
 
 add(Element, #builder{} = B) when is_binary(Element) ->
@@ -235,12 +235,12 @@ add(Element, #builder{} = B) when is_binary(Element) ->
             B#builder{slices = Slices}
     end.
 
-?DOC("""
+-doc """
 Finalises the builder, converting the mutable slice arrays into
 read-only binaries.  The result has the same membership
 semantics as the builder but consumes less memory and is what
 the index codec serialises via `to_binary/1`.
-""").
+""".
 -spec finalise(builder()) -> t().
 
 finalise(#builder{} = B) ->
@@ -258,11 +258,11 @@ finalise(#builder{} = B) ->
         slices = Slices
     }.
 
-?DOC("""
+-doc """
 One-shot helper: build a finalised filter from a list of
 elements. Equivalent to `finalise(lists:foldl(fun add/2, new(Opts),
 Elements))`.
-""").
+""".
 -spec build([binary()], build_opts()) -> t().
 
 build(Elements, Opts) when is_list(Elements), is_map(Opts) ->
@@ -272,13 +272,13 @@ build(Elements, Opts) when is_list(Elements), is_map(Opts) ->
 %% API — read
 %% =============================================================================
 
-?DOC("""
+-doc """
 Tests whether `Element` may be in the filter.
 
 `false` is conclusive — the element was never inserted.
 `true` is probabilistic — at the target FPR `p`, a `true` may
 correspond to a never-inserted element with probability ~`p`.
-""").
+""".
 -spec member(binary(), t()) -> boolean().
 
 member(Element, #?MODULE{slice_bits = SliceBits, mask = Mask, slices = Slices}) when
@@ -287,11 +287,11 @@ member(Element, #?MODULE{slice_bits = SliceBits, mask = Mask, slices = Slices}) 
     {I0, I1} = make_indexes(Element, SliceBits, Mask),
     all_set(Slices, I0, I1, Mask).
 
-?DOC("""
+-doc """
 Serialises a filter to its on-disk envelope (header + payload).
 The result is a single binary suitable for embedding in an
 `.idx` bloom section.
-""").
+""".
 -spec to_binary(t()) -> binary().
 
 to_binary(#?MODULE{} = T) ->
@@ -307,12 +307,12 @@ to_binary(#?MODULE{} = T) ->
         Payload/binary
     >>.
 
-?DOC("""
+-doc """
 Parses a previously-serialised filter. Returns
 `{ok, T, RestBytes}` where `RestBytes` is whatever followed the
 filter envelope (zero bytes when the envelope is exact). Returns
 typed `{error, _}` for malformed input.
-""").
+""".
 -spec from_binary(binary()) ->
     {ok, t(), binary()} | {error, term()}.
 

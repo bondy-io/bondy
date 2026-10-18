@@ -6,10 +6,8 @@
 -module(bondy_db_topology_single_bookie).
 -behaviour(bondy_db_topology).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Degenerate reference topology: one leveled Bookie for the whole DB.
 
 ```
@@ -72,7 +70,7 @@ EntityType (UTF-8 binary form of the atom)
 Realm is folded into the cell key by the facade, not the bucket — the
 bucket only disambiguates between entity types inside the single
 Bookie.
-""").
+""".
 
 -export([init/2]).
 -export([open_table/4]).

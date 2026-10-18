@@ -173,19 +173,7 @@ terminate(_Reason, _S) ->
 
 %% @private
 do_sweep(S) ->
-    Reclaimed =
-        try
-            bondy_registry_ptrie:reclaim(S#state.handle)
-        catch
-            C:E:ST ->
-                ?LOG_WARNING(#{
-                    description => "ptrie janitor sweep raised",
-                    class => C,
-                    reason => E,
-                    stacktrace => ST
-                }),
-                0
-        end,
+    Reclaimed = bondy_registry_ptrie:reclaim(S#state.handle),
     S1 = S#state{
         last_reclaimed = Reclaimed,
         total_reclaimed = S#state.total_reclaimed + Reclaimed

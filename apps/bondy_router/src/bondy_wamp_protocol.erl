@@ -336,16 +336,7 @@ handle_inbound_messages(Messages, St) ->
         handle_inbound_messages(Messages, St, [])
     catch
         throw:Reason ->
-            stop(Reason, St);
-        Class:Reason:Stacktrace when Class /= throw ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace,
-                state_name => St#wamp_state.state_name
-            }),
-            %% REVIEW shouldn't we call stop({system_failure, Reason}) to abort?
-            error({system_failure, Reason})
+            stop(Reason, St)
     end.
 
 %% @private

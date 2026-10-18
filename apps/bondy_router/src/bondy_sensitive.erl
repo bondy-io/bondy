@@ -63,11 +63,17 @@ restrictions on the form Status can take.
 format_status(Mod, State) ->
     case conforms(Mod) of
         true ->
+            %% The in-tree implementors match their state in the clause head
+            %% or a `=` binding, and the state is `undefined` until set.
             try Mod:format_status(State) of
                 Formatted ->
                     Formatted
             catch
-                _:_ ->
+                error:function_clause ->
+                    State;
+                error:{badmatch, _} ->
+                    State;
+                error:{badmap, _} ->
                     State
             end;
         false ->
@@ -106,3 +112,24 @@ prune_stacktrace([{M, F, [_ | _] = A, Info} | Rest]) ->
     [{M, F, length(A), Info} | Rest];
 prune_stacktrace(Stacktrace) ->
     Stacktrace.
+
+%% =============================================================================
+%% EUNIT
+%% =============================================================================
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+%% The three modules raise `function_clause`, `{badmatch, _}` and `{badmap, _}`
+%% on an unset state.
+format_status_keeps_an_unset_state_test_() ->
+    [
+        {atom_to_list(Mod), fun() ->
+            {module, Mod} = code:ensure_loaded(Mod),
+            ?assertEqual(undefined, format_status(Mod, undefined))
+        end}
+     || Mod <- [bondy_session, bondy_auth, bondy_context]
+    ].
+
+-endif.

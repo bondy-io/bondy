@@ -318,7 +318,13 @@ issue(Session, Opts0) ->
     catch
         throw:Reason ->
             {error, Reason};
-        _:Reason ->
+        error:#{code := _} = Reason ->
+            {error, Reason};
+        error:{not_authorized, _} = Reason ->
+            {error, Reason};
+        error:{no_such_user, _} = Reason ->
+            {error, Reason};
+        error:{not_found, _} = Reason ->
             {error, Reason}
     end.
 
@@ -798,14 +804,20 @@ do_issue(Session, Opts) ->
     %% do it our way)
     {_, Ticket} = jose_jws:compact(jose_jwt:sign(PrivKey, JWT)),
 
-    case is_persistent(ScopeType) of
-        true ->
-            ok = store_ticket(AuthRealmUri, Authid, Claims);
-        false ->
-            ok
-    end,
+    Stored =
+        case is_persistent(ScopeType) of
+            true ->
+                store_ticket(AuthRealmUri, Authid, Claims);
+            false ->
+                ok
+        end,
 
-    {ok, Ticket, Claims}.
+    case Stored of
+        ok ->
+            {ok, Ticket, Claims};
+        {error, _} = Error ->
+            Error
+    end.
 
 %% @private
 scope(Session, #{client_ticket := Ticket} = Opts, Uri) when
@@ -959,7 +971,7 @@ store_ticket(AuthRealmUri, Authid, Claims) ->
         all ->
             %% local | sso ticket scope type
             %% We just replace any existing ticket in this location
-            ok = bondy_db:apply(Table, AuthRealmUri, EncKey, {set, Claims});
+            bondy_db:apply(Table, AuthRealmUri, EncKey, {set, Claims});
         _ ->
             %% client_local | client_sso scope type
             %% We have to update the value, so first we fetch it.
@@ -969,7 +981,7 @@ store_ticket(AuthRealmUri, Authid, Claims) ->
                     {error, not_found} -> undefined
                 end,
             Tickets = update_tickets(Scope, Claims, Tickets0),
-            ok = bondy_db:apply(Table, AuthRealmUri, EncKey, {set, Tickets})
+            bondy_db:apply(Table, AuthRealmUri, EncKey, {set, Tickets})
     end.
 
 %% @private
@@ -1054,7 +1066,7 @@ key_scope_realm(EncKey) ->
         {_Authid, Uri, _} when is_binary(Uri) -> {ok, Uri};
         _ -> error
     catch
-        _:_ -> error
+        error:badarg -> error
     end.
 
 %% @private
@@ -1098,7 +1110,7 @@ owned_auth_realm_uris() ->
 cleanup_realm(RealmUri, Now, Stats0) ->
     Table = table(),
 
-    try bondy_db:list(Table, RealmUri) of
+    case bondy_db:list(Table, RealmUri) of
         {ok, Rows} ->
             lists:foldl(
                 fun(Row, Acc) ->
@@ -1108,16 +1120,6 @@ cleanup_realm(RealmUri, Now, Stats0) ->
                 Rows
             );
         {error, Reason} ->
-            add_error(Stats0, RealmUri, Reason)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_WARNING(#{
-                description => "Error while cleaning up tickets",
-                realm_uri => RealmUri,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
             add_error(Stats0, RealmUri, Reason)
     end.
 
@@ -1230,7 +1232,7 @@ authid_of(EncKey) ->
         _ ->
             error
     catch
-        _:_ -> error
+        error:badarg -> error
     end.
 
 %% @private

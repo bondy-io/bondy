@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_crdt_rw_nested_core).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Shared **two-level remove-wins-with-nesting** engine for
 `bondy_oplog_crdt_rw_map` — the causal dual of
 `bondy_oplog_crdt_nested_core` (the add-wins engine
@@ -36,7 +34,7 @@ Identical contract to `bondy_oplog_crdt_nested_core`: a key's `SubMod` is
 fixed by its first nested write; mixing a flat `put/5` and `put_nested/7`
 on the same live key, or changing `SubMod` on a live key, raises
 `{badarg, _}`.
-""").
+""".
 
 -export([nested_value/2]).
 -export([put/5]).

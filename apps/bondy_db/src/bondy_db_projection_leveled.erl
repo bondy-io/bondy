@@ -5,12 +5,11 @@
 
 -module(bondy_db_projection_leveled).
 
--include("bondy_doc.hrl").
 -include_lib("bondy_oplog/include/bondy_oplog.hrl").
 -include_lib("leveled/include/leveled.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 `bondy_oplog_projection_adapter` implementation backed by a leveled
 Bookie running in **`head_only` mode** with a SubKey split.
 
@@ -130,7 +129,7 @@ value-present frames, exactly as `get/3` does).
 - Routing or topology decisions.
 - Register any custom leveled tag/extractor — head_only mode bypasses
   extractors entirely (HEAD bytes are written directly via `book_mput`).
-""").
+""".
 
 -behaviour(bondy_oplog_projection_adapter).
 

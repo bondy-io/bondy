@@ -5,10 +5,8 @@
 
 -module(bondy_db_topology_leveled_common).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Shared helpers for the leveled-backed `bondy_db` topologies
 (`bondy_db_topology_single_bookie`, `bondy_db_topology_per_entity`,
 `bondy_db_topology_shared_shards`).
@@ -20,7 +18,7 @@ to (say) the default leveled options lands in every topology at once.
 
 It is **not** a `bondy_db_topology` behaviour — it ships no callbacks,
 only the leaf functions the three topology modules call.
-""").
+""".
 
 -define(PROJECTION_ADAPTER, bondy_db_projection_leveled).
 
@@ -33,7 +31,7 @@ only the leaf functions the three topology modules call.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Leveled `book_start/1` options for a Bookie rooted at `Dir`.
 
 Two options are fixed here rather than configured, because neither is the
@@ -50,7 +48,7 @@ Everything else comes from `bondy_db_config:leveled_opts/0`, backed by the
 `db.leveled.*` Cuttlefish family. A deployment that needs different values
 sets them in `bondy.conf`; overriding `book_opts_fun` in `topology_opts`
 remains available for tests and for callers that need per-Bookie options.
-""").
+""".
 -spec default_book_opts(Dir :: file:filename_all()) ->
     proplists:proplist().
 
@@ -61,23 +59,23 @@ default_book_opts(Dir) ->
         | bondy_db_config:leveled_opts()
     ].
 
-?DOC("Ensures `Dir` exists by creating it (via a sentinel child path).").
+-doc "Ensures `Dir` exists by creating it (via a sentinel child path).".
 -spec ensure_dir(Dir :: file:filename_all()) -> ok | {error, term()}.
 
 ensure_dir(Dir) ->
     filelib:ensure_dir(filename:join(Dir, ".keep")).
 
-?DOC("Normalises a directory to the string form leveled expects.").
+-doc "Normalises a directory to the string form leveled expects.".
 -spec normalise_dir(Dir :: binary() | string()) -> string().
 
 normalise_dir(Dir) when is_binary(Dir) -> binary_to_list(Dir);
 normalise_dir(Dir) when is_list(Dir) -> Dir.
 
-?DOC("""
+-doc """
 `route/2` callback body shared by the sharded topologies: looks `Shard`
 up in the state's `shards` map and returns the per-shard
 projection-adapter handle.
-""").
+""".
 -spec route(Shard :: non_neg_integer(), State :: map()) ->
     {ok, module(), map()} | {error, {unknown_shard, non_neg_integer()}}.
 

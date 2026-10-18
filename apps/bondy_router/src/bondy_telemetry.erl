@@ -182,15 +182,11 @@ never throws.
 -spec session_opened(Session :: bondy_session:t()) -> ok.
 
 session_opened(Session) ->
-    try bondy_session:realm_uri(Session) of
-        RealmUri ->
-            execute(
-                [bondy, session, opened], #{count => 1}, #{realm => RealmUri}
-            )
-    catch
-        _:_ ->
-            ok
-    end.
+    execute(
+        [bondy, session, opened],
+        #{count => 1},
+        #{realm => bondy_session:realm_uri(Session)}
+    ).
 
 -doc """
 Emits `[bondy, session, closed]` with the session duration in seconds
@@ -203,17 +199,11 @@ and the WAMP close reason URI (or `undefined`). Total: never throws.
 ) -> ok.
 
 session_closed(Session, DurationSecs, Reason) ->
-    try bondy_session:realm_uri(Session) of
-        RealmUri ->
-            execute(
-                [bondy, session, closed],
-                #{duration => DurationSecs},
-                #{realm => RealmUri, reason => Reason}
-            )
-    catch
-        _:_ ->
-            ok
-    end.
+    execute(
+        [bondy, session, closed],
+        #{duration => DurationSecs},
+        #{realm => bondy_session:realm_uri(Session), reason => Reason}
+    ).
 
 -doc """
 Emits `[bondy, wamp, hello]` with the in-process time (µs) spent
@@ -435,16 +425,14 @@ crosses the telemetry boundary. Total: never throws.
 ) -> ok.
 
 registry_event(Type, Action, Entry) ->
-    RealmUri =
-        try
-            bondy_registry_entry:realm_uri(Entry)
-        catch
-            _:_ -> undefined
-        end,
     execute(
         [bondy, registry, event],
         #{count => 1},
-        #{type => Type, action => Action, realm => RealmUri}
+        #{
+            type => Type,
+            action => Action,
+            realm => bondy_registry_entry:realm_uri(Entry)
+        }
     ).
 
 -doc """
@@ -701,63 +689,34 @@ is_lower_hex(_) ->
 
 %% @private
 do_wamp_message(M, Measurements, Ctxt) ->
-    try
-        %% Internal contexts (e.g. gateway/internal callers) may carry no
-        %% subprotocol (bondy_context:subprotocol/1 is partial).
-        {Transport, FrameType, Encoding} =
-            try bondy_context:subprotocol(Ctxt) of
-                {_, _, _} = Subprotocol -> Subprotocol;
-                _ -> {undefined, undefined, undefined}
-            catch
-                _:_ -> {undefined, undefined, undefined}
-            end,
-        Meta0 = #{
-            type => element(1, M),
-            realm_type => realm_type(Ctxt),
-            protocol => wamp,
-            transport => Transport,
-            frame_type => FrameType,
-            encoding => Encoding
-        },
-        Meta = add_uri(M, Meta0),
-        telemetry:execute([bondy, wamp, message], Measurements, Meta)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_DEBUG(#{
-                description => "Failed to emit wamp message telemetry",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ok
-    end.
+    %% Internal contexts (e.g. gateway/internal callers) carry no
+    %% subprotocol, and bondy_context:subprotocol/1 has no clause for them.
+    {Transport, FrameType, Encoding} = maps:get(
+        subprotocol, Ctxt, {undefined, undefined, undefined}
+    ),
+    Meta0 = #{
+        type => element(1, M),
+        realm_type => realm_type(Ctxt),
+        protocol => wamp,
+        transport => Transport,
+        frame_type => FrameType,
+        encoding => Encoding
+    },
+    Meta = add_uri(M, Meta0),
+    telemetry:execute([bondy, wamp, message], Measurements, Meta).
 
 %% @private
-%% Total wrapper: an emitter must never affect the caller (WAL
-%% convention, see METRICS_GAP_ANALYSIS.md Part II Rule 5).
+%% `telemetry:execute/3` catches and detaches a raising handler, so a handler
+%% failure does not reach an emitter's caller.
 execute(Event, Measurements, Meta) ->
-    try
-        telemetry:execute(Event, Measurements, Meta)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_DEBUG(#{
-                description => "Failed to emit telemetry event",
-                event => Event,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ok
-    end.
+    telemetry:execute(Event, Measurements, Meta).
 
 %% @private
 realm_type(Ctxt) ->
-    try bondy_context:realm_uri(Ctxt) of
+    case bondy_context:realm_uri(Ctxt) of
         ?MASTER_REALM_URI -> master;
-        _ -> user
-    catch
-        _:_ ->
-            undefined
+        RealmUri when is_binary(RealmUri) -> user;
+        undefined -> user
     end.
 
 %% @private

@@ -7,11 +7,10 @@
 -behaviour(bondy_oplog_validator).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Cryptographic event validator for Byzantine-tolerant deployments.
 
 The hash-chain + signature approach to detecting equivocation —
@@ -133,7 +132,7 @@ ok = bondy_oplog_instance:refresh_validator(InstanceId, key_rotation).
   not a map. The applier logs and keeps the previous snapshot.
 - In-flight `verify_event/2` calls that captured the old snapshot
   continue to use it (see `bondy_oplog_applier` moduledoc).
-""").
+""".
 
 -record(state, {
     %% Captured at `init/2` and reused by `refresh/1` to look up

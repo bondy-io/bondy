@@ -467,7 +467,7 @@ prototype_uri(RealmUri) ->
         Mod when is_atom(Mod) ->
             try Mod:prototype_uri(RealmUri) of
                 Uri when is_binary(Uri) -> Uri;
-                _ -> undefined
+                undefined -> undefined
             catch
                 Class:Reason ->
                     ?LOG_DEBUG(#{
@@ -517,7 +517,7 @@ build_relay(Map0, Acc) when is_map(Map0) ->
                     Acc
             end
     catch
-        _:Reason ->
+        error:#{code := _} = Reason ->
             ?LOG_ERROR(#{
                 description =>
                     "Invalid mail relay configuration, "

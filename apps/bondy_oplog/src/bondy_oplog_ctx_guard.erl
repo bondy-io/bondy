@@ -6,10 +6,9 @@
 -module(bondy_oplog_ctx_guard).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 The tier_2 stamp-site context-regression guard, extracted so both
 `bondy_oplog_applier` (the per-instance applier process) and
 `bondy_oplog_instance` (a **fused** instance, which has no separate
@@ -47,7 +46,7 @@ A wholesale catalogue install resets the guard outright (`new/0`).
 The guard (`guard()`) is a plain map, owned by the caller's own process
 state (the applier's `#state.ctx_guard`, or a fused instance's equivalent
 field) — this module is pure and holds no state of its own.
-""").
+""".
 
 -export([coevict/2]).
 -export([forget/2]).

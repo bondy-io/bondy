@@ -477,9 +477,8 @@ text \<open>
 
   NOT proved here:
 
-  \<^item> That the Erlang refines @{term fold_step}. Discharged by the property
-    test named I5 in @{text "_design/applied_frontier.md"}, which does not yet
-    exist.
+  \<^item> That the Erlang refines @{term fold_step}. A property test for it
+    does not yet exist.
 
   \<^item> Anything about LIVENESS. @{term fold_step} may admit nothing
     (@{term "mat = {}"} is a fixpoint), which is the permanently unroutable

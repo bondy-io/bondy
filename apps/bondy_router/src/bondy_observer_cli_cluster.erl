@@ -131,27 +131,30 @@ cell(Content, Width, Colour) ->
 
 %% @private
 self_node() ->
+    %% `partisan_config:get/1` raises `badarg` before partisan is configured.
     try
         partisan:node()
     catch
-        _:_ -> node()
+        error:badarg -> node()
     end.
 
 %% @private
 members() ->
+    %% `bondy_cluster:members/0` raises `membership_unavailable` until partisan
+    %% publishes a membership, and `badarg` while partisan is not configured.
     try
         bondy_cluster:members()
     catch
-        _:_ -> []
+        error:membership_unavailable -> [];
+        error:badarg -> []
     end.
 
 %% @private
 connected() ->
-    try partisan:nodes() of
-        N when is_list(N) -> N;
-        _ -> []
+    try
+        partisan:nodes()
     catch
-        _:_ -> []
+        error:badarg -> []
     end.
 
 %% @private

@@ -87,6 +87,32 @@ env_bad_base64_is_error_test() ->
         os:unsetenv(?VAR)
     end.
 
+env_unpadded_base64_is_error_test() ->
+    os:putenv(?VAR, "QUI"),
+    try
+        ?assertEqual(
+            {error, {invalid_base64, env}},
+            bondy_connect_secret_resolver:resolve(#{
+                provider => env, var => ?VAR, encoding => base64
+            })
+        )
+    after
+        os:unsetenv(?VAR)
+    end.
+
+env_misplaced_padding_base64_is_error_test() ->
+    os:putenv(?VAR, "A==="),
+    try
+        ?assertEqual(
+            {error, {invalid_base64, env}},
+            bondy_connect_secret_resolver:resolve(#{
+                provider => env, var => ?VAR, encoding => base64
+            })
+        )
+    after
+        os:unsetenv(?VAR)
+    end.
+
 %% =============================================================================
 %% dispatch / validation
 %% =============================================================================

@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_cell_kernel).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 The per-cell projection **kernel** — the single seam through which the
 applier maintains a catalogue cell's materialised state and value.
 
@@ -64,7 +62,7 @@ kernel and every CRDT's `decode_state/1` therefore decode them without
 `[safe]`, which would refuse an atom the VM has not interned since a
 restart (falsifier:
 `bondy_aae_cluster_SUITE:runtime_atom_cell_read_after_restart_measured`).
-""").
+""".
 
 -export([from_modules/2]).
 -export([default_crdt_for_fold/1]).

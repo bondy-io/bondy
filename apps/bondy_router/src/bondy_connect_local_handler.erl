@@ -98,15 +98,11 @@ close(#local_session{session = Session, context = Ctxt}) ->
         try
             bondy_session_manager:close(Session)
         catch
-            _:_ -> ok
+            %% `gproc_pool:pick_worker/2` raises `badarg` once the session
+            %% manager pool is gone.
+            error:badarg -> ok
         end,
-    _ =
-        try
-            bondy_context:close(Ctxt)
-        catch
-            _:_ -> ok
-        end,
-    ok.
+    ok = bondy_context:close(Ctxt).
 
 %% =============================================================================
 %% PRIVATE
@@ -138,8 +134,8 @@ do_open(RealmUri, Roles) ->
         {error, _} = Error ->
             Error
     catch
-        Class:Reason ->
-            {error, {session_open_failed, Class, Reason}}
+        error:{not_found, _} = Reason ->
+            {error, {session_open_failed, error, Reason}}
     end.
 
 %% @private Synthesize the WELCOME for the already-open session, mirroring

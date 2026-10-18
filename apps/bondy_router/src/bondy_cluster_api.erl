@@ -152,16 +152,14 @@ name.
 The fan-out target of the pre-leave survey. Tagged rather than positional so a
 reply carries its own provenance, and so a member that answers with an
 unexpected name cannot be mistaken for one that was asked.
+
+It raises when the oplog registry table is gone. The survey then counts the
+member as silent, which makes a leave unsafe.
 """.
 -spec local_readiness() -> {node(), boolean(), non_neg_integer()}.
 
 local_readiness() ->
-    Instances =
-        try length(bondy_oplog:list_instances()) of
-            N -> N
-        catch
-            _:_ -> 0
-        end,
+    Instances = length(bondy_oplog:list_instances()),
     {partisan:node(), bondy_router_app:is_ready(), Instances}.
 
 %% =============================================================================
@@ -284,7 +282,9 @@ survey(Peers, Budget) ->
             ),
             R
         catch
-            _:_ -> []
+            %% `partisan_erpc:multicall/5` raises this when a request cannot
+            %% be sent. Every peer then reads as silent.
+            error:{partisan_erpc, badarg} -> []
         end,
     Known = [
         {N, Ready, Count}
@@ -351,7 +351,7 @@ member(Name) ->
     catch
         %% An atom nobody has ever created cannot be a member, and creating
         %% one from caller input would be a leak.
-        _:_ -> error
+        error:badarg -> error
     end.
 
 %% @private

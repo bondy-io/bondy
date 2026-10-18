@@ -6,10 +6,8 @@
 -module(bondy_db_topology_per_entity).
 -behaviour(bondy_db_topology).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Reference topology for `bondy_db`: one leveled Bookie per
 `(EntityType, Shard)` shared across realms; the bucket is the realm.
 
@@ -76,7 +74,7 @@ Optional:
 
 The bucket is the realm binary (`bucket_for/3`). The entity type needs
 no encoding because each `(EntityType, Shard)` has its own Bookie.
-""").
+""".
 
 -export([init/2]).
 -export([open_table/4]).

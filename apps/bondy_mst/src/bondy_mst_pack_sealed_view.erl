@@ -10,7 +10,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Shared sealed-pack opener with self-healing `.idx` rebuild.
 
 Both `bondy_mst_pack_store` (read+write) and
@@ -51,7 +51,7 @@ from a parsed manifest — used by the reader, which has no writer.
 The two helpers must agree on the `instance_hash` derivation; both
 delegate to `bondy_mst_pack_writer` so a future change to the
 hashing scheme stays in one place.
-""").
+""".
 
 -export([open/3]).
 -export([open_ctx_from_writer/1]).

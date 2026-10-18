@@ -58,6 +58,27 @@ ipv4_cidr_binary() ->
         )
     ).
 
+malformed_cidr_binary() ->
+    ?LET(
+        {{A, B, C, D}, Mask},
+        {
+            ipv4_address(),
+            oneof([
+                ?LET(N, range(33, 999), integer_to_list(N)),
+                "x",
+                "",
+                "+8",
+                "-0",
+                " 8",
+                "8 ",
+                "8\n",
+                "8/9",
+                "8junk"
+            ])
+        },
+        list_to_binary(io_lib:format("~B.~B.~B.~B/~s", [A, B, C, D, Mask]))
+    ).
+
 ipv6_segment() ->
     range(0, 65535).
 
@@ -147,6 +168,36 @@ prop_parse_valid_ipv6_cidr() ->
             {Addr, Maskbits} = Result,
             tuple_size(Addr) =:= 8 andalso
                 Maskbits >= 0 andalso Maskbits =< 128
+        end
+    ).
+
+%% A valid address with a malformed mask is refused: out of the family's
+%% range, not decimal digits, signed, followed by anything, or empty.
+prop_parse_rejects_malformed_maskbits() ->
+    ?FORALL(
+        Bin,
+        malformed_cidr_binary(),
+        try bondy_cidr:parse(Bin) of
+            Parsed -> {accepted, Bin, Parsed} =:= refused
+        catch
+            error:badarg -> true
+        end
+    ).
+
+%% An address the strict parser refuses is refused whatever the mask. These
+%% shorthands are exactly what `inet:parse_address/1` silently widens.
+prop_parse_rejects_address_shorthand() ->
+    ?FORALL(
+        {Prefix, Maskbits},
+        {oneof(["10", "10.1", "127.1", "1.2.3.4.5", ""]), ipv4_maskbits()},
+        try
+            bondy_cidr:parse(
+                list_to_binary(io_lib:format("~s/~B", [Prefix, Maskbits]))
+            )
+        of
+            Parsed -> {accepted, Prefix, Parsed} =:= refused
+        catch
+            error:badarg -> true
         end
     ).
 

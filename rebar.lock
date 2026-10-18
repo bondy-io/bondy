@@ -127,7 +127,7 @@
   1},
  {<<"tuplespace">>,
   {git,"https://gitlab.com/leapsight/tuplespace.git",
-       {ref,"d5e540dc2e1d3a4b75dbf3841de99d4547e118ff"}},
+       {ref,"819223303c3e72d7346b2c7aef60e74305bdb1a1"}},
   0},
  {<<"types">>,{pkg,<<"types">>,<<"0.1.8">>},1},
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.7.0">>},1},

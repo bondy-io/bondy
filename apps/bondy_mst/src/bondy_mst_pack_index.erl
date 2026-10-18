@@ -9,7 +9,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Pure codec for the MST pack-store `.idx` files.
 
 An `.idx` accelerates random-access lookup in a sealed `.pack`
@@ -90,7 +90,7 @@ sub-binaries of the input).
 A typical caller (`bondy_mst_pack_store`) `mmap`s or `pread`s
 the `.idx` file as one binary, calls `open/1`, then caches the
 handle for the lifetime of the open pack.
-""").
+""".
 
 -record(?MODULE, {
     version :: pos_integer(),
@@ -197,16 +197,16 @@ offset_bytes() -> ?OFFSET_BYTES.
 %% API — build
 %% =============================================================================
 
-?DOC("""
+-doc """
 Builds an `.idx` binary from `Entries` with default options
 (`hash_len = 32`, bloom enabled at `p = 0.01`).
-""").
+""".
 -spec build([entry()]) -> {ok, iodata()} | {error, build_error()}.
 
 build(Entries) ->
     build(Entries, #{}).
 
-?DOC("""
+-doc """
 Builds an `.idx` binary from `Entries`.  `Entries` is a list of
 `{Hash, Offset}` pairs in any order; the builder sorts and
 deduplicates.
@@ -224,7 +224,7 @@ Returns `{ok, IoData}` with iodata suitable for `prim_file:write/2`,
 or `{error, build_error()}` on contract violations (hash size or
 `hash_len` option out of range). The tagged shape lets the seal
 writer roll back the in-progress sealed pack instead of crashing.
-""").
+""".
 -spec build([entry()], build_opts()) ->
     {ok, iodata()} | {error, build_error()}.
 
@@ -267,7 +267,7 @@ do_build(Entries, Opts) ->
 %% API — open
 %% =============================================================================
 
-?DOC("""
+-doc """
 Parses an `.idx` binary. Returns `{ok, Handle}` or a typed
 `{error, _}`.
 
@@ -280,7 +280,7 @@ The trailing 32 bytes are an sha256 over the rest of the file
 the body is parsed; a mismatch surfaces as
 `{error, integrity_mismatch}` so a silent bit-flip in the fanout
 or offset array cannot route lookups to the wrong record.
-""").
+""".
 -spec open(binary()) -> {ok, t()} | {error, open_error()}.
 
 open(Bin) when byte_size(Bin) < ?HEADER_BYTES + ?TRAILER_BYTES ->
@@ -321,7 +321,7 @@ open_verified_body(_Bin) ->
 %% API — lookup
 %% =============================================================================
 
-?DOC("""
+-doc """
 Looks up `Hash` in the index. Returns `{ok, Offset}` if the hash
 is present in the underlying pack, `not_found` otherwise.
 
@@ -335,7 +335,7 @@ The lookup path:
 
 For a 10 000-record pack with the average bucket holding 39
 hashes, that's at most ~6 comparisons after the bloom + fanout.
-""").
+""".
 -spec lookup(t(), binary()) ->
     {ok, non_neg_integer()} | not_found.
 
@@ -356,7 +356,7 @@ lookup(#?MODULE{} = T, Hash) when
             end
     end.
 
-?DOC("""
+-doc """
 Cheap probabilistic membership check via the bloom filter.
 
 Returns `false` if the filter is present and indicates absence
@@ -365,7 +365,7 @@ possible membership.  Callers should NOT use this as a final
 answer — `lookup/2` does that — but it's exposed for callers
 that want to skip an `.idx` entirely (e.g., the multi-pack
 fan-out in `bondy_mst_pack_store:get/2`).
-""").
+""".
 -spec may_contain(t(), binary()) -> boolean().
 
 may_contain(#?MODULE{bloom = undefined}, _Hash) ->
@@ -390,10 +390,10 @@ has_bloom(#?MODULE{}) -> true.
 -spec fanout(t()) -> binary().
 fanout(#?MODULE{fanout = F}) -> F.
 
-?DOC("""
+-doc """
 Returns the hash at sort-index `I` (0-based). Raises `badarg`
 on out-of-range index.
-""").
+""".
 -spec hash_at(t(), non_neg_integer()) -> binary().
 
 hash_at(#?MODULE{hashes = H, hash_len = L, record_count = N}, I) when
@@ -401,10 +401,10 @@ hash_at(#?MODULE{hashes = H, hash_len = L, record_count = N}, I) when
 ->
     binary:part(H, I * L, L).
 
-?DOC("""
+-doc """
 Returns the byte offset (into the corresponding `.pack`) at
 sort-index `I`.
-""").
+""".
 -spec offset_at(t(), non_neg_integer()) -> non_neg_integer().
 
 offset_at(#?MODULE{} = T, I) when
@@ -412,10 +412,10 @@ offset_at(#?MODULE{} = T, I) when
 ->
     decode_offset_at(T, I).
 
-?DOC("""
+-doc """
 Enumerates `(Hash, Offset)` pairs in sorted hash order.  Pure
 fold for inspection / tests; the lookup path never uses this.
-""").
+""".
 -spec entries(t()) -> [entry()].
 
 entries(#?MODULE{record_count = N} = T) ->

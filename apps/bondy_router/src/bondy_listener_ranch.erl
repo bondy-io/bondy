@@ -67,30 +67,24 @@ start(L) ->
     start_stream(L).
 
 stop(#{protocol := http, name := Name} = L) ->
-    try
-        cowboy:stop_listener(Name)
-    catch
-        _:_ -> ok
-    end,
+    ok = stopped(cowboy:stop_listener(Name)),
     ok = bondy_http_security_headers:cleanup(Name),
     %% Symmetric with `start_http/1`: an HTTP listener bound to a Unix domain
     %% socket must not leave its socket file behind.
     ok = maybe_unlink_socket(L),
     ok;
 stop(#{name := Name} = L) ->
-    try
-        ranch:stop_listener(Name)
-    catch
-        _:_ -> ok
-    end,
+    ok = stopped(ranch:stop_listener(Name)),
     ok = maybe_unlink_socket(L),
     ok.
 
 suspend(#{name := Name}) ->
+    %% `ranch_server:get_listener_sup/1` raises `badarg` for a listener that
+    %% is not running: a disabled one, or one already stopped.
     try
         ranch:suspend_listener(Name)
     catch
-        _:_ -> ok
+        error:badarg -> ok
     end,
     ok.
 
@@ -98,7 +92,7 @@ resume(#{name := Name}) ->
     try
         ranch:resume_listener(Name)
     catch
-        _:_ -> ok
+        error:badarg -> ok
     end,
     ok.
 
@@ -106,12 +100,18 @@ connections(#{name := Name}) ->
     try
         ranch:procs(Name, connections)
     catch
-        _:_ -> []
+        error:badarg -> []
     end.
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% `ranch:stop_listener/1` answers `{error, not_found}` for a listener that is
+%% not running, which `bondy_listener_manager:stop/1` meets for disabled ones.
+stopped(ok) -> ok;
+stopped({error, not_found}) -> ok.
 
 %% @private
 start_http(#{name := Name, transport := Transport} = L) ->

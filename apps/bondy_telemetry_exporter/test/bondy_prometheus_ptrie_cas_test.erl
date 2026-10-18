@@ -58,10 +58,11 @@ cas_counters() ->
     ).
 
 malformed() ->
-    %% The sink is total: a bad measurement map must not raise (telemetry
-    %% detaches raising handlers permanently).
+    %% The sink is total: a measurement map missing its keys must not raise
+    %% (telemetry detaches raising handlers permanently). `telemetry:execute/3`
+    %% delivers only maps, so a missing key is the malformed case that arrives.
     ok = bondy_prometheus:handle_net_event(
-        [bondy, registry, ptrie, cas_retry], not_a_map, #{}, undefined
+        [bondy, registry, ptrie, cas_retry], #{}, #{}, undefined
     ).
 
 %% =============================================================================

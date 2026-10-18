@@ -52,6 +52,7 @@
 -export([refresh_rejects_token_whose_user_is_gone/1]).
 -export([refresh_token_of_access_only_grant_raises_badarg/1]).
 -export([credential_change_revokes_tokens/1]).
+-export([issue_against_a_missing_sso_realm_answers_no_such_realm/1]).
 
 all() ->
     [
@@ -64,7 +65,8 @@ all() ->
         user_delete_revokes_tokens,
         refresh_rejects_token_whose_user_is_gone,
         refresh_token_of_access_only_grant_raises_badarg,
-        credential_change_revokes_tokens
+        credential_change_revokes_tokens,
+        issue_against_a_missing_sso_realm_answers_no_such_realm
     ].
 
 init_per_suite(Config) ->
@@ -422,3 +424,29 @@ token_table() ->
 %% @private
 device(I) ->
     <<"device_", (integer_to_binary(I))/binary>>.
+
+%% Issuing against an authentication realm that does not exist (an SSO realm
+%% removed after the session authenticated) answers `no_such_realm`, the
+%% documented refusal, rather than the raw realm-lookup error. The operating
+%% realm exists; only the authentication context is stubbed.
+issue_against_a_missing_sso_realm_answers_no_such_realm(_Config) ->
+    Missing = <<"com.example.test.token_store.removed_sso">>,
+    ok = meck:new(bondy_auth, [passthrough, no_link]),
+    try
+        [
+            ok = meck:expect(bondy_auth, F, fun(_) -> V end)
+         || {F, V} <- [
+                {authrealm, Missing},
+                {realm_uri, ?REALM_URI},
+                {user_id, ?USER},
+                {roles, []},
+                {issuer, <<"client">>}
+            ]
+        ],
+        ?assertEqual(
+            {error, {no_such_realm, Missing}},
+            bondy_oauth_token:issue(password, auth_ctxt, #{})
+        )
+    after
+        meck:unload(bondy_auth)
+    end.

@@ -10,7 +10,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Recovery pass for the pack-store's `incoming.pack` file and its
 manifest reconciliation. See the pack-store design notes
 §10 for the high-level design.
@@ -59,7 +59,7 @@ trailing torn records rather than attempting to repair them.
 `records_recovered` is the count of records that survived the
 forward scan (i.e. were verified). It is 0 in the header-reset,
 orphan-deleted, and manifest-flip cases.
-""").
+""".
 
 -export([recover/3]).
 

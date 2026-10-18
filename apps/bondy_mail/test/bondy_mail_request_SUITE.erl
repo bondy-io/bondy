@@ -413,12 +413,19 @@ oversized_attachments_are_refused(_) ->
     ?assertMatch({error, {too_large_payload, _, _}}, new(?REALM, Req)).
 
 attachment_must_be_base64(_) ->
-    Req = (base())#{
-        ~"attachments" => [
-            #{~"filename" => ~"note.txt", ~"data" => ~"!!!not base64!!!"}
-        ]
-    },
-    ?assertMatch({error, {invalid_request, _}}, new(?REALM, Req)).
+    %% One input per `error` reason `base64:decode/1` raises: `badarg`,
+    %% `missing_padding`, `function_clause`, `badarith`, `{case_clause, _}`.
+    [
+        ?assertMatch(
+            {error, {invalid_request, attachment_not_base64}},
+            new(?REALM, (base())#{
+                ~"attachments" => [
+                    #{~"filename" => ~"note.txt", ~"data" => Data}
+                ]
+            })
+        )
+     || Data <- [~"!!!not base64!!!", ~"aGk", ~"A", ~"====", ~"AQ==AQ=="]
+    ].
 
 -doc """
 An attachment filename may not look like a path.

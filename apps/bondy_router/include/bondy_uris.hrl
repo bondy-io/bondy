@@ -72,6 +72,7 @@
 -define(BONDY_HTTP_GATEWAY_GET, <<"bondy.http_gateway.api.get">>).
 -define(BONDY_HTTP_GATEWAY_LIST, <<"bondy.http_gateway.api.list">>).
 -define(BONDY_HTTP_GATEWAY_LOAD, <<"bondy.http_gateway.api.load">>).
+-define(BONDY_HTTP_GATEWAY_STATUS, <<"bondy.http_gateway.api.status">>).
 -define(BONDY_HTTP_GATEWAY_DELETE, <<"bondy.http_gateway.api.delete">>).
 
 -define(BONDY_INTERFACE_DELETE, <<"bondy.interface.delete">>).

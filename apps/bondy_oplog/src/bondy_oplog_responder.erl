@@ -8,11 +8,10 @@
 -behaviour(partisan_gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("bondy_doc.hrl").
 -include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Node-level sync responder for distributed transports.
 
 A single `partisan_gen_server` per node, registered locally under the
@@ -117,7 +116,7 @@ replica drops a retired origin's frontier entry only once every member's
 answer contains that origin, so a peer that cannot answer blocks the reap
 rather than licensing it.
 
-""").
+""".
 
 -export([start_link/0]).
 -export([dispatch/2]).
@@ -169,11 +168,11 @@ child_spec() ->
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Locally dispatches a sync `Request` to the instance identified by
 `InstanceId`. Read-only requests do not await the applier's drain, except
 `get_frontier`, which is an installed-consistency barrier.
-""").
+""".
 -spec dispatch(instance_id(), bondy_oplog_transport:request()) ->
     {ok, term()} | {error, term()}.
 

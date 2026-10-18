@@ -8,10 +8,8 @@
 -behaviour(bondy_oplog_crdt).
 -behaviour(bondy_oplog_crdt_commutative).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Two-Phase Set (2P-Set) — native operation-based CRDT.
 
 The op-based equivalent of the pure `pure_twopset`. A set with both
@@ -50,7 +48,7 @@ survive a remove) use the add-wins set `bondy_oplog_crdt_aw_set`
 The HLC is read from the event key. `value_equals_state/0 -> false`:
 the value is the *difference* of the two sets, not the state itself, so
 the substrate stores a value column.
-""").
+""".
 
 %% bondy_oplog_crdt
 -export([causal_tier/0]).

@@ -9,7 +9,7 @@
 -include("bondy_mst_pack.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Pure pack-file codec for the MST page-store backend.
 
 Owns the on-disk wire format described in
@@ -105,7 +105,7 @@ back to the per-record CRC for finer-grained localisation.
 All decode functions return `{ok, Term}` or `{error, Reason}`;
 none throw. Callers (`bondy_mst_pack_store`) translate the
 typed errors into telemetry events and recovery actions.
-""").
+""".
 
 %% Magic / version / sizes — exported so writer/reader and tests
 %% can reference them without re-including the header.
@@ -203,18 +203,18 @@ trailer_bytes() -> ?TRAILER_BYTES.
 
 hash_bytes() -> ?HASH_BYTES.
 
-?DOC("""
+-doc """
 Encodes a hash algorithm atom into its on-disk byte id.
-""").
+""".
 -spec hash_algo_id(hash_algo()) -> non_neg_integer().
 
 hash_algo_id(sha256) -> ?HASH_SHA256.
 
-?DOC("""
+-doc """
 Decodes a hash algorithm byte id into its atom. Returns
 `{error, {bad_hash_algo, Id}}` for unknown ids; the codec never
 crashes on garbage input.
-""").
+""".
 -spec hash_algo_atom(non_neg_integer()) ->
     {ok, hash_algo()} | {error, decode_error()}.
 
@@ -225,7 +225,7 @@ hash_algo_atom(Other) -> {error, {bad_hash_algo, Other}}.
 %% API — pack header
 %% =============================================================================
 
-?DOC("""
+-doc """
 Encodes a 48-byte pack header per §3.1. `Header` must carry every
 field listed in the type `pack_header()`. The output is a binary
 suitable for `prim_file:write/2`.
@@ -233,7 +233,7 @@ suitable for `prim_file:write/2`.
 `record_count = 0` is the convention for the in-progress incoming
 pack; the seal path rewrites the header in-place with the final
 record count.
-""").
+""".
 -spec encode_pack_header(pack_header()) -> binary().
 
 encode_pack_header(#{
@@ -267,7 +267,7 @@ encode_pack_header(#{
         AlgoId:32/big-unsigned, CreatedAt:64/big-unsigned,
         RecordCount:32/big-unsigned, 0:32, 0:64>>.
 
-?DOC("""
+-doc """
 Decodes a 48-byte pack header. Validates `Magic`, `Version`,
 and `HashAlgo`. Returns `{ok, Header}` or a typed `{error, _}`.
 
@@ -275,7 +275,7 @@ Reserved bytes are not validated for content (they're allowed to
 carry anything), but the magic / version / algo gate is strict —
 this is the file-recognition step and the caller should refuse
 to open the pack on any error here.
-""").
+""".
 -spec decode_pack_header(binary()) ->
     {ok, pack_header()} | {error, decode_error()}.
 
@@ -315,7 +315,7 @@ decode_pack_header(_) ->
 %% API — record
 %% =============================================================================
 
-?DOC("""
+-doc """
 Encodes a page record as `<<Hash:32, PageLen:32, PageCrc:32, Page>>`.
 
 `Hash` must be exactly `hash_bytes()` (32) bytes — shorter
@@ -324,7 +324,7 @@ the on-disk record header has a fixed length.
 
 The CRC is computed by this module; the caller passes the raw
 page bytes.
-""").
+""".
 -spec encode_record(binary(), binary()) -> iodata().
 
 encode_record(Hash, Page) when
@@ -336,14 +336,14 @@ encode_record(Hash, Page) when
     Crc = erlang:crc32(Page),
     [<<Hash/binary, PageLen:32/big-unsigned, Crc:32/big-unsigned>>, Page].
 
-?DOC("""
+-doc """
 Decodes the fixed 40-byte record header. Returns `{ok, #{hash,
 page_len, page_crc}}` or `{error, truncated_record_header}`.
 
 The body bytes are not touched here; the caller pread's
 `page_len` bytes after the header and runs them through
 `verify_record/2` to confirm the CRC.
-""").
+""".
 -spec decode_record_header(binary()) ->
     {ok, record_header()} | {error, decode_error()}.
 
@@ -355,22 +355,22 @@ decode_record_header(
 ) ->
     {ok, #{hash => Hash, page_len => PageLen, page_crc => Crc}}.
 
-?DOC("""
+-doc """
 Returns the total on-disk size of a record with `PageLen`-byte
 body: 40 + PageLen.
-""").
+""".
 -spec record_size(non_neg_integer()) -> pos_integer().
 
 record_size(PageLen) when is_integer(PageLen), PageLen >= 0 ->
     ?REC_HDR_BYTES + PageLen.
 
-?DOC("""
+-doc """
 Verifies that the supplied page bytes match the CRC recorded in
 the header. Returns `ok` or `{error, {crc_mismatch, Got, Want}}`.
 
 A bit-flip inside the page body is guaranteed to surface here
 rather than as a silently-corrupted page returned to the caller.
-""").
+""".
 -spec verify_record(record_header(), binary()) ->
     ok | {error, decode_error()}.
 
@@ -388,25 +388,25 @@ verify_record(#{page_crc := Want}, Page) ->
 %% API — trailer
 %% =============================================================================
 
-?DOC("""
+-doc """
 Computes the 32-byte sha256 trailer over the supplied pack body
 bytes (header + all records, in disk order). The caller appends
 the returned binary as the last 32 bytes of the pack on seal.
 
 Accepts iodata so the writer can chain header iodata + record
 iodata without first flattening to a binary.
-""").
+""".
 -spec compute_trailer(iodata()) -> binary().
 
 compute_trailer(BodyIoData) ->
     crypto:hash(sha256, BodyIoData).
 
-?DOC("""
+-doc """
 Verifies a pack trailer.  `BodyIoData` is the bytes from offset 0
 up to but not including the trailer; `Trailer` is the 32 bytes at
 the tail of the pack.  Returns `ok` or a typed
 `{error, {trailer_mismatch, _, _}}` / `{error, truncated_trailer}`.
-""").
+""".
 -spec verify_trailer(iodata(), binary()) ->
     ok | {error, decode_error()}.
 

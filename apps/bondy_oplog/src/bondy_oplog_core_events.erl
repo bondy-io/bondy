@@ -7,10 +7,8 @@
 
 -behaviour(gen_server).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Lightweight intra-node pub/sub for substrate lifecycle events.
 
 The `bondy_oplog_core_dispatcher` gen_server owns an in-memory ETS table
@@ -64,7 +62,7 @@ so the operational cost is minimal.
 
 The events module starts before `bondy_oplog_core_dispatcher` in
 `bondy_oplog_sup` so the dispatcher can notify on its first init.
-""").
+""".
 
 -define(SERVER, ?MODULE).
 -define(TAB, bondy_oplog_core_events_tab).
@@ -119,32 +117,32 @@ child_spec() ->
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-?DOC("""
+-doc """
 Subscribe the calling process to `Topic`. Idempotent: subscribing twice
 from the same process leaves a single subscription in place.
-""").
+""".
 -spec subscribe(topic()) -> ok.
 
 subscribe(Topic) when is_atom(Topic) ->
     gen_server:call(?SERVER, {subscribe, Topic, self()}).
 
-?DOC("""
+-doc """
 Drop the calling process's subscription to `Topic`. Idempotent: removing
 an absent subscription is a no-op.
-""").
+""".
 -spec unsubscribe(topic()) -> ok.
 
 unsubscribe(Topic) when is_atom(Topic) ->
     gen_server:call(?SERVER, {unsubscribe, Topic, self()}).
 
-?DOC("""
+-doc """
 Broadcast `Payload` to every process subscribed to `Topic`. Each
 subscriber receives `{bondy_oplog_core_event, Topic, Payload}` via the
 bare send operator. Returns `ok` whether or not any subscriber matched.
 
 The walk runs in the caller's process — no gen_server round-trip — so
 the notify path stays out of the events module's own mailbox.
-""").
+""".
 -spec notify(topic(), payload()) -> ok.
 
 notify(Topic, Payload) when is_atom(Topic) ->
@@ -156,19 +154,19 @@ notify(Topic, Payload) when is_atom(Topic) ->
     lists:foreach(fun(Pid) -> Pid ! Msg end, Subs),
     ok.
 
-?DOC("""
+-doc """
 List every topic that has at least one subscriber. Intended for
 diagnostics.
-""").
+""".
 -spec topics() -> [topic()].
 
 topics() ->
     MS = [{#sub{key = {'$1', '_'}, _ = '_'}, [], ['$1']}],
     lists:usort(ets:select(?TAB, MS)).
 
-?DOC("""
+-doc """
 Return the subscribers for a topic. Intended for diagnostics and tests.
-""").
+""".
 -spec subscribers(topic()) -> [pid()].
 
 subscribers(Topic) when is_atom(Topic) ->

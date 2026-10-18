@@ -8,7 +8,7 @@
 -include("bondy_mst.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Cold backup and restore for a bondy_mst data tree.
 
 This is the **cold-backup** primitive: it assumes no oplog instance
@@ -72,7 +72,7 @@ Events emitted on the path `[bondy_mst, admin, ...]`:
 | `[..., restore, start]` | `#{}` | `#{source, target}` |
 | `[..., restore, complete]` | `#{file_count, total_bytes, duration_us}` | `#{source, target}` |
 | `[..., restore, failed]` | `#{duration_us}` | `#{source, target, reason}` |
-""").
+""".
 
 -export([backup/2]).
 -export([backup/3]).
@@ -106,7 +106,7 @@ Events emitted on the path `[bondy_mst, admin, ...]`:
 backup(SourceDir, BackupDir) ->
     backup(SourceDir, BackupDir, #{}).
 
-?DOC("""
+-doc """
 Copy `SourceDir` into `BackupDir` and write `manifest.etf` recording
 every file's size and SHA-256.
 
@@ -119,7 +119,7 @@ every file's size and SHA-256.
 `storage_path` falls inside `SourceDir`** — a backup taken while the
 writer is live would be torn. The recommended cold-backup sequence
 is shown at the top of this module.
-""").
+""".
 -spec backup(file:filename_all(), file:filename_all(), map()) ->
     {ok, manifest()} | {error, term()}.
 
@@ -135,9 +135,7 @@ backup(SourceDir, BackupDir, Opts) when is_map(Opts) ->
             do_backup(Source, Target)
         catch
             throw:{error, _} = E ->
-                E;
-            Class:Reason:St ->
-                {error, {Class, Reason, St}}
+                E
         end,
     DurationUs = erlang:monotonic_time(microsecond) - Start,
     case Result of
@@ -161,7 +159,7 @@ backup(SourceDir, BackupDir, Opts) when is_map(Opts) ->
             {error, R}
     end.
 
-?DOC("""
+-doc """
 Reads `manifest.etf` from `BackupDir`, then re-hashes every file
 listed in the manifest and confirms the hash matches.
 
@@ -169,7 +167,7 @@ Returns `{ok, Manifest}` on success or `{error, Reason}`. Possible
 reasons: `{manifest, not_found}`, `{manifest, corrupted}`, `{file,
 RelPath, missing}`, `{file, RelPath, size_mismatch}`, `{file,
 RelPath, hash_mismatch}`.
-""").
+""".
 -spec verify(file:filename_all()) ->
     {ok, manifest()} | {error, term()}.
 
@@ -213,7 +211,7 @@ verify(BackupDir) ->
 restore(BackupDir, TargetDir) ->
     restore(BackupDir, TargetDir, #{}).
 
-?DOC("""
+-doc """
 Verify `BackupDir` (via `verify/1`) and then copy every manifest
 entry into `TargetDir`.
 
@@ -223,7 +221,7 @@ entry into `TargetDir`.
 
 **The caller is responsible for stopping any oplog instance whose
 `storage_path` falls inside `TargetDir`** before calling.
-""").
+""".
 -spec restore(file:filename_all(), file:filename_all(), map()) ->
     {ok, manifest()} | {error, term()}.
 
@@ -234,7 +232,11 @@ restore(BackupDir, TargetDir, Opts) when is_map(Opts) ->
     emit([restore, start], #{}, #{source => Source, target => Target}),
     Result =
         try
-            {ok, Manifest} = verify(Source),
+            Manifest =
+                case verify(Source) of
+                    {ok, Verified} -> Verified;
+                    {error, _} = VerifyError -> throw(VerifyError)
+                end,
             ok = check_target_writable(Target, Opts),
             ok = do_restore(Source, Target, Manifest),
             {ok, Manifest}
@@ -353,13 +355,24 @@ strip_prefix(F, Prefix) ->
 %% Returns {Size, HashHex}. Reads in 1 MiB chunks so a multi-GB
 %% leveled SST does not pull the whole thing into memory.
 copy_and_hash(Src, Dst) ->
-    {ok, In} = prim_file:open(Src, [read, raw, binary]),
+    In =
+        case prim_file:open(Src, [read, raw, binary]) of
+            {ok, InFd} -> InFd;
+            {error, InReason} -> throw({error, {open, Src, InReason}})
+        end,
     try
-        {ok, Out} = prim_file:open(Dst, [write, raw, binary]),
+        Out =
+            case prim_file:open(Dst, [write, raw, binary]) of
+                {ok, OutFd} -> OutFd;
+                {error, OutReason} -> throw({error, {open, Dst, OutReason}})
+            end,
         try
             Ctx0 = crypto:hash_init(?HASH_ALGO),
             {Ctx1, Size} = copy_loop(In, Out, Ctx0, 0),
-            ok = bondy_mst_io:datasync(Out),
+            case bondy_mst_io:datasync(Out) of
+                ok -> ok;
+                {error, SyncReason} -> throw({error, {datasync, SyncReason}})
+            end,
             HashHex = hex(crypto:hash_final(Ctx1)),
             {Size, HashHex}
         after
@@ -373,7 +386,10 @@ copy_and_hash(Src, Dst) ->
 copy_loop(In, Out, Ctx, Acc) ->
     case prim_file:read(In, ?COPY_CHUNK) of
         {ok, Chunk} ->
-            ok = prim_file:write(Out, Chunk),
+            case prim_file:write(Out, Chunk) of
+                ok -> ok;
+                {error, WriteReason} -> throw({error, {write, WriteReason}})
+            end,
             Ctx1 = crypto:hash_update(Ctx, Chunk),
             copy_loop(In, Out, Ctx1, Acc + byte_size(Chunk));
         eof ->

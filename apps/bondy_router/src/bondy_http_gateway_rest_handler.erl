@@ -247,10 +247,12 @@ is_authorized(Req0, St0) ->
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(?HTTP_FORBIDDEN, json, Response, Req0),
             {stop, Req1, St0};
-        error:{no_such_realm, _} = Reason ->
+        %% `bondy_realm:fetch/1` raises this when the spec's realm was removed
+        %% after the dispatch table that routed here was built.
+        error:{not_found, RealmUri} when is_binary(RealmUri) ->
             {StatusCode, Body} = take_status_code(
                 bondy_connect_error:to_map(
-                    bondy_connect_error:from_term(Reason)
+                    bondy_connect_error:from_term({no_such_realm, RealmUri})
                 ),
                 ?HTTP_INTERNAL_SERVER_ERROR
             ),
@@ -833,12 +835,18 @@ decode_body_in_context(Method, St) when
         Body = bondy_router_utils:decode(Enc, Bin),
         maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St)
     catch
-        Class:Reason:Stacktrace ->
+        error:Reason:Stacktrace when
+            Reason == badarg;
+            Reason == unexpected_end;
+            is_tuple(Reason), element(1, Reason) == badarg;
+            is_tuple(Reason), element(1, Reason) == invalid_byte;
+            is_tuple(Reason), element(1, Reason) == unexpected_sequence
+        ->
             _ = log(
                 error,
                 #{
                     description => "Error while decoding HTTP body",
-                    class => Class,
+                    class => error,
                     reason => Reason,
                     stacktrace => Stacktrace
                 },

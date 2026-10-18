@@ -159,7 +159,7 @@ map returned by `Bridge:init/1`.
                             false -> {error, {unknown_bridge, Mod}}
                         end
                 catch
-                    _:_ -> false
+                    error:badarg -> false
                 end;
             (Mod) when is_atom(Mod) ->
                 erlang:module_loaded(Mod)
@@ -304,8 +304,11 @@ validate_spec(Map) ->
         Val = maps_utils:validate(Map, ?SUBSCRIPTIONS_SPEC),
         {ok, Val}
     catch
-        _:Reason ->
-            {error, Reason}
+        error:#{code := _} = Reason ->
+            {error, Reason};
+        %% The `bridge` validator has no clause for a non-binary, non-atom value.
+        error:function_clause ->
+            {error, function_clause}
     end.
 
 %% =============================================================================
@@ -642,62 +645,52 @@ do_subscribe(Subscription, State) ->
     end.
 
 do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
-    try
-        %% Everything but the event itself is resolved once, here, so the
-        %% per-event path is a single map put.
-        StaticCtxt = static_mops_ctxt(Bridge, State),
-        Fun = fun(Topic1, #event{} = Event) when Topic1 == Topic ->
-            CtxtEvent = bondy_broker_bridge_event:new(RealmUri, Topic, Event),
-            Ctxt = StaticCtxt#{<<"event">> => CtxtEvent},
-            Action1 = mops:eval(Action0, Ctxt),
-            case Bridge:validate_action(Action1) of
-                {ok, Action2} ->
-                    %% TODO: Also handle acknowledge to publisher when
-                    %% Action.options.acknowledge == true
-                    Bridge:apply_action(Action2);
-                {error, Reason} ->
-                    throw({invalid_action, Reason})
-            end
-        end,
-        %% We use bondy_broker subscribers, this is an instance of a
-        %% bondy_subscriber gen_server supervised by bondy_subscribers_sup.
-        Opts = Opts0#{
-            %% This tells bondy_broker that every node has an instance of this
-            %% subscriber and thus the broker will only process events that
-            %% have been was published by a local Publisher and avoid
-            %% processing forwarded events which would result in duplication.
-            %% See bondy_broker:do_publish/4.
-            %% The group_id is the name (identifier) of the BrokerBridge
-            group_id => Bridge
-        },
-        %% REVIEW: Shall we pass a bondy_ref with a session ID here or use name
-        {ok, {Id, Pid}} =
-            Res = bondy_broker:subscribe(
-                RealmUri, Opts, Topic, Fun
+    %% Everything but the event itself is resolved once, here, so the
+    %% per-event path is a single map put.
+    StaticCtxt = static_mops_ctxt(Bridge, State),
+    Fun = fun(Topic1, #event{} = Event) when Topic1 == Topic ->
+        CtxtEvent = bondy_broker_bridge_event:new(RealmUri, Topic, Event),
+        Ctxt = StaticCtxt#{<<"event">> => CtxtEvent},
+        Action1 = mops:eval(Action0, Ctxt),
+        case Bridge:validate_action(Action1) of
+            {ok, Action2} ->
+                %% TODO: Also handle acknowledge to publisher when
+                %% Action.options.acknowledge == true
+                Bridge:apply_action(Action2);
+            {error, Reason} ->
+                throw({invalid_action, Reason})
+        end
+    end,
+    %% We use bondy_broker subscribers, this is an instance of a
+    %% bondy_subscriber gen_server supervised by bondy_subscribers_sup.
+    Opts = Opts0#{
+        %% This tells bondy_broker that every node has an instance of this
+        %% subscriber and thus the broker will only process events that
+        %% have been was published by a local Publisher and avoid
+        %% processing forwarded events which would result in duplication.
+        %% See bondy_broker:do_publish/4.
+        %% The group_id is the name (identifier) of the BrokerBridge
+        group_id => Bridge
+    },
+    %% REVIEW: Shall we pass a bondy_ref with a session ID here or use name
+    case bondy_broker:subscribe(RealmUri, Opts, Topic, Fun) of
+        {ok, {Id, Pid}} = Res ->
+            %% Add to registry and set properties so that we can perform queries
+            true = bondy_gproc:register({subscriber, Id}, Pid),
+            true = bondy_gproc:register(
+                subscription_id, Pid, resource_property, Id
             ),
-
-        %% Add to registry and set properties so that we can perform queries
-        true = bondy_gproc:register({subscriber, Id}, Pid),
-        true = bondy_gproc:register(
-            subscription_id, Pid, resource_property, Id
-        ),
-        true = bondy_gproc:register(
-            bondy_broker_bridge, Pid, resource_property, Bridge
-        ),
-
-        Res
-    catch
-        Class:Reason:Stacktrace ->
+            true = bondy_gproc:register(
+                bondy_broker_bridge, Pid, resource_property, Bridge
+            ),
+            Res;
+        {error, Reason} = Error ->
             ?LOG_ERROR(#{
                 description => "Error while creating broker bridge subscriber",
-                class => Class,
                 reason => Reason,
-                stacktrace => Stacktrace,
                 bridge => Bridge
             }),
-            %% The same shape on both paths: `{error, Reason}`, which is what
-            %% every caller of this function matches.
-            {error, Reason}
+            Error
     end.
 
 unsubscribe_all(State) ->

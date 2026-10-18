@@ -5,10 +5,8 @@
 
 -module(bondy_oplog_high_water).
 
--include("bondy_doc.hrl").
-
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-shard high-water HLC mark.
 
 Encapsulates a single 64-bit `atomics` counter that tracks the highest
@@ -44,7 +42,7 @@ bootstrap finalisation, both of which tolerate the lag (the worst
 case is a stale `{ok, no_watermark}` reply until enough events have
 been applied). Durable persistence is deliberately deferred — a future
 extension may add it if a use case justifies the per-write cost.
-""").
+""".
 
 -export([new/0]).
 -export([advance/2]).

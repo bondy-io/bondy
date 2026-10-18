@@ -117,13 +117,18 @@ init_indices() ->
     gen_server:call(?MODULE, init_indices, timer:minutes(10)).
 
 -doc """
+Returns the partitions connected to the registry pool, as `{Name, Pid}` pairs
+where `Name` is `{bondy_registry_partition, Index}`.
 """.
--spec partitions() -> [pid()].
+-spec partitions() -> [{{bondy_registry_partition, integer()}, pid()}].
 
 partitions() ->
     gproc_pool:active_workers(?REGISTRY_POOL).
 
 -doc """
+Returns the partition that holds the entries of a realm. `Arg` is the realm
+URI, or an entry or entry key of the realm; see
+`bondy_registry_partition:pick/1`.
 """.
 -spec pick_partition(Arg :: binary() | entry()) -> pid().
 
@@ -131,6 +136,8 @@ pick_partition(Arg) ->
     bondy_registry_partition:pick(Arg).
 
 -doc """
+Returns the registry's `size` and `memory`, summed over all partitions; see
+`bondy_registry_store:info/1` for what each counts.
 """.
 -spec info() -> #{size => non_neg_integer(), memory => non_neg_integer()}.
 
@@ -453,19 +460,8 @@ entries(Type, RealmUri, SessionId, Limit) ->
 match(?EOT) ->
     ?EOT;
 match(Cont0) ->
-    try
-        #{type := Type} = bondy_registry_partition:continuation_info(Cont0),
-        sort(Type, do_match(Cont0))
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while searching registry",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ?EOT
-    end.
+    #{type := Type} = bondy_registry_partition:continuation_info(Cont0),
+    sort(Type, do_match(Cont0)).
 
 -doc """
 Returns `true` iff at least one stored entry (local or remote, any
@@ -548,18 +544,7 @@ registrations matching a procedure.
         | eot().
 
 match(Type, RealmUri, Uri, Opts) ->
-    try
-        sort(Type, do_match(Type, RealmUri, Uri, Opts))
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while searching registry",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ?EOT
-    end.
+    sort(Type, do_match(Type, RealmUri, Uri, Opts)).
 
 -doc "Continues a match started with `find_matches/3` or `find_matches/4`.".
 -spec find_matches(continuation() | eot()) ->
@@ -574,19 +559,8 @@ match(Type, RealmUri, Uri, Opts) ->
 find_matches(?EOT) ->
     ?EOT;
 find_matches(Cont0) ->
-    try
-        #{type := Type} = bondy_registry_partition:continuation_info(Cont0),
-        sort(Type, do_find_matches(Cont0))
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while searching registry",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ?EOT
-    end.
+    #{type := Type} = bondy_registry_partition:continuation_info(Cont0),
+    sort(Type, do_find_matches(Cont0)).
 
 -doc "Calls `find_matches/4`".
 -spec find_matches
@@ -617,18 +591,7 @@ registrations matching a procedure.
         | eot().
 
 find_matches(Type, RealmUri, Uri, Opts) ->
-    try
-        sort(Type, do_find_matches(Type, RealmUri, Uri, Opts))
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while searching registry",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ?EOT
-    end.
+    sort(Type, do_find_matches(Type, RealmUri, Uri, Opts)).
 
 format_error(Reason, StackTrace) ->
     bondy_connect_error:format_error(Reason, StackTrace).
@@ -669,21 +632,19 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 handle_info(rib_check = Event, State) ->
-    %% Periodic RIB consistency sweep. Defensive: the check scans the
-    %% registry projections realm by realm and must never take the registry
-    %% server down.
+    %% A storage DB that is closed, reopening or idle skips this sweep; the
+    %% next interval retries.
     ?LOG_DEBUG(#{event => Event}),
     _ =
         try
             rib_check()
         catch
-            Class:Reason:Stacktrace ->
-                ?LOG_WARNING(#{
-                    description => "Registry RIB consistency sweep failed",
-                    class => Class,
-                    reason => Reason,
-                    stacktrace => Stacktrace
-                })
+            error:{registry_not_provisioned, _} = Reason:Stacktrace ->
+                log_rib_check_skipped(Reason, Stacktrace);
+            error:bondy_realm_table_unavailable = Reason:Stacktrace ->
+                log_rib_check_skipped(Reason, Stacktrace);
+            error:{badmatch, {error, _}} = Reason:Stacktrace ->
+                log_rib_check_skipped(Reason, Stacktrace)
         end,
     ok = schedule_rib_check(),
     {noreply, State};
@@ -1128,20 +1089,8 @@ init_indices(State) ->
     Now = State#state.start_ts,
     Node = bondy_config:nodestring(),
 
-    try
-        ok = rebuild_indices(registration, Now, Node),
-        ok = rebuild_indices(subscription, Now, Node)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description =>
-                    "Error while initialising registry from bondy_db",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
-    end.
+    ok = rebuild_indices(registration, Now, Node),
+    ok = rebuild_indices(subscription, Now, Node).
 
 %% @private
 rebuild_indices(Type, Now, Node) ->
@@ -1303,9 +1252,17 @@ rib_check() ->
     }).
 
 %% @private
-%% Total by contract, like every other step of the sweep: an unreadable
-%% projection or a missing stub table must not take the registry server down,
-%% and `reap_orphan_stubs/1` is itself fail-closed on a read it cannot make.
+log_rib_check_skipped(Reason, Stacktrace) ->
+    ?LOG_WARNING(#{
+        description => "Registry RIB consistency sweep failed",
+        class => error,
+        reason => Reason,
+        stacktrace => Stacktrace
+    }).
+
+%% @private
+%% `bondy_cluster:members/0` raises `membership_unavailable` until the
+%% membership is first set; the reap then waits for the next sweep.
 rib_reap_orphan_stubs(RealmUri) ->
     try bondy_registry_rib:reap_orphan_stubs(RealmUri) of
         0 ->
@@ -1321,20 +1278,20 @@ rib_reap_orphan_stubs(RealmUri) ->
             }),
             N
     catch
-        Class:Reason:Stacktrace ->
+        error:membership_unavailable:Stacktrace ->
             ?LOG_WARNING(#{
                 description => "Registry RIB orphan-stub reap failed",
                 realm_uri => RealmUri,
-                class => Class,
-                reason => Reason,
+                class => error,
+                reason => membership_unavailable,
                 stacktrace => Stacktrace
             }),
             0
     end.
 
 %% @private
-%% Record a metric without ever raising — nothing here may take the
-%% registry server down.
+%% Record a metric; a missing metrics subsystem must not take the registry
+%% server down. `bondy_metrics` raises `badarg` while its ETS table is absent.
 registry_metric(Type, Spec) ->
     try
         case Type of
@@ -1342,7 +1299,7 @@ registry_metric(Type, Spec) ->
             histogram -> bondy_metrics:histogram(Spec)
         end
     catch
-        _:_ ->
+        error:badarg ->
             ok
     end.
 
@@ -1361,13 +1318,7 @@ registry_metric(Type, Spec) ->
 %% cells yet is a divergence the cell-derived set cannot see.
 rib_check_realms() ->
     Known = [bondy_realm:uri(R) || R <- bondy_realm:list()],
-    WithCells =
-        try
-            bondy_registry_rib:realms()
-        catch
-            _:_ -> []
-        end,
-    lists:usort(Known ++ WithCells).
+    lists:usort(Known ++ bondy_registry_rib:realms()).
 
 %% @private
 %% Arms the next RIB consistency sweep. `registry.rib.check_interval`

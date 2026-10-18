@@ -240,23 +240,24 @@ pre_stop() ->
 
     Fun = fun
         ({continue, Cont}) ->
+            %% `ets:select/1` raises `badarg` once the session table is gone.
             try
                 bondy_session:list(Cont)
             catch
-                Class:Reason:Stacktrace ->
+                error:badarg ->
                     ?LOG_ERROR(#{
                         description => "Error while shutting down router",
-                        class => Class,
-                        reason => Reason,
-                        stacktrace => Stacktrace
+                        reason => badarg
                     }),
                     []
             end;
         ({RealmUri, Ref}) ->
+            %% `bondy_ref:pid/1` raises `badarg` for a session whose gproc
+            %% name is already gone.
             try
                 bondy_router_peer:send(RealmUri, Ref, M)
             catch
-                _:_ -> ok
+                error:badarg -> ok
             end,
             ok
     end,
@@ -341,24 +342,27 @@ async_forward(M, Ctxt0) ->
                 #{~"error" => ErrorMap}
             ),
             {reply, Reply, Ctxt0};
-        Class:Reason:Stacktrace ->
-            Ctxt = bondy_context:realm_uri(Ctxt0),
-            SessionId = bondy_context:session_id(Ctxt0),
-            ExtId = bondy_session_id:to_external(SessionId),
-
-            ?LOG_ERROR(#{
-                description => "Error while routing message",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace,
-                protocol_session_id => ExtId,
-                session_id => SessionId,
-                context => Ctxt,
-                message => M
-            }),
-            %% TODO Maybe publish metaevent and stats
-            {ok, Ctxt0}
+        error:{case_clause, {error, _}} = Reason ->
+            log_route_failed(error, Reason, M, Ctxt0);
+        exit:{noproc, {gen_server, call, _}} = Reason ->
+            log_route_failed(exit, Reason, M, Ctxt0)
     end.
+
+%% @private
+log_route_failed(Class, Reason, M, Ctxt0) ->
+    Ctxt = bondy_context:realm_uri(Ctxt0),
+    SessionId = bondy_context:session_id(Ctxt0),
+    ExtId = bondy_session_id:to_external(SessionId),
+    ?LOG_ERROR(#{
+        description => "Error while routing message",
+        class => Class,
+        reason => Reason,
+        protocol_session_id => ExtId,
+        session_id => SessionId,
+        context => Ctxt,
+        message => M
+    }),
+    {ok, Ctxt0}.
 
 %% @private
 -doc """

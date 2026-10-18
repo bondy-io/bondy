@@ -419,12 +419,17 @@ worker_dispatches_by_kind(_) ->
         end
     end.
 
-%% A malformed reaction payload is logged and swallowed — the worker stays alive
-%% and responsive so its queued backlog is not lost.
+%% A peer cell key that does not unfold (no NUL between realm and username) is
+%% logged and dropped: the worker stays alive and responsive, so its queued
+%% backlog is not lost.
 worker_survives_bad_event(_) ->
     fun() ->
-        Worker = gproc_pool:pick_worker(?AAE_REACTOR_POOL, <<"whatever">>),
-        gen_server:cast(Worker, {react, not_a_sub, <<"k">>, clear, undefined}),
+        Sub = bondy_aae_reactor:make_sub(
+            user, "security_users", ?BONDY_DB_USER_TAB
+        ),
+        Key = <<"no-nul-separator">>,
+        Worker = gproc_pool:pick_worker(?AAE_REACTOR_POOL, Key),
+        gen_server:cast(Worker, {react, Sub, Key, clear, undefined}),
         ?assertEqual(
             {error, {unsupported_call, flush}},
             gen_server:call(Worker, flush)
@@ -560,3 +565,36 @@ bootstrap_reaction_is_total_test() ->
     ?assertEqual(
         ok, bondy_aae_reactor:bootstrap_reaction(some_future_kind, some_table)
     ).
+
+%% The pool outlives a supervisor restart. A restart under a larger configured
+%% size must keep the existing pool's size: the extra slots would not exist,
+%% so workers for them would run without ever being picked.
+restart_keeps_the_existing_pool_size_test_() ->
+    {setup,
+        fun() ->
+            {ok, _} = application:ensure_all_started(gproc),
+            ?assertError(badarg, gproc_pool:worker_pool(?AAE_REACTOR_POOL)),
+            bondy_config:get(
+                [aae_reactor_pool, size], erlang:system_info(schedulers_online)
+            )
+        end,
+        fun(Prev) ->
+            true = gproc_pool:force_delete(?AAE_REACTOR_POOL),
+            ok = bondy_config:set([aae_reactor_pool, size], Prev)
+        end,
+        fun(_) ->
+            ok = bondy_config:set([aae_reactor_pool, size], 2),
+            {ok, {_, First}} = bondy_aae_reactor_sup:init([]),
+            ok = bondy_config:set([aae_reactor_pool, size], 4),
+            {ok, {_, Restart}} = bondy_aae_reactor_sup:init([]),
+            Shards = fun(Children) ->
+                [Id || #{id := Id} <- Children, is_integer(Id)]
+            end,
+            [
+                ?_assertEqual([1, 2], Shards(First)),
+                ?_assertEqual([1, 2], Shards(Restart)),
+                ?_assertEqual(
+                    2, length(gproc_pool:worker_pool(?AAE_REACTOR_POOL))
+                )
+            ]
+        end}.

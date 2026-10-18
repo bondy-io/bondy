@@ -750,11 +750,20 @@ door_call(Node, Msg, Timeout) ->
     end.
 
 %% @private
+%% A remote cast crosses `partisan:forward_message/4`, whose failure
+%% space is not established from its source. Every caller treats the
+%% cast as best effort, so the failure is logged with class and reason.
 door_cast(Node, Msg) ->
     try
         partisan_gen_server:cast({?MODULE, Node}, Msg)
     catch
-        _:_ -> ok
+        Class:Reason ->
+            ?LOG_INFO(#{
+                description => "MCP handshake door cast failed",
+                node => Node,
+                class => Class,
+                reason => Reason
+            })
     end,
     ok.
 
@@ -966,18 +975,8 @@ local_take_inflight(Pid, Id) ->
 %% @private
 do_cancel(#{req_id := ReqId, ctxt := Ctxt, mode := Mode}) ->
     M = bondy_wamp_message:cancel(ReqId, #{mode => Mode}),
-    try
-        _ = bondy_router:forward(M, Ctxt),
-        ok
-    catch
-        Class:Reason ->
-            ?LOG_WARNING(#{
-                description => "Failed to cancel an in-flight MCP call",
-                class => Class,
-                reason => Reason
-            }),
-            ok
-    end.
+    _ = bondy_router:forward(M, Ctxt),
+    ok.
 
 %% =============================================================================
 %% PRIVATE — the remote stream (consumer side)

@@ -1,8 +1,8 @@
 # M0 — Fly fault-injection capability spike
 
-The **blocking** first milestone of the Bondy test harness (`_design/test-harness/06 §M0`).
+The **blocking** first milestone of the Bondy test harness.
 It answers one question before any correctness/perf work relies on Fly: **which
-faults from `03 §5` can we actually inject on Fly Machines, and can we confirm
+faults can we actually inject on Fly Machines, and can we confirm
 each took effect?** (Firecracker gives root inside the VM, but `CAP_NET_ADMIN` on
 the 6PN device and `LD_PRELOAD` are *not* contractually guaranteed — they must be
 proven, not assumed.)

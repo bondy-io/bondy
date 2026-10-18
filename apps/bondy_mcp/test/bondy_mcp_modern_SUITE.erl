@@ -67,6 +67,7 @@ all() ->
         param_headers_are_cross_checked,
         basic_auth_and_the_rbac_projection,
         delegated_ticket_caps_the_projection,
+        garbage_bearer_token_is_unauthorized,
         unauthenticated_request_starts_nothing,
         requests_leave_zero_footprint,
         notification_is_accepted,
@@ -882,6 +883,21 @@ delegated_ticket_caps_the_projection(Config) ->
         lists:sort([?ALLOWED, ?DENIED]),
         lists:sort([maps:get(<<"name">>, T) || T <- UTools])
     ).
+
+%% A Bearer value that is not a compact JWS. Short garbage fails
+%% `bondy_oauth_jwt:decode/1`'s own guard; long garbage fails inside
+%% jose. Both fall through to ticket verification and answer 401.
+garbage_bearer_token_is_unauthorized(Config) ->
+    Short = bearer_auth(<<"not-a-jwt">>),
+    {S1, _} = post(
+        Config, ?RBAC_REALM, req(17, <<"tools/list">>, #{}), #{auth => Short}
+    ),
+    ?assertEqual(401, S1),
+    Long = bearer_auth(binary:copy(<<"x">>, 48)),
+    {S2, _} = post(
+        Config, ?RBAC_REALM, req(18, <<"tools/list">>, #{}), #{auth => Long}
+    ),
+    ?assertEqual(401, S2).
 
 unauthenticated_request_starts_nothing(Config) ->
     Sessions0 = stored_session_count(),

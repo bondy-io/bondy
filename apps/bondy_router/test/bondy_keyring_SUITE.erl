@@ -26,6 +26,7 @@ all() ->
         current_key_shape,
         lookup_key_only_current_id,
         fail_closed_missing_env,
+        lookup_key_reports_an_unresolvable_key_as_missing,
         fail_closed_invalid_key_size,
         out_of_range_key_id_fails_closed,
         works_as_wal_key_registry
@@ -139,6 +140,15 @@ fail_closed_missing_env(_Config) ->
     ?assert(bondy_keyring:is_enabled()),
     ?assertError({master_key_unavailable, _}, bondy_keyring:current_key()),
     ?assertError({master_key_unavailable, _}, bondy_keyring:seal(<<"x">>)).
+
+%% `lookup_key/1` reads `{master_key_unavailable, _}` as a missing key.
+lookup_key_reports_an_unresolvable_key_as_missing(_Config) ->
+    os:unsetenv(?ENV_VAR),
+    ok = bondy_config:set([security, master_key], #{
+        provider => env, var => ?ENV_VAR, encoding => base64, id => 9
+    }),
+    ok = bondy_keyring:reset_cache(),
+    ?assertEqual({error, missing}, bondy_keyring:lookup_key(9)).
 
 %% The envelope holds the id in 16 bits. An id past 65535 would be sealed under
 %% its truncation, which no node looks up, so it is refused before anything is
