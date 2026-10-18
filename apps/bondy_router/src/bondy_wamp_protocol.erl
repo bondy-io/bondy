@@ -724,17 +724,24 @@ maybe_auth_challenge(enabled, #{authid := UserId} = Details, Realm, St0) ->
     Roles = authroles(Details),
     SourceIP = bondy_context:source_ip(Ctxt),
 
+    ReqMethods = maps:get(authmethods, Details, []),
+
     case bondy_auth:init(SessionId, Realm, UserId, Roles, SourceIP) of
         {ok, AuthCtxt} ->
             St2 = St1#wamp_state{auth_context = AuthCtxt},
-            ReqMethods = maps:get(authmethods, Details, []),
 
             case bondy_auth:available_methods(ReqMethods, AuthCtxt) of
                 [] ->
-                    {error, {no_authmethod, ReqMethods}, St2};
+                    refuse_user({no_authmethod, ReqMethods}, Realm, St2);
                 [Method | _] ->
                     auth_challenge(Method, St2)
             end;
+        {error, {no_such_user, _} = Reason} ->
+            refuse_user(Reason, Realm, St1);
+        {error, user_disabled = Reason} ->
+            refuse_user(Reason, Realm, St1);
+        {error, {no_such_groups, _} = Reason} ->
+            refuse_user(Reason, Realm, St1);
         {error, Reason} ->
             {error, {authentication_failed, Reason}, St1}
     end;
@@ -755,6 +762,48 @@ maybe_auth_challenge(_, Details, Realm, St0) ->
             auth_challenge(?WAMP_ANON_AUTH, St);
         {error, Reason} ->
             {error, {authentication_failed, Reason}, St1}
+    end.
+
+%% @private
+%% A refusal whose reason depends on the user: unknown, disabled, not holding
+%% the requested role, or without a source for the requested methods. The
+%% reply must be the one an existing user gets, so the reason is only logged.
+%% When the client asked for a password method the realm enables, the reply is
+%% a decoy challenge (`bondy_auth:decoy/5`); otherwise it is the generic ABORT.
+%% A request naming no method the realm enables is refused the same way for
+%% every user, so that refusal keeps its specific message.
+refuse_user(Reason, Realm, St0) ->
+    Ctxt = St0#wamp_state.context,
+    ReqMethods = maps:get(
+        authmethods, bondy_context:request_details(Ctxt), []
+    ),
+    RealmMethods = bondy_realm:authmethods(Realm),
+    Enabled = [M || M <- ReqMethods, lists:member(M, RealmMethods)],
+    Password = [
+        M
+     || M <- Enabled, M == ?WAMP_SCRAM_AUTH orelse M == ?WAMP_CRA_AUTH
+    ],
+    ?LOG_INFO(#{
+        description =>
+            "Authentication refused before the challenge; replying as for an "
+            "existing user to avoid user enumeration",
+        reason => Reason,
+        authid => bondy_context:authid(Ctxt)
+    }),
+    case {Enabled, Password} of
+        {[], []} ->
+            {error, {no_authmethod, ReqMethods}, St0};
+        {_, [Method | _]} ->
+            Decoy = bondy_auth:decoy(
+                bondy_context:session_id(Ctxt),
+                Realm,
+                bondy_context:authid(Ctxt),
+                Method,
+                bondy_context:source_ip(Ctxt)
+            ),
+            auth_challenge(Method, St0#wamp_state{auth_context = Decoy});
+        {_, []} ->
+            {error, {authentication_failed, refused}, St0}
     end.
 
 %% @private

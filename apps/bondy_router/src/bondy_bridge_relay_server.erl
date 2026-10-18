@@ -931,13 +931,6 @@ full_sync(SessionId, RealmUri, Opts, State) ->
     %% We do not automatically sync the SSO Realms, if the client node wants it,
     %% that should be requested explicitly
 
-    %% TODO However, we should sync a projection of the SSO Realm, the realm
-    %% definition itself but with users, groups, sources and grants that affect
-    %% the Realm's users, and avoiding bringing the password
-    %% SO WE NEED REPLICATION FILTERS AT PLUM_DB LEVEL
-    %% This means that only non SSO Users can login.
-    %% ALSO we are currently copying the CRA passwords which we shouldn't
-
     ok = do_full_sync(SessionId, RealmUri, Opts, State).
 
 %% @private
@@ -976,9 +969,9 @@ The bondy_db cells that make up a realm's replicable security model, as
 `{TableName, Band, Key, Value, Hlc}` tuples ready to ship to a bridge client.
 Exposed for testing the read side of `do_full_sync/4`.
 
-TODO We should NOT sync private keys (stripped from the realm record below) nor
-passwords (still synced — needs the password split off the user object so an
-admin can opt in, e.g. WAMPSCRAM).
+Secret material never leaves the cluster that owns it: the realm's private
+keys and every user's `password` are stripped, so a synced user cannot
+authenticate at the client by password (`bondy_bridge_relay_sync_SUITE`).
 """.
 realm_sync_cells(RealmUri) ->
     lists:flatmap(
@@ -1004,7 +997,16 @@ table_cells(?BONDY_DB_REALM_TAB = TableName, RealmUri) ->
         {error, not_found} ->
             []
     end;
+table_cells(?BONDY_DB_USER_TAB = TableName, RealmUri) ->
+    [
+        {T, Band, Key, maps:remove(password, User), Hlc}
+     || {T, Band, Key, User, Hlc} <- band_cells(TableName, RealmUri)
+    ];
 table_cells(TableName, RealmUri) ->
+    band_cells(TableName, RealmUri).
+
+%% @private
+band_cells(TableName, RealmUri) ->
     Table = sync_table(TableName),
     {ok, Rows} = bondy_db:list(Table, RealmUri),
     [

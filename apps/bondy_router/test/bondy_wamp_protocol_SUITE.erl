@@ -25,7 +25,8 @@ all() ->
         hello_admission_when_busy,
         hello_admission_disabled,
         hello_admission_under_memory_pressure,
-        router_abort_close_logs_the_reason
+        router_abort_close_logs_the_reason,
+        unknown_authid_gets_a_challenge_like_a_known_one
     ].
 
 init_per_suite(Config) ->
@@ -437,6 +438,74 @@ handle_inbound(_Config) ->
     Error = {unsupported_encoding, EncodingUnsupported},
     ?assertError(
         Error, bondy_wamp_protocol:handle_inbound(<<>>, StateInvalidSP)
+    ).
+
+%% -----------------------------------------------------------------------------
+%% HELLO must not reveal whether a user exists
+%% -----------------------------------------------------------------------------
+
+%% A wamp-scram HELLO for an unknown authid, or for a real user naming a role
+%% it does not hold, gets a CHALLENGE with the same keys as a real user's, and
+%% an unknown authid gets the same salt every time, as a real user does. A
+%% wrong proof is then refused with the same ABORT in every case.
+unknown_authid_gets_a_challenge_like_a_known_one(_Config) ->
+    Uri = ~"com.example.test.wamp_protocol.enumeration",
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        description => ~"user enumeration test realm",
+        authmethods => [~"wamp-scram"],
+        security_enabled => true,
+        users => [#{username => ~"alice", password => ~"aWe11KeptSecret"}],
+        sources => [
+            #{
+                usernames => [~"alice"],
+                authmethod => ~"wamp-scram",
+                cidr => ~"0.0.0.0/0"
+            }
+        ]
+    }),
+    {#challenge{auth_method = ~"wamp-scram", extra = Known}, KnownSt} =
+        scram_hello(Uri, ~"alice", #{}),
+    {#challenge{auth_method = ~"wamp-scram", extra = Ghost1}, GhostSt} =
+        scram_hello(Uri, ~"ghost", #{}),
+    {#challenge{extra = Ghost2}, _} = scram_hello(Uri, ~"Ghost", #{}),
+    {#challenge{extra = NoRole}, NoRoleSt} =
+        scram_hello(Uri, ~"alice", #{authrole => ~"not_a_member"}),
+
+    Keys = lists:sort(maps:keys(Known)),
+    ?assertEqual(Keys, lists:sort(maps:keys(Ghost1))),
+    ?assertEqual(Keys, lists:sort(maps:keys(NoRole))),
+    ?assertEqual(maps:get(~"salt", Ghost1), maps:get(~"salt", Ghost2)),
+    ?assertNotEqual(maps:get(~"salt", Known), maps:get(~"salt", Ghost1)),
+
+    Refusal = wrong_proof(KnownSt),
+    ?assertMatch({stop, ?WAMP_AUTHENTICATION_FAILED, [_], _}, Refusal),
+    ?assertEqual(element(3, Refusal), element(3, wrong_proof(GhostSt))),
+    ?assertEqual(element(3, Refusal), element(3, wrong_proof(NoRoleSt))).
+
+scram_hello(RealmUri, Authid, Extra) ->
+    {ok, St} = bondy_wamp_protocol:init(
+        {raw, binary, erl}, {{127, 0, 0, 1}, 5000}, #{}
+    ),
+    Hello = bondy_wamp_message:hello(RealmUri, Extra#{
+        roles => #{caller => #{}},
+        authid => Authid,
+        authmethods => [~"wamp-scram"],
+        authextra => #{
+            ~"nonce" => base64:encode(crypto:strong_rand_bytes(16))
+        }
+    }),
+    Data = bondy_wamp_encoding:encode(Hello, erl),
+    {reply, [Reply], St1} = bondy_wamp_protocol:handle_inbound(Data, St),
+    {[Msg], <<>>} = bondy_wamp_encoding:decode({raw, binary, erl}, Reply),
+    {Msg, St1}.
+
+wrong_proof(St) ->
+    Authenticate = bondy_wamp_message:authenticate(
+        base64:encode(crypto:strong_rand_bytes(32)), #{}
+    ),
+    bondy_wamp_protocol:handle_inbound(
+        bondy_wamp_encoding:encode(Authenticate, erl), St
     ).
 
 %% -----------------------------------------------------------------------------

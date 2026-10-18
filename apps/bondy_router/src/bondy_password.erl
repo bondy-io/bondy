@@ -86,6 +86,7 @@ At the moment this module supports two protocols:
 -export([data/1]).
 -export([default_opts/0]).
 -export([default_opts/1]).
+-export([from_data/3]).
 -export([from_term/1]).
 -export([future/1]).
 -export([hash_length/1]).
@@ -227,6 +228,21 @@ hash_length(#{version := ?VERSION, params := #{hash_length := Val}}) ->
     Val;
 hash_length(#{} = PW) ->
     hash_length(maybe_add_version(PW)).
+
+-doc """
+Returns a current-version password of `Protocol` from already-derived `Data`,
+without hashing.
+""".
+-spec from_data(protocol(), params(), data()) -> t().
+
+from_data(Protocol, Params, Data) ->
+    #{
+        type => password,
+        version => ?VERSION,
+        protocol => Protocol,
+        params => Params,
+        data => Data
+    }.
 
 -spec from_term(Term :: proplists:proplist() | map()) -> t().
 
@@ -410,30 +426,14 @@ do_upgrade(String, Pass) when is_binary(String) andalso is_list(Pass) ->
 -spec new_cra(binary(), bondy_password_cra:params()) -> t() | no_return().
 
 new_cra(Password, Params) ->
-    Builder = fun(Data, ValidParams) ->
-        #{
-            type => password,
-            version => ?VERSION,
-            protocol => cra,
-            params => ValidParams,
-            data => Data
-        }
-    end,
+    Builder = fun(Data, ValidParams) -> from_data(cra, ValidParams, Data) end,
     bondy_password_cra:new(Password, Params, Builder).
 
 %% @private
 -spec new_scram(binary(), bondy_password_scram:params()) -> t() | no_return().
 
 new_scram(Password, Params) ->
-    Builder = fun(Data, ValidParams) ->
-        #{
-            type => password,
-            version => ?VERSION,
-            protocol => scram,
-            params => ValidParams,
-            data => Data
-        }
-    end,
+    Builder = fun(Data, ValidParams) -> from_data(scram, ValidParams, Data) end,
     bondy_password_scram:new(Password, Params, Builder).
 
 validate_string(Password) ->

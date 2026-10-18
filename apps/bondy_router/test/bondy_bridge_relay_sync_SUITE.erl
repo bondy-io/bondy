@@ -3,8 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Tests the bridge relay full-sync after its cut-over from plum_db to bondy_db.
-%% The server reads a realm's security model out of bondy_db as a list of
+%% Tests the bridge relay full sync. The server reads a realm's security model out of bondy_db as a list of
 %% `{TableName, Band, Key, Value, Hlc}' cells (`realm_sync_cells/1'); the client
 %% merges each cell into its own bondy_db preserving the origin HLC
 %% (`handle_aae_data/2'). Booting bondy_router provisions the catalogue tables
@@ -19,6 +18,7 @@
 
 -define(REALM_A, <<"com.bondy.test.bridge_sync.server">>).
 -define(REALM_B, <<"com.bondy.test.bridge_sync.client">>).
+-define(REALM_PW, <<"com.bondy.test.bridge_sync.passwords">>).
 
 all() ->
     bondy_ct:all().
@@ -77,6 +77,25 @@ realm_sync_cells_reads_security_model_test(_) ->
             <<"com.bondy.test.bridge_sync.absent">>
         )
     ).
+
+%% Password material never leaves the cluster that owns it: a user created
+%% with a password is shipped without its `password` field, and keeps the rest.
+realm_sync_cells_strips_passwords_test(_) ->
+    _ = bondy_realm:create(#{
+        uri => ?REALM_PW,
+        description => <<"bridge sync password realm">>,
+        security_enabled => true,
+        users => [#{username => <<"bob">>, password => <<"s3cr3t-pass">>}]
+    }),
+    {ok, Stored} = bondy_db:read(
+        bondy_namespace_catalog:table(security_users), ?REALM_PW, <<"bob">>
+    ),
+    ?assertMatch({#{password := _}, _}, Stored),
+
+    Cells = bondy_bridge_relay_server:realm_sync_cells(?REALM_PW),
+    [Bob] = [V || {security_users, _, <<"bob">>, V, _} <- Cells],
+    ?assertNot(maps:is_key(password, Bob)),
+    ?assertEqual(maps:remove(password, element(1, Stored)), Bob).
 
 %% The client merges a shipped cell into bondy_db preserving the origin HLC:
 %% a fresh cell applies, an older cell is rejected (newer local value kept), a

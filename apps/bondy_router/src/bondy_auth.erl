@@ -73,6 +73,7 @@ system and the user's password capabilities.
 -export([available_methods/1]).
 -export([available_methods/2]).
 -export([challenge/3]).
+-export([decoy/5]).
 -export([host/1]).
 -export([init/3]).
 -export([init/4]).
@@ -287,6 +288,49 @@ init(SessionId, Realm, Username0, Roles0, SourceIP, Opts) when
             {error, Reason}
     end.
 
+-doc """
+Returns a context that challenges for the password method `Method` like an
+existing user's, but never authenticates.
+
+`bondy_wamp_protocol` uses it where a HELLO would otherwise be refused for a
+reason that depends on the user, so the reply does not reveal whether `Authid`
+exists. The salt and keys are derived from the realm's private keys and the
+casefolded `Authid`, so every node of the cluster sends the same salt for the
+same authid, as it does for a stored user (`bondy_wamp_protocol_SUITE`).
+""".
+-spec decoy(
+    SessionId :: bondy_session_id:t(),
+    Realm :: bondy_realm:t(),
+    Authid :: binary(),
+    Method :: binary(),
+    SourceIP :: inet:ip_address()
+) -> context().
+
+decoy(SessionId, Realm, Authid0, Method, SourceIP) when
+    Method == ?WAMP_SCRAM_AUTH; Method == ?WAMP_CRA_AUTH
+->
+    Authid = casefold(Authid0),
+    Secret = crypto:mac(hmac, sha512, decoy_realm_secret(Realm), Authid),
+    User = maps:put(
+        password,
+        decoy_password(decoy_protocol(Method), Secret),
+        bondy_rbac_user:new(#{username => Authid})
+    ),
+    #{
+        provider => ?BONDY_AUTH_PROVIDER,
+        session_id => SessionId,
+        realm_uri => bondy_realm:uri(Realm),
+        sso_realm_uri => bondy_realm:sso_realm_uri(Realm),
+        user_id => Authid,
+        user => User,
+        role => undefined,
+        roles => [],
+        source_ip => SourceIP,
+        host => undefined,
+        available_methods => [Method],
+        decoy => true
+    }.
+
 -spec methods() -> [binary()].
 
 methods() ->
@@ -450,9 +494,8 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt0) ->
             callback_mod_state := CBModState0
         } = Ctxt0,
 
-        %% §9.8 AE auth fence — applied to EVERY method here in the common path:
-        %% a node whose security view is stale/isolated must refuse all new
-        %% authentication, not just the bearer-token path.
+        %% The AE auth fence applies to every method: a node whose security
+        %% view is stale or isolated refuses all new authentication.
         case security_fence() of
             ok ->
                 case
@@ -460,7 +503,10 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt0) ->
                 of
                     {ok, DataOut, CBModState1} ->
                         Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
-                        apply_authroles_cap(DataOut, Ctxt);
+                        case maps:get(decoy, Ctxt, false) of
+                            true -> {error, authentication_failed};
+                            false -> apply_authroles_cap(DataOut, Ctxt)
+                        end;
                     {error, Reason, _} ->
                         {error, Reason}
                 end;
@@ -711,6 +757,39 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
         end,
         Requirements
     ).
+
+%% @private
+decoy_protocol(?WAMP_SCRAM_AUTH) -> scram;
+decoy_protocol(?WAMP_CRA_AUTH) -> cra.
+
+%% @private
+decoy_realm_secret(Realm) ->
+    Keys = lists:sort(bondy_realm:private_keys(Realm)),
+    crypto:hash(sha512, term_to_binary(Keys, [deterministic])).
+
+%% @private
+%% Each field is a differently labelled HMAC of `Secret`, truncated.
+decoy_password(scram, Secret) ->
+    #{params := Params} = bondy_password:default_opts(scram),
+    bondy_password:from_data(scram, Params, #{
+        salt => decoy_bytes(
+            Secret, ~"salt", bondy_password_scram:salt_length()
+        ),
+        stored_key => decoy_bytes(Secret, ~"stored_key", 32),
+        server_key => decoy_bytes(Secret, ~"server_key", 32)
+    });
+decoy_password(cra, Secret) ->
+    #{params := Params} = bondy_password:default_opts(cra),
+    bondy_password:from_data(cra, Params, #{
+        salt => decoy_bytes(Secret, ~"salt", bondy_password_cra:salt_length()),
+        salted_password => decoy_bytes(
+            Secret, ~"salted_password", bondy_password_cra:hash_length()
+        )
+    }).
+
+%% @private
+decoy_bytes(Secret, Label, Len) when Len =< 64 ->
+    binary:part(crypto:mac(hmac, sha512, Secret, Label), 0, Len).
 
 %% @private
 get_user(_, _, undefined) ->

@@ -82,12 +82,8 @@ challenge(Details, Ctxt, State0) ->
 
         case bondy_auth:user(Ctxt) of
             undefined ->
-                %% No user exists for this authid. Throw rather than error/1
-                %% so the catch below returns {error, authentication_failed,
-                %% State}, which the router maps to the same generic ABORT as
-                %% a wrong password (bondy_wamp_protocol:abort_message/1), so
-                %% the ABORT reason does not reveal "no such user". An unknown
-                %% user is still ABORTed before a CHALLENGE, a residual oracle.
+                %% The router maps this to the same generic ABORT as a wrong
+                %% password (`bondy_wamp_protocol:abort_message/1`).
                 throw(authentication_failed);
             _ ->
                 User = bondy_auth:user(Ctxt),
