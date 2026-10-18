@@ -1421,6 +1421,7 @@ sub_idx(Entry) ->
 
     #sub_idx{
         key = {RealmUri, Uri},
+        protocol_session_id = entry_proto_sess_id(Entry),
         entry_key = EntryKey,
         is_proxy = IsProxy
     }.
@@ -1951,13 +1952,13 @@ ms_node_filter(Opts) ->
     end.
 
 %% @private
-%% Returns a set of protocol-session-id binaries from Opts.Key
-%% (`eligible` or `exclude`), or `'_'` meaning no filter.
+%% Returns the set of WAMP session ids in Opts.Key (`eligible` or `exclude`),
+%% or `'_'` meaning no filter. The ids compare with `entry_proto_sess_id/1`.
 ms_id_set_filter(Key, Opts) ->
     case maps:find(Key, Opts) of
         error -> '_';
         {ok, []} -> '_';
-        {ok, Ids} -> sets:from_list([integer_to_binary(I) || I <- Ids])
+        {ok, Ids} -> sets:from_list(Ids)
     end.
 
 %% @private

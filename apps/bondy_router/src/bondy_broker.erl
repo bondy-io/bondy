@@ -989,7 +989,6 @@ fold_matches([], _Fun, Acc) ->
 -spec on_create(bondy_registry_entry:t()) -> ok.
 
 on_create(Entry) ->
-    ok = maybe_send_retained(Entry),
     ok = bondy_telemetry:registry_event(subscription, created, Entry),
     bondy_meta_events:maybe_publish(created, Entry).
 
