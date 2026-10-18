@@ -19,18 +19,15 @@
 # See `bench/fly/README.md` for the operator runbook.
 # =============================================================================
 
-# OTP 29 + Elixir 1.20.3 on Debian 12 (bookworm) slim. There is no
+# OTP 29 + Elixir 1.20.4 on Debian 12 (bookworm) slim. There is no
 # hexpm/elixir tag pairing Elixir 1.18.x with OTP 29, so tracking
 # production OTP forces the Elixir minor forward too; bench/mix.exs
 # requires `~> 1.15`, which 1.20 satisfies.
 #
 # `hexpm/elixir` tag format is
-# `<elixir>-erlang-<otp>-<os>-<os_version>[-slim]`. Rolling tags
-# (no date snapshot) are used here because we re-pin via the
-# Fly.io substrate doc whenever production OTP is fixed; if you
-# need fully reproducible image bytes, pin to a dated snapshot
-# tag from https://hub.docker.com/r/hexpm/elixir/tags.
-FROM hexpm/elixir:1.20.3-erlang-29.0.5-debian-bookworm-20260803-slim
+# `<elixir>-erlang-<otp>-<os>-<os_version>[-slim]`. Keep `<otp>` equal
+# to the `erlang:` tag in deployment/Dockerfile.
+FROM hexpm/elixir:1.20.4-erlang-29.1.2-debian-bookworm-20261005-slim
 
 ARG REBAR3_VERSION=3.27.0
 ARG JUST_VERSION=1.36.0

@@ -22,7 +22,7 @@
 # =============================================================================
 # Build stage 1 — OTP-29 release build
 # =============================================================================
-FROM erlang:29.0.5 AS builder
+FROM erlang:29.1.2 AS builder
 
 # Only what the surviving native NIFs need (RocksDB is gone — no snappy/openssl-dev):
 #   build-essential (crc32cer C++, lz4/ezstd C) · cmake (crc32cer's `make nif`) ·
@@ -50,7 +50,7 @@ RUN rebar3 as docker tar && \
 # =============================================================================
 # Build stage 2 — runtime + fault toolbox
 # =============================================================================
-FROM debian:trixie-slim AS runner
+FROM debian:trixie-20261005-slim AS runner
 
 ENV BONDY_ERL_NODENAME=bondy@127.0.0.1
 ENV BONDY_ERL_DISTRIBUTED_COOKIE=bondy

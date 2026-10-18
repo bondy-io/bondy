@@ -7,7 +7,7 @@
 # =============================================================================
 # Build stage 1
 # =============================================================================
-FROM erlang:29.0.5 AS builder
+FROM erlang:29.1.2 AS builder
 
 # Build dependencies. RocksDB is gone, so the packages that existed only for it
 # are removed: libsnappy-dev (RocksDB linked system snappy), plus libssl-dev and
@@ -44,15 +44,11 @@ RUN rebar3 as docker tar && \
 # =============================================================================
 # Build stage 2
 # =============================================================================
-# debian trixie (Debian 13). `debian:stable-slim` rolled from bookworm to
-# trixie, so watch the Debian 13 security tracker for this image.
-#
-# For reproducible, audit-friendly builds, pin the base by digest instead of
-# the floating tag, e.g.:
-#   FROM debian:trixie-slim@sha256:<digest> AS runner
-# You can get the current digest with:
-#   docker buildx imagetools inspect debian:trixie-slim
-FROM debian:trixie-slim AS runner
+# Debian 13 (trixie), pinned to a dated snapshot so a rebuild starts from a
+# known base; `apt-get upgrade` below then adds the security updates published
+# since. Move the snapshot forward with the `erlang:` tag above, and check the
+# result with `docker scout cves`.
+FROM debian:trixie-20261005-slim AS runner
 
 # We define defaults
 # We assume you have DNS. Erlang will take the FQDN and generate
@@ -77,7 +73,6 @@ ENV HOME "/bondy"
 #
 #   - bash      : entrypoint / relx boot scripts
 #   - procps    : ps, top, free, kill, sysctl, etc. (ops diagnostics)
-#   - iproute2  : ip, ss (replaces the deprecated net-tools)
 #   - openssl   : required by the Erlang crypto application
 #   - libstdc++6 : runtime C++ stdlib for the crc32cer NIF (google/crc32c is
 #                 C++). It USED to arrive transitively via libsnappy1v5 (also
@@ -95,7 +90,9 @@ ENV HOME "/bondy"
 #                 several MEDIUM findings with NO upstream fix. Bondy resolves
 #                 DNS via the Erlang runtime; dig/nslookup are not needed.
 #   - nano      : editor, not needed in a production image (2 CVEs).
-#   - net-tools : deprecated; superseded by iproute2.
+#   - iproute2  : ip, ss. Its libtirpc dependency carries two MEDIUMs with no
+#                 Debian fix; inspect sockets from the host instead.
+#   - net-tools : deprecated.
 #
 # `apt-get upgrade` ensures base-image packages pick up Debian security updates
 # (glibc, systemd, libcap2, nghttp2, ...) rather than staying frozen at the
@@ -118,7 +115,7 @@ ENV HOME "/bondy"
 RUN apt-get update && \
     apt-get -y upgrade && \
     apt-get -y install --no-install-recommends \
-        bash procps iproute2 openssl libstdc++6 \
+        bash procps openssl libstdc++6 \
     && apt-get -y autoremove && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
