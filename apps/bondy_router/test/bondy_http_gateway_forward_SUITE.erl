@@ -30,6 +30,8 @@ how many requests reached the upstream, not only what the client got.
 -export([get_fails_when_the_retries_run_out/1]).
 -export([post_is_not_sent_again/1]).
 -export([an_answer_is_not_retried/1]).
+-export([a_response_without_a_status_keeps_the_upstream_status/1]).
+-export([an_upstream_that_does_not_answer_times_out/1]).
 -export([upstream/3]).
 
 all() ->
@@ -38,7 +40,9 @@ all() ->
         get_without_retries_fails_at_once,
         get_fails_when_the_retries_run_out,
         post_is_not_sent_again,
-        an_answer_is_not_retried
+        an_answer_is_not_retried,
+        a_response_without_a_status_keeps_the_upstream_status,
+        an_upstream_that_does_not_answer_times_out
     ].
 
 init_per_suite(Config) ->
@@ -51,7 +55,9 @@ init_per_suite(Config) ->
     Ports =
         #{
             Case => free_port()
-         || Case <- [late, once, never, post, answer]
+         || Case <- [
+                late, once, never, post, answer, plain_ok, plain_error, silent
+            ]
         },
     ok = bondy_http_gateway:load(#{
         ~"id" => ?API,
@@ -72,7 +78,10 @@ init_per_suite(Config) ->
                     ~"/once" => #{~"get" => forward(Ports, once, 0)},
                     ~"/never" => #{~"get" => forward(Ports, never, 2)},
                     ~"/post" => #{~"post" => forward(Ports, post, 3)},
-                    ~"/answer" => #{~"get" => forward(Ports, answer, 3)}
+                    ~"/answer" => #{~"get" => forward(Ports, answer, 3)},
+                    ~"/plain_ok" => #{~"get" => plain(Ports, plain_ok)},
+                    ~"/plain_error" => #{~"get" => plain(Ports, plain_error)},
+                    ~"/silent" => #{~"get" => silent(Ports)}
                 }
             }
         }
@@ -129,6 +138,25 @@ an_answer_is_not_retried(Config) ->
     ?assertMatch({503, _}, request(get, ~"/answer")),
     ?assertEqual(1, upstream_requests(Port)).
 
+%% The response spec sets no `status_code`, and its body is the parser's
+%% default, an empty binary.
+a_response_without_a_status_keeps_the_upstream_status(Config) ->
+    ok = upstream(self(), port(plain_ok, Config), 200),
+    ok = upstream(self(), port(plain_error, Config), 409),
+    ?assertMatch({200, _}, request(get, ~"/plain_ok")),
+    ?assertMatch({409, _}, request(get, ~"/plain_error")).
+
+an_upstream_that_does_not_answer_times_out(Config) ->
+    ok = upstream(self(), port(silent, Config), silent),
+    {Status, Body} = request(get, ~"/silent"),
+    ?assertEqual(
+        {
+            bondy_http_utils:http_status(~"bondy.error.gateway_timeout"),
+            ~"bondy.error.gateway_timeout"
+        },
+        {Status, maps:get(~"uri", json:decode(Body))}
+    ).
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -152,6 +180,16 @@ forward(Ports, Case, Retries) ->
                 ~"body" => ~"{{action.result.body}}"
             }
         }
+    }.
+
+silent(Ports) ->
+    #{~"action" := Action} = Spec = forward(Ports, silent, 0),
+    Spec#{~"action" => Action#{~"timeout" => 500}}.
+
+plain(Ports, Case) ->
+    #{
+        ~"action" => maps:get(~"action", forward(Ports, Case, 0)),
+        ~"response" => #{~"on_error" => #{}, ~"on_result" => #{}}
     }.
 
 port(Case, Config) ->
@@ -202,7 +240,7 @@ upstream_requests(Port) ->
     end.
 
 %% Listens on `Port` and answers every request with `Status`, reporting each to
-%% `Owner`.
+%% `Owner`. A `silent` upstream reads each request and never answers it.
 upstream(Owner, Port, Status) ->
     Self = self(),
     Ready = make_ref(),
@@ -223,13 +261,18 @@ accept(Owner, Port, Listen, Status) ->
     {ok, Socket} = gen_tcp:accept(Listen),
     ok = read_headers(Socket),
     Owner ! {upstream_request, Port},
+    ok = answer(Socket, Status),
+    accept(Owner, Port, Listen, Status).
+
+answer(_, silent) ->
+    ok;
+answer(Socket, Status) ->
     ok = gen_tcp:send(Socket, [
         "HTTP/1.1 ",
         integer_to_list(Status),
         " Status\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
     ]),
-    ok = gen_tcp:close(Socket),
-    accept(Owner, Port, Listen, Status).
+    gen_tcp:close(Socket).
 
 read_headers(Socket) ->
     case gen_tcp:recv(Socket, 0, 5000) of

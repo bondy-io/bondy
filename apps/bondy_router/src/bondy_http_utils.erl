@@ -506,8 +506,10 @@ status_of(?BONDY_ERROR_ALREADY_EXISTS) ->
     ?HTTP_BAD_REQUEST;
 status_of(?BONDY_ERROR_TIMEOUT) ->
     ?HTTP_GATEWAY_TIMEOUT;
+%% An upstream that answered badly or could not be reached (RFC 9110,
+%% section 15.6.3).
 status_of(?BONDY_ERROR_BAD_GATEWAY) ->
-    ?HTTP_SERVICE_UNAVAILABLE;
+    ?HTTP_BAD_GATEWAY;
 status_of(?BONDY_ERROR_TOO_MANY_REQUESTS) ->
     ?HTTP_TOO_MANY_REQUESTS;
 status_of(?BONDY_ERROR_NOT_IN_SESSION) ->

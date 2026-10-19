@@ -107,7 +107,8 @@ derived_status_test() ->
         %% store reports a refused write with it; the handler remaps 500→400,
         %% so this must never derive to 500).
         {service_unavailable, ?HTTP_SERVICE_UNAVAILABLE},
-        {too_many_results, ?HTTP_BAD_REQUEST}
+        {too_many_results, ?HTTP_BAD_REQUEST},
+        {bad_gateway, ?HTTP_BAD_GATEWAY}
     ],
     [
         ?assertEqual(

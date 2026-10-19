@@ -654,20 +654,17 @@ take_status_code(Term) ->
     take_status_code(Term, ?HTTP_INTERNAL_SERVER_ERROR).
 
 %% @private
--spec take_status_code(map(), pos_integer()) -> {pos_integer(), map()}.
+-spec take_status_code(term(), pos_integer()) -> {pos_integer(), term()}.
 
 take_status_code(#{<<"status_code">> := _} = Map, _) ->
     maps:take(<<"status_code">>, Map);
 take_status_code(#{<<"body">> := Body0} = Map, Default) ->
     {HTTStatus, Body1} = take_status_code(Body0, Default),
     {HTTStatus, Map#{<<"body">> => Body1}};
-take_status_code(ErrorBody, Default) ->
-    case maps:take(<<"status_code">>, ErrorBody) of
-        error ->
-            {status_code_of(ErrorBody, Default), ErrorBody};
-        Res ->
-            Res
-    end.
+take_status_code(ErrorBody, Default) when is_map(ErrorBody) ->
+    {status_code_of(ErrorBody, Default), ErrorBody};
+take_status_code(Body, Default) when not is_map(Body) ->
+    {Default, Body}.
 
 %% @private
 %% `uri' is an error's normative identity and is preferred; `code' is consulted
@@ -993,9 +990,7 @@ perform_action(
                 maps:get(<<"on_error">>, RSpec), ApiCtxt1, MopsOpts
             ),
             St2 = maps:update(api_context, ApiCtxt1, St1),
-            {StatusCode1, Response1} = take_status_code(
-                Response0, ?HTTP_INTERNAL_SERVER_ERROR
-            ),
+            {StatusCode1, Response1} = take_status_code(Response0, StatusCode0),
             {error, StatusCode1, Response1, St2}
     end;
 perform_action(
@@ -1055,9 +1050,7 @@ perform_action(
                 maps:get(<<"on_error">>, RSpec), ApiCtxt1, MopsOpts
             ),
             St2 = maps:update(api_context, ApiCtxt1, St1),
-            {StatusCode1, Response1} = take_status_code(
-                Response0, ?HTTP_INTERNAL_SERVER_ERROR
-            ),
+            {StatusCode1, Response1} = take_status_code(Response0, StatusCode0),
             {error, StatusCode1, Response1, St2}
     end.
 
@@ -1095,18 +1088,39 @@ forward_upstream(
             ),
             ok = timer:sleep(RetryTimeout),
             forward_upstream(Req, Retries - 1, RetryTimeout, RSpec, St0);
+        {error, Reason} when Reason =:= timeout; Reason =:= connect_timeout ->
+            throw(
+                upstream_error(
+                    gateway_timeout,
+                    <<"The upstream URL '", Url/binary,
+                        "' did not respond in time.">>,
+                    Url,
+                    Reason
+                )
+            );
         {error, Reason} ->
-            %% Reason is a raw hackney term: it has no JSON representation and
-            %% must be rendered before it can reach a client.
-            Error = bondy_connect_error:new(bad_gateway, #{
-                message =>
+            throw(
+                upstream_error(
+                    bad_gateway,
                     <<"Error while connecting with upstream URL '", Url/binary,
                         "'.">>,
-                details => #{url => Url},
-                metadata => #{reason => Reason}
-            }),
-            throw(bondy_connect_error:to_map(Error))
+                    Url,
+                    Reason
+                )
+            )
     end.
+
+%% @private
+%% Reason is a raw hackney term: it has no JSON representation and must be
+%% rendered before it can reach a client.
+upstream_error(Type, Message, Url, Reason) ->
+    bondy_connect_error:to_map(
+        bondy_connect_error:new(Type, #{
+            message => Message,
+            details => #{url => Url},
+            metadata => #{reason => Reason}
+        })
+    ).
 
 %% @private
 %% The action's `timeout` and `retries` apply unless the call `options` set a
@@ -1175,7 +1189,7 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) when
     Ctxt1 = update_context({error, Error}, Ctxt0),
     Response0 = mops_eval(maps:get(<<"on_error">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
-    {FinalCode, Response1} = take_status_code(Response0),
+    {FinalCode, Response1} = take_status_code(Response0, StatusCode),
     {error, FinalCode, Response1, St1};
 from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     Ctxt0 = maps:get(api_context, St0),
@@ -1194,7 +1208,7 @@ from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     Ctxt1 = update_context({result, Result1}, Ctxt0),
     Response0 = mops_eval(maps:get(<<"on_result">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
-    {StatusCode1, Response1} = take_status_code(Response0),
+    {StatusCode1, Response1} = take_status_code(Response0, StatusCode0),
     {ok, StatusCode1, Response1, St1}.
 
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->

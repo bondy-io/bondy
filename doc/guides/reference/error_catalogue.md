@@ -250,7 +250,7 @@ so.
 | `unavailable` | `bondy.error.unavailable` | `unavailable` | transient | 503 | S004 |
 | `temporarily_unavailable` | `bondy.error.temporarily_unavailable` | `temporarily_unavailable` | transient | 503 | S005 |
 | `gateway_timeout` | `bondy.error.gateway_timeout` | `gateway_timeout` | transient | 504 | S006 |
-| `bad_gateway` | `bondy.error.bad_gateway` | `bad_gateway` | transient | 503 | S007 |
+| `bad_gateway` | `bondy.error.bad_gateway` | `bad_gateway` | transient | 502 | S007 |
 | `disk_full` | `bondy.error.disk_full` | `disk_full` | transient | 500 | S008 |
 | `out_of_memory` | `bondy.error.out_of_memory` | `out_of_memory` | transient | 500 | S009 |
 | `too_many_connections` | `bondy.error.too_many_connections` | `too_many_connections` | transient | 503 | S010 |

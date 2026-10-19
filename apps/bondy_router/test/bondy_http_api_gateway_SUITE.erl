@@ -305,3 +305,62 @@ parse_action(Action, Defaults) ->
         ],
         bondy_http_gateway_api_spec_parser:parse(Spec)
     ).
+
+%% The response spec sets no `status_code`, and its body is the parser's
+%% default, an empty binary.
+call_error_without_a_status_keeps_the_error_status_test(_) ->
+    Realm = <<"com.example.test.call_error_status">>,
+    Api = <<"com.example.test.call_error_status.api">>,
+    _ = bondy_realm:create(#{
+        uri => Realm,
+        authmethods => [<<"anonymous">>],
+        security_enabled => false
+    }),
+    Get = #{
+        <<"action">> => #{
+            <<"type">> => <<"wamp_call">>,
+            <<"procedure">> => <<"com.example.test.call_error_status.none">>
+        },
+        <<"response">> => #{<<"on_error">> => #{}, <<"on_result">> => #{}}
+    },
+    ok = bondy_http_gateway:load(#{
+        <<"id">> => Api,
+        <<"name">> => Api,
+        <<"host">> => <<"_">>,
+        <<"realm_uri">> => Realm,
+        <<"defaults">> => #{
+            <<"security">> => #{}, <<"schemes">> => [<<"http">>]
+        },
+        <<"versions">> => #{
+            <<"1.0.0">> => #{
+                <<"base_path">> => <<"/call_error_status/v1.0">>,
+                <<"paths">> => #{<<"/none">> => #{<<"get">> => Get}}
+            }
+        }
+    }),
+    try
+        _ = bondy_http_gateway:rebuild_dispatch_tables(),
+        ?assertEqual(
+            bondy_http_utils:http_status(<<"wamp.error.no_such_procedure">>),
+            http_get_status(
+                <<"http://localhost:18080/call_error_status/v1.0/none">>, 50
+            )
+        )
+    after
+        bondy_http_gateway:delete(Api)
+    end.
+
+%% Dispatch table rebuilds are debounced, so the route answers 404 until it is
+%% mounted; a 404 never reaches the action.
+http_get_status(_, 0) ->
+    ct:fail(route_not_mounted);
+http_get_status(Url, N) ->
+    {ok, Status, _, Ref} = hackney:request(get, Url, [], <<>>, []),
+    {ok, _} = hackney:body(Ref),
+    case Status of
+        404 ->
+            timer:sleep(100),
+            http_get_status(Url, N - 1);
+        _ ->
+            Status
+    end.

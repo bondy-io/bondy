@@ -47,7 +47,9 @@ when the endpoint is called:
 - `forward` — proxies the request to an upstream HTTP service. When the
   upstream gives no response, a request with an idempotent method (RFC 9110,
   section 9.2.2) is sent up to `retries` more times, `retry_timeout`
-  milliseconds apart; a response of any status is returned as it is
+  milliseconds apart; a response of any status is returned as it is. A
+  request left without a response fails with `bondy.error.gateway_timeout`
+  when it timed out, and with `bondy.error.bad_gateway` otherwise
   (`bondy_http_gateway_forward_SUITE`).
 - `static` — returns a static body and headers
 
