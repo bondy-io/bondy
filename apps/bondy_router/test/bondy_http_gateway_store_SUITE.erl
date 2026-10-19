@@ -85,11 +85,7 @@ crud_roundtrip_test(_) ->
 
     ok = bondy_http_gateway:load(spec(?SPEC_ID, ?REALM)),
 
-    %% Lookup returns the stored SOURCE spec (with the `ts` field load adds).
-    Stored = bondy_http_gateway:lookup(?SPEC_ID),
-    ?assert(is_map(Stored)),
-    ?assertEqual(?SPEC_ID, maps:get(<<"id">>, Stored)),
-    ?assert(maps:is_key(<<"ts">>, Stored)),
+    ?assertEqual(spec(?SPEC_ID, ?REALM), bondy_http_gateway:lookup(?SPEC_ID)),
 
     ?assert(has_spec(?SPEC_ID, bondy_http_gateway:list())),
 
@@ -116,7 +112,7 @@ rejected_spec_is_reported_and_kept_test(_) ->
     Good = <<"com.bondy.test.gateway_store.good">>,
     Bad = <<"com.bondy.test.gateway_store.unparseable">>,
     ok = bondy_http_gateway:load(spec(Good, ?REALM)),
-    ok = store_raw(Bad, #{<<"id">> => Bad, <<"name">> => Bad, <<"ts">> => 1}),
+    ok = store_raw(Bad, #{<<"id">> => Bad, <<"name">> => Bad}),
     Rules = bondy_http_gateway:routes(#{transport => tcp}),
     ?assertNotEqual([], Rules),
     ?assertMatch(#{status := active}, status_of(Good)),
@@ -135,7 +131,7 @@ rejected_spec_is_reported_and_kept_test(_) ->
 pending_realm_spec_activates_with_its_realm_test(_) ->
     Realm = <<"com.bondy.test.gateway_store.late_realm">>,
     Id = <<"com.bondy.test.gateway_store.pending">>,
-    ok = store_raw(Id, (spec(Id, Realm))#{<<"ts">> => 1}),
+    ok = store_raw(Id, spec(Id, Realm)),
     _ = bondy_http_gateway:routes(#{transport => tcp}),
     ?assertEqual(
         #{id => Id, status => pending_realm, realm_uri => Realm},
@@ -163,7 +159,7 @@ realm_delete_takes_its_routes_down(_) ->
         description => <<"API Gateway deleted realm">>,
         security_enabled => false
     }),
-    ok = store_raw(Id, (spec(Id, Realm))#{<<"ts">> => 1}),
+    ok = store_raw(Id, spec(Id, Realm)),
     ?assert(
         bondy_ct:wait_until(
             fun() ->
@@ -233,6 +229,19 @@ apply_config_loads_every_valid_spec_test(Config) ->
     ok = bondy_http_gateway:delete(A),
     ok = bondy_http_gateway:delete(B).
 
+%% Applying the same file again writes nothing: the declarative apply runs on
+%% every boot, and a rewrite of an unchanged spec would be a new operation.
+apply_config_leaves_an_unchanged_spec_alone_test(Config) ->
+    Id = <<"com.bondy.test.gateway_store.declared_twice">>,
+    File = config_file(Config, "twice.json", json:encode([spec(Id, ?REALM)])),
+    with_config_file(File, fun() ->
+        ?assertEqual(ok, bondy_http_gateway:apply_config()),
+        Hlc = stored_hlc(Id),
+        ?assertEqual(ok, bondy_http_gateway:apply_config()),
+        ?assertEqual(Hlc, stored_hlc(Id))
+    end),
+    ok = bondy_http_gateway:delete(Id).
+
 %% A request for a spec whose realm was removed is answered as
 %% `no_such_realm`, the error a client can act on, not as an internal error.
 %% Exercises the handler's authorization step directly: a spec's routes are
@@ -281,9 +290,62 @@ removed_realm_is_answered_as_no_such_realm_test(_) ->
         meck:unload(cowboy_req)
     end.
 
+%% Cowboy takes the first route that matches, so a static segment must come
+%% before a binding that would also match it.
+static_path_is_not_shadowed_by_a_binding_test(_) ->
+    Id = <<"com.bondy.test.gateway_store.shadowed">>,
+    Get = maps:get(<<"/things">>, paths(spec(Id, ?REALM))),
+    Paths = #{<<"/things/:id">> => Get, <<"/things/new">> => Get},
+    ok = bondy_http_gateway:load(with_paths(spec(Id, ?REALM), Paths)),
+    ok = bondy_http_gateway:rebuild_dispatch_tables(),
+    try
+        ?assertEqual(
+            <<"/v1.0/things/new">>, route_of(<<"/v1.0/things/new">>)
+        ),
+        ?assertEqual(<<"/v1.0/things/:id">>, route_of(<<"/v1.0/things/7">>))
+    after
+        ok = bondy_http_gateway:delete(Id)
+    end.
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+%% The route template that the served dispatch table of every plain-HTTP API
+%% Gateway listener sends `Path` on `myapi.com` to. The spec declares `http`
+%% only, so a TLS listener serves none of its routes.
+route_of(Path) ->
+    Req = #{host => <<"myapi.com">>, path => Path},
+    Names = [
+        Name
+     || #{
+            name := Name,
+            protocol := http,
+            transport := tcp,
+            services := Services
+        } <-
+            bondy_listener_manager:listeners(),
+        lists:member(api_gateway, Services)
+    ],
+    ?assertNotEqual([], Names),
+    [Route] = lists:usort([
+        begin
+            {persistent_term, Key} = bondy_http_gateway:dispatch_table(Name),
+            {ok, _, #{handler_opts := #{route := R}}} = cowboy_router:execute(
+                Req, #{dispatch => persistent_term:get(Key)}
+            ),
+            R
+        end
+     || Name <- Names
+    ]),
+    Route.
+
+paths(#{<<"versions">> := #{<<"1.0.0">> := #{<<"paths">> := Paths}}}) ->
+    Paths.
+
+with_paths(Spec, Paths) ->
+    #{<<"versions">> := #{<<"1.0.0">> := V} = Vs} = Spec,
+    Spec#{<<"versions">> := Vs#{<<"1.0.0">> := V#{<<"paths">> := Paths}}}.
 
 config_file(Config, Name, Contents) ->
     File = filename:join(?config(priv_dir, Config), Name),
@@ -310,6 +372,12 @@ has_spec(Id, Specs) ->
 store_raw(Id, Spec) ->
     Table = bondy_namespace_catalog:table(api_gateway),
     bondy_db:apply(Table, <<>>, Id, {set, Spec}).
+
+stored_hlc(Id) ->
+    Table = bondy_namespace_catalog:table(api_gateway),
+    {ok, Cells} = bondy_db:list(Table, <<>>),
+    [Hlc] = [H || {I, _, H} <- Cells, I =:= Id],
+    Hlc.
 
 status_of(Id) ->
     {ok, Status} = find_status(Id),

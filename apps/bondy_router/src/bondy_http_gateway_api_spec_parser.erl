@@ -1836,11 +1836,6 @@ get_revoke_path(_) ->
     <<"/oauth/revoke">>.
 
 %% @private
-%% The defaults are deliberately two-segment, like `/oauth/token` and
-%% `/oidc/login`. Routes are matched in ascending path order (they reach Cowboy
-%% through a `leap_relation`, which is ordered) and Cowboy takes the first
-%% match, so a one-segment `/verify` would be shadowed by any API path declaring
-%% a single-segment binding such as `/:id`.
 get_verify_path(#{<<"verify_path">> := Path}, _Default) ->
     validate_rel_path(Path);
 get_verify_path(_, Default) ->

@@ -635,40 +635,14 @@ load_spec(FName, Opts) ->
     end.
 
 %% @private
-%% Persist the source spec under `Id`. A runtime load always writes, stamping a
-%% fresh `ts` (the per-node load time `load_dispatch_tables/0` uses to FIFO-order
-%% overlapping specs). A DECLARATIVE config apply writes only when the spec
-%% source actually changed (compared modulo `ts`): re-reading the config file on
-%% every boot must NOT re-stamp `ts`, because `ts` is a per-node wall clock and
-%% a fresh value on each node/boot diverges the replicated cell (and its content
-%% digest). The op-based CRDT + anti-entropy reconcile multi-node writes, so an
-%% unchanged spec needs no per-boot rewrite.
+%% Persist the source spec under `Id`. A runtime load always writes. A
+%% DECLARATIVE config apply runs on every boot, so it writes only when the
+%% stored spec differs, and an unchanged spec emits no operation.
 store_spec(Id, Map, Opts) ->
-    case maps:get(declarative, Opts, false) of
-        true ->
-            Desired = maps:remove(<<"ts">>, Map),
-            case lookup(Id) of
-                Stored when is_map(Stored) ->
-                    case maps:remove(<<"ts">>, Stored) =:= Desired of
-                        true ->
-                            %% Unchanged — keep the replicated value (and its
-                            %% already-converged ts); emit no operation.
-                            ok;
-                        false ->
-                            add(Id, with_ts(Map))
-                    end;
-                {error, not_found} ->
-                    add(Id, with_ts(Map))
-            end;
-        false ->
-            add(Id, with_ts(Map))
+    case maps:get(declarative, Opts, false) andalso lookup(Id) =:= Map of
+        true -> ok;
+        false -> add(Id, Map)
     end.
-
-%% @private
-%% Stamp the per-node load time used to FIFO-order overlapping specs
-%% (`load_dispatch_tables/0`).
-with_ts(Map) ->
-    maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map).
 
 -doc """
 We store the API Spec in the metadata store. Notice that we store the JSON
@@ -720,22 +694,14 @@ Loads all the existing API specs from store, parses them and generates a
 dispatch table per scheme.
 """.
 load_dispatch_tables() ->
-    %% We sorted by time, this is because in case api definitions overlap
-    %% we want at least try to process them in FIFO order.
-    %% @TODO This does not work in a distributed env, since we are relying
-    %% on wall clock, to be solve by using a CRDT?
     Loaded = [{K, load_stored_spec(K, V)} || {K, V} <- stored_specs()],
-    Specs = lists:sort([
-        {K, Ts, Parsed}
-     || {K, {parsed, Ts, Parsed}} <- Loaded
-    ]),
     ok = record_status(Loaded),
 
     %% No base routes: the paths a listener serves besides its
     %% specification-derived ones come from the services it declares, and
     %% `bondy_http_services:dispatch/1` assembles them.
     Result = bondy_http_gateway_api_spec_parser:dispatch_table(
-        [element(3, S) || S <- Specs], []
+        [Parsed || {_, {parsed, Parsed}} <- Loaded], []
     ),
 
     case Result of
@@ -751,15 +717,13 @@ load_dispatch_tables() ->
 load_stored_spec(K, V) ->
     try
         Parsed = bondy_http_gateway_api_spec_parser:parse(V),
-        Ts = maps:get(<<"ts">>, V),
         ?LOG_INFO(#{
             description =>
                 "Loading and parsing API Gateway specification from store",
             name => maps:get(~"name", V),
-            id => maps:get(~"id", V),
-            timestamp => Ts
+            id => maps:get(~"id", V)
         }),
-        {parsed, Ts, Parsed}
+        {parsed, Parsed}
     catch
         %% The parser raises any error its validators and expression
         %% evaluator produce on stored data, so no narrower set exists.
@@ -794,7 +758,7 @@ record_status(Loaded) ->
     ok.
 
 %% @private
-spec_status({parsed, _Ts, #{<<"realm_uri">> := Realm}}) ->
+spec_status({parsed, #{<<"realm_uri">> := Realm}}) ->
     case bondy_http_gateway_api_spec_parser:is_realm_available(Realm) of
         true ->
             #{status => active};

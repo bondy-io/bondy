@@ -43,12 +43,43 @@ Called on the start path and again by `bondy_http_gateway` whenever an API
 Gateway specification changes: a running listener reads its table through
 `{persistent_term, Key}`, so replacing the stored value is what makes new routes
 live without restarting it.
+
+Cowboy answers a request with the first path that matches it, so each host's
+paths are ordered most specific first. At the first segment where two paths
+differ in kind, a literal comes before a binding, and a binding before `[...]`;
+the path `'_'` comes last. Paths of the same shape keep the order
+`bondy_http_services:dispatch/1` gives them. `bondy_http_gateway_store_SUITE`
+checks that a binding does not shadow a literal path.
 """.
 -spec recompile_dispatch(bondy_listener_config:t()) -> ok.
 
 recompile_dispatch(#{name := Name} = L) ->
-    Routes = bondy_http_services:dispatch(L),
-    _ = persistent_term:put(dispatch_key(Name), cowboy_router:compile(Routes)),
+    Specificity = fun
+        ('_') ->
+            [3];
+        (Segments) when is_list(Segments) ->
+            [
+                case S of
+                    '...' -> 2;
+                    _ when is_atom(S) -> 1;
+                    _ when is_binary(S) -> 0
+                end
+             || S <- Segments
+            ]
+    end,
+    Dispatch = [
+        {Host, Fields, [
+            P
+         || {_, P} <- lists:keysort(1, [
+                {Specificity(Match), P}
+             || {Match, _, _, _} = P <- Paths
+            ])
+        ]}
+     || {Host, Fields, Paths} <- cowboy_router:compile(
+            bondy_http_services:dispatch(L)
+        )
+    ],
+    _ = persistent_term:put(dispatch_key(Name), Dispatch),
     ok.
 
 %% =============================================================================
