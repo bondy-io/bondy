@@ -56,7 +56,7 @@ init_per_suite(Config) ->
     Ids = [
         begin
             Uri = uri(I),
-            {ok, {Entry, true}} = bondy_registry:add(
+            {ok, Entry} = bondy_registry:add(
                 registration, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref
             ),
             bondy_registry_entry:id(Entry)
@@ -168,7 +168,7 @@ members_by_id(Config) ->
 
     %% Same path for a subscription, resolved by its own id.
     Topic = <<"com.meta.topic.members">>,
-    {ok, {SubEntry, true}} = bondy_registry:add(
+    {ok, SubEntry} = bondy_registry:add(
         subscription, RealmUri, Topic, #{match => ?EXACT_MATCH}, Ref
     ),
     SubId = bondy_registry_entry:id(SubEntry),

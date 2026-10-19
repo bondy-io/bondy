@@ -162,7 +162,7 @@ Used for adding proxy entries only as it skips all checks.
 Fails with `badarg` if  `Entry` is not a proxy entry.
 """.
 -spec add(entry()) ->
-    {ok, {entry(), IsFirstEntry :: boolean()}}
+    {ok, entry()}
     | {error, already_exists}
     | no_return().
 
@@ -182,7 +182,7 @@ add(Entry) ->
     Opts :: map(),
     Ctxt :: bondy_context:t()
 ) ->
-    {ok, {Entry :: entry(), IsFirstEntry :: boolean()}}
+    {ok, entry()}
     | {error, {already_exists, entry()} | any()}.
 
 add(Type, Uri, Opts, Ctxt) when is_map(Ctxt) ->
@@ -226,7 +226,7 @@ return an error tuple.
     Opts :: map(),
     Ref :: bondy_ref:t()
 ) ->
-    {ok, {Entry :: entry(), IsFirstEntry :: boolean()}}
+    {ok, entry()}
     | {error, {already_exists, entry()} | any()}.
 
 add(Type, RealmUri, Uri, Opts, Ref) ->

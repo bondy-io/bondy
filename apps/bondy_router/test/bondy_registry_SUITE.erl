@@ -442,10 +442,10 @@ sub_same_uri_multiple_policies(Config) ->
     Type = subscription,
     Uri = <<"com.multi.policy">>,
 
-    {ok, {E1, _}} = bondy_registry:add(
+    {ok, E1} = bondy_registry:add(
         Type, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref
     ),
-    {ok, {E2, _}} = bondy_registry:add(
+    {ok, E2} = bondy_registry:add(
         Type, RealmUri, Uri, #{match => ?PREFIX_MATCH}, Ref
     ),
 
@@ -486,7 +486,7 @@ remove_all_runs_task_once_per_entry(Config) ->
      || I <- lists:seq(1, N)
     ],
     _ = [
-        {ok, {_, true}} =
+        {ok, _} =
             bondy_registry:add(subscription, RealmUri, Uri, Opts, Ref)
      || Uri <- Uris
     ],
@@ -504,7 +504,7 @@ remove_all_runs_task_once_per_entry(Config) ->
     OtherSessionId = bondy_session_id:new(),
     OtherRef = bondy_ref:new(internal, self(), OtherSessionId),
     OtherUri = <<"com.example.removeall.sibling">>,
-    {ok, {OtherEntry, true}} =
+    {ok, OtherEntry} =
         bondy_registry:add(subscription, RealmUri, OtherUri, Opts, OtherRef),
 
     SessionlessPid = spawn(fun() ->
@@ -514,7 +514,7 @@ remove_all_runs_task_once_per_entry(Config) ->
     end),
     SessionlessRef = bondy_ref:new(internal, SessionlessPid),
     SessionlessUri = <<"com.example.removeall.sessionless">>,
-    {ok, {SessionlessEntry, true}} = bondy_registry:add(
+    {ok, SessionlessEntry} = bondy_registry:add(
         subscription, RealmUri, SessionlessUri, Opts, SessionlessRef
     ),
 
@@ -587,7 +587,7 @@ sub_sessionless_refs(Config) ->
     RefA = bondy_ref:new(internal, PidA),
     RefB = bondy_ref:new(internal, PidB),
 
-    {ok, {EntryA, _}} = bondy_registry:add(Type, RealmUri, Uri, Opts, RefA),
+    {ok, EntryA} = bondy_registry:add(Type, RealmUri, Uri, Opts, RefA),
 
     ?assertMatch(
         {error, {already_exists, EntryA}},
@@ -595,7 +595,7 @@ sub_sessionless_refs(Config) ->
         "Same internal ref re-subscribing is idempotent"
     ),
 
-    {ok, {EntryB, _}} = bondy_registry:add(Type, RealmUri, Uri, Opts, RefB),
+    {ok, EntryB} = bondy_registry:add(Type, RealmUri, Uri, Opts, RefB),
 
     ?assertNotEqual(
         bondy_registry_entry:id(EntryA),
@@ -668,7 +668,7 @@ concurrent_single_registrations_admit_one(Config) ->
                 end
              || W <- Workers
             ],
-            Entries = [E || {_, {ok, {E, _}}} <- Replies],
+            Entries = [E || {_, {ok, E}} <- Replies],
             _ = [ok = bondy_registry:remove(E) || E <- Entries],
             _ = [W ! stop || W <- Workers],
             length(Entries)
@@ -1385,7 +1385,7 @@ start_subscriber(RealmUri, Uri, Opts) ->
             {{127, 0, 0, 1}, 0}, {ws, text, json}, #{session => Session}
         ),
         Ref = bondy_context:ref(Ctxt),
-        {ok, {_Entry, true}} =
+        {ok, _Entry} =
             bondy_registry:add(subscription, RealmUri, Uri, Opts, Ref),
         Parent ! {self(), ready},
         receive
@@ -1575,7 +1575,7 @@ add_subscription_test(Type, RealmUri, Uri, Opts, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
 
-    {ok, {Entry, true}} = bondy_registry:add(Type, RealmUri, Uri, Opts, Ref),
+    {ok, Entry} = bondy_registry:add(Type, RealmUri, Uri, Opts, Ref),
 
     Key = bondy_registry_entry:key(Entry),
 
@@ -1628,7 +1628,7 @@ subscription_pages_reach_every_entry(_) ->
     Ids = lists:sort([
         begin
             Ref = bondy_ref:new(internal, Keeper, bondy_session_id:new()),
-            {ok, {Entry, _}} = bondy_registry:add(
+            {ok, Entry} = bondy_registry:add(
                 subscription, Realm, Topic, #{match => ?EXACT_MATCH}, Ref
             ),
             bondy_registry_entry:id(Entry)
@@ -1666,7 +1666,7 @@ registration_pages_reach_every_entry(_) ->
     Ids = lists:sort([
         begin
             Ref = bondy_ref:new(internal, Keeper, bondy_session_id:new()),
-            {ok, {Entry, _}} = bondy_registry:add(
+            {ok, Entry} = bondy_registry:add(
                 registration, Realm, Uri, Opts0, Ref
             ),
             bondy_registry_entry:id(Entry)

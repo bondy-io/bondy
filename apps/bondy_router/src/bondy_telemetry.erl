@@ -420,7 +420,7 @@ crosses the telemetry boundary. Total: never throws.
 """.
 -spec registry_event(
     Type :: registration | subscription,
-    Action :: created | added | removed | deleted,
+    Action :: added | removed,
     Entry :: bondy_registry_entry:t()
 ) -> ok.
 

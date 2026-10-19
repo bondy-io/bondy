@@ -6,8 +6,17 @@
 -module(bondy_meta_events).
 -moduledoc """
 Demand-gated publication of the WAMP registration/subscription meta
-events (`wamp.registration.on_create`, `wamp.subscription.on_subscribe`,
-…).
+events: `wamp.registration.on_register`, `wamp.registration.on_unregister`,
+`wamp.subscription.on_subscribe` and `wamp.subscription.on_unsubscribe`.
+
+Bondy does not publish `on_create` or `on_delete`. WAMP fires them when a URI
+gains its first registration or subscription and loses its last. A cluster
+cannot decide "first" and "last" for a URI without coordinating its nodes, so
+each node would announce its own, and a subscriber would see a URI deleted
+while other nodes still serve it. `bondy_meta_events_SUITE` checks that neither
+is published. A consumer that needs to know whether a URI has registrations or
+subscriptions asks the `wamp.registration.*` and `wamp.subscription.*` meta
+procedures.
 
 Per METRICS_GAP_ANALYSIS.md Part III, a meta event is only worth
 producing when someone can observe it. `maybe_publish/2` therefore:
@@ -101,12 +110,11 @@ demanded(RealmUri, TopicUri) ->
 Publishes the meta event(s) implied by a registration/subscription
 lifecycle action, subject to demand.
 
-`Action` is the registry lifecycle action (`created | added | removed |
-deleted`); the meta topic is derived from it and the entry type. Each
-implied topic is demand-checked independently.
+`Action` is the registry lifecycle action, `added` or `removed`; the meta
+topic is derived from it and the entry type.
 """.
 -spec maybe_publish(
-    Action :: created | added | removed | deleted,
+    Action :: added | removed,
     Entry :: bondy_registry_entry:t()
 ) -> ok.
 
@@ -117,7 +125,7 @@ maybe_publish(Action, Entry) ->
 
     case demanded(RealmUri, Topic) of
         true ->
-            enqueue(Topic, Action, Entry);
+            enqueue(Topic, Entry);
         false ->
             ok
     end.
@@ -127,21 +135,17 @@ maybe_publish(Action, Entry) ->
 %% =============================================================================
 
 %% @private
-topic(subscription, created) -> ?WAMP_SUBSCRIPTION_ON_CREATE;
 topic(subscription, added) -> ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE;
 topic(subscription, removed) -> ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE;
-topic(subscription, deleted) -> ?WAMP_SUBSCRIPTION_ON_DELETE;
-topic(registration, created) -> ?WAMP_REG_ON_CREATE;
 topic(registration, added) -> ?WAMP_REG_ON_REGISTER;
-topic(registration, removed) -> ?WAMP_REG_ON_UNREGISTER;
-topic(registration, deleted) -> ?WAMP_REG_ON_DELETE.
+topic(registration, removed) -> ?WAMP_REG_ON_UNREGISTER.
 
 %% @private
 %% Builds the publication closure and enqueues it, partition-keyed by
 %% session id (per-session meta-event ordering). This is the demanded
 %% path only — the closure capture and queue traffic never happen when
 %% nobody is subscribed.
-enqueue(Topic, Action, Entry) ->
+enqueue(Topic, Entry) ->
     Type = bondy_registry_entry:type(Entry),
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     SessionId = bondy_registry_entry:session_id(Entry),
@@ -151,16 +155,7 @@ enqueue(Topic, Action, Entry) ->
         %% We use a global ID as this is not a publishers request
         ReqId = bondy_message_id:global(),
         EntryId = bondy_registry_entry:id(Entry),
-        Args =
-            case Action == created of
-                true ->
-                    [
-                        ExtSessionId,
-                        bondy_registry_entry:to_external(Entry, wamp_meta)
-                    ];
-                false ->
-                    [ExtSessionId, EntryId]
-            end,
+        Args = [ExtSessionId, EntryId],
         KWArgs =
             case Type of
                 registration ->

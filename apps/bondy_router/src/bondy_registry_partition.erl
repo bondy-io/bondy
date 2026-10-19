@@ -218,8 +218,7 @@ execute_after(Delay, Partition, Fun, Args) when
 Used for adding proxy entries only as it skips all checks.
 Fails with `badarg` if  `Entry` is not a proxy entry.
 """.
--spec add(Partition :: pid(), entry()) ->
-    {ok, {entry(), IsFirstEntry :: boolean()}} | {error, any()}.
+-spec add(Partition :: pid(), entry()) -> {ok, entry()} | {error, any()}.
 
 add(Partition, Entry) when is_pid(Partition) ->
     Store = store(Partition),

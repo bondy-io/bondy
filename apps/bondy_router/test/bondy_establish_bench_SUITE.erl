@@ -163,7 +163,7 @@ do_subscribe(RealmUri) ->
     Uri =
         <<"perf.topic.",
             (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    {ok, {_, _}} = bondy_registry:add(
+    {ok, _} = bondy_registry:add(
         subscription, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref
     ),
     ok.

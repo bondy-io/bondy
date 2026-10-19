@@ -1600,7 +1600,7 @@ do_write_one(RealmUri, N, Stats) ->
                     subscription, RealmUri, Uri, #{match => <<"exact">>}, Ref
                 )
             of
-                {ok, {_, _}} ->
+                {ok, _} ->
                     bump(Stats, sub_ok);
                 Other ->
                     record_error(Stats, sub_err, {RealmUri, Uri, Other})

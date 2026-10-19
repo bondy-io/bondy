@@ -35,9 +35,6 @@ Indices for matching bondy_registry_entry(s).
     sub_prefix_idx_ptrie :: bondy_registry_ptrie:handle(),
     %% Subscriptions w/match_policy == wildcard — persistent trie, lock-free
     sub_wc_idx_ptrie :: bondy_registry_ptrie:handle(),
-    %% Counter per URI, used to distinguish on_create vs.
-    %% on_register|on_subscribe — concurrent r/w
-    counters_tab :: ets:tab(),
     %% One row per live LOCAL entry, keyed
     %% {Type, Realm, Policy, Uri, Created, EntryId} — the source
     %% bondy_registry_rib derives the replicated routing summaries from.
@@ -284,10 +281,6 @@ new(PartitionIndex) ->
     S4 = bondy_registry_ptrie:new(gen_name(sub_wc_idx_ptrie, PartitionIndex)),
 
     %% Common
-    {ok, C1} = bondy_connect_table_manager:add_or_claim(
-        gen_name(counters_tab, PartitionIndex),
-        [set | key_value:put(keypos, 1, Opts)]
-    ),
     {ok, RIB1} = bondy_connect_table_manager:add_or_claim(
         gen_name(rib_members_tab, PartitionIndex),
         [ordered_set | key_value:put(keypos, 1, Opts)]
@@ -316,7 +309,6 @@ new(PartitionIndex) ->
         sub_prefix_idx_ptrie = S3,
         sub_wc_idx_ptrie = S4,
         %% Common
-        counters_tab = C1,
         rib_members_tab = RIB1,
         local_entry_tab = L1,
         local_session_idx_tab = L2
@@ -344,7 +336,6 @@ info(#bondy_registry_store{} = Store) ->
         Store#bondy_registry_store.reg_exact_idx_tab,
         Store#bondy_registry_store.sub_local_exact_idx_tab,
         Store#bondy_registry_store.sub_remote_exact_idx_tab,
-        Store#bondy_registry_store.counters_tab,
         Store#bondy_registry_store.rib_members_tab,
         Store#bondy_registry_store.local_entry_tab,
         Store#bondy_registry_store.local_session_idx_tab
@@ -392,14 +383,15 @@ through a trie server.
 > next releases.
 """.
 -spec add(Store :: t(), Entry :: entry()) ->
-    {ok, {entry(), IsFirstEntry :: boolean()}} | {error, Reason :: any()}.
+    {ok, entry()} | {error, Reason :: any()}.
 
 add(#bondy_registry_store{} = Store, Entry) ->
     ok = validate_entry(Entry),
 
     maybe
         ok ?= store(Store, Entry),
-        store_indices(Store, Entry)
+        ok ?= store_indices(Store, Entry),
+        {ok, Entry}
     end.
 
 -doc """
@@ -422,13 +414,7 @@ through a trie server.
 
 add_indices(#bondy_registry_store{} = Store, Entry) ->
     ok = validate_entry(Entry),
-
-    case store_indices(Store, Entry) of
-        {ok, _} ->
-            ok;
-        {error, _} = Error ->
-            Error
-    end.
+    store_indices(Store, Entry).
 
 -doc """
 Removes a registration or subscription entry (`bondy_registry_entry:t()`) from
@@ -809,9 +795,7 @@ METRICS_GAP_ANALYSIS.md Part III): the common case is *no* match, which
 each policy section answers fail-fast (an ETS miss for `exact`, a
 missing-branch ptrie walk for `prefix`/`wildcard`), so this is cheap
 enough to call on the registry's own write path. Deliberately composed
-from the same per-policy sections the publish path uses — never from
-the per-URI entry counters, which exist only for on_create/on_delete
-detection and are slated for removal.
+from the same per-policy sections the publish path uses.
 """.
 -spec has_matches(
     Store :: t(), Type :: entry_type(), RealmUri :: uri(), Uri :: uri()
@@ -1427,8 +1411,7 @@ sub_idx(Entry) ->
     }.
 
 %% @private
--spec store_indices(Store :: t(), Entry :: entry()) ->
-    {ok, {entry(), IsFirstEntry :: boolean()}} | {error, any()}.
+-spec store_indices(Store :: t(), Entry :: entry()) -> ok | {error, any()}.
 
 store_indices(#bondy_registry_store{} = Store, Entry) ->
     Type = bondy_registry_entry:type(Entry),
@@ -1490,39 +1473,22 @@ delete_indices(Store, Entry) ->
 %% @private
 add_exact_registration_index(Store, Entry) ->
     Tab = Store#bondy_registry_store.reg_exact_idx_tab,
-    Uri = bondy_registry_entry:uri(Entry),
-    MatchPolicy = bondy_registry_entry:match_policy(Entry),
-
-    Object = reg_idx(Entry),
-    true = ets:insert(Tab, Object),
-    IsFirstEntry = incr_counter(Store, Uri, MatchPolicy, 1) =:= 1,
-    {ok, {Entry, IsFirstEntry}}.
+    true = ets:insert(Tab, reg_idx(Entry)),
+    ok.
 
 %% @private
 del_exact_registration_index(Store, Entry) ->
     Tab = Store#bondy_registry_store.reg_exact_idx_tab,
     Pattern = reg_idx(Entry),
 
-    case ets:select_delete(Tab, [{Pattern, [], [true]}]) of
-        0 ->
-            ok;
-        1 ->
-            Uri = bondy_registry_entry:uri(Entry),
-            MatchPolicy = bondy_registry_entry:match_policy(Entry),
-            _ = decr_counter(Store, Uri, MatchPolicy, 1),
-            ok
-    end.
+    _ = ets:select_delete(Tab, [{Pattern, [], [true]}]),
+    ok.
 
 %% @private
 add_local_exact_subscription_index(Store, Entry) ->
     Tab = Store#bondy_registry_store.sub_local_exact_idx_tab,
-    Uri = bondy_registry_entry:uri(Entry),
-    MatchPolicy = bondy_registry_entry:match_policy(Entry),
-
-    Object = sub_idx(Entry),
-    true = ets:insert(Tab, Object),
-    IsFirstEntry = incr_counter(Store, Uri, MatchPolicy, 1) =:= 1,
-    {ok, {Entry, IsFirstEntry}}.
+    true = ets:insert(Tab, sub_idx(Entry)),
+    ok.
 
 %% @private
 del_local_exact_subscription_index(Store, Entry) ->
@@ -1530,35 +1496,28 @@ del_local_exact_subscription_index(Store, Entry) ->
 
     Pattern = sub_idx(Entry),
 
-    case ets:select_delete(Tab, [{Pattern, [], [true]}]) of
-        0 ->
-            ok;
-        1 ->
-            Uri = bondy_registry_entry:uri(Entry),
-            MatchPolicy = bondy_registry_entry:match_policy(Entry),
-            _ = decr_counter(Store, Uri, MatchPolicy, 1),
-            ok
-    end.
+    _ = ets:select_delete(Tab, [{Pattern, [], [true]}]),
+    ok.
 
 %% @private
 add_prefix_registration_idx(Store, Entry) ->
     Ptrie = Store#bondy_registry_store.reg_prefix_idx_ptrie,
-    add_ptrie_index(Store, Entry, Ptrie).
+    add_ptrie_index(Entry, Ptrie).
 
 %% @private
 del_prefix_registration_index(Store, Entry) ->
     Ptrie = Store#bondy_registry_store.reg_prefix_idx_ptrie,
-    del_ptrie_index(Store, Entry, Ptrie).
+    del_ptrie_index(Entry, Ptrie).
 
 %% @private
 add_prefix_subscription_index(Store, Entry) ->
     Ptrie = Store#bondy_registry_store.sub_prefix_idx_ptrie,
-    add_ptrie_index(Store, Entry, Ptrie).
+    add_ptrie_index(Entry, Ptrie).
 
 %% @private
 del_prefix_subscription_index(Store, Entry) ->
     Ptrie = Store#bondy_registry_store.sub_prefix_idx_ptrie,
-    del_ptrie_index(Store, Entry, Ptrie).
+    del_ptrie_index(Entry, Ptrie).
 
 %% @private
 -doc """
@@ -1580,11 +1539,7 @@ add_remote_exact_subscription_idx(Store, Entry) ->
     },
 
     true = ets:insert(Tab, Obj),
-
-    %% This is a remote entry, so the on_create event was already generated on
-    %% its node.
-    IsFirstEntry = false,
-    {ok, {Entry, IsFirstEntry}}.
+    ok.
 
 %% @private
 -doc """
@@ -1609,35 +1564,35 @@ del_remote_exact_subscription_index(Store, Entry) ->
 %% @private
 add_wildcard_registration_index(Store, Entry) ->
     Ptrie = Store#bondy_registry_store.reg_wc_idx_ptrie,
-    add_ptrie_index(Store, Entry, Ptrie).
+    add_ptrie_index(Entry, Ptrie).
 
 %% @private
 del_wildcard_registration_index(Store, Entry) ->
     Ptrie = Store#bondy_registry_store.reg_wc_idx_ptrie,
-    del_ptrie_index(Store, Entry, Ptrie).
+    del_ptrie_index(Entry, Ptrie).
 
 %% @private
 add_wildcard_subscription_index(Store, Entry) ->
     Ptrie = Store#bondy_registry_store.sub_wc_idx_ptrie,
-    add_ptrie_index(Store, Entry, Ptrie).
+    add_ptrie_index(Entry, Ptrie).
 
 %% @private
 del_wildcard_subscription_index(Store, Entry) ->
     Ptrie = Store#bondy_registry_store.sub_wc_idx_ptrie,
-    del_ptrie_index(Store, Entry, Ptrie).
+    del_ptrie_index(Entry, Ptrie).
 
 %% @private
 %% Atomic RMW: add the entry to the `#{EntryKey => EntryData}` map stored
 %% at the ptrie leaf for `{URI, Policy}`. Under concurrent writers, the
 %% underlying `ptrie:update/4` retries via root-CAS, so the update is
 %% lost-update-free without a per-partition gen_server.
-add_ptrie_index(Store, Entry, Ptrie) ->
+add_ptrie_index(Entry, Ptrie) ->
     Key = ptrie_index_key(Entry),
     Policy = ptrie_policy(Entry),
     EntryKey = bondy_registry_entry:key(Entry),
     EntryData = ptrie_entry_data(Entry),
 
-    Result = bondy_registry_ptrie:update(
+    bondy_registry_ptrie:update(
         Ptrie,
         Key,
         Policy,
@@ -1647,23 +1602,13 @@ add_ptrie_index(Store, Entry, Ptrie) ->
             (Map) when is_map(Map) ->
                 {ok, maps:put(EntryKey, EntryData, Map)}
         end
-    ),
-
-    case Result of
-        ok ->
-            Uri = bondy_registry_entry:uri(Entry),
-            MatchPolicy = bondy_registry_entry:match_policy(Entry),
-            IsFirstEntry = incr_counter(Store, Uri, MatchPolicy, 1) =:= 1,
-            {ok, {Entry, IsFirstEntry}};
-        {error, _} = Error ->
-            Error
-    end.
+    ).
 
 %% @private
 %% Atomic RMW: remove the entry from the leaf's `#{EntryKey => EntryData}`
 %% map. If the map becomes empty, the leaf is removed entirely. No-op if
 %% the leaf wasn't there.
-del_ptrie_index(Store, Entry, Ptrie) ->
+del_ptrie_index(Entry, Ptrie) ->
     Key = ptrie_index_key(Entry),
     Policy = ptrie_policy(Entry),
     EntryKey = bondy_registry_entry:key(Entry),
@@ -1685,55 +1630,13 @@ del_ptrie_index(Store, Entry, Ptrie) ->
 
     case Result of
         ok ->
-            Uri = bondy_registry_entry:uri(Entry),
-            MatchPolicy = bondy_registry_entry:match_policy(Entry),
-            _ = decr_counter(Store, Uri, MatchPolicy, 1),
             ok;
         deleted ->
-            Uri = bondy_registry_entry:uri(Entry),
-            MatchPolicy = bondy_registry_entry:match_policy(Entry),
-            _ = decr_counter(Store, Uri, MatchPolicy, 1),
             ok;
         noop ->
             ok;
         {error, _} = Error ->
             Error
-    end.
-
-%% =============================================================================
-%% PRIVATE: URI COUNTERS
-%% =============================================================================
-
-%% TODO we should remove the use of these counters. We use them because
-%% WAMP distinguishes between on_create|on_delete and on_subscribe|on_register
-%% events.
-%% In a distributed setting with no coordination this distinction is impossible
-%% to guarantee and has absolutely no value to the user. At the moment two
-%% nodes might trigger the on_create as the counters are not global. Even if we
-%% used global CRDT counters there is a possibility of multiple nodes
-%% triggering simultaneous on_create|on_delete events.
-
-%% @private
-incr_counter(Store, Uri, MatchPolicy, N) ->
-    Tab = Store#bondy_registry_store.counters_tab,
-    Key = {Uri, MatchPolicy},
-    Default = {counter, Key, 0},
-    ets:update_counter(Tab, Key, {3, N}, Default).
-
-%% @private
-decr_counter(Store, Uri, MatchPolicy, N) ->
-    Tab = Store#bondy_registry_store.counters_tab,
-    Key = {Uri, MatchPolicy},
-    Default = {counter, Key, 0},
-
-    case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
-        0 ->
-            %% Other process might have concurrently incremented the counter,
-            %% so we do a match delete
-            true = ets:match_delete(Tab, Default),
-            0;
-        Val ->
-            Val
     end.
 
 %% =============================================================================

@@ -150,7 +150,6 @@ realm `RealmUri`.
 
 flush(RealmUri, Ref) ->
     try
-        %% TODO If subscription is deleted we need to also call on_delete/1
         %% Cleanup all registrations for the ref's session
         SessionId = bondy_ref:session_id(Ref),
         bondy_registry:remove_all(
@@ -267,16 +266,8 @@ subscribe(RealmUri, Opts, Topic, Ref) ->
     bondy_ref:is_type(Ref) orelse error({badarg, Ref}),
 
     case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
-        {ok, {Entry, true}} ->
-            %% WAMP 10.3.1 A wamp.subscription.on_subscribe event MUST always
-            %% be fired subsequent to a wamp.subscription.on_create event,
-            %% since the first subscribe results in both the creation of the
-            %% subscription and the addition of a session.
-            ok = on_create(Entry),
+        {ok, Entry} ->
             ok = on_subscribe(Entry),
-            {ok, bondy_registry_entry:id(Entry)};
-        {ok, {Entry, false}} ->
-            on_subscribe(Entry),
             {ok, bondy_registry_entry:id(Entry)};
         {error, {already_exists, _Entry}} ->
             {error, already_exists};
@@ -313,15 +304,7 @@ unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
             case bondy_registry:remove(Entry) of
                 ok ->
                     on_unsubscribe(Entry);
-                {ok, false} ->
-                    on_unsubscribe(Entry);
-                {ok, true} ->
-                    %% WAMP 10.3.1 ...Similarly, the
-                    %% wamp.subscription.on_delete event MUST always be
-                    %% preceded by a wamp.subscription.on_unsubscribe event.
-                    ok = on_unsubscribe(Entry),
-                    on_delete(Entry);
-                Error ->
+                {error, _} = Error ->
                     Error
             end;
         {error, _} = Error ->
@@ -524,18 +507,7 @@ do_forward(#subscribe{} = M, Ctxt) ->
     ReqId = M#subscribe.request_id,
 
     case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
-        {ok, {Entry, true}} ->
-            Id = bondy_registry_entry:id(Entry),
-            bondy_router_peer:send(
-                RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)
-            ),
-            %% WAMP 10.3.1 A wamp.subscription.on_subscribe event MUST always
-            %% be fired subsequent to a wamp.subscription.on_create event,
-            %% since the first subscribe results in both the creation of the
-            %% subscription and the addition of a session.
-            ok = on_create(Entry),
-            on_subscribe(Entry);
-        {ok, {Entry, false}} ->
+        {ok, Entry} ->
             Id = bondy_registry_entry:id(Entry),
             bondy_router_peer:send(
                 RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)
@@ -986,13 +958,6 @@ fold_matches([], _Fun, Acc) ->
 %% @private
 %% The aggregate metric is counted unconditionally (telemetry); the WAMP
 %% meta-event publication is demand-gated (see bondy_meta_events).
--spec on_create(bondy_registry_entry:t()) -> ok.
-
-on_create(Entry) ->
-    ok = bondy_telemetry:registry_event(subscription, created, Entry),
-    bondy_meta_events:maybe_publish(created, Entry).
-
-%% @private
 -spec on_subscribe(bondy_registry_entry:t()) -> ok.
 
 on_subscribe(Entry) ->
@@ -1006,13 +971,6 @@ on_subscribe(Entry) ->
 on_unsubscribe(Entry) ->
     ok = bondy_telemetry:registry_event(subscription, removed, Entry),
     bondy_meta_events:maybe_publish(removed, Entry).
-
-%% @private
--spec on_delete(bondy_registry_entry:t()) -> ok.
-
-on_delete(Entry) ->
-    ok = bondy_telemetry:registry_event(subscription, deleted, Entry),
-    bondy_meta_events:maybe_publish(deleted, Entry).
 
 %% =============================================================================
 %% PRIVATE: EVENT RETENTION

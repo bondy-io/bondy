@@ -365,7 +365,6 @@ queue that are associated for reference `Ref` in realm `RealmUri`.
 
 flush(RealmUri, Ref) ->
     try
-        %% TODO If registration is deleted we need to also call on_delete/1
         %% Cleanup all registrations for the ref's session.
         %% We do this before flushing promises so that any concurrent CALL
         %% cannot pick this ref as a callee after we start the flush.
@@ -459,7 +458,7 @@ register(Procedure, Opts0, RealmUri, Ref) ->
         end,
 
     case bondy_registry:add(registration, RealmUri, Procedure, Opts, Ref) of
-        {ok, {Entry, _}} ->
+        {ok, Entry} ->
             {ok, bondy_registry_entry:id(Entry)};
         {error, {already_exists, _}} ->
             {error, already_exists};
@@ -481,11 +480,7 @@ unregister(RegId, RealmUri) when is_binary(RealmUri) ->
             case bondy_registry:remove(Entry) of
                 ok ->
                     on_unregister(Entry);
-                {ok, false} ->
-                    on_unregister(Entry);
-                {ok, true} ->
-                    on_delete(Entry);
-                Error ->
+                {error, _} = Error ->
                     Error
             end
     end.
@@ -1355,8 +1350,8 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
     Ref = bondy_context:ref(Ctxt),
 
     case bondy_registry:add(registration, RealmUri, Uri, Opts, Ref) of
-        {ok, {Entry, IsFirst}} ->
-            ok = on_register(IsFirst, Entry),
+        {ok, Entry} ->
+            ok = on_register(Entry),
             Id = bondy_registry_entry:id(Entry),
             Reply = bondy_wamp_message:registered(ReqId, Id),
             bondy_router_peer:send(RealmUri, Ref, Reply);
@@ -2509,10 +2504,7 @@ call_opts(_) -> #{}.
 %% @private
 %% The aggregate metric is counted unconditionally (telemetry); the WAMP
 %% meta-event publication is demand-gated (see bondy_meta_events).
-on_register(true, Entry) ->
-    ok = bondy_telemetry:registry_event(registration, created, Entry),
-    bondy_meta_events:maybe_publish(created, Entry);
-on_register(false, Entry) ->
+on_register(Entry) ->
     ok = bondy_telemetry:registry_event(registration, added, Entry),
     bondy_meta_events:maybe_publish(added, Entry).
 
@@ -2520,11 +2512,6 @@ on_register(false, Entry) ->
 on_unregister(Entry) ->
     ok = bondy_telemetry:registry_event(registration, removed, Entry),
     bondy_meta_events:maybe_publish(removed, Entry).
-
-%% @private
-on_delete(Entry) ->
-    ok = bondy_telemetry:registry_event(registration, deleted, Entry),
-    bondy_meta_events:maybe_publish(deleted, Entry).
 
 %% @private
 %% Hierarchical (RIB `read` mode) selection: the caller picks a NODE — self,

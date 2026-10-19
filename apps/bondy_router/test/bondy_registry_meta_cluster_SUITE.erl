@@ -178,7 +178,7 @@ do_add_regs(RealmUri, Uris) ->
     Ref = bondy_context:ref(Ctxt),
     [
         begin
-            {ok, {Entry, true}} = bondy_registry:add(
+            {ok, Entry} = bondy_registry:add(
                 registration, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref
             ),
             bondy_registry_entry:id(Entry)

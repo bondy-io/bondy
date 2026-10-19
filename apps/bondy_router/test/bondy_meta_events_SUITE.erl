@@ -16,6 +16,7 @@ knob.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
+-include("bondy_security.hrl").
 
 -define(REALM, <<"com.test.meta.events">>).
 -define(ON_SUBSCRIBE, ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE).
@@ -29,6 +30,7 @@ knob.
 -export([delivery_with_subscribers/1]).
 -export([config_off_silences/1]).
 -export([realm_meta_events_published/1]).
+-export([create_and_delete_are_not_published/1]).
 
 all() ->
     [
@@ -36,7 +38,8 @@ all() ->
         aggregates_counted_unconditionally,
         delivery_with_subscribers,
         config_off_silences,
-        realm_meta_events_published
+        realm_meta_events_published,
+        create_and_delete_are_not_published
     ].
 
 init_per_suite(Config) ->
@@ -98,7 +101,6 @@ aggregates_counted_unconditionally(_) ->
     Label = fun(Action) ->
         #{node => Node, realm => ?REALM, type => subscription, action => Action}
     end,
-    Created0 = counter_value(bondy_registry_events_total, Label(created)),
     Added0 = counter_value(bondy_registry_events_total, Label(added)),
     Removed0 = counter_value(bondy_registry_events_total, Label(removed)),
 
@@ -106,9 +108,6 @@ aggregates_counted_unconditionally(_) ->
     {ok, Id} = subscribe(#{}, Topic),
 
     %% The sink is inline and wait-free — visible immediately.
-    true =
-        counter_value(bondy_registry_events_total, Label(created)) ==
-            Created0 + 1,
     true =
         counter_value(bondy_registry_events_total, Label(added)) ==
             Added0 + 1,
@@ -192,6 +191,54 @@ realm_meta_events_published(_) ->
         error(realm_meta_event_timeout)
     end,
     ok = bondy_broker:unsubscribe(SubId, Master),
+    ok.
+
+create_and_delete_are_not_published(_) ->
+    Silent = [
+        ?WAMP_REG_ON_CREATE,
+        ?WAMP_REG_ON_DELETE,
+        ?WAMP_SUBSCRIPTION_ON_CREATE,
+        ?WAMP_SUBSCRIPTION_ON_DELETE
+    ],
+    SilentIds = [Id || T <- Silent, {ok, Id} <- [subscribe(#{}, T)]],
+    {ok, OnRegister} = subscribe(#{}, ?WAMP_REG_ON_REGISTER),
+    {ok, OnUnregister} = subscribe(#{}, ?WAMP_REG_ON_UNREGISTER),
+    ok = flush_events(),
+
+    ok = bondy_realm:disable_security(?REALM),
+    Peer = {{127, 0, 0, 1}, 10000},
+    Session = bondy_session:new(?REALM, #{
+        peer => Peer,
+        authid => <<"callee">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => false,
+        authroles => [<<"anonymous">>],
+        roles => #{callee => #{}}
+    }),
+    Ctxt = bondy_context:new(Peer, {ws, text, json}, #{session => Session}),
+    Register = bondy_wamp_message:register(
+        1, #{}, <<"com.test.meta.app.proc">>
+    ),
+    ok = bondy_dealer:forward(Register, Ctxt),
+    RegId =
+        receive
+            {?BONDY_REQ, _, ?REALM, #registered{registration_id = Id}} -> Id
+        after 5000 ->
+            error(registered_timeout)
+        end,
+    #event{subscription_id = OnRegister} = await_event(5000),
+    ok = bondy_dealer:unregister(RegId, ?REALM),
+    #event{subscription_id = OnUnregister} = await_event(5000),
+
+    {ok, AppId} = subscribe(#{}, <<"com.test.meta.app.topic">>),
+    ok = bondy_broker:unsubscribe(AppId, ?REALM),
+    ok = assert_no_event(500),
+
+    _ = [
+        ok = bondy_broker:unsubscribe(Id, ?REALM)
+     || Id <- [OnRegister, OnUnregister | SilentIds]
+    ],
     ok.
 
 %% =============================================================================
