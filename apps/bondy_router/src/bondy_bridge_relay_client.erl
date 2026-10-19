@@ -8,6 +8,12 @@
 EARLY DRAFT implementation of the client-side connection between an edge node
 (this module) and a remote/core node (`bondy_bridge_relay_server`).
 
+When a session opens, the client sends the remote node every registration and
+subscription in the session's realm. It then relays each later change: the
+`[bondy, dealer, registration, _]` and `[bondy, broker, subscription, _]` events
+that `bondy_dealer` and `bondy_broker` notify on `bondy_event_manager` when a
+client adds or removes one. `bondy_bridge_relay_rpc_SUITE` covers both kinds.
+
 ```mermaid
 stateDiagram-v2
     %%{init:{'state':{'nodeSpacing': 50, 'rankSpacing': 200}}}%%
@@ -1292,32 +1298,32 @@ add_event_handler(Session, State) when is_map(Session) ->
     RealmUri = maps:get(realm_uri, Session),
     MyRef = maps:get(ref, Session),
 
-    Fun = fun
-        ({Tag, Term}) ->
-            IsMatch =
-                bondy_registry_entry:is_entry(Term) andalso
-                    %% We avoid forwarding our own subscriptions
-                    SessionId =/= bondy_registry_entry:session_id(Term) andalso
-                    RealmUri =:= bondy_registry_entry:realm_uri(Term) andalso
-                    (Tag =:= registration_created orelse
-                        Tag =:= registration_added orelse
-                        Tag =:= registration_deleted orelse
-                        Tag =:= registration_removed orelse
-                        Tag =:= subscription_created orelse
-                        Tag =:= subscription_added orelse
-                        Tag =:= subscription_removed orelse
-                        Tag =:= subscription_deleted),
+    Relay = fun(Tag, Entry) ->
+        IsMatch =
+            %% We avoid forwarding our own subscriptions
+            SessionId =/= bondy_registry_entry:session_id(Entry) andalso
+                RealmUri =:= bondy_registry_entry:realm_uri(Entry),
 
-            case IsMatch of
-                true ->
-                    Msg = {
-                        Tag,
-                        bondy_registry_entry:to_external(Term, bridge_relay)
-                    },
-                    ok = ?MODULE:forward(MyRef, Msg);
-                false ->
-                    ok
-            end;
+        case IsMatch of
+            true ->
+                Msg = {
+                    Tag, bondy_registry_entry:to_external(Entry, bridge_relay)
+                },
+                ok = ?MODULE:forward(MyRef, Msg);
+            false ->
+                ok
+        end
+    end,
+
+    Fun = fun
+        ({[bondy, dealer, registration, added], Entry}) ->
+            Relay(registration_added, Entry);
+        ({[bondy, dealer, registration, removed], Entry}) ->
+            Relay(registration_removed, Entry);
+        ({[bondy, broker, subscription, added], Entry}) ->
+            Relay(subscription_added, Entry);
+        ({[bondy, broker, subscription, removed], Entry}) ->
+            Relay(subscription_removed, Entry);
         (_) ->
             ok
     end,

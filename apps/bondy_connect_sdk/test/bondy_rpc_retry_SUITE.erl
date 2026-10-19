@@ -64,6 +64,8 @@ second late, and the deadlines leave room for that.
 -export([no_such_procedure_gives_up_before_the_deadline/1]).
 -export([progressive_results_call_to_no_procedure_fails_at_once/1]).
 -export([a_waiting_call_can_be_cancelled/1]).
+-export([sdk_caller_waits_for_the_retries/1]).
+-export([sdk_async_caller_waits_until_the_deadline/1]).
 
 all() ->
     [
@@ -96,7 +98,9 @@ all() ->
         no_such_procedure_gives_up_when_retries_run_out,
         no_such_procedure_gives_up_before_the_deadline,
         progressive_results_call_to_no_procedure_fails_at_once,
-        a_waiting_call_can_be_cancelled
+        a_waiting_call_can_be_cancelled,
+        sdk_caller_waits_for_the_retries,
+        sdk_async_caller_waits_until_the_deadline
     ].
 
 init_per_suite(Config) ->
@@ -501,6 +505,49 @@ a_waiting_call_can_be_cancelled(Config) ->
     end,
     ok = register(Config, Proc, [reply], #{}),
     ?assertEqual([], attempts(Proc, 3000)).
+
+%% A `bondy_connect_sdk` caller waits for the attempts the dealer makes, not one
+%% call timeout.
+sdk_caller_waits_for_the_retries(Config) ->
+    Proc = ~"com.example.test.rpc_retry.sdk_caller",
+    ok = register(Config, Proc, [sleep, reply], ?IDEMPOTENT),
+    Caller = connect(),
+    try
+        ?assertMatch(
+            {ok, #{args := [2]}},
+            bondy_connect_client:call(
+                Caller, Proc, [1], #{}, #{timeout => 1000, '_retries' => 1}
+            )
+        ),
+        ?assertEqual([1, 2], attempts(Proc, 0))
+    after
+        bondy_connect_client:disconnect(Caller)
+    end.
+
+%% The callee registers after `_retries + 1` call timeouts have passed, but
+%% before the `_deadline`, while the dealer waits for a registration.
+sdk_async_caller_waits_until_the_deadline(Config) ->
+    Proc = ~"com.example.test.rpc_retry.sdk_async_caller",
+    Caller = connect(),
+    try
+        {ok, Token} = bondy_connect_client:call_async(
+            Caller,
+            Proc,
+            [1],
+            #{},
+            #{timeout => 300, '_retries' => 5, '_deadline' => 8000}
+        ),
+        timer:sleep(2500),
+        ok = register(Config, Proc, [reply], #{}),
+        receive
+            {bondy_connect_client, Token, Reply} ->
+                ?assertMatch({ok, #{args := [1]}}, Reply)
+        after 10000 ->
+            ct:fail(no_reply)
+        end
+    after
+        bondy_connect_client:disconnect(Caller)
+    end.
 
 %% =============================================================================
 %% HELPERS

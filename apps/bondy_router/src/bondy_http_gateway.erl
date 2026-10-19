@@ -682,6 +682,8 @@ validate_spec(Map) ->
             {error, Reason};
         error:{unsupported_action_type, _} = Reason ->
             {error, Reason};
+        error:{unsupported_keys, _, _} = Reason ->
+            {error, Reason};
         error:action_type_missing ->
             {error, action_type_missing};
         throw:#{~"code" := _} = Reason ->

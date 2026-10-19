@@ -47,6 +47,10 @@ The operators are `integer`, `float`, `boolean`, `abs`, `head`, `tail`,
 `merge(Expr)`, `with([Keys])` and `without([Keys])`. An operator that does
 not apply to its value fails with `{invalid_expression, [Op, Value]}`.
 
+An argument in single quotes is a literal: `get('first name')` reads the key
+`first name`. Spaces and tabs outside a literal are ignored, and spaces and
+tabs inside one are kept; `mops_SUITE` covers both.
+
 ## Deferred evaluation
 
 A context value of `proxy/0` marks a key that is not known yet. An
@@ -370,10 +374,8 @@ acc(#state{acc = Acc} = St, Val) ->
 parse_expr(Bin, #state{context = Ctxt} = St) ->
     case binary:split(Bin, St#state.pop, [global]) of
         [Val] ->
-            %% TODO review the need for trim/1
             get_value(trim(Val), Ctxt);
         [Val | Ops] ->
-            %% TODO review the need for trim/1
             apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt), Ctxt);
         _ ->
             error({badarg, Bin})
@@ -802,24 +804,16 @@ maybe_trim(Bin) ->
 
 %% @private
 trim(Bin) ->
-    trimb(Bin, <<>>).
+    trim(Bin, false, <<>>).
 
-%% @private
-trimb(<<>>, Acc) ->
-    Acc;
-trimb(<<C, Rest/binary>>, Acc) when C =:= $\s; C =:= $\t ->
-    trimb(Rest, Acc);
-trimb(Bin, Acc) ->
-    case binary:match(Bin, [<<$\s>>, <<$\t>>], []) of
-        nomatch ->
-            <<Acc/binary, Bin/binary>>;
-        {Pos, 1} ->
-            Part = binary:part(Bin, 0, Pos),
-            trimb(
-                binary:part(Bin, Pos, byte_size(Bin) - Pos),
-                <<Acc/binary, Part/binary>>
-            )
-    end.
+trim(<<$', Rest/binary>>, Quoted, Acc) ->
+    trim(Rest, not Quoted, <<Acc/binary, $'>>);
+trim(<<C, Rest/binary>>, false, Acc) when C =:= $\s; C =:= $\t ->
+    trim(Rest, false, Acc);
+trim(<<C, Rest/binary>>, Quoted, Acc) ->
+    trim(Rest, Quoted, <<Acc/binary, C>>);
+trim(<<>>, _, Acc) ->
+    Acc.
 
 %% @private
 safe_binary_to_float(Val) ->

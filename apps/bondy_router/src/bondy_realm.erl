@@ -128,6 +128,13 @@ realms using just one set of credentials.
 It is enabled by setting the realm's `sso_realm_uri` property during realm
 creation or during an update operation.
 
+A user's credentials come from the SSO realm the user is linked to, while the
+realm's SSO realm signs its tokens and tickets and holds their revocations.
+An update that would change the SSO realm of a realm holding linked users
+therefore fails with `inconsistency_error`, including a prototype update that
+a member realm inherits; remove those users first. `bondy_realm_SUITE` covers
+both, and the cross-identity token this prevents.
+
 - It requires the user to authenticate when opening a session in a realm.
 - Changing credentials e.g. updating password can be performed while
 connected to any realm.
@@ -2457,6 +2464,7 @@ merge_and_store(Realm0, Map, Opts) ->
     Realm1 = maps:fold(fun fold_props/3, Realm0, Map),
 
     ok = check_integrity_constraints(Realm1),
+    ok = check_sso_links(Realm0, Realm1),
 
     %% Only now that the prototype is known to exist, and to not be this realm.
     Realm = derive_password_opts(Realm1, Map),
@@ -3115,6 +3123,46 @@ validate_uris(Data) ->
         }
     },
     maps_utils:validate(Data, Validator, Opts).
+
+%% @private
+check_sso_links(#realm{sso_realm_uri = Uri}, #realm{sso_realm_uri = Uri}) ->
+    ok;
+check_sso_links(Old, #realm{uri = Uri} = New) ->
+    Members = [
+        M
+     || New#realm.is_prototype,
+        #realm{prototype_uri = P, sso_realm_uri = undefined} = M <- list(),
+        P =:= Uri
+    ],
+    Changes = [
+        {Uri, sso_realm_uri(Old), sso_realm_uri(New)}
+        | [
+            {M#realm.uri, Old#realm.sso_realm_uri, New#realm.sso_realm_uri}
+         || M <- Members
+        ]
+    ],
+    Linked = [
+        R
+     || {R, From, To} <- Changes,
+        From =/= To,
+        From =/= undefined,
+        lists:any(
+            fun(U) -> bondy_rbac_user:sso_realm_uri(U) =:= From end,
+            bondy_rbac_user:list(R)
+        )
+    ],
+    Linked =:= [] orelse
+        error({
+            inconsistency_error,
+            [sso_realm_uri],
+            iolist_to_binary([
+                "The SSO realm cannot change while these realms hold users "
+                "linked to it: ",
+                lists:join(", ", Linked),
+                ". Remove those users first."
+            ])
+        }),
+    ok.
 
 %% @private
 check_integrity_constraints(Realm) ->

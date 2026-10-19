@@ -10,6 +10,7 @@
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
+-include("bondy_db_tables.hrl").
 
 -define(LU1, <<"local_user_1">>).
 -define(LU2, <<"local_user_2">>).
@@ -34,6 +35,7 @@ all() ->
         remove_group,
         remove_user,
         remove_refuses_a_linked_sso_user,
+        update_reports_a_missing_sso_user,
         delete_api_reports_a_linked_sso_user_as_a_conflict,
         list_members,
         group_deletion_cleans_members,
@@ -498,6 +500,25 @@ remove_refuses_a_linked_sso_user(_) ->
     ),
     ok = bondy_rbac_user:remove(?REALM2_URI, Username),
     ?assertEqual(ok, bondy_rbac_user:remove(?SSO_REALM_URI, Username)).
+
+%% `remove/3` refuses while a local user links to the SSO user, but a peer can
+%% remove it before the link replicates; clearing the cell stands in for that.
+update_reports_a_missing_sso_user(_) ->
+    Username = ~"sso_missing",
+    User = #{
+        username => Username,
+        password => Username,
+        sso_realm_uri => ?SSO_REALM_URI
+    },
+    {ok, _} = bondy_rbac_user:add(?REALM1_URI, bondy_rbac_user:new(User)),
+    Table = bondy_namespace_catalog:table(?BONDY_DB_USER_TAB),
+    ok = bondy_db:apply(Table, ?SSO_REALM_URI, Username, clear),
+    ?assertEqual(
+        {error, {no_such_user, Username}},
+        bondy_rbac_user:update(?REALM1_URI, Username, #{
+            password => ~"a-new-password"
+        })
+    ).
 
 delete_api_reports_a_linked_sso_user_as_a_conflict(_) ->
     Username = <<"sso_linked_api">>,

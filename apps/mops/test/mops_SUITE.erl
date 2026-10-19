@@ -55,6 +55,16 @@ simple_4_test(_) ->
 simple_5_test(_) ->
     <<"3 3">> = mops:eval(<<"\"{{foo}} {{foo}}\"">>, #{<<"foo">> => 3}).
 
+%% Whitespace outside a quoted literal is ignored; inside one it is part of
+%% the literal.
+quoted_argument_keeps_its_spaces_test(_) ->
+    Ctxt = #{~"foo" => #{~"first name" => 1, ~"firstname" => 2}},
+    ?assertEqual(1, mops:eval(~"{{foo |> get('first name')}}", Ctxt)),
+    ?assertEqual(
+        ~" a  b ", mops:eval(~"{{foo |> get('nope', ' a  b ')}}", Ctxt)
+    ),
+    ?assertEqual(2, mops:eval(~"{{ foo |> get( 'firstname' ) }}", Ctxt)).
+
 simple_future_1_test(_) ->
     Proxy = mops:proxy(),
     {Proxy, F} = mops:eval(

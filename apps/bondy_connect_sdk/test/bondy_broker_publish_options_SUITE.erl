@@ -44,6 +44,9 @@ covered: the router announces `sharded_subscription => false`.
 -export([eligible_session/1]).
 -export([exclude_me_prefix/1]).
 -export([eligible_session_prefix/1]).
+-export([empty_eligible_list_admits_no_one/1]).
+-export([empty_eligible_list_admits_no_one_prefix/1]).
+-export([eligible_list_emptied_by_exclusion_admits_no_one/1]).
 -export([exclude_authid/1]).
 -export([eligible_authid/1]).
 -export([exclude_authrole/1]).
@@ -60,6 +63,9 @@ all() ->
         eligible_session,
         exclude_me_prefix,
         eligible_session_prefix,
+        empty_eligible_list_admits_no_one,
+        empty_eligible_list_admits_no_one_prefix,
+        eligible_list_emptied_by_exclusion_admits_no_one,
         exclude_authid,
         eligible_authid,
         exclude_authrole,
@@ -148,6 +154,23 @@ eligible_session_prefix(Config) ->
     ok = subscribe([alice, bob], ?PREFIX, #{match => ~"prefix"}, Config),
     Opts = #{eligible => [session_id(~"alice")]},
     assert_delivery([alice], Opts, Config).
+
+%% An `eligible` list names the only sessions that may receive the event, so an
+%% empty one names none; it is not read as an absent option.
+empty_eligible_list_admits_no_one(Config) ->
+    ok = subscribe([alice, bob], ?TOPIC, Config),
+    assert_delivery([], #{eligible => []}, Config).
+
+empty_eligible_list_admits_no_one_prefix(Config) ->
+    ok = subscribe([alice, bob], ?PREFIX, #{match => ~"prefix"}, Config),
+    assert_delivery([], #{eligible => []}, Config).
+
+%% The publisher's own session leaves `eligible` through `exclude_me`.
+eligible_list_emptied_by_exclusion_admits_no_one(Config) ->
+    ok = subscribe([alice, bob, carol], ?TOPIC, Config),
+    assert_delivery([], #{eligible => [session_id(~"carol")]}, Config),
+    Opts = #{eligible => [session_id(~"bob")], exclude => [session_id(~"bob")]},
+    assert_delivery([], Opts, Config).
 
 exclude_authid(Config) ->
     ok = subscribe([alice, bob], ?TOPIC, Config),

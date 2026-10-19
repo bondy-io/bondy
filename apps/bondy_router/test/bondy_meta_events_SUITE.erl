@@ -31,6 +31,7 @@ knob.
 -export([config_off_silences/1]).
 -export([realm_meta_events_published/1]).
 -export([create_and_delete_are_not_published/1]).
+-export([internal_registration_is_announced/1]).
 
 all() ->
     [
@@ -39,7 +40,8 @@ all() ->
         delivery_with_subscribers,
         config_off_silences,
         realm_meta_events_published,
-        create_and_delete_are_not_published
+        create_and_delete_are_not_published,
+        internal_registration_is_announced
     ].
 
 init_per_suite(Config) ->
@@ -240,6 +242,30 @@ create_and_delete_are_not_published(_) ->
      || Id <- [OnRegister, OnUnregister | SilentIds]
     ],
     ok.
+
+internal_registration_is_announced(_) ->
+    Node = bondy_config:node(),
+    Label = fun(Action) ->
+        #{node => Node, realm => ?REALM, type => registration, action => Action}
+    end,
+    {ok, OnRegister} = subscribe(#{}, ?WAMP_REG_ON_REGISTER),
+    {ok, OnUnregister} = subscribe(#{}, ?WAMP_REG_ON_UNREGISTER),
+    ok = flush_events(),
+    Added0 = counter_value(bondy_registry_events_total, Label(added)),
+    Removed0 = counter_value(bondy_registry_events_total, Label(removed)),
+
+    Ref = bondy_ref:new(internal, self(), bondy_session_id:new()),
+    {ok, RegId} = bondy_dealer:register(
+        <<"com.test.meta.app.internal">>, #{}, ?REALM, Ref
+    ),
+    #event{subscription_id = OnRegister} = await_event(5000),
+    ok = bondy_dealer:unregister(RegId, ?REALM),
+    #event{subscription_id = OnUnregister} = await_event(5000),
+    1 = counter_value(bondy_registry_events_total, Label(added)) - Added0,
+    1 = counter_value(bondy_registry_events_total, Label(removed)) - Removed0,
+
+    ok = bondy_broker:unsubscribe(OnRegister, ?REALM),
+    ok = bondy_broker:unsubscribe(OnUnregister, ?REALM).
 
 %% =============================================================================
 %% PRIVATE

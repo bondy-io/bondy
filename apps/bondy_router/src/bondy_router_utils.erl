@@ -130,6 +130,16 @@ is_uuid(Term) when is_bitstring(Term) ->
 is_uuid(_) ->
     false.
 
+-doc """
+Encodes `Term` with the named encoding; `<<>>` and `undefined` become `<<>>`.
+
+For `json`, a binary that parses as JSON is taken to be encoded already and is
+returned as it is, and any other binary is encoded as a JSON string. The
+caller does not say which a binary is, so a string that happens to parse as
+JSON, such as `<<"123">>`, is sent as the JSON it parses as.
+""".
+-spec maybe_encode(atom() | binary(), term()) -> binary().
+
 maybe_encode(_, <<>>) ->
     <<>>;
 maybe_encode(_, undefined) ->
@@ -139,11 +149,9 @@ maybe_encode(bert, Term) ->
 maybe_encode(erl, Term) ->
     term_to_binary(Term);
 maybe_encode(json, Term) when is_binary(Term) ->
-    %% TODO this is wrong, we should be passing the metadada so that we know in
-    %% which encoding the Term is
     case bondy_wamp_json:try_decode(Term) of
-        {ok, JSON} ->
-            JSON;
+        {ok, _} ->
+            Term;
         {error, _} ->
             bondy_wamp_json:encode(Term)
     end;

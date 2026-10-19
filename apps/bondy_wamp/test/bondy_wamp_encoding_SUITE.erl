@@ -1229,7 +1229,7 @@ call_erl_4_test(_) ->
     ),
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, binary, erl}, Bin),
     ?assertMatch(
-        {call, 1, _, <<"foo">>, [#{<<"bar">> := _}], undefined, undefined},
+        {call, 1, _, <<"foo">>, [[[<<"bar">>, _]]], undefined, undefined},
         M1
     ).
 

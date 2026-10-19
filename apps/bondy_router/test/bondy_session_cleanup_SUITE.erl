@@ -18,6 +18,10 @@ exercises:
 - `graceful_close_*` — `bondy_session_manager:close/1,2` (the cast a
   connection or `close_all/1` sends).
 
+The session-scoped message-id counter is one such resource, so the suite also
+pins its contract: a session without a counter never gets one, and its IDs
+wrap to 1.
+
 What this suite does NOT cover: cross-node convergence of the removals (the
 RIB summaries ride AAE); the realm-delete path on a node OTHER than the one
 that performed the delete — realm deletion is not yet replayed as a local
@@ -52,7 +56,10 @@ all() ->
         oidc_refresh_entry_is_keyed_by_its_session,
         oidc_refresh_entry_dropped_when_session_gone,
         session_match_failure_reaches_the_caller,
-        failed_wildcard_registration_refuses_the_open
+        failed_wildcard_registration_refuses_the_open,
+        purged_session_counter_is_not_recreated,
+        init_session_accepts_a_session_record,
+        session_ids_wrap_to_one
     ].
 
 init_per_suite(Config) ->
@@ -246,6 +253,40 @@ oidc_refresh_entry_dropped_when_session_gone(Config) ->
     ?assertEqual([], oidc_entries(Id)),
     ok.
 
+%% An invocation id drawn for a callee whose session has just closed.
+purged_session_counter_is_not_recreated(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Id = bondy_session_id:new(),
+    ok = bondy_message_id:init_session(RealmUri, Id),
+    ?assertEqual(1, bondy_message_id:session(RealmUri, Id)),
+    ok = bondy_message_id:purge_session(RealmUri, Id),
+    ?assert(is_integer(bondy_message_id:session(RealmUri, Id))),
+    ?assertEqual([], message_id_counters(RealmUri, Id)).
+
+%% WAMP session-scope ids run from 1 to 2^53 and wrap to 1.
+session_ids_wrap_to_one(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Id = bondy_session_id:new(),
+    ok = bondy_message_id:init_session(RealmUri, Id),
+    try
+        true = ets:insert(bondy_session_counter, {{RealmUri, Id}, ?MAX_ID - 1}),
+        ?assertEqual(?MAX_ID, bondy_message_id:session(RealmUri, Id)),
+        ?assertEqual(1, bondy_message_id:session(RealmUri, Id))
+    after
+        bondy_message_id:purge_session(RealmUri, Id)
+    end.
+
+init_session_accepts_a_session_record(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Session = unopened_session(RealmUri),
+    ok = bondy_message_id:init_session(RealmUri, Session),
+    try
+        ?assertEqual(1, bondy_message_id:session(RealmUri, Session)),
+        ?assertEqual(2, bondy_message_id:session(RealmUri, Session))
+    after
+        bondy_message_id:purge_session(RealmUri, Session)
+    end.
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -407,6 +448,16 @@ node_wildcards(RealmUri) ->
      || E <- all_registrations(RealmUri),
         binary:part(bondy_registry_entry:uri(E), 0, Size) == Prefix
     ].
+
+%% @private
+unopened_session(RealmUri) ->
+    bondy_session:new(RealmUri, #{
+        peer => {{127, 0, 0, 1}, 0},
+        is_anonymous => true,
+        authid => <<"anonymous">>,
+        authroles => [],
+        roles => #{caller => #{features => #{call_timeout => true}}}
+    }).
 
 %% @private
 message_id_counters(RealmUri, SessionId) ->

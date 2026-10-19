@@ -69,6 +69,12 @@ defined in this module (`?API_HOST`, `?API_VERSION`, `?API_PATH`,
 `?REQ_SPEC`, etc.). Invalid specs raise errors with descriptive
 messages.
 
+The host, version, path, method, response and action levels accept only the
+keys their spec declares, under any of its names. Any other key raises
+`{unsupported_keys, Where, Keys}`, where `Where` names the level (`{action,
+Type}` for an action), so a misspelt setting is refused rather than replaced by
+its default. `bondy_http_api_gateway_SUITE` checks each level.
+
 ## Error URI → HTTP status code mapping
 
 The spec supports a `status_codes` map at the host and version levels
@@ -472,18 +478,10 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
     <<"variables">> => #{},
     <<"defaults">> => #{},
     <<"is_collection">> => false,
-    <<"headers">> => <<"{{defaults.headers}}">>,
     <<"accepts">> => <<"{{defaults.accepts}}">>,
     <<"provides">> => <<"{{defaults.provides}}">>,
     <<"schemes">> => <<"{{defaults.schemes}}">>,
-    <<"security">> => <<"{{defaults.security}}">>,
-    <<"body_max_bytes">> => <<"{{defaults.body_max_bytes}}">>,
-    <<"body_read_bytes">> => <<"{{defaults.body_read_bytes}}">>,
-    <<"body_read_seconds">> => <<"{{defaults.body_read_seconds}}">>,
-    <<"timeout">> => <<"{{defaults.timeout}}">>,
-    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
-    <<"retries">> => <<"{{defaults.retries}}">>,
-    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
+    <<"security">> => <<"{{defaults.security}}">>
 }).
 
 -define(API_PATH, #{
@@ -1260,7 +1258,7 @@ is_realm_available(Realm) ->
     NewSpec :: map() | {error, invalid_specification_format} | no_return().
 
 parse(Spec, Ctxt) when is_map(Spec) ->
-    parse_host(maps_utils:validate(Spec, ?API_HOST), Ctxt);
+    parse_host(validate_known(host, Spec, ?API_HOST), Ctxt);
 parse(_, _) ->
     {error, invalid_specification_format}.
 
@@ -1291,7 +1289,7 @@ parse_host(Host0, Ctxt0) ->
 -spec parse_version(map(), map()) -> map().
 parse_version(V0, Ctxt0) ->
     {V1, Ctxt1} = merge_eval_vars(V0, Ctxt0),
-    V2 = maps_utils:validate(V1, ?API_VERSION),
+    V2 = validate_known(version, V1, ?API_VERSION),
     %% We merge again in case the validation added defaults
     {V3, Ctxt2} = merge_eval_vars(V2, Ctxt1),
     {Codes1, V4} = maps:take(?STATUS_CODES_KEY, V3),
@@ -1342,7 +1340,7 @@ parse_path(P0, Ctxt0) ->
 
     P4 = parse_path_elements(P3, Ctxt2),
 
-    P5 = maps_utils:validate(P4, ?API_PATH),
+    P5 = validate_known(path, P4, ?API_PATH),
     %% HTTP (and COWBOY) requires uppercase method names
     P6 = maps:put(<<"allowed_methods">>, to_uppercase(L), P5),
     P7 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P6),
@@ -1351,7 +1349,7 @@ parse_path(P0, Ctxt0) ->
         Sec0 = maps:get(Method, IPath),
         try
             Sec1 = parse_request_method(Method, Sec0, Ctxt2),
-            Sec2 = maps_utils:validate(Sec1, ?REQ_SPEC),
+            Sec2 = validate_known(method, Sec1, ?REQ_SPEC),
             maps:update(Method, Sec2, IPath)
         catch
             error:{badkey, Key} ->
@@ -1427,7 +1425,7 @@ this function applies defaults values and evaluates all terms
 If the action type provided is not recognised it fails with
 `{unsupported_action_type, Type}`.
 A key that the action type does not declare fails with
-`{unsupported_action_keys, Type, Keys}`.
+`{unsupported_keys, {action, Type}, Keys}`.
 If an action type is not provided if fails with `action_type_missing`.
 """.
 -spec parse_action(binary(), map(), map()) -> map().
@@ -1451,31 +1449,35 @@ parse_action(<<"options">>, Spec, _) ->
 parse_action(_, _, _) ->
     error(action_type_missing).
 
-%% `maps_utils:validate/2` drops the keys a spec does not declare, which would
-%% accept a setting the action never applies. A default gives way to a key
-%% given under any of its names, or it would shadow an alias.
+%% A default gives way to a key given under any of its names, or it would shadow
+%% an alias.
 validate_action(#{<<"type">> := Type} = Spec, Defaults, ActionSpec, Ctxt) ->
-    Names =
-        #{
-            K => [K | maps:get(aliases, V, [])] ++
-                maps:values(maps:with([alias], V))
-         || K := V <- ActionSpec
-        },
     Given = [
         K
-     || K := Ns <- Names, lists:any(fun(N) -> maps:is_key(N, Spec) end, Ns)
+     || K := Ns <- key_names(ActionSpec),
+        lists:any(fun(N) -> maps:is_key(N, Spec) end, Ns)
     ],
-    case maps:keys(maps:without(lists:append(maps:values(Names)), Spec)) of
-        [] ->
-            maps_utils:validate(
-                mops_eval(
-                    maps:merge(maps:without(Given, Defaults), Spec), Ctxt
-                ),
-                ActionSpec
-            );
-        Keys ->
-            error({unsupported_action_keys, Type, lists:sort(Keys)})
+    validate_known(
+        {action, Type},
+        mops_eval(maps:merge(maps:without(Given, Defaults), Spec), Ctxt),
+        ActionSpec
+    ).
+
+%% `maps_utils:validate/2` drops the keys a spec does not declare, so the check
+%% for them runs first.
+validate_known(Where, Map, Spec) ->
+    Known = lists:append(maps:values(key_names(Spec))),
+    case lists:sort(maps:keys(maps:without(Known, Map))) of
+        [] -> maps_utils:validate(Map, Spec);
+        Keys -> error({unsupported_keys, Where, Keys})
     end.
+
+key_names(Spec) ->
+    #{
+        K => [K | maps:get(aliases, V, [])] ++
+            maps:values(maps:with([alias], V))
+     || K := V <- Spec
+    }.
 
 parse_response(Method, Spec0, Ctxt) ->
     OR0 = maps:get(<<"on_result">>, Spec0, ?DEFAULT_RESPONSE),
@@ -1487,7 +1489,8 @@ parse_response(Method, Spec0, Ctxt) ->
     ok = lint_response_exposure(Method, <<"on_result">>, OR0),
     ok = lint_response_exposure(Method, <<"on_error">>, OE0),
     [OR1, OE1] = [
-        maps_utils:validate(
+        validate_known(
+            response,
             mops_eval(maps:merge(?DEFAULT_RESPONSE, X), Ctxt),
             ?RESPONSE_SPEC
         )

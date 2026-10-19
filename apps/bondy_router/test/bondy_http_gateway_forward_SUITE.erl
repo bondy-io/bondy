@@ -32,6 +32,9 @@ how many requests reached the upstream, not only what the client got.
 -export([an_answer_is_not_retried/1]).
 -export([a_response_without_a_status_keeps_the_upstream_status/1]).
 -export([an_upstream_that_does_not_answer_times_out/1]).
+-export([an_upstream_body_is_returned_as_it_is/1]).
+-export([an_upstream_body_keeps_its_content_type/1]).
+-export([the_spec_content_type_overrides_the_upstream/1]).
 -export([upstream/3]).
 
 all() ->
@@ -42,7 +45,10 @@ all() ->
         post_is_not_sent_again,
         an_answer_is_not_retried,
         a_response_without_a_status_keeps_the_upstream_status,
-        an_upstream_that_does_not_answer_times_out
+        an_upstream_that_does_not_answer_times_out,
+        an_upstream_body_is_returned_as_it_is,
+        an_upstream_body_keeps_its_content_type,
+        the_spec_content_type_overrides_the_upstream
     ].
 
 init_per_suite(Config) ->
@@ -56,7 +62,18 @@ init_per_suite(Config) ->
         #{
             Case => free_port()
          || Case <- [
-                late, once, never, post, answer, plain_ok, plain_error, silent
+                late,
+                once,
+                never,
+                post,
+                answer,
+                plain_ok,
+                plain_error,
+                silent,
+                json_body,
+                text_body,
+                typed_body,
+                spec_typed_body
             ]
         },
     ok = bondy_http_gateway:load(#{
@@ -81,7 +98,13 @@ init_per_suite(Config) ->
                     ~"/answer" => #{~"get" => forward(Ports, answer, 3)},
                     ~"/plain_ok" => #{~"get" => plain(Ports, plain_ok)},
                     ~"/plain_error" => #{~"get" => plain(Ports, plain_error)},
-                    ~"/silent" => #{~"get" => silent(Ports)}
+                    ~"/silent" => #{~"get" => silent(Ports)},
+                    ~"/json_body" => #{~"get" => forward(Ports, json_body, 0)},
+                    ~"/text_body" => #{~"get" => forward(Ports, text_body, 0)},
+                    ~"/typed_body" => #{
+                        ~"get" => forward(Ports, typed_body, 0)
+                    },
+                    ~"/spec_typed_body" => #{~"get" => spec_typed(Ports)}
                 }
             }
         }
@@ -157,6 +180,33 @@ an_upstream_that_does_not_answer_times_out(Config) ->
         {Status, maps:get(~"uri", json:decode(Body))}
     ).
 
+%% The gateway forwards the upstream's bytes; a body that is not JSON is not
+%% encoded as a JSON string, and one that is JSON is not decoded.
+an_upstream_body_is_returned_as_it_is(Config) ->
+    ok = upstream(self(), port(json_body, Config), {200, ~"{\"a\":[1,2]}"}),
+    ok = upstream(self(), port(text_body, Config), {200, ~"hello"}),
+    ?assertEqual({200, ~"{\"a\":[1,2]}"}, request(get, ~"/json_body")),
+    {200, Headers, ~"hello"} = response(get, ~"/text_body"),
+    ?assertNot(is_map_key(~"content-type", Headers)).
+
+an_upstream_body_keeps_its_content_type(Config) ->
+    ok = upstream(
+        self(), port(typed_body, Config), {200, ~"text/plain", ~"hello"}
+    ),
+    ?assertMatch(
+        {200, #{~"content-type" := ~"text/plain"}, ~"hello"},
+        response(get, ~"/typed_body")
+    ).
+
+the_spec_content_type_overrides_the_upstream(Config) ->
+    ok = upstream(
+        self(), port(spec_typed_body, Config), {200, ~"text/plain", ~"a,b"}
+    ),
+    ?assertMatch(
+        {200, #{~"content-type" := ~"text/csv"}, ~"a,b"},
+        response(get, ~"/spec_typed_body")
+    ).
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -186,6 +236,17 @@ silent(Ports) ->
     #{~"action" := Action} = Spec = forward(Ports, silent, 0),
     Spec#{~"action" => Action#{~"timeout" => 500}}.
 
+spec_typed(Ports) ->
+    #{~"response" := #{~"on_result" := OnResult} = Response} =
+        Spec = forward(Ports, spec_typed_body, 0),
+    Spec#{
+        ~"response" => Response#{
+            ~"on_result" => OnResult#{
+                ~"headers" => #{~"content-type" => ~"text/csv"}
+            }
+        }
+    }.
+
 plain(Ports, Case) ->
     #{
         ~"action" => maps:get(~"action", forward(Ports, Case, 0)),
@@ -204,23 +265,29 @@ free_port() ->
 %% Dispatch table rebuilds are debounced, so the route answers 404 until it is
 %% mounted; a 404 never reaches the action.
 request(Method, Path) ->
-    request(Method, Path, 50).
+    {Status, _, Body} = response(Method, Path),
+    {Status, Body}.
 
-request(_, _, 0) ->
+response(Method, Path) ->
+    response(Method, Path, 50).
+
+response(_, _, 0) ->
     ct:fail(route_not_mounted);
-request(Method, Path, N) ->
+response(Method, Path, N) ->
     Url = iolist_to_binary([
         "http://localhost:18080", ?BASE_PATH, Path
     ]),
     Headers = [{~"content-type", ~"application/json"}],
-    {ok, Status, _, Ref} = hackney:request(Method, Url, Headers, ~"{}", []),
+    {ok, Status, RespHeaders, Ref} = hackney:request(
+        Method, Url, Headers, ~"{}", []
+    ),
     {ok, Body} = hackney:body(Ref),
     case Status of
         404 ->
             timer:sleep(100),
-            request(Method, Path, N - 1);
+            response(Method, Path, N - 1);
         _ ->
-            {Status, Body}
+            {Status, #{string:lowercase(K) => V || {K, V} <- RespHeaders}, Body}
     end.
 
 assert_bad_gateway({Status, Body}) ->
@@ -240,7 +307,9 @@ upstream_requests(Port) ->
     end.
 
 %% Listens on `Port` and answers every request with `Status`, reporting each to
-%% `Owner`. A `silent` upstream reads each request and never answers it.
+%% `Owner`. `Status` may carry a body as `{Status, Body}`, and a content type as
+%% `{Status, ContentType, Body}`. A `silent` upstream
+%% reads each request and never answers it.
 upstream(Owner, Port, Status) ->
     Self = self(),
     Ready = make_ref(),
@@ -266,11 +335,23 @@ accept(Owner, Port, Listen, Status) ->
 
 answer(_, silent) ->
     ok;
-answer(Socket, Status) ->
+answer(Socket, Status) when is_integer(Status) ->
+    answer(Socket, {Status, <<>>});
+answer(Socket, {Status, Body}) ->
+    answer(Socket, Status, [], Body);
+answer(Socket, {Status, ContentType, Body}) ->
+    answer(Socket, Status, ["content-type: ", ContentType, "\r\n"], Body).
+
+answer(Socket, Status, Headers, Body) ->
     ok = gen_tcp:send(Socket, [
         "HTTP/1.1 ",
         integer_to_list(Status),
-        " Status\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+        " Status\r\n",
+        Headers,
+        "content-length: ",
+        integer_to_list(byte_size(Body)),
+        "\r\nconnection: close\r\n\r\n",
+        Body
     ]),
     gen_tcp:close(Socket).
 

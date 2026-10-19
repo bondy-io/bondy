@@ -136,6 +136,11 @@ option is `{limit, _}` (see `find/4`); the result shape is keyed on it.
     invoke => wildcard(binary()),
     sort => bondy_registry_entry:comparator()
 }.
+-doc """
+`eligible` admits only the listed local sessions, so an empty list admits none;
+`exclude` withholds the listed ones. `bondy_broker_publish_options_SUITE`
+covers both, through exact and prefix subscriptions.
+""".
 -type sub_match_opts() :: #{
     nodestring => wildcard(nodestring()),
     node => wildcard(node()),
@@ -1860,7 +1865,6 @@ ms_node_filter(Opts) ->
 ms_id_set_filter(Key, Opts) ->
     case maps:find(Key, Opts) of
         error -> '_';
-        {ok, []} -> '_';
         {ok, Ids} -> sets:from_list(Ids)
     end.
 
@@ -1960,11 +1964,9 @@ topic_session_restrictions(Var, Opts) ->
     R =
         case maps:find(eligible, Opts) of
             error ->
-                %% Not provided
                 {'_', []};
             {ok, []} ->
-                %% Idem as not provided
-                {'_', []};
+                {Var, [false]};
             {ok, EligibleIds} ->
                 Eligible = maybe_or(
                     [

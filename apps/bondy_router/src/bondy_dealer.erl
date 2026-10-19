@@ -479,6 +479,10 @@ retry(Promise) ->
 -doc """
 Creates a local registration.
 
+The registration is announced like one made by a WAMP REGISTER: registry
+counters, the `wamp.registration.on_register` meta event and the bridge relay
+(`bondy_meta_events_SUITE:internal_registration_is_announced`).
+
 If the registration is done using a callback module, only the invoke single
 strategy can be used (i.e. `shared_registration` and `sharded_registration`
 are also disabled). Also the callback module needs to conform to the
@@ -519,6 +523,7 @@ register(Procedure, Opts0, RealmUri, Ref) ->
 
     case bondy_registry:add(registration, RealmUri, Procedure, Opts, Ref) of
         {ok, Entry} ->
+            ok = on_register(Entry),
             {ok, bondy_registry_entry:id(Entry)};
         {error, {already_exists, _}} ->
             {error, already_exists};
@@ -2673,11 +2678,17 @@ call_opts(_) -> #{}.
 %% meta-event publication is demand-gated (see bondy_meta_events).
 on_register(Entry) ->
     ok = bondy_telemetry:registry_event(registration, added, Entry),
+    ok = bondy_event_manager:notify({
+        [bondy, dealer, registration, added], Entry
+    }),
     bondy_meta_events:maybe_publish(added, Entry).
 
 %% @private
 on_unregister(Entry) ->
     ok = bondy_telemetry:registry_event(registration, removed, Entry),
+    ok = bondy_event_manager:notify(
+        {[bondy, dealer, registration, removed], Entry}
+    ),
     bondy_meta_events:maybe_publish(removed, Entry).
 
 %% @private

@@ -36,7 +36,10 @@ and the token-cache suites).
     successful_get_request_emits_ok_metrics/1,
     client_error_response_classified_correctly/1,
     retries_exhausted_emits_retries_total_and_bad_gateway/1,
-    retry_attempt_numbers_are_correct_for_non_default_retries/1
+    retry_attempt_numbers_are_correct_for_non_default_retries/1,
+    pending_credentials_are_unavailable/1,
+    a_failed_token_fetch_is_unavailable/1,
+    a_handler_fault_is_an_internal_error/1
 ]).
 
 all() ->
@@ -44,7 +47,10 @@ all() ->
         successful_get_request_emits_ok_metrics,
         client_error_response_classified_correctly,
         retries_exhausted_emits_retries_total_and_bad_gateway,
-        retry_attempt_numbers_are_correct_for_non_default_retries
+        retry_attempt_numbers_are_correct_for_non_default_retries,
+        pending_credentials_are_unavailable,
+        a_failed_token_fetch_is_unavailable,
+        a_handler_fault_is_an_internal_error
     ].
 
 %% ===================================================================
@@ -150,6 +156,53 @@ end_per_testcase(_TC, Config) ->
         ]
     ),
     ok.
+
+%% ===================================================================
+%% Errors the connector raises itself
+%% ===================================================================
+
+%% A gateway `wamp_call` answers with the status the error URI maps to
+%% (`bondy_http_api_gateway_SUITE:call_error_without_a_status_keeps_the_error_status_test`),
+%% so these conditions must not name the upstream.
+pending_credentials_are_unavailable(Config) ->
+    ServiceName = ?config(service_name, Config),
+    Tab = ets:new(bondy_http_connector_manager, [named_table, set]),
+    true = ets:insert(Tab, {ServiceName, not_ready}),
+    try
+        ProcConf = base_proc_conf(Config, <<"com.example.pending">>),
+        ?assertMatch(
+            {error, <<"bondy.error.unavailable">>, _, _, #{
+                <<"status">> := 503
+            }},
+            bondy_http_connector_callee_handler:handle_wamp_call(
+                ProcConf#http_connector_proc_conf{vars_resolved = false},
+                #{},
+                #{}
+            )
+        )
+    after
+        ets:delete(Tab)
+    end.
+
+a_failed_token_fetch_is_unavailable(Config) ->
+    bondy_http_connector_mock_auth:set_error(token_endpoint_down),
+    ?assertMatch(
+        {error, <<"bondy.error.unavailable">>, _, _, #{<<"status">> := 503}},
+        bondy_http_connector_callee_handler:handle_wamp_call(
+            base_proc_conf(Config, <<"com.example.no_token">>), #{}, #{}
+        )
+    ).
+
+a_handler_fault_is_an_internal_error(Config) ->
+    ProcConf = base_proc_conf(Config, <<"com.example.fault">>),
+    ?assertMatch(
+        {error, <<"bondy.error.internal_error">>, _, _, #{
+            <<"status">> := 500
+        }},
+        bondy_http_connector_callee_handler:handle_wamp_call(
+            ProcConf#http_connector_proc_conf{method = trace}, #{}, #{}
+        )
+    ).
 
 %% ===================================================================
 %% Helpers

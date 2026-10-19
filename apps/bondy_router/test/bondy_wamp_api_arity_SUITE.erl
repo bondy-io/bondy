@@ -80,6 +80,7 @@ declared_no_realm() ->
         {~"bondy.http_gateway.api.get", 1},
         {~"bondy.http_gateway.api.list", 0},
         {~"bondy.http_gateway.api.load", 1},
+        {~"bondy.http_gateway.api.status", 0},
         {~"bondy.interface.delete", 1},
         {~"bondy.interface.get", 1},
         {~"bondy.interface.list", 0},

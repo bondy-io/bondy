@@ -541,7 +541,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 <<"headers">> := Headers
             } = Response,
             Req1 = set_resp_headers(Headers, Req0),
-            {maybe_encode(Enc, Body, Spec), Req1, St1};
+            {maybe_encode(Enc, Body), Req1, St1};
         {ok, StatusCode, Response, St1} ->
             Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St1};
@@ -1190,7 +1190,7 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) when
     Response0 = mops_eval(maps:get(<<"on_error">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
     {FinalCode, Response1} = take_status_code(Response0, StatusCode),
-    {error, FinalCode, Response1, St1};
+    {error, FinalCode, upstream_bytes(RespHeaders, RespBody, Response1), St1};
 from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     Ctxt0 = maps:get(api_context, St0),
     Result0 = #{
@@ -1209,7 +1209,27 @@ from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     Response0 = mops_eval(maps:get(<<"on_result">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
     {StatusCode1, Response1} = take_status_code(Response0, StatusCode0),
-    {ok, StatusCode1, Response1, St1}.
+    {ok, StatusCode1, upstream_bytes(RespHeaders, RespBody, Response1), St1}.
+
+%% @private
+%% A binary body of a `forward` response is the upstream's bytes, or text the
+%% spec wrote in their place, and is sent as it is; any other body is encoded.
+%% The upstream's bytes keep its content type, or none when it named none (RFC
+%% 9110, section 8.3); the spec's response headers override either
+%% (`bondy_http_gateway_forward_SUITE`).
+upstream_bytes(RespHeaders, Bytes, #{<<"body">> := Bytes} = Response) ->
+    Response#{<<"body">> => {encoded, Bytes, content_type(RespHeaders)}};
+upstream_bytes(_, _, #{<<"body">> := Body} = Response) when is_binary(Body) ->
+    Response#{<<"body">> => {encoded, Body}};
+upstream_bytes(_, _, #{<<"body">> := _} = Response) ->
+    Response.
+
+%% @private
+content_type(Headers) ->
+    case [V || {K, V} <- Headers, string:lowercase(K) =:= <<"content-type">>] of
+        [Value | _] -> Value;
+        [] -> undefined
+    end.
 
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
     {_, Body} = take_status_code(
@@ -1252,22 +1272,25 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
 -spec reply(integer(), atom(), map(), cowboy_req:req()) ->
     cowboy_req:req().
 
-reply(HTTPCode, Enc, Response, Req0) ->
-    %% We add the content-type since we are bypassing Cowboy by replying
-    %% ourselves
-    MimeType =
-        case Enc of
-            msgpack ->
-                <<"application/msgpack; charset=utf-8">>;
-            json ->
-                <<"application/json; charset=utf-8">>;
+reply(HTTPCode, Enc, #{<<"body">> := Body} = Response, Req0) ->
+    %% We set the content-type since we are bypassing Cowboy by replying
+    %% ourselves, and drop the one `cowboy_rest` negotiated for a body that has
+    %% none
+    Req1 =
+        case media_type(Enc, Body) of
             undefined ->
-                <<"application/json; charset=utf-8">>;
-            Bin ->
-                Bin
+                cowboy_req:delete_resp_header(<<"content-type">>, Req0);
+            MimeType ->
+                cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0)
         end,
-    Req1 = cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0),
     cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req1)).
+
+%% @private
+media_type(_, {encoded, _, ContentType}) -> ContentType;
+media_type(msgpack, _) -> <<"application/msgpack; charset=utf-8">>;
+media_type(json, _) -> <<"application/json; charset=utf-8">>;
+media_type(undefined, _) -> <<"application/json; charset=utf-8">>;
+media_type(Bin, _) -> Bin.
 
 %% @private
 -spec prepare_request(atom(), map(), cowboy_req:req()) ->
@@ -1315,19 +1338,13 @@ method_to_atom(<<"post">>) -> post;
 method_to_atom(<<"put">>) -> put.
 
 %% @private
+maybe_encode(_, {encoded, Body}) ->
+    Body;
+maybe_encode(_, {encoded, Body, _}) ->
+    Body;
 maybe_encode(undefined, Body) ->
     Body;
 maybe_encode(Enc, Body) ->
-    bondy_router_utils:maybe_encode(Enc, Body).
-
-%% @private
-maybe_encode(_, <<>>, _) ->
-    <<>>;
-maybe_encode(undefined, Body, _) ->
-    Body;
-maybe_encode(_, Body, #{<<"action">> := #{<<"type">> := <<"forward">>}}) ->
-    Body;
-maybe_encode(Enc, Body, _) ->
     bondy_router_utils:maybe_encode(Enc, Body).
 
 error_encoding(json) -> json;

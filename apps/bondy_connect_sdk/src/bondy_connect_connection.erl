@@ -186,10 +186,11 @@ represent a stream of progressive results — use `call_async/5` for that.
 call(_, _, _, _, #{receive_progress := true}) ->
     tag_error({error, {invalid_option, receive_progress}});
 call(Pid, Uri, Args, KWArgs, Opts) ->
-    Timeout = maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT),
     tag_error(
         call_safe(
-            Pid, {call, Uri, Args, KWArgs, Opts}, Timeout + ?CALL_TIMEOUT_SLACK
+            Pid,
+            {call, Uri, Args, KWArgs, Opts},
+            reply_timeout(Opts) + ?CALL_TIMEOUT_SLACK
         )
     ).
 
@@ -528,7 +529,7 @@ established(
         call,
         {async, Owner, Token},
         call_msg(Uri, Args, KWArgs, Opts),
-        call_timeout(Opts),
+        reply_timeout(Opts),
         Meta,
         Data
     ),
@@ -904,7 +905,7 @@ do_call(From, Uri, Args, KWArgs, Opts, Data) ->
         call,
         From,
         call_msg(Uri, Args, KWArgs, Opts),
-        call_timeout(Opts),
+        reply_timeout(Opts),
         #{},
         Data
     ),
@@ -1941,6 +1942,21 @@ set_request_id(#call{} = M, ReqId) ->
 %% @private
 call_timeout(Opts) ->
     maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT).
+
+%% @private How long the client waits for a CALL's reply: until the router's
+%% `bondy_wamp_api_utils:retry_deadline/1`, after which the dealer starts no
+%% attempt. The dealer retries no progressive call; `bondy_rpc_retry_SUITE`
+%% covers both.
+reply_timeout(#{receive_progress := true} = Opts) ->
+    call_timeout(Opts);
+reply_timeout(#{'_retries' := N, '_deadline' := D}) when
+    is_integer(N), N > 0, is_integer(D), D > 0
+->
+    D;
+reply_timeout(#{'_retries' := N} = Opts) when is_integer(N), N > 0 ->
+    (N + 1) * call_timeout(Opts);
+reply_timeout(Opts) ->
+    call_timeout(Opts).
 
 %% @private Absolute (monotonic) deadline from the `_deadline` option, or
 %% `infinity`.

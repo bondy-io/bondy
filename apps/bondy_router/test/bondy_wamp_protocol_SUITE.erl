@@ -19,6 +19,7 @@ all() ->
         init_ok,
         terminate,
         handle_inbound,
+        a_term_outside_the_wamp_data_model_is_a_protocol_violation,
         throttle_disabled_by_default,
         throttle_when_enabled,
         throttle_message_class,
@@ -438,6 +439,28 @@ handle_inbound(_Config) ->
     Error = {unsupported_encoding, EncodingUnsupported},
     ?assertError(
         Error, bondy_wamp_protocol:handle_inbound(<<>>, StateInvalidSP)
+    ).
+
+%% An `erl` peer can send any term `binary_to_term/2` accepts. A list with an
+%% improper tail or a tuple below the message level has no WAMP value, so the
+%% frame is refused as malformed, as a JSON frame that does not parse is.
+a_term_outside_the_wamp_data_model_is_a_protocol_violation(_Config) ->
+    Realm = ~"com.example.test.wamp_protocol",
+    lists:foreach(
+        fun(Value) ->
+            {ok, St} = bondy_wamp_protocol:init(
+                {raw, binary, erl}, {{127, 0, 0, 1}, 5000}, #{}
+            ),
+            Data = term_to_binary([
+                ?HELLO, Realm, #{~"roles" => #{~"caller" => #{}}, ~"x" => Value}
+            ]),
+            ?assertMatch(
+                {stop, ?WAMP_PROTOCOL_VIOLATION, [_], _},
+                bondy_wamp_protocol:handle_inbound(Data, St),
+                Value
+            )
+        end,
+        [[1 | 2], [[~"a", 1 | ~"b"]], {1, 2}]
     ).
 
 %% -----------------------------------------------------------------------------

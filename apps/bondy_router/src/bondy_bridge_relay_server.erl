@@ -934,13 +934,14 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
 
     try key_value:get([SessionId, OriginId], Index0) of
         ProxyId ->
-            %% TODO get ctxt from session once we have real sessions
-            RealmUri = session_realm(SessionId, State),
-            Node = bondy_config:node(),
+            %% The proxy entry carries the session id of the session's ref
+            %% (`add_registry_entry/3`), not the key of `sessions`.
             Ctxt = #{
-                realm_uri => RealmUri,
-                node => Node,
-                session_id => SessionId
+                realm_uri => session_realm(SessionId, State),
+                node => bondy_config:node(),
+                session_id => bondy_ref:session_id(
+                    session_ref(SessionId, State)
+                )
             },
 
             ok = bondy_registry:remove(Type, ProxyId, Ctxt),

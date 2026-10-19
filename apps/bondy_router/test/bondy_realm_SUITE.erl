@@ -46,6 +46,9 @@ all() ->
         delete_removes_retained_messages,
         delete_refuses_a_referenced_prototype,
         delete_refuses_a_referenced_sso_realm,
+        sso_switch_is_refused_while_users_link_to_the_sso_realm,
+        prototype_sso_switch_is_refused_while_a_member_has_linked_users,
+        sso_switch_cannot_hand_a_user_another_identity,
         delete_api_reports_a_refusal_as_a_conflict
     ].
 
@@ -278,6 +281,84 @@ delete_refuses_a_referenced_sso_realm(_) ->
     ?assertMatch({ok, _}, bondy_realm:lookup(SSOUri)),
     ok = bondy_realm:delete(Uri),
     ?assertEqual(ok, bondy_realm:delete(SSOUri)).
+
+sso_switch_is_refused_while_users_link_to_the_sso_realm(_) ->
+    [S1, S2] = [sso_realm() || _ <- [1, 2]],
+    Uri = gen_uri(),
+    _ = bondy_realm:create(#{uri => Uri, sso_realm_uri => S1}),
+    ok = add_sso_user(Uri, ?U1, S1),
+    ?assertError(
+        {inconsistency_error, [sso_realm_uri], _},
+        bondy_realm:update(Uri, #{sso_realm_uri => S2})
+    ),
+    ?assertError(
+        {inconsistency_error, [sso_realm_uri], _},
+        bondy_realm:update(Uri, #{sso_realm_uri => undefined})
+    ),
+    ?assertEqual(S1, bondy_realm:sso_realm_uri(Uri)),
+    ?assertEqual(
+        S1,
+        bondy_realm:sso_realm_uri(
+            bondy_realm:update(Uri, #{sso_realm_uri => S1})
+        )
+    ),
+    ok = bondy_rbac_user:remove(Uri, ?U1),
+    ?assertEqual(
+        S2,
+        bondy_realm:sso_realm_uri(
+            bondy_realm:update(Uri, #{sso_realm_uri => S2})
+        )
+    ).
+
+%% A member that sets its own `sso_realm_uri` does not inherit the prototype's,
+%% so its users do not hold the prototype back.
+prototype_sso_switch_is_refused_while_a_member_has_linked_users(_) ->
+    [S1, S2, S3] = [sso_realm() || _ <- [1, 2, 3]],
+    ProtoUri = gen_uri(),
+    _ = bondy_realm:create(#{
+        uri => ProtoUri, is_prototype => true, sso_realm_uri => S1
+    }),
+    Inherits = gen_uri(),
+    _ = bondy_realm:create(#{uri => Inherits, prototype_uri => ProtoUri}),
+    Overrides = gen_uri(),
+    _ = bondy_realm:create(#{
+        uri => Overrides, prototype_uri => ProtoUri, sso_realm_uri => S3
+    }),
+    ok = add_sso_user(Inherits, ?U1, S1),
+    ok = add_sso_user(Overrides, ?U2, S3),
+    ?assertError(
+        {inconsistency_error, [sso_realm_uri], _},
+        bondy_realm:update(ProtoUri, #{sso_realm_uri => S2})
+    ),
+    ?assertEqual(S1, bondy_realm:sso_realm_uri(Inherits)),
+    ok = bondy_rbac_user:remove(Inherits, ?U1),
+    _ = bondy_realm:update(ProtoUri, #{sso_realm_uri => S2}),
+    ?assertEqual(S2, bondy_realm:sso_realm_uri(Inherits)),
+    ?assertEqual(S3, bondy_realm:sso_realm_uri(Overrides)).
+
+%% Two realms with SSO realms `S1` and `S2` each hold a user named `?U1`, two
+%% people. Were the first realm switched to `S2`, its `?U1` would log in with
+%% `S1` credentials and receive an `S2`-issued token the second realm accepts as
+%% its own `?U1`.
+sso_switch_cannot_hand_a_user_another_identity(_) ->
+    [S1, S2] = [sso_realm() || _ <- [1, 2]],
+    Mine = gen_uri(),
+    Theirs = gen_uri(),
+    _ = bondy_realm:create(token_realm(Mine, S1)),
+    _ = bondy_realm:create(token_realm(Theirs, S2)),
+    ok = add_sso_user(Mine, ?U1, S1),
+    ok = add_sso_user(Theirs, ?U1, S2),
+    _ = catch_inconsistency(fun() ->
+        bondy_realm:update(Mine, #{sso_realm_uri => S2})
+    end),
+    {ok, Ctxt} = bondy_auth:init(
+        bondy_session_id:new(), Mine, ?U1, [], {127, 0, 0, 1}
+    ),
+    {ok, Token} = bondy_oauth_token:issue(password, Ctxt, #{allow_sso => true}),
+    {ok, {JWT, _}} = bondy_oauth_token:to_access_token(Token),
+    ?assertEqual(
+        {error, untrusted_issuer}, bondy_oauth_jwt:verify(Theirs, JWT)
+    ).
 
 %% The admin API reports the refusal as a permanent `conflict` naming the
 %% dependent realms, not as an internal error a client would retry.
@@ -616,4 +697,38 @@ wait_until(Fun, Remaining) ->
         false ->
             timer:sleep(100),
             wait_until(Fun, Remaining - 100)
+    end.
+
+sso_realm() ->
+    Uri = gen_uri(),
+    _ = bondy_realm:create(#{uri => Uri, is_sso_realm => true}),
+    Uri.
+
+add_sso_user(RealmUri, Username, SSOUri) ->
+    User = bondy_rbac_user:new(#{
+        username => Username,
+        password => ~"a-good-password",
+        sso_realm_uri => SSOUri
+    }),
+    {ok, _} = bondy_rbac_user:add(RealmUri, User),
+    ok.
+
+token_realm(Uri, SSOUri) ->
+    #{
+        uri => Uri,
+        sso_realm_uri => SSOUri,
+        security_enabled => true,
+        authmethods => [?PASSWORD_AUTH, ?WAMP_OAUTH2_AUTH],
+        sources => [
+            #{usernames => ~"all", authmethod => M, cidr => ~"0.0.0.0/0"}
+         || M <- [?PASSWORD_AUTH, ?WAMP_OAUTH2_AUTH]
+        ]
+    }.
+
+%% The refusal under test; any other failure propagates.
+catch_inconsistency(Fun) ->
+    try
+        Fun()
+    catch
+        error:{inconsistency_error, [sso_realm_uri], _} = Reason -> Reason
     end.

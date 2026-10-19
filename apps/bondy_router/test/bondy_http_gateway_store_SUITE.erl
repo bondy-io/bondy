@@ -307,15 +307,44 @@ static_path_is_not_shadowed_by_a_binding_test(_) ->
         ok = bondy_http_gateway:delete(Id)
     end.
 
+%% Cowboy commits to the first host that matches, so a literal host must come
+%% before a binding host that would also match it.
+literal_host_is_not_shadowed_by_a_binding_host_test(_) ->
+    Literal = <<"com.bondy.test.gateway_store.literal_host">>,
+    Binding = <<"com.bondy.test.gateway_store.binding_host">>,
+    Get = maps:get(<<"/things">>, paths(spec(Literal, ?REALM))),
+    LiteralSpec = with_paths(spec(Literal, ?REALM), #{<<"/literal">> => Get}),
+    ok = bondy_http_gateway:load(LiteralSpec#{<<"host">> => <<"api.myapi.com">>}),
+    ok = bondy_http_gateway:load(
+        (spec(Binding, ?REALM))#{<<"host">> => <<":tenant.myapi.com">>}
+    ),
+    ok = bondy_http_gateway:rebuild_dispatch_tables(),
+    try
+        ?assertEqual(
+            <<"/v1.0/literal">>,
+            route_of(<<"api.myapi.com">>, <<"/v1.0/literal">>)
+        ),
+        ?assertEqual(
+            <<"/v1.0/things">>,
+            route_of(<<"acme.myapi.com">>, <<"/v1.0/things">>)
+        )
+    after
+        ok = bondy_http_gateway:delete(Literal),
+        ok = bondy_http_gateway:delete(Binding)
+    end.
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
 
 %% The route template that the served dispatch table of every plain-HTTP API
-%% Gateway listener sends `Path` on `myapi.com` to. The spec declares `http`
+%% Gateway listener sends `Path` on `Host` to. The spec declares `http`
 %% only, so a TLS listener serves none of its routes.
 route_of(Path) ->
-    Req = #{host => <<"myapi.com">>, path => Path},
+    route_of(<<"myapi.com">>, Path).
+
+route_of(Host, Path) ->
+    Req = #{host => Host, path => Path},
     Names = [
         Name
      || #{

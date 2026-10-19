@@ -963,6 +963,9 @@ fold_matches([], _Fun, Acc) ->
 on_subscribe(Entry) ->
     ok = maybe_send_retained(Entry),
     ok = bondy_telemetry:registry_event(subscription, added, Entry),
+    ok = bondy_event_manager:notify({
+        [bondy, broker, subscription, added], Entry
+    }),
     bondy_meta_events:maybe_publish(added, Entry).
 
 %% @private
@@ -970,6 +973,9 @@ on_subscribe(Entry) ->
 
 on_unsubscribe(Entry) ->
     ok = bondy_telemetry:registry_event(subscription, removed, Entry),
+    ok = bondy_event_manager:notify(
+        {[bondy, broker, subscription, removed], Entry}
+    ),
     bondy_meta_events:maybe_publish(removed, Entry).
 
 %% =============================================================================

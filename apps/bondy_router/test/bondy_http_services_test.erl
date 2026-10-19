@@ -281,16 +281,6 @@ wildcard_routes_are_replicated_into_every_named_host_test() ->
         ?assert(lists:keymember("/cluster/topology", 1, Named))
     end).
 
-the_wildcard_host_is_emitted_last_test() ->
-    %% Order is load-bearing, not cosmetic: `match/3`'s `'_'` clause matches
-    %% unconditionally (`cowboy_router.erl:225`), so a `'_'` entry placed first
-    %% shadows every named host entirely.
-    with_vhost_carrier(fun() ->
-        Dispatch = bondy_http_services:dispatch(listener([admin, vhost])),
-        ?assertEqual('_', element(1, lists:last(Dispatch))),
-        ?assertEqual(2, length(Dispatch))
-    end).
-
 the_wildcard_host_is_always_emitted_test() ->
     %% A listener whose only carrier contributes no route still gets a `'_'`
     %% entry. An empty dispatch list would change the answer to an unmatched

@@ -2,14 +2,15 @@
 ## 1.0.0
 
 ### Action required
-* Upgrading from a pre-release that carries `bondy_db` (for example `1.0.0-rc.olive` or `1.0.0-rc.pear`) requires stopping every node and starting them all on this release. See [Upgrading from the bondy_db pre-releases](doc/guides/configuration/upgrading_from_bondy_db_prereleases.md).
-* Upgrading from `1.0.0-rc.65` requires a new cluster: PlumDB data is not readable by this release. See the [migration guide](doc/guides/configuration/migrating_from_1.0.0-rc.65.md).
+* Upgrading from `1.0.0-rc.65` (or previous versions) requires a new cluster: PlumDB data is not readable by this release. See the [migration guide](doc/guides/configuration/migrating_from_1.0.0-rc.65.md).
 * A single-node deployment must set `cluster.enabled = off`; with `on` and no other member, compaction, reclamation, origin retirement and the authentication freshness fence hold. See [Clustering](doc/guides/configuration/clustering.md#running-a-single-node).
 * Listeners are declared under `listeners.$name.*`; the fixed per-scheme listener keys are removed, and every enabled `tls` listener must state its certificate. See [Listeners](doc/guides/configuration/listeners.md#migrating-from-the-pre-10-keys).
 * `listeners.$name.linger.timeout` is in seconds; a value written with a unit suffix changes meaning (`scripts/migrate_conf.escript check` reports it). See [Listeners](doc/guides/configuration/listeners.md).
 * Renamed or removed `bondy.conf` keys: `wamp.transport_queue.*` → `wamp.http_transport.*`; the global `wamp.{websocket,sse,longpoll}.*` blocks, the thirty `wamp.broker.*`/`wamp.dealer.*` feature keys, `wamp.dealer.pattern_based_registration`, `wamp.broker.pattern_based_subscription`, `store.*`, `oplog.core.scan_max_concurrency` and `db.compaction.peer_timeout` are removed; `rpc_gateway.*` is `http_connector.*`. `scripts/migrate_conf.escript` reports and rewrites them.
 * `advanced.config` stanzas for the router move from `{bondy, …}` to `{bondy_router, …}`, and remote-console module names changed. See the [migration guide](doc/guides/configuration/migrating_from_1.0.0-rc.65.md).
 * A custom `bondy_oplog_cache_adapter` must implement `ticket/1` and `fill/5` in place of `put/4`.
+* An API Gateway specification with a key the parser does not know is refused, at the host, version, path, method, action and response levels; a misspelt key used to be dropped and its default applied.
+* The `wamp_call` action's `retries` and `retry_timeout` are removed. Ask for retries with the CALL options `_retries` and `_idempotent` instead.
 
 ### New Features
 * New storage and replication stack replacing PlumDB/RocksDB: `bondy_db` on `bondy_oplog` and the vendored `bondy_mst`. See [Database architecture](doc/guides/architecture/db_architecture.md) and [Database options](doc/guides/configuration/database_options.md).
@@ -28,6 +29,8 @@
 * `scripts/migrate_conf.escript` checks and rewrites a `bondy.conf`. See [Checking your configuration](doc/guides/configuration/checking_your_configuration.md).
 * One error payload for every transport. See the [error catalogue](doc/guides/reference/error_catalogue.md).
 * `cluster.enabled = off` runs a node without clustering; it compacts and reclaims on its own frontier. New error `bondy.error.cluster_disabled` (`K004`). See [Clustering](doc/guides/configuration/clustering.md).
+* `CALL.Options._retries` asks the dealer to retry a call that got no answer, when the registration is `_idempotent`, until the call's `_deadline` or `_retries + 1` timeouts. `bondy_connect_sdk` waits for the whole window.
+* The API Gateway `forward` action retries a request that got no response when its method is idempotent.
 
 ### Security
 * Inbound rate limiting (`security.rate_limit.*`, off by default). See [Load regulation and rate limiting](doc/guides/configuration/load_regulation_and_rate_limiting.md).
@@ -39,6 +42,11 @@
 * Fixed: a claim-restricted (for example OIDC) session received the grants of the user's locally stored group memberships. See [Authorization](doc/guides/security/authorization.md).
 * WAMP URI validation rejects control characters, and realm URIs with NUL bytes are refused.
 * Cowboy 2.18.0 and cowlib 2.19.0. See [Listeners](doc/guides/configuration/listeners.md#request-validation).
+* Bridge relay full sync shipped users' password hashes; it no longer ships passwords.
+* `HELLO` revealed whether a user exists; password methods now get a decoy challenge, and other methods a generic `ABORT`.
+* `PUBLISH` ignored `eligible_authid`, `eligible_authrole`, `exclude_authid` and `exclude_authrole` for live and retained events.
+* A realm could switch its SSO realm while its users still linked to the old one, so a token issued for one user was accepted as another. The switch is refused while linked users exist.
+* An SSO user that other realms link to, and a realm that other realms use as prototype or SSO realm, can no longer be removed.
 
 ### Improvements
 * Built and shipped on Erlang/OTP 29; OTP 28 still builds the tree. See [Runtime requirements](doc/guides/deployment/runtime_requirements.md).
@@ -58,14 +66,6 @@
 * The in-memory registry's cell sweep resumes from its cursor instead of re-reading the whole cell directory on every batch.
 
 ### Fixes
-* `bondy_db:close/1` closes every table still open on the DB. A table left open at close kept its index-shard registry rows on a dead projection handle, and the next restart of the index writers' supervisor took the oplog application down.
-* A power loss could undo renames in the durable stores; `platform_data_dir` must accept `fsync` on a directory. See [Platform directories](doc/guides/deployment/platform_directories.md).
-* A read could keep returning a value a later write had replaced.
-* A node whose `main` database opened slowly failed its liveness probe and was restarted in a loop. See [Listeners](doc/guides/configuration/listeners.md#health-probes).
-* A storage shard whose processes crashed repeatedly stayed down until the node restarted. See [Platform directories](doc/guides/deployment/platform_directories.md#when-a-storage-shard-stops).
-* After an applier crash, a shard of `main` stopped applying writes.
-* A node could create several replica origins at once.
-* An in-VM client's registrations and subscriptions kept routing after it disconnected.
 * Over HTTP long-poll, a router `ABORT` or `GOODBYE` never reached the client.
 * A WAMP session over HTTP long-poll or SSE could receive messages out of order. See [Listeners](doc/guides/configuration/listeners.md#node-wide-http-transport-queue).
 * An outbound bridge relay with no `ping` block crashed, and one with no `reconnect` block never reconnected. See [Bridge relay](doc/guides/configuration/bridge_relay.md).
@@ -135,6 +135,22 @@
 * A departed node's registrations and subscriptions survived retirement once the survivors had compacted their registry history.
 * A node or index writer that stopped between a durable write and its index updates lost those updates.
 * Reading a durable cell while its first write landed could crash the reader with `badarg`: the projection's HEAD read fell back from the value column to the state column between two store calls. It now reads the one column the cell's fold writes.
+* A bridge relay server crashed on a malformed `HELLO` or `AUTHENTICATE`; it answers a `protocol_violation` `ABORT`.
+* Registrations and subscriptions made after a bridge relay session opened never reached the core, and their removals matched nothing.
+* Two concurrent `single` registrations of one procedure could both succeed.
+* `exclude`, `eligible` and `exclude_me` did not apply to exact-match subscriptions, and an empty `eligible` list delivered to every subscriber; it now delivers to none.
+* A retained event was delivered twice to a new subscriber.
+* Deleting a realm left its HTTP API Gateway routes installed.
+* A route with a binding, in the path or the host, could shadow a literal one; routes and hosts are matched most specific first.
+* An API Gateway specification with an unknown action key crashed the gateway on load.
+* A gateway response that set no status and had a non-map body lost the action's status; `bondy.error.bad_gateway` answered 503 instead of 502. A `forward` to an upstream that never answers gets `bondy.error.gateway_timeout` (504).
+* The `forward` action garbled upstream bodies: JSON was decoded and re-encoded, text was quoted, and every body was labelled `application/json`. The upstream's bytes and content type are sent as received.
+* The HTTP connector reported pending credentials and a failed token fetch as `bondy.error.bad_gateway` (502) instead of `bondy.error.unavailable` (503), and its own crashes as `bad_gateway` instead of `bondy.error.internal_error` (500).
+* `bondy_connect_sdk` failed a call that asked for `_retries` after its first timeout.
+* Session-scoped ids wrapped to 0, and a session without a counter created one on demand.
+* An `erl`-encoded improper list or tuple crashed the connection instead of being answered with a `protocol_violation` `ABORT`.
+* Mops dropped spaces inside quoted literals, so `get('first name')` read `firstname`.
+* Updating a user whose SSO user was missing returned an undeclared error.
 
 ### Changes
 * MessagePack is encoded and decoded by Bondy's own `bondy_msgpack`; four behaviours change for MessagePack clients. See [Serialisation](doc/guides/introduction/wamp.md#serialisation).
@@ -162,6 +178,8 @@
 * `bondy_cluster_channel_connections` is labelled by `peer` and `channel`.
 * The authentication freshness fence counts only sync rounds; a local write no longer defers its refusal.
 * Partisan 6.3.1, from 5.0.3.
+* The `on_create` and `on_delete` registration and subscription meta events are not published: a cluster cannot tell a URI's first and last registration without coordinating its nodes.
+* Over the `erl` serialisation, a property list in a payload is sent as a list of two-element lists, not as a map; a repeated key lost an element and a mixed list crashed the encoder.
 
 ## 1.0.0-rc.65
 * Fix bug in decoding of Error messages when using partial JSON encoding

@@ -1763,7 +1763,7 @@ do_update(RealmUri, #{sso_realm_uri := SSOUri} = User, Data0, Opts) when
 
     case lookup(SSOUri, Username) of
         {error, not_found} ->
-            throw(not_such_user);
+            throw({no_such_user, Username});
         {ok, SSOUser} ->
             {SSOData, LocalData} = maps_utils:split(
                 [password_opts, password, authorized_keys], Data0

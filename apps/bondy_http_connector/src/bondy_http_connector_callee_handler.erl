@@ -85,7 +85,7 @@ handle_wamp_call(ProcConf, Options) ->
 Called when the WAMP client provides kwargs.
 
 Checks service readiness (secret resolution status) before proceeding.
-If the service's secrets are still pending, returns `bondy.error.bad_gateway`.
+If the service's secrets are still pending, returns `bondy.error.unavailable`.
 Otherwise merges any resolved secret vars into ProcConf and delegates
 to the HTTP forwarding logic.
 """.
@@ -113,7 +113,7 @@ handle_wamp_call(
             do_handle_wamp_call(apply_secrets(ProcConf, Vars), KWArgs0);
         {error, not_ready} ->
             wamp_error(
-                <<"bondy.error.bad_gateway">>,
+                bondy_connect_error:uri(unavailable),
                 503,
                 <<"Service credentials pending">>
             )
@@ -264,7 +264,7 @@ do_handle_wamp_call_(#http_connector_proc_conf{} = ProcConf, KWArgs0) ->
                 reason => AuthErr
             }),
             wamp_error(
-                <<"bondy.error.bad_gateway">>,
+                bondy_connect_error:uri(unavailable),
                 503,
                 <<"Authentication unavailable">>
             );
@@ -277,7 +277,7 @@ do_handle_wamp_call_(#http_connector_proc_conf{} = ProcConf, KWArgs0) ->
                 stacktrace => Stack
             }),
             wamp_error(
-                <<"bondy.error.bad_gateway">>,
+                bondy_connect_error:uri(internal_error),
                 500,
                 <<"Internal error">>
             )

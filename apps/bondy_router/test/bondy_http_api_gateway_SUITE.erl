@@ -216,13 +216,13 @@ call_timeout_spec_flow_test(_) ->
 
 publish_rejects_retries_test(_) ->
     ?assertError(
-        {unsupported_action_keys, <<"wamp_publish">>, [<<"retries">>]},
+        {unsupported_keys, {action, <<"wamp_publish">>}, [<<"retries">>]},
         parse_action(publish_action(#{<<"retries">> => 2}), #{})
     ).
 
 call_rejects_retry_timeout_test(_) ->
     ?assertError(
-        {unsupported_action_keys, <<"wamp_call">>, [<<"retry_timeout">>]},
+        {unsupported_keys, {action, <<"wamp_call">>}, [<<"retry_timeout">>]},
         parse_action(call_action(#{<<"retry_timeout">> => 2000}), #{})
     ).
 
@@ -268,9 +268,85 @@ publish_action(Extra) ->
         Extra
     ).
 
+%% A key the parser does not declare is refused at every level, or a misspelt
+%% setting would be dropped and its default applied in its place.
+unknown_key_is_refused_at_every_level_test(_) ->
+    Levels = [
+        {host, []},
+        {version, [<<"versions">>, <<"1.0.0">>]},
+        {path, [<<"versions">>, <<"1.0.0">>, <<"paths">>, <<"/things">>]},
+        {method, [
+            <<"versions">>, <<"1.0.0">>, <<"paths">>, <<"/things">>, <<"post">>
+        ]},
+        {response, [
+            <<"versions">>,
+            <<"1.0.0">>,
+            <<"paths">>,
+            <<"/things">>,
+            <<"post">>,
+            <<"response">>,
+            <<"on_result">>
+        ]}
+    ],
+    _ = [
+        ?assertError(
+            {unsupported_keys, Level, [<<"timout">>]},
+            bondy_http_gateway_api_spec_parser:parse(
+                with_key(
+                    Path, <<"timout">>, actions_spec(call_action(#{}), #{})
+                )
+            )
+        )
+     || {Level, Path} <- Levels
+    ],
+    ok.
+
+%% Every node serves this specification; one it failed to parse would be logged
+%% and left unserved.
+admin_api_spec_parses_test(_) ->
+    File = filename:join(
+        code:priv_dir(bondy_router), "specs/bondy_admin_api.json"
+    ),
+    {ok, Spec} = bondy_router_utils:json_consult(File),
+    ?assertMatch(
+        #{<<"versions">> := #{}},
+        bondy_http_gateway_api_spec_parser:parse(Spec)
+    ).
+
+load_refuses_an_unknown_key_and_keeps_serving_test(_) ->
+    Gateway = whereis(bondy_http_gateway),
+    Spec = actions_spec(call_action(#{<<"retry_timeout">> => 2000}), #{}),
+    ?assertEqual(
+        {error,
+            {unsupported_keys, {action, <<"wamp_call">>}, [<<"retry_timeout">>]}},
+        bondy_http_gateway:load(Spec)
+    ),
+    ?assertEqual(Gateway, whereis(bondy_http_gateway)).
+
+with_key([], Key, Map) ->
+    Map#{Key => 1};
+with_key([H | T], Key, Map) ->
+    Map#{H := with_key(T, Key, maps:get(H, Map))}.
+
 %% Parses an API whose one path runs `Action`, and returns the parsed action.
 parse_action(Action, Defaults) ->
-    Spec = #{
+    maps_utils:get_path(
+        [
+            <<"versions">>,
+            <<"1.0.0">>,
+            <<"paths">>,
+            <<"/things">>,
+            <<"post">>,
+            <<"action">>
+        ],
+        bondy_http_gateway_api_spec_parser:parse(
+            actions_spec(Action, Defaults)
+        )
+    ).
+
+%% An API whose one path runs `Action`.
+actions_spec(Action, Defaults) ->
+    #{
         <<"id">> => <<"com.actions_api">>,
         <<"name">> => <<"com.actions_api">>,
         <<"host">> => <<"actions-api.com">>,
@@ -293,18 +369,7 @@ parse_action(Action, Defaults) ->
                 }
             }
         }
-    },
-    maps_utils:get_path(
-        [
-            <<"versions">>,
-            <<"1.0.0">>,
-            <<"paths">>,
-            <<"/things">>,
-            <<"post">>,
-            <<"action">>
-        ],
-        bondy_http_gateway_api_spec_parser:parse(Spec)
-    ).
+    }.
 
 %% The response spec sets no `status_code`, and its body is the parser's
 %% default, an empty binary.

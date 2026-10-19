@@ -8,6 +8,14 @@
 Encodes and decodes WAMP terms to and from the Erlang external term format,
 mapping between WAMP message representations and native Erlang terms (atoms,
 maps, lists and tuples) according to the configured options.
+
+A list with an improper tail has no WAMP value: encoding and decoding raise
+`badarg` for one, and decoding raises `badarg` for a tuple inside a message.
+`bondy_wamp_erl_test` checks both; `bondy_wamp_protocol_SUITE` checks that the
+router refuses such a frame as a protocol violation.
+
+A tuple inside a message encodes as a list, so a property list becomes a list
+of two-element lists, never a map (`bondy_wamp_erl_test`).
 """.
 
 -record(wamp_erl, {
@@ -71,21 +79,9 @@ encode_term(Term, Opts0) when is_map(Term) ->
         #{},
         Term
     );
-encode_term([{_, _} | _] = Term, Opts0) ->
-    Opts = incr(Opts0),
-
-    maps:from_list(
-        lists:map(
-            fun({K, V}) ->
-                {encode_term(K, Opts), encode_term(V, Opts)}
-            end,
-            Term
-        )
-    );
 encode_term(Term, Opts0) when is_list(Term) ->
     Opts = incr(Opts0),
-    %% TODO: Handle improper lists
-    lists:map(fun(T) -> encode_term(T, Opts) end, Term);
+    map_list(fun(T) -> encode_term(T, Opts) end, Term);
 encode_term(Term, #wamp_erl{level = 0} = Opts) when is_tuple(Term) ->
     Encoded = encode_term(tuple_to_list(Term), Opts),
     case Opts#wamp_erl.message_format of
@@ -133,15 +129,22 @@ decode_term(Term, Opts0) when is_map(Term) ->
         Term
     );
 decode_term(Term, Opts) when is_list(Term) ->
-    lists:map(fun(T) -> decode_term(T, incr(Opts)) end, Term);
+    map_list(fun(T) -> decode_term(T, incr(Opts)) end, Term);
 decode_term(Term, #wamp_erl{level = 0} = Opts) when is_tuple(Term) ->
     list_to_tuple(
         decode_term(tuple_to_list(Term), incr(Opts))
     );
 decode_term(Term, _) when is_tuple(Term) ->
-    error({badarg, Term});
+    error(badarg, [Term]);
 decode_term(Term, _) ->
     Term.
+
+map_list(Fun, [H | T]) ->
+    [Fun(H) | map_list(Fun, T)];
+map_list(_, []) ->
+    [];
+map_list(_, Tail) ->
+    error(badarg, [Tail]).
 
 %% @private
 maybe_atom(Term, #wamp_erl{keys = binary}) ->

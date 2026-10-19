@@ -43,6 +43,10 @@ init() ->
     {ok, ?TAB} = bondy_connect_table_manager:add(?TAB, Opts),
     ok.
 
+-doc """
+Starts the session-scoped counter of a session. `session/2` draws the session's
+IDs from it until `purge_session/2` removes it.
+""".
 -spec init_session(
     RealmUri :: uri(),
     SessionOrId :: bondy_session:t() | bondy_session_id:t()
@@ -55,7 +59,7 @@ init_session(RealmUri, SessionId) when
     _ = ets:insert_new(?TAB, {Key, 0}),
     ok;
 init_session(RealmUri, Session) ->
-    session(RealmUri, bondy_session:id(Session)).
+    init_session(RealmUri, bondy_session:id(Session)).
 
 -doc """
 Generates a WAMP message id in the global scope.
@@ -84,8 +88,9 @@ wrapping to 1 after it reached `2^53` (for each direction -
 Client-to-Router and Router-to-Client)
 This is the Router-to-Client direction.
 
-If the counter hasn't been previously initialised using `init_session/2`,
-the function will return a random ID by calling `router/1`.
+A session without a counter, one never initialised with `init_session/2` or
+already purged with `purge_session/2`, gets a random ID from `router/1`, and no
+counter is created for it.
 """.
 -spec session(
     RealmUri :: uri(),
@@ -95,10 +100,14 @@ the function will return a random ID by calling `router/1`.
 session(RealmUri, SessionId) when
     is_binary(RealmUri) andalso is_binary(SessionId)
 ->
+    Key = {RealmUri, SessionId},
     try
-        incr_session_counter(RealmUri, SessionId)
+        ets:update_counter(?TAB, Key, {2, 1, ?MAX_ID, 1})
     catch
         error:badarg ->
+            %% `ets:member/2` raises for a missing table, so only a missing
+            %% counter falls back.
+            false = ets:member(?TAB, Key),
             router(RealmUri)
     end;
 session(RealmUri, Session) ->
@@ -119,23 +128,3 @@ purge_session(RealmUri, SessionId) when
     ok;
 purge_session(RealmUri, Session) when is_binary(RealmUri) ->
     purge_session(RealmUri, bondy_session:id(Session)).
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-%% @private
--spec incr_session_counter(uri(), bondy_session_id:t()) ->
-    integer() | no_return().
-
-%% TODO do not use default but use another function to set up once we store the session.
-%% This way the update_counter will fail for non persistent sessions and we can fallback to a random number
-incr_session_counter(RealmUri, SessionId) when is_binary(SessionId) ->
-    %% IDs in the session scope MUST be incremented by 1 beginning with 1 and
-    %% wrapping to 1 after it reached 2^53 (for each direction -
-    %% Client-to-Router and Router-to-Client)
-    %% This is the Router-to-Client direction
-    Key = {RealmUri, SessionId},
-    UpdateOp = {2, 1, ?MAX_ID, 0},
-    Default = {Key, 0},
-    ets:update_counter(?TAB, Key, UpdateOp, Default).

@@ -1253,8 +1253,9 @@ unservable_own_root_holds_until_peers_dominate() ->
 %% it and the cycle rebuilds. Another is lost above it, so the capped
 %% truncation keeps it, the tree stays unservable and no rebuild is reported.
 %% Once the applier has folded what it can read and the member covers it, the
-%% next cycle drops the page above too and reports the rebuild. The events on
-%% that page come back from the peer
+%% next cycle drops the page above too and reports the rebuild; B advertises its
+%% root again, which is `undefined` when every key was covered and the tree is
+%% empty. The events on that page come back from the peer
 %% (`proofs/tla/ConfirmedCompaction_2R_Async_Lost.cfg` holds `NoDrop`;
 %% `_2R_Async_Lost_Live.cfg` holds `Convergence`).
 unservable_own_root_rebuild_holds_unapplied_applier() ->
@@ -1267,11 +1268,7 @@ unservable_own_root_rebuild_holds_unapplied_applier() ->
         ok = append_events(A, 1, 100),
         ApplierPid = bondy_oplog_registry:applier_pid(B),
         ok = sys:suspend(ApplierPid),
-        ok = pull_root(B, A),
-        {Tab, _} = root_page(B),
-        Subtrees = subtrees(Tab, bondy_oplog_instance:root_hash(B)),
-        [Below | _] = [R || {R, _, Hi} <- Subtrees, Hi =/= top, Hi =< H],
-        [Above | _] = [R || {R, Lo, _} <- Subtrees, Lo =/= bottom, Lo >= H],
+        {Tab, Below, Above} = pages_around(B, A, H, 101),
         true = ets:delete(Tab, Below),
         true = ets:delete(Tab, Above),
         ok = record_row(
@@ -1288,7 +1285,10 @@ unservable_own_root_rebuild_holds_unapplied_applier() ->
                 {peer, rb_applier}, B, bondy_oplog_registry:frontier(B)
             ),
             ?assert(compact_rebuilt(B)),
-            ?assert(is_binary(bondy_oplog_instance:aae_root(B))),
+            ?assertEqual(
+                bondy_oplog_instance:root_hash(B),
+                bondy_oplog_instance:aae_root(B)
+            ),
             ok = pull_root(B, A),
             ok = bondy_oplog_applier:barrier(ApplierPid),
             AOrigin = bondy_oplog_instance:origin(A),
@@ -1300,6 +1300,24 @@ unservable_own_root_rebuild_holds_unapplied_applier() ->
     after
         teardown(A),
         teardown(B)
+    end.
+
+%% Pulls `Peer`'s root into `Local` and returns `Local`'s page table with one
+%% subtree wholly below the key `H` and one wholly above it. The tree's shape
+%% follows the hashes of its keys, so the subtree above may not exist yet:
+%% append to `Peer` until it does.
+pages_around(Local, Peer, H, N) when N < 400 ->
+    ok = pull_root(Local, Peer),
+    {Tab, _} = root_page(Local),
+    Subtrees = subtrees(Tab, bondy_oplog_instance:root_hash(Local)),
+    Below = [R || {R, _, Hi} <- Subtrees, Hi =/= top, Hi =< H],
+    Above = [R || {R, Lo, _} <- Subtrees, Lo =/= bottom, Lo >= H],
+    case {Below, Above} of
+        {[B | _], [A | _]} ->
+            {Tab, B, A};
+        _ ->
+            ok = append_events(Peer, N, N + 9),
+            pages_around(Local, Peer, H, N + 10)
     end.
 
 %% Every subtree under the page `Hash` of the page table `Tab`, as

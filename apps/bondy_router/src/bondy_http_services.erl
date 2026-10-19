@@ -62,10 +62,9 @@ Carriers are asked in a stable order so the resulting table — and therefore th
 and why it is not merely alphabetical, is in `carrier_order/1`.
 
 Every route a carrier declares for `'_'` is also copied into each named host
-entry, and the `'_'` entry is emitted last. Both follow from the same property of
-`cowboy_router:match/3` — it commits to the first host entry that matches and
-never falls through — and both are load-bearing rather than cosmetic; see
-`with_wildcard_routes/1` and `by_host/1`.
+entry, because `cowboy_router:match/3` commits to the first host entry that
+matches and never falls through; see `with_wildcard_routes/1`. The order of the
+host entries is set by `bondy_listener_ranch:recompile_dispatch/1`.
 """.
 -spec dispatch(bondy_listener_config:t()) -> cowboy_router:routes().
 
@@ -340,10 +339,6 @@ replicate(Host, Wildcard, Claims) ->
     ).
 
 %% @private
-%% Named hosts first, `'_'` LAST — `match/3`'s `'_'` clause matches
-%% unconditionally (`cowboy_router.erl:225`), so a `'_'` entry placed first
-%% shadows every named host entirely.
-%%
 %% The `'_'` entry is emitted even when it holds no route. A listener declaring
 %% only `api_gateway` with no stored specification contributes nothing, and an
 %% empty dispatch list would change its answer to an unmatched request from

@@ -173,16 +173,19 @@ reclaim_does_not_disarm_other_cells(T) ->
 %% Helpers
 %% =============================================================================
 
-%% One unbounded sweep at an HLC above every write so far, so a stable disabled
-%% cell is judged reclaimable. Drains first: the sweep judges the projection,
-%% which the applier has to have caught up to.
+%% One unbounded sweep just above the shard's high-water HLC, so every applied
+%% cell is below the stability point. Drains first: the sweep judges the
+%% projection, which the applier has to have caught up to. `bondy_db:tick/1`
+%% cannot stand in: the DB's clock is not the oplog's, and in the millisecond
+%% of the last write it can read below that write's HLC.
 sweep(T) ->
-    StableHlc = bondy_db:tick(T) + 1,
     InstanceId = instance_of(T),
     ok = bondy_oplog_instance:await_apply(InstanceId),
+    NS = maps:get(namespace, bondy_db:info(T)),
+    {ok, HighWater} = bondy_oplog_core_registry:high_water_hlc(NS, primary, 0),
     Pid = bondy_oplog_registry:applier_pid(InstanceId),
     ?assert(is_pid(Pid)),
-    bondy_oplog_applier:sweep_stable_cells(Pid, StableHlc).
+    bondy_oplog_applier:sweep_stable_cells(Pid, HighWater + 1).
 
 %% Delete a cell straight out of the shard's projection, at the
 %% `(EntityType bucket, <<Realm, 0, Key>>)` address the memory topology folds a

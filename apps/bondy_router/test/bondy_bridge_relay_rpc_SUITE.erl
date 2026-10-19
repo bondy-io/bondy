@@ -40,12 +40,14 @@
 -define(DEVICE, <<"ct_device">>).
 -define(PUB_REALM, <<"com.bondy.bridge_pub">>).
 -define(PUB_TOPIC, <<"com.bridge.pub.encoded">>).
+-define(LATE_REALM, <<"com.bondy.bridge_late">>).
 
 all() ->
     [
         boot_loads_every_app_module,
         bridged_call_hop_trace,
         bridged_encoded_publish_keeps_payload,
+        registry_changes_after_the_bridge_opens_reach_the_core,
         crashing_server_redials_with_backoff,
         retry_budget_has_no_time_limit
     ].
@@ -248,6 +250,43 @@ bridged_encoded_publish_keeps_payload(Config) ->
     after
         _ = erpc:call(Edge, bondy_bridge_relay_manager, remove_bridge, [
             <<"ct_pub_bridge">>
+        ])
+    end.
+
+%% `proxy_existing` ships the edge's registrations and subscriptions once, when
+%% the bridge session opens; a client that adds or removes one later reaches the
+%% core only through the bridge client's registry event handler.
+registry_changes_after_the_bridge_opens_reach_the_core(Config) ->
+    [{_, Core, _}, {_, Edge, _}] = proplists:get_value(nodes, Config),
+    #{public := Pub} = KeyPair = bondy_cryptosign:generate_key(),
+    ok = erpc:call(Core, ?MODULE, do_create_core_realm, [?LATE_REALM, Pub]),
+    ok = erpc:call(
+        Edge, bondy_trace_context_SUITE, do_create_open_realm, [?LATE_REALM]
+    ),
+    Early = <<"com.bridge.late.early">>,
+    Late = <<"com.bridge.late.late">>,
+    _ = client_peer(Edge, ?LATE_REALM, registration, Early),
+    Port = erpc:call(Core, ranch, get_port, [bridge]),
+    ok = erpc:call(
+        Edge,
+        ?MODULE,
+        do_add_bridge,
+        [Port, ?LATE_REALM, KeyPair, <<"ct_late_bridge">>, []]
+    ),
+    try
+        ok = wait_proxy_registration(Core, ?LATE_REALM, Early, Edge),
+        lists:foreach(
+            fun(Type) ->
+                Client = client_peer(Edge, ?LATE_REALM, Type, Late),
+                ok = wait_proxy(Core, Type, Late, true),
+                Client ! remove,
+                ok = wait_proxy(Core, Type, Late, false)
+            end,
+            [registration, subscription]
+        )
+    after
+        _ = erpc:call(Edge, bondy_bridge_relay_manager, remove_bridge, [
+            <<"ct_late_bridge">>
         ])
     end.
 
@@ -718,6 +757,81 @@ flush_peer_logs() ->
         {peer_log, Node, Event} -> [{Node, Event} | flush_peer_logs()]
     after 0 -> []
     end.
+
+%% Starts a client on `Node` that registers or subscribes to `Uri` with a WAMP
+%% REGISTER or SUBSCRIBE, as a connected client does, and undoes it on
+%% `remove`.
+client_peer(Node, RealmUri, Type, Uri) ->
+    Self = self(),
+    Pid = erpc:call(Node, ?MODULE, do_client_peer, [RealmUri, Type, Uri, Self]),
+    receive
+        {Pid, added} -> Pid
+    after 5000 ->
+        error({client_peer_not_added, Type, Uri})
+    end.
+
+%% @private
+do_client_peer(RealmUri, Type, Uri, Parent) ->
+    spawn(fun() ->
+        Session0 = bondy_session:new(RealmUri, #{
+            peer => {{127, 0, 0, 1}, 10994},
+            authid => <<"late_client">>,
+            authmethod => ?WAMP_ANON_AUTH,
+            is_anonymous => true,
+            security_enabled => false,
+            authroles => [<<"anonymous">>],
+            roles => #{callee => #{}, subscriber => #{}}
+        }),
+        {ok, Session} = bondy_session:store(Session0),
+        Ctxt = bondy_context:new(
+            bondy_session:peer(Session), {ws, text, json}, #{session => Session}
+        ),
+        Id = client_add(Type, Uri, Ctxt),
+        Parent ! {self(), added},
+        receive
+            remove -> client_remove(Type, Id, Ctxt)
+        end,
+        receive
+            stop -> ok
+        end
+    end).
+
+%% @private
+client_add(registration, Uri, Ctxt) ->
+    ok = bondy_dealer:forward(bondy_wamp_message:register(1, #{}, Uri), Ctxt),
+    receive
+        {'$bondy_request', _, _, #registered{registration_id = Id}} -> Id
+    end;
+client_add(subscription, Uri, Ctxt) ->
+    ok = bondy_broker:forward(bondy_wamp_message:subscribe(1, #{}, Uri), Ctxt),
+    receive
+        {'$bondy_request', _, _, #subscribed{subscription_id = Id}} -> Id
+    end.
+
+%% @private
+client_remove(registration, Id, Ctxt) ->
+    ok = bondy_dealer:forward(bondy_wamp_message:unregister(2, Id), Ctxt),
+    receive
+        {'$bondy_request', _, _, #unregistered{}} -> ok
+    end;
+client_remove(subscription, Id, Ctxt) ->
+    ok = bondy_broker:forward(bondy_wamp_message:unsubscribe(2, Id), Ctxt),
+    receive
+        {'$bondy_request', _, _, #unsubscribed{}} -> ok
+    end.
+
+%% @private
+wait_proxy(Core, Type, Uri, Present) ->
+    wait_until(
+        fun() ->
+            Present =:=
+                erpc:call(Core, bondy_registry, has_matches, [
+                    Type, ?LATE_REALM, Uri
+                ])
+        end,
+        {proxy, Type, Uri, Present},
+        erlang:monotonic_time(millisecond) + 30000
+    ).
 
 %% @private
 wait_until(Fun, Tag, Deadline) ->
