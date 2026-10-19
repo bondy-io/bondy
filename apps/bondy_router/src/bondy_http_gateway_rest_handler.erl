@@ -894,6 +894,8 @@ perform_action(
         <<"headers">> := Headers,
         <<"timeout">> := T,
         <<"connect_timeout">> := CT,
+        <<"retries">> := Retries,
+        <<"retry_timeout">> := RetryTimeout,
         <<"body">> := Body
     } = Act1 = mops_eval(Act, Ctxt0),
 
@@ -917,24 +919,13 @@ perform_action(
 
     AtomMethod = method_to_atom(maps:get(<<"http_method">>, Act1, Method0)),
 
-    case hackney:request(AtomMethod, Url, maps:to_list(Headers), Body, Opts) of
-        {ok, StatusCode, RespHeaders} when AtomMethod =:= head ->
-            from_http_response(StatusCode, RespHeaders, <<>>, RSpec, St0);
-        {ok, StatusCode, RespHeaders, ClientRef} ->
-            {ok, RespBody} = hackney:body(ClientRef),
-            from_http_response(StatusCode, RespHeaders, RespBody, RSpec, St0);
-        {error, Reason} ->
-            %% Reason is a raw hackney term: it has no JSON representation and
-            %% must be rendered before it can reach a client.
-            Error = bondy_connect_error:new(bad_gateway, #{
-                message =>
-                    <<"Error while connecting with upstream URL '", Url/binary,
-                        "'.">>,
-                details => #{url => Url},
-                metadata => #{reason => Reason}
-            }),
-            throw(bondy_connect_error:to_map(Error))
-    end;
+    forward_upstream(
+        {AtomMethod, Url, maps:to_list(Headers), Body, Opts},
+        Retries,
+        RetryTimeout,
+        RSpec,
+        St0
+    );
 perform_action(
     Method,
     #{<<"action">> := #{<<"type">> := <<"wamp_call">>} = Act} = Spec,
@@ -963,12 +954,15 @@ perform_action(
         <<"args">> := A,
         <<"kwargs">> := Akw,
         <<"options">> := Opts0,
-        %% TODO use retries
-        <<"retries">> := _R,
+        <<"retries">> := Retries,
         <<"timeout">> := Timeout
     } = mops_eval(Act, ApiCtxt0, MopsOpts),
 
-    Opts = merge_call_timeout(Timeout, Opts0),
+    Opts = merge_call_option(
+        [<<"_retries">>, '_retries'],
+        Retries,
+        merge_call_option([<<"timeout">>, timeout], Timeout, Opts0)
+    ),
 
     RSpec = maps:get(<<"response">>, Spec),
 
@@ -1068,20 +1062,66 @@ perform_action(
     end.
 
 %% @private
-%% The action-level `timeout` applies unless the action's WAMP call
-%% `options` already define a non-zero `timeout` (per WAMP, 0 means the
-%% Call Timeout feature is disabled, so we treat it as unset). Downstream
-%% `bondy_router_peer:call/5` falls back to `wamp.call_timeout` when no timeout is set.
-merge_call_timeout(Timeout, Opts) when
-    is_integer(Timeout) andalso Timeout > 0
+%% A request that got no response may still have reached the upstream, so only
+%% an idempotent method (RFC 9110, section 9.2.2) is sent again.
+forward_upstream(
+    {AtomMethod, Url, Headers, Body, Opts} = Req,
+    Retries,
+    RetryTimeout,
+    RSpec,
+    St0
+) ->
+    case hackney:request(AtomMethod, Url, Headers, Body, Opts) of
+        {ok, StatusCode, RespHeaders} when AtomMethod =:= head ->
+            from_http_response(StatusCode, RespHeaders, <<>>, RSpec, St0);
+        {ok, StatusCode, RespHeaders, ClientRef} ->
+            {ok, RespBody} = hackney:body(ClientRef),
+            from_http_response(StatusCode, RespHeaders, RespBody, RSpec, St0);
+        {error, Reason} when
+            Retries > 0 andalso
+                (AtomMethod =:= get orelse AtomMethod =:= head orelse
+                    AtomMethod =:= options orelse AtomMethod =:= put orelse
+                    AtomMethod =:= delete)
+        ->
+            _ = log(
+                info,
+                #{
+                    description => "Gateway is retrying an upstream request",
+                    upstream_url => Url,
+                    reason => Reason,
+                    retries => Retries
+                },
+                St0
+            ),
+            ok = timer:sleep(RetryTimeout),
+            forward_upstream(Req, Retries - 1, RetryTimeout, RSpec, St0);
+        {error, Reason} ->
+            %% Reason is a raw hackney term: it has no JSON representation and
+            %% must be rendered before it can reach a client.
+            Error = bondy_connect_error:new(bad_gateway, #{
+                message =>
+                    <<"Error while connecting with upstream URL '", Url/binary,
+                        "'.">>,
+                details => #{url => Url},
+                metadata => #{reason => Reason}
+            }),
+            throw(bondy_connect_error:to_map(Error))
+    end.
+
+%% @private
+%% The action's `timeout` and `retries` apply unless the call `options` set a
+%% non-zero value of their own. A WAMP `timeout` of 0 disables the Call Timeout
+%% feature and a `_retries` of 0 asks for none, so a 0 defers to the action.
+merge_call_option([Key | _] = Keys, Value, Opts) when
+    is_integer(Value) andalso Value > 0
 ->
-    case maps_utils:get_any([<<"timeout">>, timeout], Opts, 0) of
+    case maps_utils:get_any(Keys, Opts, 0) of
         0 ->
-            maps:put(<<"timeout">>, Timeout, Opts);
+            maps:put(Key, Value, Opts);
         _ ->
             Opts
     end;
-merge_call_timeout(_, Opts) ->
+merge_call_option(_, _, Opts) ->
     Opts.
 
 %% @private

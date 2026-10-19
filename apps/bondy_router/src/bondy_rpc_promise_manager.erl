@@ -101,28 +101,33 @@ handle_info(evict, State) ->
             timeout => Timeout
         }),
 
-        Mssg = iolist_to_binary(
-            io_lib:format(
-                "The operation could not be completed in time"
-                " (~p milliseconds).",
-                [Timeout]
-            )
-        ),
+        case bondy_dealer:retry(Promise) of
+            true ->
+                ok;
+            false ->
+                Mssg = iolist_to_binary(
+                    io_lib:format(
+                        "The operation could not be completed in time"
+                        " (~p milliseconds).",
+                        [Timeout]
+                    )
+                ),
 
-        %% We always create a CALL error, regardless of whether promise is of
-        %% type call or invocation
-        Error = bondy_wamp_message:error(
-            ?CALL,
-            CallId,
-            #{
-                procedure_uri => ProcUri,
-                timeout => Timeout
-            },
-            ?WAMP_ERROR_TIMEOUT,
-            [Mssg]
-        ),
+                %% We always create a CALL error, regardless of whether promise is of
+                %% type call or invocation
+                Error = bondy_wamp_message:error(
+                    ?CALL,
+                    CallId,
+                    #{
+                        procedure_uri => ProcUri,
+                        timeout => Timeout
+                    },
+                    ?WAMP_ERROR_TIMEOUT,
+                    [Mssg]
+                ),
 
-        bondy_router_peer:send(RealmUri, Caller, Error)
+                bondy_router_peer:send(RealmUri, Caller, Error)
+        end
     end,
 
     Opts = #{

@@ -830,10 +830,7 @@ path_spec() ->
     #{
         <<"is_collection">> => false,
         <<"get">> => #{
-            <<"action">> => #{
-                <<"type">> => <<"static">>,
-                <<"response">> => #{}
-            },
+            <<"action">> => #{<<"type">> => <<"static">>},
             <<"response">> => #{
                 <<"on_result">> => #{<<"body">> => <<>>},
                 <<"on_error">> => #{<<"body">> => <<>>}

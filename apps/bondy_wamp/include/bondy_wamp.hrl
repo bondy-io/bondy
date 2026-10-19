@@ -488,7 +488,11 @@ end).
         %% progressive call the WAMP `timeout` is an inter-result
         %% inactivity window that each progressive result restarts; the
         %% deadline caps the total duration regardless of progress.
-        '_deadline'
+        '_deadline',
+        %% Attempts the dealer may add after a failure that leaves the call
+        %% unanswered, when the registration is `_idempotent`; see
+        %% `bondy_dealer:retry/1`.
+        '_retries'
         | ?WAMP_TRACE_ATTRS
     ]},
     {cancel, [
@@ -505,6 +509,9 @@ end).
         '_disclose_session_info',
         '_prefer_local',
         '_prefer_local',
+        %% Running an invocation twice is safe, so the dealer may retry a call
+        %% that asked for `_retries`.
+        '_idempotent',
         %% number of concurrent, outstanding calls that can exist
         %% for a single endpoint
         'x_concurrency',

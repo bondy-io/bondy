@@ -62,6 +62,7 @@ short call against every procedure in the second family.
 -export([page_cursor/1]).
 -export([page_extras/1]).
 -export([deadline/1]).
+-export([retry_deadline/1]).
 -export([budget/2]).
 -export([admin_call_args/3]).
 -export([admin_call_args/4]).
@@ -318,6 +319,28 @@ deadline(Opts) when is_map(Opts) ->
         _ ->
             infinity
     end.
+
+-doc """
+The instant after which a CALL that asked for `_retries` gets no further
+attempt, in `erlang:system_time` milliseconds, or `infinity` when it asked for
+none.
+
+It is the call's `_deadline` when it set one, and otherwise `_retries + 1`
+call timeouts from now. `bondy_dealer:retry/1` starts no attempt after it, and
+`bondy_router_peer:call/5` waits for the reply until it.
+""".
+-spec retry_deadline(map()) -> integer() | infinity.
+
+retry_deadline(#{'_retries' := N} = Opts) when is_integer(N), N > 0 ->
+    case deadline(Opts) of
+        infinity ->
+            erlang:system_time(millisecond) +
+                (N + 1) * bondy_router_utils:timeout(Opts);
+        Deadline ->
+            Deadline
+    end;
+retry_deadline(Opts) when is_map(Opts) ->
+    infinity.
 
 -doc """
 How long a `bondy.*` handler may wait RIGHT NOW: what is left of `Deadline`,

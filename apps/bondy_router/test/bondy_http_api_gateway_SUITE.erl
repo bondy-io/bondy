@@ -105,7 +105,11 @@ simple_1_test(_) ->
     bondy_http_gateway_api_spec_parser:parse(Spec).
 
 call_timeout_merge_test(_) ->
-    Merge = fun bondy_http_gateway_rest_handler:merge_call_timeout/2,
+    Merge = fun(Timeout, Opts) ->
+        bondy_http_gateway_rest_handler:merge_call_option(
+            [<<"timeout">>, timeout], Timeout, Opts
+        )
+    end,
 
     %% The action timeout is merged when options define no timeout
     ?assertEqual(#{<<"timeout">> => 90000}, Merge(90000, #{})),
@@ -131,8 +135,21 @@ call_timeout_merge_test(_) ->
     ?assertEqual(#{}, Merge(0, #{})),
     ?assertEqual(#{}, Merge(undefined, #{})).
 
-%% The action `timeout` (inherited from `defaults.timeout`)
-%% must survive parsing and, once merged, govern the WAMP call options.
+call_retries_merge_test(_) ->
+    Merge = fun(Retries, Opts) ->
+        bondy_http_gateway_rest_handler:merge_call_option(
+            [<<"_retries">>, '_retries'], Retries, Opts
+        )
+    end,
+    ?assertEqual(#{<<"_retries">> => 2}, Merge(2, #{})),
+    ?assertEqual(#{<<"_retries">> => 2}, Merge(2, #{<<"_retries">> => 0})),
+    ?assertEqual(#{<<"_retries">> => 5}, Merge(2, #{<<"_retries">> => 5})),
+    ?assertEqual(#{'_retries' => 5}, Merge(2, #{'_retries' => 5})),
+    ?assertEqual(#{}, Merge(0, #{})),
+    ?assertEqual(#{}, Merge(-1, #{})).
+
+%% The action `timeout` and `retries` (inherited from `defaults`) must survive
+%% parsing and, once merged, govern the WAMP call options.
 call_timeout_spec_flow_test(_) ->
     Spec = #{
         <<"id">> => <<"com.timeout_api">>,
@@ -141,6 +158,7 @@ call_timeout_spec_flow_test(_) ->
         <<"realm_uri">> => <<"com.timeout_api">>,
         <<"defaults">> => #{
             <<"timeout">> => 95000,
+            <<"retries">> => 2,
             <<"security">> => #{},
             <<"schemes">> => [<<"http">>]
         },
@@ -179,9 +197,111 @@ call_timeout_spec_flow_test(_) ->
         ],
         Parsed
     ),
-    #{<<"timeout">> := Timeout, <<"options">> := Opts} = Action,
-    ?assertEqual(95000, Timeout),
+    #{
+        <<"timeout">> := Timeout,
+        <<"retries">> := Retries,
+        <<"options">> := Opts
+    } = Action,
+    ?assertEqual({95000, 2}, {Timeout, Retries}),
     ?assertEqual(
-        #{<<"timeout">> => 95000},
-        bondy_http_gateway_rest_handler:merge_call_timeout(Timeout, Opts)
+        #{<<"timeout">> => 95000, <<"_retries">> => 2},
+        bondy_http_gateway_rest_handler:merge_call_option(
+            [<<"_retries">>, '_retries'],
+            Retries,
+            bondy_http_gateway_rest_handler:merge_call_option(
+                [<<"timeout">>, timeout], Timeout, Opts
+            )
+        )
+    ).
+
+publish_rejects_retries_test(_) ->
+    ?assertError(
+        {unsupported_action_keys, <<"wamp_publish">>, [<<"retries">>]},
+        parse_action(publish_action(#{<<"retries">> => 2}), #{})
+    ).
+
+call_rejects_retry_timeout_test(_) ->
+    ?assertError(
+        {unsupported_action_keys, <<"wamp_call">>, [<<"retry_timeout">>]},
+        parse_action(call_action(#{<<"retry_timeout">> => 2000}), #{})
+    ).
+
+forward_rejects_an_unbounded_retry_timeout_test(_) ->
+    ?assertError(
+        #{key := <<"retry_timeout">>},
+        parse_action(
+            #{
+                <<"type">> => <<"forward">>,
+                <<"host">> => <<"http://localhost:1">>,
+                <<"retry_timeout">> => infinity
+            },
+            #{}
+        )
+    ).
+
+call_accepts_an_alias_test(_) ->
+    Action = parse_action(
+        maps:remove(<<"args">>, call_action(#{<<"arguments">> => [1]})), #{}
+    ),
+    ?assertMatch(#{<<"args">> := [1]}, Action).
+
+publish_does_not_inherit_retries_test(_) ->
+    Action = parse_action(publish_action(#{}), #{<<"retries">> => 2}),
+    ?assertNot(maps:is_key(<<"retries">>, Action)).
+
+call_action(Extra) ->
+    maps:merge(
+        #{
+            <<"type">> => <<"wamp_call">>,
+            <<"procedure">> => <<"com.actions_api.call">>,
+            <<"args">> => []
+        },
+        Extra
+    ).
+
+publish_action(Extra) ->
+    maps:merge(
+        #{
+            <<"type">> => <<"wamp_publish">>,
+            <<"topic">> => <<"com.actions_api.topic">>
+        },
+        Extra
+    ).
+
+%% Parses an API whose one path runs `Action`, and returns the parsed action.
+parse_action(Action, Defaults) ->
+    Spec = #{
+        <<"id">> => <<"com.actions_api">>,
+        <<"name">> => <<"com.actions_api">>,
+        <<"host">> => <<"actions-api.com">>,
+        <<"realm_uri">> => <<"com.actions_api">>,
+        <<"defaults">> => Defaults#{
+            <<"security">> => #{}, <<"schemes">> => [<<"http">>]
+        },
+        <<"versions">> => #{
+            <<"1.0.0">> => #{
+                <<"base_path">> => <<"/v1.0">>,
+                <<"paths">> => #{
+                    <<"/things">> => #{
+                        <<"post">> => #{
+                            <<"action">> => Action,
+                            <<"response">> => #{
+                                <<"on_error">> => #{}, <<"on_result">> => #{}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    maps_utils:get_path(
+        [
+            <<"versions">>,
+            <<"1.0.0">>,
+            <<"paths">>,
+            <<"/things">>,
+            <<"post">>,
+            <<"action">>
+        ],
+        bondy_http_gateway_api_spec_parser:parse(Spec)
     ).

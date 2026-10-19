@@ -44,7 +44,11 @@ when the endpoint is called:
 
 - `wamp_call` — calls a WAMP procedure and returns the result
 - `wamp_publish` — publishes to a WAMP topic
-- `forward` — proxies the request to an upstream HTTP service
+- `forward` — proxies the request to an upstream HTTP service. When the
+  upstream gives no response, a request with an idempotent method (RFC 9110,
+  section 9.2.2) is sent up to `retries` more times, `retry_timeout`
+  milliseconds apart; a response of any status is returned as it is
+  (`bondy_http_gateway_forward_SUITE`).
 - `static` — returns a static body and headers
 
 ## MOPS expressions
@@ -829,23 +833,28 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
     <<"retries">> => #{
         alias => retries,
         required => true,
-        datatype => [integer, ?MOPS_PROXY_FUN_TYPE]
+        datatype => [non_neg_integer, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"retry_timeout">> => #{
         alias => retry_timeout,
         required => true,
-        datatype => [timeout, ?MOPS_PROXY_FUN_TYPE]
+        datatype => [non_neg_integer, ?MOPS_PROXY_FUN_TYPE]
     }
 }).
 
--define(DEFAULT_WAMP_ACTION, #{
+-define(DEFAULT_WAMP_PUBLISH_ACTION, #{
+    <<"options">> => #{},
+    <<"args">> => [],
+    <<"kwargs">> => #{},
+    <<"timeout">> => <<"{{defaults.timeout}}">>
+}).
+
+-define(DEFAULT_WAMP_CALL_ACTION, #{
     <<"options">> => #{},
     <<"args">> => [],
     <<"kwargs">> => #{},
     <<"timeout">> => <<"{{defaults.timeout}}">>,
-    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
-    <<"retries">> => <<"{{defaults.retries}}">>,
-    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
+    <<"retries">> => <<"{{defaults.retries}}">>
 }).
 
 -define(WAMP_RPC_ACTION_SPEC, #{
@@ -866,7 +875,7 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
     <<"retries">> => #{
         alias => retries,
         required => true,
-        datatype => [integer, ?MOPS_PROXY_FUN_TYPE]
+        datatype => [non_neg_integer, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"procedure">> => #{
         alias => procedure,
@@ -918,11 +927,6 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
         alias => timeout,
         required => true,
         datatype => [timeout, ?MOPS_PROXY_FUN_TYPE]
-    },
-    <<"retries">> => #{
-        alias => retries,
-        required => true,
-        datatype => [integer, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"topic">> => #{
         alias => procedure,
@@ -1420,36 +1424,56 @@ this function applies defaults values and evaluates all terms
 (using `mops:eval/2`).
 If the action type provided is not recognised it fails with
 `{unsupported_action_type, Type}`.
+A key that the action type does not declare fails with
+`{unsupported_action_keys, Type, Keys}`.
 If an action type is not provided if fails with `action_type_missing`.
 """.
 -spec parse_action(binary(), map(), map()) -> map().
 
 parse_action(_, #{<<"type">> := <<"wamp_call">>} = Spec, Ctxt) ->
-    maps_utils:validate(
-        mops_eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
-        ?WAMP_RPC_ACTION_SPEC
+    validate_action(
+        Spec, ?DEFAULT_WAMP_CALL_ACTION, ?WAMP_RPC_ACTION_SPEC, Ctxt
     );
 parse_action(_, #{<<"type">> := <<"wamp_publish">>} = Spec, Ctxt) ->
-    maps_utils:validate(
-        mops_eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
-        ?WAMP_PUBSUB_ACTION_SPEC
+    validate_action(
+        Spec, ?DEFAULT_WAMP_PUBLISH_ACTION, ?WAMP_PUBSUB_ACTION_SPEC, Ctxt
     );
 parse_action(_, #{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
-    maps_utils:validate(
-        mops_eval(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt),
-        ?FWD_ACTION_SPEC
-    );
+    validate_action(Spec, ?DEFAULT_FWD_ACTION, ?FWD_ACTION_SPEC, Ctxt);
 parse_action(_, #{<<"type">> := <<"static">>} = Spec, Ctxt) ->
-    maps_utils:validate(
-        mops_eval(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt),
-        ?STATIC_ACTION_SPEC
-    );
+    validate_action(Spec, ?DEFAULT_STATIC_ACTION, ?STATIC_ACTION_SPEC, Ctxt);
 parse_action(_, #{<<"type">> := Type}, _) ->
     error({unsupported_action_type, Type});
 parse_action(<<"options">>, Spec, _) ->
     Spec;
 parse_action(_, _, _) ->
     error(action_type_missing).
+
+%% `maps_utils:validate/2` drops the keys a spec does not declare, which would
+%% accept a setting the action never applies. A default gives way to a key
+%% given under any of its names, or it would shadow an alias.
+validate_action(#{<<"type">> := Type} = Spec, Defaults, ActionSpec, Ctxt) ->
+    Names =
+        #{
+            K => [K | maps:get(aliases, V, [])] ++
+                maps:values(maps:with([alias], V))
+         || K := V <- ActionSpec
+        },
+    Given = [
+        K
+     || K := Ns <- Names, lists:any(fun(N) -> maps:is_key(N, Spec) end, Ns)
+    ],
+    case maps:keys(maps:without(lists:append(maps:values(Names)), Spec)) of
+        [] ->
+            maps_utils:validate(
+                mops_eval(
+                    maps:merge(maps:without(Given, Defaults), Spec), Ctxt
+                ),
+                ActionSpec
+            );
+        Keys ->
+            error({unsupported_action_keys, Type, lists:sort(Keys)})
+    end.
 
 parse_response(Method, Spec0, Ctxt) ->
     OR0 = maps:get(<<"on_result">>, Spec0, ?DEFAULT_RESPONSE),

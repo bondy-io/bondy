@@ -309,6 +309,7 @@ another register request second might be permissible immediately.
 -export([features/0]).
 -export([flush/2]).
 -export([flush_callee_promises/2]).
+-export([retry/1]).
 -export([forward/2]).
 -export([forward/3]).
 -export([is_feature_implemented/1]).
@@ -415,6 +416,65 @@ flush_callee_promises(RealmUri, Ref) ->
     bondy_rpc_promise:flush(
         RealmUri, Ref, #{on_callee_flush => fun send_no_eligible_callee/1}
     ).
+
+-doc """
+Routes the call behind `Promise` again, as a new attempt with a new invocation.
+Returns `true` when it did, and `false` when the caller is owed the failure that
+settled `Promise`.
+
+The call set `CALL.Options._retries` above zero and is not progressive, since
+the caller may already hold some of its results. `Promise` is one of:
+
+- the invocation promise of a call to a registration that set
+  `REGISTER.Options._idempotent` to `true`, after a timeout or the loss of the
+  callee;
+- the call promise of a call that found no registration, which waits for one.
+  No callee ran it, so the procedure need not be idempotent. The waits back
+  off exponentially with jitter (`bondy_connect_retry`), from about a second.
+
+The attempt counts against `_retries` and runs on what is left of the call's
+`_deadline`, so no attempt starts after it. Without a `_deadline` the call
+gets `_retries + 1` call timeouts.
+
+A local caller's attempt routes like the first one, so it reaches any
+registration made since. On the node that owns the callee of a forwarded call,
+the attempt goes to one of that node's registrations. When none is left,
+the caller's node routes it to another node, as for any call that found no
+callee there. `bondy_rpc_retry_SUITE` covers each case, and
+`bondy_rpc_retry_cluster_SUITE` covers forwarded calls on a two-node cluster.
+""".
+-spec retry(bondy_rpc_promise:t()) -> boolean().
+
+retry(Promise) ->
+    case bondy_rpc_promise:get(retry, Promise, undefined) of
+        #{call := #call{options = #{'_retries' := N} = O} = Call0} = Retry ->
+            Deadline = bondy_rpc_promise:get(deadline, Promise),
+            Left = Deadline - erlang:system_time(millisecond),
+            Call = Call0#call{
+                options = O#{'_retries' => N - 1, '_deadline' => Left}
+            },
+            case {Left > 0, Retry} of
+                {true, #{uri := Uri, opts := Opts, ctxt := Ctxt}} ->
+                    ok = handle_call(Call, Ctxt, Uri, Opts),
+                    true;
+                {true, #{opts := Opts}} ->
+                    #{'$private' := P} = O,
+                    ok = forward(
+                        Call#call{
+                            options = (Call#call.options)#{
+                                '$private' := P#{registration_id := undefined}
+                            }
+                        },
+                        undefined,
+                        Opts#{rib_completion => true}
+                    ),
+                    true;
+                {false, _} ->
+                    false
+            end;
+        undefined ->
+            false
+    end.
 
 -doc """
 Creates a local registration.
@@ -573,7 +633,7 @@ forward(#call{} = Msg, _Hint, #{rib_completion := true} = Opts0) ->
                     forward(
                         rib_rebind(Msg, Entry),
                         bondy_registry_entry:ref(Entry),
-                        Opts
+                        Opts#{entry => Entry}
                     );
                 {error, _} ->
                     ok = rib_count(
@@ -582,11 +642,15 @@ forward(#call{} = Msg, _Hint, #{rib_completion := true} = Opts0) ->
                     reply_no_eligible_callee(Msg, Opts)
             end
     end;
-forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
+forward(#call{} = Msg, Callee, #{from := Caller} = Opts0) ->
     %% A remote Caller is making a CALL to a local Callee or local bridged
-    %% Callee.
+    %% Callee. `entry` is the registration this node selected for a
+    %% node-addressed CALL; an entry-addressed CALL comes without one.
     true == bondy_ref:is_local(Callee) orelse
         error({forwarding_error, callback_no_local}),
+
+    Entry = maps:get(entry, Opts0, undefined),
+    Opts = maps:remove(entry, Opts0),
 
     RealmUri = ?GET_REALM_URI(Opts),
     CalleeType = bondy_ref:type(Callee),
@@ -647,7 +711,7 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
                     CalleeSessionId ->
                         bondy_message_id:session(RealmUri, CalleeSessionId)
                 end,
-            Timeout = bondy_router_utils:timeout(Opts),
+            Timeout = bondy_router_utils:timeout(Msg#call.options),
 
             %% receive_progress reaches the callee only if it announced
             %% progressive_call_results (the caller was already gated at
@@ -670,20 +734,27 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
                 ['$private', call_id], Msg#call.options, undefined
             ),
 
-            PromiseOpts = maybe_mark_progressive_input(
-                maybe_mark_progress(
-                    #{
-                        procedure_uri => Msg#call.procedure_uri,
-                        via => Via,
-                        timeout => Timeout,
-                        deadline => promise_deadline(Msg#call.options),
-                        trace => promise_trace(Invocation)
-                    },
-                    maps:get(
-                        receive_progress, Invocation#invocation.details, false
-                    )
+            PromiseOpts = maybe_mark_retry(
+                maybe_mark_progressive_input(
+                    maybe_mark_progress(
+                        #{
+                            procedure_uri => Msg#call.procedure_uri,
+                            via => Via,
+                            timeout => Timeout,
+                            deadline => promise_deadline(Msg#call.options),
+                            trace => promise_trace(Invocation)
+                        },
+                        maps:get(
+                            receive_progress,
+                            Invocation#invocation.details,
+                            false
+                        )
+                    ),
+                    Invocation
                 ),
-                Invocation
+                Msg,
+                Entry,
+                #{call => Msg, opts => Opts}
             ),
 
             Promise = bondy_rpc_promise:new_invocation(
@@ -844,12 +915,11 @@ forward(#error{request_type = ?CALL} = M, Caller, Opts) ->
     Status =
         case M#error.error_uri of
             ?WAMP_ERROR_TIMEOUT ->
-                %% This is a peer node's promise manager timeout error produced
-                %% while matching an expired invocation promise, so we want to
-                %% match the local promise even if it is timeout to
-                %% prevent the local promise manager to generate another one based
-                %% on the call promise.
-                expired;
+                %% The owner node's promise manager timed the invocation out.
+                %% The call promise here may have expired as well, and taking
+                %% it stops this node's promise manager sending a second
+                %% timeout. It may also still be active, waiting for retries.
+                all;
             _ ->
                 active
         end,
@@ -1182,9 +1252,8 @@ handle_cancel(#cancel{} = M, Ctxt, Mode) ->
 %% discarded; for `kill` the promise stays — the callee's ERROR is relayed
 %% back and settles the call. The CANCEL is forwarded in every mode (for
 %% `skip` only so the callee's node drops its invocation promise). A
-%% promise without a callee (a node-addressed routing retry with no owner
-%% bound yet) cannot be routed to; the settled or expiring promise bounds
-%% the call instead.
+%% promise without a callee is a call waiting for a registration; there is
+%% nothing to forward the CANCEL to.
 handle_cancel_remote(M, Ctxt, Mode, CallKey, Promise) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Caller = bondy_context:ref(Ctxt),
@@ -1193,11 +1262,18 @@ handle_cancel_remote(M, Ctxt, Mode, CallKey, Promise) ->
     Uri = bondy_rpc_promise:procedure_uri(Promise),
     ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt),
 
+    %% `kill` waits for the callee's ERROR, which a call without a callee (one
+    %% waiting for a registration) never gets.
     ok =
-        case Mode of
-            kill ->
+        case {Mode, bondy_rpc_promise:callee(Promise)} of
+            {kill, undefined} ->
+                _ = bondy_rpc_promise:take(CallKey),
+                bondy_router_peer:send(
+                    RealmUri, Caller, cancelled_error(CallId), #{}
+                );
+            {kill, _} ->
                 ok;
-            _ ->
+            {Settled, _} when Settled == killnowait; Settled == skip ->
                 _ = bondy_rpc_promise:take(CallKey),
                 Error = cancelled_error(CallId),
                 bondy_router_peer:send(RealmUri, Caller, Error, #{})
@@ -1600,6 +1676,34 @@ session_feature(_, _, _) ->
 maybe_mark_progress(PromiseOpts, true) ->
     PromiseOpts#{receive_progress => true};
 maybe_mark_progress(PromiseOpts, _) ->
+    PromiseOpts.
+
+%% @private
+%% `Retry` is what `retry/1` needs to route the call again; the retry deadline
+%% becomes the promise's own, so no attempt outlives the caller's wait.
+%% Extension options pass validation untyped, so only an integer `_retries` and
+%% a literal `true` `_idempotent` enable a retry.
+maybe_mark_retry(#{receive_progress := true} = PromiseOpts, _, _, _) ->
+    PromiseOpts;
+maybe_mark_retry(#{progressive_input := true} = PromiseOpts, _, _, _) ->
+    PromiseOpts;
+maybe_mark_retry(PromiseOpts, #call{}, undefined, _) ->
+    PromiseOpts;
+maybe_mark_retry(
+    PromiseOpts, #call{options = #{'_retries' := N} = O}, Entry, Retry
+) when is_integer(N), N > 0 ->
+    case
+        bondy_registry_entry:get_option('_idempotent', Entry, false) =:= true
+    of
+        true ->
+            PromiseOpts#{
+                deadline => bondy_wamp_api_utils:retry_deadline(O),
+                retry => Retry
+            };
+        false ->
+            PromiseOpts
+    end;
+maybe_mark_retry(PromiseOpts, #call{}, _, _) ->
     PromiseOpts.
 
 %% @private
@@ -2119,7 +2223,7 @@ handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri) ->
     case Chosen of
         {ok, Entry} ->
             ok = maybe_gate_progressive_callee(Msg, Entry),
-            do_call(CallId, ProcUri, Fun, Opts, Ctxt, Entry);
+            do_call(Msg, ProcUri, Fun, Opts, Ctxt, Entry);
         {forward_node, Nodestring} ->
             rib_forward_call(Msg, CallId, ProcUri, Opts, Ctxt, Nodestring);
         {error, noproc} ->
@@ -2135,7 +2239,58 @@ handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri) ->
                         Value
                 end,
 
-            ok = reply_error(Error, Ctxt);
+            #call{options = O} = Msg,
+            Progressive =
+                maps:get(receive_progress, O, false) orelse
+                    maps:get(progress, O, false),
+
+            %% No callee ran the call, so a call that asks for retries waits
+            %% for a registration, backing off between attempts. The waiting
+            %% call is a call promise without a callee, and its expiry is the
+            %% next attempt (`retry/1`). `_retries` and the retry deadline bound
+            %% the waits, so the backoff state keeps no deadline of its own.
+            case {Progressive, bondy_wamp_api_utils:retry_deadline(O)} of
+                {false, Deadline} when is_integer(Deadline) ->
+                    Left = Deadline - erlang:system_time(millisecond),
+                    Retry0 =
+                        case Opts of
+                            #{retry_backoff := R} ->
+                                R;
+                            #{} ->
+                                bondy_connect_retry:init(CallId, #{
+                                    max_retries => maps:get('_retries', O),
+                                    deadline => 0,
+                                    backoff_enabled => true,
+                                    backoff_min => 500
+                                })
+                        end,
+                    case bondy_connect_retry:fail(Retry0) of
+                        {Delay, Retry} when is_integer(Delay), Delay < Left ->
+                            Promise = bondy_rpc_promise:new_call(
+                                RealmUri,
+                                bondy_context:ref(Ctxt),
+                                CallId,
+                                #{
+                                    procedure_uri => ProcUri,
+                                    timeout => Delay,
+                                    deadline => Deadline,
+                                    retry => #{
+                                        call => Msg,
+                                        uri => ProcUri,
+                                        opts => Opts#{retry_backoff => Retry},
+                                        ctxt => Ctxt
+                                    }
+                                }
+                            ),
+                            ok = bondy_rpc_promise:add(Promise);
+                        {Delay, _} when is_integer(Delay) ->
+                            ok = reply_error(Error, Ctxt)
+                    end;
+                {false, infinity} ->
+                    ok = reply_error(Error, Ctxt);
+                {true, _} ->
+                    ok = reply_error(Error, Ctxt)
+            end;
         {error, ErrorMap} when is_map(ErrorMap) ->
             %% bondy_rpc_load_balancer opts validation error. It is carried as
             %% a cause so the caller gets both the general condition and the
@@ -2161,10 +2316,12 @@ handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri) ->
 
 %% @private
 -spec do_call(
-    id(), uri(), call_fun(), invoke_opts(), bondy_context:t(), entry()
+    wamp_call(), uri(), call_fun(), invoke_opts(), bondy_context:t(), entry()
 ) -> ok.
 
-do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
+do_call(
+    #call{request_id = CallId} = Call, ProcUri, UserFun, Opts, Ctxt0, Entry
+) ->
     case UserFun(Entry, Ctxt0) of
         {ok, _} ->
             %% UserFun sent a response sequentially, no need
@@ -2232,16 +2389,26 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
                             CallId,
                             Callee,
                             InvocationId,
-                            maybe_mark_progressive_input(
-                                maybe_mark_progress(
-                                    PromiseOpts,
-                                    maps:get(
-                                        receive_progress,
-                                        Msg#invocation.details,
-                                        false
-                                    )
+                            maybe_mark_retry(
+                                maybe_mark_progressive_input(
+                                    maybe_mark_progress(
+                                        PromiseOpts,
+                                        maps:get(
+                                            receive_progress,
+                                            Msg#invocation.details,
+                                            false
+                                        )
+                                    ),
+                                    Msg
                                 ),
-                                Msg
+                                Call,
+                                Entry,
+                                #{
+                                    call => Call,
+                                    uri => ProcUri,
+                                    opts => Opts,
+                                    ctxt => Ctxt0
+                                }
                             )
                         ),
                         {P, SendOpts}
@@ -2749,29 +2916,51 @@ send_rib_call(
         from => Caller
     }),
 
+    PromiseOpts = maybe_mark_progressive_call_input(
+        maybe_mark_progress(
+            #{
+                procedure_uri => ProcUri,
+                timeout => Timeout,
+                deadline => promise_deadline(Call#call.options),
+                trace => promise_trace(Call),
+                rib_retry => Retry,
+                %% Node-addressed: the callee is whichever local
+                %% registration the owner node completes to. Address the
+                %% node so a caller CANCEL or a caller-death flush relays
+                %% there — the owner node resolves its invocation and
+                %% INTERRUPTs (see forward/3).
+                callee => NodeRef
+            },
+            maps:get(receive_progress, Call#call.options, false)
+        ),
+        Call
+    ),
+
+    %% The owner node may retry a call to an idempotent procedure, which this
+    %% node cannot tell, so a call that may be retried waits for its retry
+    %% deadline. The owner node's ERROR settles a call it does not retry.
     Promise = bondy_rpc_promise:new_call(
         RealmUri,
         Caller,
         CallId,
-        maybe_mark_progressive_call_input(
-            maybe_mark_progress(
-                #{
-                    procedure_uri => ProcUri,
-                    timeout => Timeout,
-                    deadline => promise_deadline(Call#call.options),
-                    trace => promise_trace(Call),
-                    rib_retry => Retry,
-                    %% Node-addressed: the callee is whichever local
-                    %% registration the owner node completes to. Address the
-                    %% node so a caller CANCEL or a caller-death flush relays
-                    %% there — the owner node resolves its invocation and
-                    %% INTERRUPTs (see forward/3).
-                    callee => NodeRef
-                },
-                maps:get(receive_progress, Call#call.options, false)
-            ),
-            Call
-        )
+        case
+            {PromiseOpts,
+                bondy_wamp_api_utils:retry_deadline(Call#call.options)}
+        of
+            {_, infinity} ->
+                PromiseOpts;
+            {#{receive_progress := true}, _} ->
+                PromiseOpts;
+            {#{progressive_input := true}, _} ->
+                PromiseOpts;
+            {#{}, Deadline} when is_integer(Deadline) ->
+                PromiseOpts#{
+                    timeout => max(
+                        1, Deadline - erlang:system_time(millisecond)
+                    ),
+                    deadline => Deadline
+                }
+        end
     ),
     ok = bondy_rpc_promise:add(Promise),
 
@@ -2869,7 +3058,7 @@ rib_retry(M, Promise, RealmUri, Caller, Retry, Timeout) ->
     ProcUri = bondy_rpc_promise:procedure_uri(Promise),
 
     %% The retried leg runs on the REMAINING time, not a fresh budget.
-    Call = rib_call_with_timeout(Call0, Timeout),
+    Call = rib_call_with_timeout(Call0, M, Timeout),
 
     Matches = bondy_registry:find_matches(
         registration, RealmUri, ProcUri, reg_match_opts()
@@ -2881,7 +3070,7 @@ rib_retry(M, Promise, RealmUri, Caller, Retry, Timeout) ->
             ok = forward(
                 rib_rebind(Call, Entry),
                 bondy_registry_entry:ref(Entry),
-                #{realm_uri => RealmUri, from => Caller}
+                #{realm_uri => RealmUri, from => Caller, entry => Entry}
             ),
             true;
         {forward_node, Nodestring} ->
@@ -2904,18 +3093,24 @@ rib_retry(M, Promise, RealmUri, Caller, Retry, Timeout) ->
     end.
 
 %% @private
-rib_call_with_timeout(#call{options = O} = C, Timeout) when
+%% A call that may be retried keeps its timeout for each attempt, and resumes
+%% with the retries the missed attempt had left.
+rib_call_with_timeout(
+    #call{options = O} = C, #error{details = #{'_retries' := N}}, Timeout
+) when is_integer(Timeout) ->
+    C#call{options = O#{'_retries' => N, '_deadline' => Timeout}};
+rib_call_with_timeout(#call{options = O} = C, #error{}, Timeout) when
     is_integer(Timeout)
 ->
     C#call{options = O#{timeout => Timeout}};
-rib_call_with_timeout(C, _) ->
+rib_call_with_timeout(C, #error{}, infinity) ->
     C.
 
 %% @private
-%% The completion-miss marker is routing-internal — never relay it to the
+%% The completion-miss details are routing-internal — never relay them to the
 %% client.
 strip_rib_details(#error{details = Details} = M) when is_map(Details) ->
-    M#error{details = maps:remove(rib_completion_miss, Details)};
+    M#error{details = maps:without([rib_completion_miss, '_retries'], Details)};
 strip_rib_details(M) ->
     M.
 
@@ -3021,8 +3216,11 @@ reg_match_opts() ->
 %% it the one no_eligible_callee the caller node may safely retry on
 %% another candidate node. The same error produced by a callee-death flush
 %% (an invocation WAS in flight) never carries the marker and is never
-%% retried, preserving at-most-once invocation.
-reply_no_eligible_callee(#call{} = Msg, #{from := Caller} = Opts) ->
+%% retried, preserving at-most-once invocation. The `_retries` detail carries
+%% the retries the missed attempt had, for the caller node to resume with.
+reply_no_eligible_callee(
+    #call{options = CallOpts} = Msg, #{from := Caller} = Opts
+) ->
     RealmUri = ?GET_REALM_URI(Opts),
     Error0 = bondy_wamp_error:to_wamp(
         bondy_connect_error:new(no_eligible_callee, #{
@@ -3034,14 +3232,16 @@ reply_no_eligible_callee(#call{} = Msg, #{from := Caller} = Opts) ->
         }),
         Msg
     ),
-    %% The marker is stamped on the record AFTER construction, deliberately
-    %% bypassing the details validation: it must never be part of the
-    %% client-facing details vocabulary, so a client-crafted ERROR carrying
-    %% it is stripped at wire decode (unknown key) and can never force a
-    %% retry of a delivered invocation. Only this node-internal path can
-    %% produce it; peers relay records verbatim.
+    %% The details are stamped on the record AFTER construction: they are not
+    %% part of the client-facing details vocabulary. Wire decode keeps an
+    %% unknown details key as a binary (`bondy_wamp_details:new/2`), so an
+    %% ERROR decoded from a callee's frame cannot carry these atom keys and
+    %% force a retry of a delivered invocation. Peers relay records verbatim.
     Error = Error0#error{
-        details = (Error0#error.details)#{rib_completion_miss => true}
+        details = maps:merge(
+            (Error0#error.details)#{rib_completion_miss => true},
+            maps:with(['_retries'], CallOpts)
+        )
     },
     {To, SendOpts} = bondy_router_peer:prepare_send(Caller, Opts),
     bondy_router_peer:send(RealmUri, To, Error, SendOpts).
@@ -3058,7 +3258,8 @@ reply_no_eligible_callee(#call{} = Msg, #{from := Caller} = Opts) ->
 %%   node-addressed RIB call, the owner node) or bridged: relay a CANCEL
 %%   (mode killnowait) keyed by the call id; the callee's node resolves
 %%   its invocation promise and INTERRUPTs (see forward/3). A promise
-%%   without a callee cannot be routed to and simply expires.
+%%   without a callee is a call waiting for a registration, which the
+%%   flush removes with the caller's other promises.
 caller_flush_fun(Ref) ->
     RefSessionId = bondy_ref:session_id(Ref),
 
@@ -3118,35 +3319,41 @@ cancel_remote_callee(Promise) ->
     end.
 
 %% @private
-%% Replies to the caller of an in-flight invocation promise with a
-%% `wamp.error.no_eligible_callee` ERROR. Used by `flush/2` when the callee
-%% session dies, so callers fast-fail instead of waiting for the call
-%% timeout. The reply is routed back through any relays stored in the
-%% promise's `via` queue.
+%% Routes the call again (`retry/1`) or replies to the caller of an in-flight
+%% invocation promise with a `wamp.error.no_eligible_callee` ERROR. Used by
+%% `flush/2` when the callee session dies, so callers fast-fail instead of
+%% waiting for the call timeout. The reply is routed back through any relays
+%% stored in the promise's `via` queue.
 send_no_eligible_callee(Promise) ->
-    RealmUri = bondy_rpc_promise:realm_uri(Promise),
-    Caller = bondy_rpc_promise:caller(Promise),
-    Callee = bondy_rpc_promise:callee(Promise),
-    CallId = bondy_rpc_promise:call_id(Promise),
-    Via = bondy_rpc_promise:via(Promise),
+    case retry(Promise) of
+        true ->
+            ok;
+        false ->
+            RealmUri = bondy_rpc_promise:realm_uri(Promise),
+            Caller = bondy_rpc_promise:caller(Promise),
+            Callee = bondy_rpc_promise:callee(Promise),
+            CallId = bondy_rpc_promise:call_id(Promise),
+            Via = bondy_rpc_promise:via(Promise),
 
-    Error = bondy_wamp_error:to_wamp(
-        bondy_connect_error:new(no_eligible_callee, #{
-            message => ~"There are no eligible callees for the procedure.",
-            description => <<
-                "The callee handling this call became unavailable "
-                "while the call was in flight."
-            >>
-        }),
-        ?CALL,
-        CallId,
-        #{}
-    ),
+            Error = bondy_wamp_error:to_wamp(
+                bondy_connect_error:new(no_eligible_callee, #{
+                    message =>
+                        ~"There are no eligible callees for the procedure.",
+                    description => <<
+                        "The callee handling this call became unavailable "
+                        "while the call was in flight."
+                    >>
+                }),
+                ?CALL,
+                CallId,
+                #{}
+            ),
 
-    SendOpts0 = #{from => Callee, via => Via},
-    {To, SendOpts} = bondy_router_peer:prepare_send(Caller, SendOpts0),
-    _ = bondy_router_peer:send(RealmUri, To, Error, SendOpts),
-    ok.
+            SendOpts0 = #{from => Callee, via => Via},
+            {To, SendOpts} = bondy_router_peer:prepare_send(Caller, SendOpts0),
+            _ = bondy_router_peer:send(RealmUri, To, Error, SendOpts),
+            ok
+    end.
 
 %% @private
 %% `call_cancelled' is kept as Args[0]: it is a token clients match on, not

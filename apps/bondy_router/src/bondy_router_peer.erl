@@ -399,15 +399,20 @@ Notice this decodes payload partials to Erlang terms, returning a `map()`.
     {ok, map()} | {error, wamp_error_map()}.
 
 call(Uri, Opts, Args, KWArgs, Ctxt0) ->
-    Timeout =
-        case maps_utils:get_any([<<"timeout">>, timeout], Opts, 0) of
-            0 -> bondy_config:get(wamp_call_timeout);
-            Val -> Val
+    ReqId = bondy_context:gen_message_id(Ctxt0, session),
+    #call{options = CallOpts} =
+        M = bondy_wamp_message:call(ReqId, Opts, Uri, Args, KWArgs),
+    Wait =
+        case bondy_wamp_api_utils:retry_deadline(CallOpts) of
+            infinity ->
+                bondy_router_utils:timeout(CallOpts);
+            Deadline ->
+                max(0, Deadline - erlang:system_time(millisecond))
         end,
 
-    case cast(Uri, Opts, Args, KWArgs, Ctxt0) of
+    case forward_call(M, Ctxt0) of
         {ok, ReqId} ->
-            check_response(Uri, ReqId, Timeout, Ctxt0);
+            check_response(Uri, ReqId, Wait, Ctxt0);
         {error, _} = Error ->
             Error
     end.
@@ -421,9 +426,7 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
         {?BONDY_REQ, _Pid, _RealmUri, #error{} = R} when
             R#error.request_id == ReqId
         ->
-            {error, message_to_map(R)};
-        Other ->
-            {error, Other}
+            {error, message_to_map(R)}
     after Timeout ->
         Mssg = iolist_to_binary(
             io_lib:format(
@@ -460,7 +463,7 @@ A non-blocking call.
     map() | undefined,
     bondy_context:t()
 ) ->
-    ok | {error, wamp_error_map()}.
+    {ok, id()} | {error, wamp_error_map()}.
 
 cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
@@ -468,9 +471,20 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
     ReqId = bondy_context:gen_message_id(Ctxt0, session),
+    forward_call(
+        bondy_wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs), Ctxt0
+    ).
 
-    M = bondy_wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
+%% =============================================================================
+%% API - CALLEE ROLE
+%% =============================================================================
 
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+forward_call(#call{request_id = ReqId} = M, Ctxt0) ->
     case bondy_router:forward(M, Ctxt0) of
         {ok, _} ->
             {ok, ReqId};
@@ -504,14 +518,6 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
             ok = bondy_telemetry:wamp_message(Error, Ctxt1),
             {error, message_to_map(Error)}
     end.
-
-%% =============================================================================
-%% API - CALLEE ROLE
-%% =============================================================================
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
 
 %% @private
 relay_message(RealmUri, Node, To, Msg, Opts) ->
